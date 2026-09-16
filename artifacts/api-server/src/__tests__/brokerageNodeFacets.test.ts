@@ -79,16 +79,11 @@ import {
   resetOwnerFactAtomQueryableForTests,
   setOwnerFactAtomQueryableForTests,
 } from "../lib/ownerFactRead";
-import { memoryParcelGateVerdicts } from "../lib/parcelGateVerdictRead";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
 } from "../lib/parcelRecordCellRead";
-import {
-  resetValueHistoryVerdictStoreForTests,
-  setValueHistoryVerdictStoreForTests,
-} from "../lib/valueHistoryFactServeCutover";
 import {
   SETBACK_FRONT_FT_RAIL_KEY,
   SETBACK_SIDE_FT_RAIL_KEY,
@@ -96,18 +91,10 @@ import {
   SETBACK_CORNER_FT_RAIL_KEY,
 } from "../lib/setbacksFactFromParcelRecord";
 import {
-  resetSetbacksVerdictStoreForTests,
-  setSetbacksVerdictStoreForTests,
-} from "../lib/setbacksFactServeCutover";
-import {
   ZONING_DISTRICT_RAIL_KEY,
   ZONING_JURISDICTION_KEY_RAIL_KEY,
   ZONING_PROVENANCE_RAIL_KEY,
 } from "../lib/zoningFactFromParcelRecord";
-import {
-  resetZoningVerdictStoreForTests,
-  setZoningVerdictStoreForTests,
-} from "../lib/zoningFactServeCutover";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -2954,18 +2941,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
         },
         contentHash: `test-hash-valuehistory-${placeKey}`,
       });
-      setValueHistoryVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: "valueHistory",
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-16T00:00:00Z",
-            runId: "test-p246",
-          },
-        ]),
-      );
+      // P-297: no verdict store is injected here any more. The rail is slated
+      // for 48021 in code, and the parcel's own cell below is the whole
+      // decision -- the county verdict no longer gates this route.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -2996,7 +2974,6 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     }
 
     afterEach(() => {
-      resetValueHistoryVerdictStoreForTests();
       resetParcelRecordQueryableForTests();
     });
 
@@ -3190,26 +3167,14 @@ describe.skipIf(!hasDb)(
     });
 
     afterEach(async () => {
-      resetZoningVerdictStoreForTests();
-      resetSetbacksVerdictStoreForTests();
       resetParcelRecordQueryableForTests();
       if (!ctx.schema) return;
       await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
     });
 
-    it("D6: a gate-passing county now serves REAL setback numbers this route never showed before", async () => {
-      setSetbacksVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: SETBACK_FRONT_FT_RAIL_KEY,
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-07T00:00:00Z",
-            runId: "test",
-          },
-        ]),
-      );
+    it("D6: a SLATED county now serves REAL setback numbers this route never showed before", async () => {
+      // P-297: the slate alone cuts this rail over for 48021 -- the parcel's
+      // own cells below are the decision, and the county verdict is not read.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -3258,19 +3223,9 @@ describe.skipIf(!hasDb)(
       expect(res.body.facets.envelope).toBeNull();
     });
 
-    it("D5: a gate-passing live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
-      setZoningVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: ZONING_DISTRICT_RAIL_KEY,
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-07T00:00:00Z",
-            runId: "test",
-          },
-        ]),
-      );
+    it("D5: a SLATED live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
+      // P-297: the slate alone cuts this rail over for 48021; the cells below
+      // are the decision. The county verdict is not read on this path.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -3303,7 +3258,7 @@ describe.skipIf(!hasDb)(
       expect(res.body.facets.facetCoverage.zoning).toBe(true);
     });
 
-    it("D5: with no gate-passing ledger fact, the baked stamp still wins (unchanged, no regression)", async () => {
+    it("D5: with no live zoning cell for a slated rail, the baked stamp still wins (unchanged, no regression)", async () => {
       const res = await request(getApp()).get(
         `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
       );

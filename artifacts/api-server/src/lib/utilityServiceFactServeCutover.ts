@@ -5,58 +5,51 @@
  * pattern wellFactServeCutover.ts (PARCEL-B-READER/PARCEL-B-SLATE1)
  * established.
  *
- * UNLIKE that precedent, the "not record" branch here is not a legacy
- * reader -- utilityService has none (see utilityServiceFactRead.ts's module
- * doc). Any (county, "utilityService") pair not in PARCEL_RECORD_SLATE, or
- * lacking a passing gate verdict, resolves to `notCutOverUtilityServiceFact`
- * rather than a call to an atom store that was never written for this rail.
- * This still fails closed the same way: nothing is fabricated, and a typed
- * refusal is indistinguishable in shape from every other refusal this
+ * The "not served from the ledger" branch here is not a legacy reader --
+ * utilityService has none (see utilityServiceFactRead.ts's module doc). It
+ * resolves to `notCutOverUtilityServiceFact`, an honest typed "not live yet"
+ * refusal rather than a call to an atom store that was never written for this
+ * rail. This still fails closed the same way: nothing is fabricated, and a
+ * typed refusal is indistinguishable in shape from every other refusal this
  * module can produce.
+ *
+ * P-297 (2026-09-16, operator ruling A-193) narrowed WHEN that branch runs.
+ * It used to run for any pair that was not `record`, which meant a slated
+ * county whose gate verdict read `refuse` served `not-cut-over` for every
+ * parcel even though this rail's cells exist and are earned in that county.
+ * It now runs only for a pair OUTSIDE PARCEL_RECORD_SLATE: the slate is the
+ * cut-over switch, and a slated pair serves this parcel's own cell through
+ * the record adapter, including the adapter's own typed refusal.
+ *
+ * NO GATE VERDICT EXISTS for this rail at the time of this card, which is
+ * exactly the case the ruling is about: a pair slated ahead of its verdict
+ * used to resolve `legacy` (here: not-cut-over) forever. Under P-297 it
+ * serves its cells as soon as they exist, and a cell that is not there yet
+ * is a declared refusal WITH ITS REASON.
  */
 
-import { resolveAllowlist } from "./parcelRecordAllowlist";
-import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
-import { resolveVerdictStore } from "./parcelGateVerdictRead";
+import { loadCellServeDecision } from "./cellServeRule";
+import { parseParcelNodeId } from "./parcelNodeId";
 import { utilityServiceFactFromParcelRecord } from "./utilityServiceFactFromParcelRecord";
 import {
   notCutOverUtilityServiceFact,
   UTILITY_SERVICE_RAIL_KEY,
   type UtilityServiceFactRead,
 } from "./utilityServiceFactRead";
-import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
-
-/**
- * Test/deploy seam for the verdict store this wrapper consults.
- * `undefined` (the default) means: use the real env-resolved pool
- * (resolveVerdictStore, parcelGateVerdictRead.ts). Tests inject an
- * explicit store or `null`.
- */
-let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
-
-export function setUtilityServiceVerdictStoreForTests(
-  store: ParcelRecordQueryable | null,
-): void {
-  injectedVerdictStore = store;
-}
-
-export function resetUtilityServiceVerdictStoreForTests(): void {
-  injectedVerdictStore = undefined;
-}
 
 export async function loadUtilityServiceFactForServe(
   parcelNodeId: string,
 ): Promise<UtilityServiceFactRead> {
-  const countyFips = countyFipsFromParcelNodeId(parcelNodeId);
-  if (!countyFips) {
+  const parsed = parseParcelNodeId(parcelNodeId);
+  if (!parsed) {
     return notCutOverUtilityServiceFact(parcelNodeId);
   }
-  const state = await resolveAllowlist(
-    resolveVerdictStore(injectedVerdictStore),
-    countyFips,
+  const decision = await loadCellServeDecision(
+    parsed.countyFips,
+    parsed.propId,
     UTILITY_SERVICE_RAIL_KEY,
   );
-  if (state !== "record") {
+  if (decision.serve === "current-path") {
     return notCutOverUtilityServiceFact(parcelNodeId);
   }
   return utilityServiceFactFromParcelRecord(parcelNodeId);

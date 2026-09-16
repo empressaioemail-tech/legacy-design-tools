@@ -1,62 +1,57 @@
 /**
- * Serve-layer cutover wrapper for parcelAreaSqFt (F-01, OPS-21 P-148 /
- * P-133), on the allowlist pattern maxImperviousCoverPctFactServeCutover.ts
- * established.
+ * Serve-layer cutover wrapper for parcelAreaSqFt (F-01, OPS-21 P-148 / P-133).
+ * The "not served from the ledger" branch is not a legacy reader --
+ * parcelAreaSqFt has none -- and resolves to `notCutOverParcelAreaSqFtFact`.
+ * Slated in Bastrop/Caldwell/McLennan/Travis/Williamson; Hays is EXCLUDED
+ * (P-145 has not landed), not an oversight.
  *
- * The "not record" branch here is not a legacy reader -- parcelAreaSqFt has
- * none. Any (county, "parcelAreaSqFt") pair not in PARCEL_RECORD_SLATE, or
- * lacking a passing gate verdict, resolves to notCutOverParcelAreaSqFtFact.
+ * P-297 (2026-09-16, operator ruling A-193) replaced the county-verdict
+ * gate this file used to apply. Until P-297 the wrapper asked
+ * `resolveAllowlist` for (record | legacy | refused) and served the record's
+ * own answer only on `record`, which required a PASSING county gate verdict
+ * -- so a slated county whose verdict read `refuse` (one unaccounted cell on
+ * this rail, anywhere in the county) fell back for EVERY parcel in it,
+ * including parcels whose own cell was earned and correct. The verdict is a
+ * completeness and publish grade; it stopped deciding what a parcel shows.
  *
- * UNLIKE the other 4 rails this dispatch adds, this is the ONE wrapper this
- * card actually slates (48021, 48055, 48309, 48453, 48491 -- all 5 in-scope
- * counties except Hays, live-verified passing at slate time). Building the
- * wrapper is what makes that slate entry non-vacuous, per S4/P-135's own
- * finding that a slate entry with no resolveAllowlist call site is
- * indistinguishable from an inert no-op by every existing test.
+ * The wrapper now decides from PARCEL_RECORD_SLATE and the PARCEL'S OWN CELL
+ * through the one rule in `cellServeRule.ts`:
+ *
+ *   - pair NOT in the slate -> the fallback below, short-circuiting before any
+ *     I/O, byte-identical to the behavior before this file existed. The slate,
+ *     not the verdict, is the cut-over switch.
+ *   - pair in the slate -> this parcel's own cell, served through the record
+ *     adapter AS-IS: a value with its source and vintage, a stated absence
+ *     with its reason, or a declared refusal carrying the cell's own reason
+ *     (unaccounted, engine-refused, cell-miss, malformed-cell,
+ *     store-not-configured). Never the legacy or baked value.
+ *
+ * The county verdict is no longer read on this path; `cellServeRule.test.ts`
+ * fails if this file imports the verdict reader again.
  */
 
-import { resolveAllowlist } from "./parcelRecordAllowlist";
-import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
-import { resolveVerdictStore } from "./parcelGateVerdictRead";
+import { loadCellServeDecision } from "./cellServeRule";
+import { parseParcelNodeId } from "./parcelNodeId";
 import { parcelAreaSqFtFactFromParcelRecord } from "./parcelAreaSqFtFactFromParcelRecord";
 import {
   notCutOverParcelAreaSqFtFact,
   PARCEL_AREA_SQFT_RAIL_KEY,
   type ParcelAreaSqFtFactRead,
 } from "./parcelAreaSqFtFactRead";
-import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
-
-/**
- * Test/deploy seam for the verdict store this wrapper consults.
- * `undefined` (the default) means: use the real env-resolved pool
- * (resolveVerdictStore, parcelGateVerdictRead.ts). Tests inject an
- * explicit store or `null`.
- */
-let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
-
-export function setParcelAreaSqFtVerdictStoreForTests(
-  store: ParcelRecordQueryable | null,
-): void {
-  injectedVerdictStore = store;
-}
-
-export function resetParcelAreaSqFtVerdictStoreForTests(): void {
-  injectedVerdictStore = undefined;
-}
 
 export async function loadParcelAreaSqFtFactForServe(
   parcelNodeId: string,
 ): Promise<ParcelAreaSqFtFactRead> {
-  const countyFips = countyFipsFromParcelNodeId(parcelNodeId);
-  if (!countyFips) {
+  const parsed = parseParcelNodeId(parcelNodeId);
+  if (!parsed) {
     return notCutOverParcelAreaSqFtFact(parcelNodeId);
   }
-  const state = await resolveAllowlist(
-    resolveVerdictStore(injectedVerdictStore),
-    countyFips,
+  const decision = await loadCellServeDecision(
+    parsed.countyFips,
+    parsed.propId,
     PARCEL_AREA_SQFT_RAIL_KEY,
   );
-  if (state !== "record") {
+  if (decision.serve === "current-path") {
     return notCutOverParcelAreaSqFtFact(parcelNodeId);
   }
   return parcelAreaSqFtFactFromParcelRecord(parcelNodeId);

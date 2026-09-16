@@ -556,6 +556,21 @@ export function resolveAllowlistState(
 }
 
 /**
+ * P-297 (2026-09-16, operator ruling A-193) TOOK THE SERVE DECISION AWAY FROM
+ * `resolveAllowlistState` ABOVE. It used to BE the serve switch: 'record' only
+ * on a `pass` verdict, so one unaccounted cell anywhere in a slated county
+ * turned every parcel in it back to the legacy or baked value. The switch is
+ * now the code-owned slate alone, and what a parcel shows is decided from its
+ * own cell by `cellServeRule.ts`'s `resolveCellServeDecision`. Nothing in
+ * production imports either of these two functions any more
+ * (`cellServeRule.test.ts` fails if a `*ServeCutover.ts` module imports them
+ * back in). They are kept, unchanged and still under test, as the executable
+ * record of what the county VERDICT means -- a completeness and publish grade
+ * -- and as the mapping the publish gate's vocabulary question is answered
+ * from. They no longer choose a value.
+ */
+
+/**
  * Full async resolution. Checks slate membership FIRST, synchronously, in
  * memory -- with today's empty slate this means every call short-circuits
  * to 'legacy' WITHOUT ever touching the verdict store. This matters

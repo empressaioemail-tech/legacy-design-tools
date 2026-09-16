@@ -1,155 +1,146 @@
 /**
- * The serve-layer integration point PARCEL-FLOOD-CUTOVER built and
- * activated for ALL SIX program counties, including Caldwell (deliberately
- * slated so its own 'excluded' gate verdict resolves to the allowlist's
- * visible 'refused' state, not a silent 'legacy' default).
+ * floodHazardFactServeCutover.ts — P-297 (operator ruling A-193, OPS-24 law
+ * 7): the serve switch is the code-owned SLATE, and what a parcel shows comes
+ * from ITS OWN cell.
+ *
+ * Rail note: flood is slated in all six counties, Caldwell (48055) included —
+ * the pair the slate deliberately kept listed so an excluded/refused verdict
+ * would be VISIBLE. Under this ruling the visibility is the PARCEL's, decided
+ * by its own cell.
+ *
+ * STORE SEAM DIFFERENCE, DISCLOSED: this rail's adapter does NOT read through
+ * `parcelRecordCellRead.ts`. It reuses `parcelRecordFactRead.ts`'s
+ * `loadParcelRecordFloodFact` (PARCEL-C-REPORT's own already-deployed flood
+ * cell read), so its test store is injected through THAT module's seam
+ * (`memoryParcelRecordFlood`). Both seams exist in this repo for two different
+ * consumers; this file uses the one this rail actually goes through.
+ *
+ * THIS FILE REPLACES the pre-P-297 suite, which pinned the old contract
+ * ("only a PASS verdict reaches the record; refuse / excluded / no verdict /
+ * store failure / no store all fall back to the legacy atom"). Those
+ * assertions encoded the exact defect the ruling names, so they are deleted
+ * rather than kept passing.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { loadFloodHazardFactForServe } from "./floodHazardFactServeCutover";
+import { loadFloodHazardFactAtom } from "./floodHazardFactRead";
 import {
-  memoryParcelGateVerdicts,
-  memoryParcelGateVerdictsThatFails,
-} from "./parcelGateVerdictRead";
-import {
+  FLOOD_RAIL_KEY,
   memoryParcelRecordFlood,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
 } from "./parcelRecordFactRead";
-import {
-  memoryFloodHazardAtoms,
-  resetFloodHazardAtomQueryableForTests,
-  setFloodHazardAtomQueryableForTests,
-} from "./floodHazardFactRead";
-import {
-  loadFloodHazardFactForServe,
-  resetFloodVerdictStoreForTests,
-  setFloodVerdictStoreForTests,
-} from "./floodHazardFactServeCutover";
+import { isSlatedForCellServe } from "./cellServeRule";
 
-const GOLD = "48021:34137"; // 48021 IS slated for flood.
-const CALDWELL_PARCEL = "48055:10068"; // 48055 IS slated for flood (unlike wells/specialDistricts).
-const UNSLATED = "48103:100"; // 48103 is NOT a program county.
-const UNSLATED_BODY = {
-  entityType: "flood-hazard-fact",
-  inSpecialFloodHazardArea: false,
-  floodZone: "X",
-  zoneSubtype: null,
-  baseFloodElevation: null,
-  sourceAdapter: "fema-nfhl-bulk-v1",
-  sourceVintage: "NFHL_48_20260101",
-  sourceCitation: "test fixture",
-  evaluatedAt: "2026-08-15T00:00:00Z",
-};
+const RAIL_KEY = "flood";
+const SLATED = "48021:34137";
+const UNSLATED = "48103:100";
 
 afterEach(() => {
-  resetFloodHazardAtomQueryableForTests();
-  resetFloodVerdictStoreForTests();
   resetParcelRecordQueryableForTests();
 });
 
-describe("loadFloodHazardFactForServe — UNSLATED county stays byte-identical to loadFloodHazardFactAtom", () => {
-  it("a present zone-X fixture: identical shape via the wrapper and the direct call", async () => {
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([{ entityId: UNSLATED, body: UNSLATED_BODY }]),
-    );
-    setFloodVerdictStoreForTests(null);
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(UNSLATED));
-    const viaWrapper = await loadFloodHazardFactForServe(UNSLATED);
-    expect(viaWrapper).toEqual(direct);
+describe("loadFloodHazardFactForServe — the slate is the switch", () => {
+  it("the slate says what this suite assumes about its two counties", () => {
+    expect(isSlatedForCellServe("48021", RAIL_KEY)).toBe(true);
+    expect(isSlatedForCellServe("48055", RAIL_KEY)).toBe(true); // Caldwell, deliberately listed
+    expect(isSlatedForCellServe("48103", RAIL_KEY)).toBe(false);
+    expect(FLOOD_RAIL_KEY).toBe(RAIL_KEY);
   });
 
-  it("FALSIFIER: even a fabricated PASS verdict has no effect for an unslated county", async () => {
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([{ entityId: UNSLATED, body: UNSLATED_BODY }]),
+  it("an UNSLATED pair never touches parcel_record — it runs the atom path, unchanged, with zero I/O", async () => {
+    let calls = 0;
+    const withoutStore = await loadFloodHazardFactForServe(UNSLATED);
+    setParcelRecordQueryableForTests({
+      async query() {
+        calls += 1;
+        return { rows: [] };
+      },
+    });
+    const withStore = await loadFloodHazardFactForServe(UNSLATED);
+    expect(calls).toBe(0);
+    expect(withStore).toEqual(withoutStore);
+  });
+
+  it("FALSIFIER 2: an unaccounted cell on a SLATED pair is a declared refusal carrying the cell's reason, never the atom answer", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordFlood([{ placeKey: SLATED, cellState: { kind: "unaccounted" } }]),
     );
-    setFloodVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48103", railKey: "flood", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
+    const served = await loadFloodHazardFactForServe(SLATED);
+    const preCutover = await loadFloodHazardFactAtom(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-unaccounted");
+    expect(JSON.stringify(served)).toContain("has not yet examined flood");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("an engine-refused cell on a SLATED pair is a declared refusal carrying the engine's own words", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordFlood([
+        { placeKey: SLATED, cellState: { kind: "refused", reason: "no flood source covers this parcel" } },
       ]),
     );
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(UNSLATED));
-    const viaWrapper = await loadFloodHazardFactForServe(UNSLATED);
-    expect(viaWrapper).toEqual(direct);
+    const served = await loadFloodHazardFactForServe(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("no flood source covers this parcel");
   });
 
-  it("a malformed parcelNodeId falls through to loadFloodHazardFactAtom's own existing refusal, unchanged", async () => {
-    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
-    setFloodVerdictStoreForTests(null);
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom("not-a-valid-id"));
-    const viaWrapper = await loadFloodHazardFactForServe("not-a-valid-id");
-    expect(viaWrapper).toEqual(direct);
-  });
-});
-
-describe("loadFloodHazardFactForServe — SLATED counties (gold + Caldwell) genuinely reach the record adapter", () => {
-  it("a real PASS verdict on gold (48021) serves from parcel_record, not the legacy atom", async () => {
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([{ entityId: GOLD, body: { ...UNSLATED_BODY, floodZone: "X" } }]), // legacy fixture claims zone X
-    );
-    setFloodVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "flood", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
-      ]),
-    );
+  it("FALSIFIER 1: a slated parcel whose own cell is earned is served that cell, with no verdict store anywhere in this file", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordFlood([
         {
-          placeKey: GOLD,
-          cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
-          payload: { zone: "AE", floodway: false, bfe: 512.3, method: "point-on-surface", sourceVintage: "NFHL_48_20260101" }, // record claims AE, a real divergence from the legacy fixture
+          placeKey: SLATED,
+          cellState: { kind: "absent-verified", basis: { method: "sweep", finding: "swept, none found" } },
         },
       ]),
     );
-    const result = await loadFloodHazardFactForServe(GOLD);
-    expect(result.state).toBe("present");
-    if (result.state !== "present") throw new Error("unreachable");
-    expect(result.floodZone).toBe("AE");
-    expect(result.sourceAdapter).toBe("parcel_record");
+    const served = await loadFloodHazardFactForServe(SLATED);
+    expect(served?.state).toBe("absent");
+    if (served?.state !== "absent" || !served.absence) throw new Error("unreachable");
+    expect(served.absence.kind).toBe("absent-verified");
   });
 
-  it("CALDWELL (48055): an EXCLUDED verdict on a slated county resolves the allowlist to 'refused' -- serves legacy at the wire (same as a REFUSE would), but is the visible, attempted state this card's own premise names", async () => {
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([{ entityId: CALDWELL_PARCEL, body: UNSLATED_BODY }]),
-    );
-    setFloodVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48055", railKey: "flood", verdict: "excluded", unaccountedCount: 0, evaluatedAt: "2026-09-02T21:42:16Z", runId: "real-b-gate-sched-run" },
+  it("a present flood zone cell is served as a present determination (the value form)", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordFlood([
+        {
+          placeKey: SLATED,
+          cellState: { kind: "value", source: "fema-nfhl", vintage: "2026-08-01" },
+          payload: { zone: "AE", floodway: false, bfe: 412, method: "nfhl-sweep", sourceVintage: "2026-08-01" },
+        },
       ]),
     );
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(CALDWELL_PARCEL));
-    const viaWrapper = await loadFloodHazardFactForServe(CALDWELL_PARCEL);
-    // Wire behavior is identical to legacy (excluded -> 'refused' state ->
-    // same fallback as legacy/unslated) -- the DISTINCTION lives in the
-    // allowlist's own resolveAllowlistState (see parcelRecordAllowlist.test.ts),
-    // not in this wrapper's own output shape.
-    expect(viaWrapper).toEqual(direct);
+    const served = await loadFloodHazardFactForServe(SLATED);
+    expect(served?.state).toBe("present");
+    if (served?.state !== "present") throw new Error("unreachable");
+    expect(served.floodZone).toBe("AE");
+    expect(served.inSpecialFloodHazardArea).toBe(true);
   });
 
-  it("REFUSE verdict on gold still falls back to legacy -- attempted but refused, not record", async () => {
-    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
-    setFloodVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "flood", verdict: "refuse", unaccountedCount: 7, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
-      ]),
-    );
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(GOLD));
-    const viaWrapper = await loadFloodHazardFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+  it("a SLATED pair whose cell row does not exist is a declared refusal naming the missing row", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordFlood([]));
+    const served = await loadFloodHazardFactForServe(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-cell-miss");
   });
 
-  it("a store failure on gold fails closed to legacy, not a thrown error", async () => {
-    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
-    setFloodVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(GOLD));
-    const viaWrapper = await loadFloodHazardFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+  it("an unreadable/unconfigured store on a SLATED pair is a declared refusal, never the atom answer", async () => {
+    resetParcelRecordQueryableForTests();
+    setParcelRecordQueryableForTests(null);
+    const served = await loadFloodHazardFactForServe(SLATED);
+    const preCutover = await loadFloodHazardFactAtom(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-store-not-configured");
+    expect(served).not.toEqual(preCutover);
   });
 
-  it("a null verdict store (not configured) on gold fails closed to legacy", async () => {
-    setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
-    setFloodVerdictStoreForTests(null);
-    const direct = await import("./floodHazardFactRead").then((m) => m.loadFloodHazardFactAtom(GOLD));
-    const viaWrapper = await loadFloodHazardFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+  it("a malformed parcelNodeId keeps the atom read's own answer (no place_key is guessed)", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordFlood([]));
+    const malformed = "not-a-valid-id";
+    const viaWrapper = await loadFloodHazardFactForServe(malformed);
+    resetParcelRecordQueryableForTests();
+    const withoutStore = await loadFloodHazardFactForServe(malformed);
+    expect(viaWrapper).toEqual(withoutStore);
   });
 });

@@ -1,149 +1,144 @@
 /**
- * The serve-layer integration point for setbackRules (F-01, OPS-21 P-148 /
- * P-132 built the wrapper; OPS-21 P-150 slates it). GOLD is 48491
- * (Williamson), one of the 5 counties P-150 slates (Bastrop, Caldwell,
- * McLennan, Travis, Williamson -- Hays excluded, P-145 not landed). Distinct
- * from setbacksFactServeCutover.ts (the Ft-suffixed siblings' wrapper),
- * which DOES have a legacy fallback; this rail has none.
+ * setbackRulesFactServeCutover.ts — P-297 (operator ruling A-193, OPS-24 law 7): the serve switch
+ * is the code-owned SLATE, and what a parcel shows comes from ITS OWN cell.
+ *
+ * Rail note: setbackRules is the one companion-row rail in this group (its cell's value is
+ * null on every present row; the content lives in parcel_record_companion_row, which its
+ * adapter already handles), and its fallback is a not-cut-over refusal.
+ *
+ * THIS FILE REPLACES the pre-P-297 suite, which pinned the old contract
+ * ("only a PASS verdict reaches the record; refuse / excluded / no verdict /
+ * store failure / no store all fall back to the legacy value"). Those
+ * assertions encoded the exact defect the ruling names -- one unaccounted cell
+ * anywhere in a slated county turning every parcel in it back to the bake --
+ * so they are deleted rather than kept passing. The adapter's own answer
+ * shapes are covered by <rail>FactFromParcelRecord.test.ts; what this file
+ * covers is the SWITCH, per the dispatch's falsifiers 1, 2 and 4.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  memoryParcelGateVerdicts,
-  memoryParcelGateVerdictsThatFails,
-} from "./parcelGateVerdictRead";
+import { loadSetbackRulesFactForServe } from "./setbackRulesFactServeCutover";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
+  type ParcelRecordQueryable,
 } from "./parcelRecordCellRead";
-import {
-  loadSetbackRulesFactForServe,
-  resetSetbackRulesVerdictStoreForTests,
-  setSetbackRulesVerdictStoreForTests,
-} from "./setbackRulesFactServeCutover";
+import { isSlatedForCellServe } from "./cellServeRule";
+import { notCutOverSetbackRulesFact } from "./setbackRulesFactRead";
 
-const HAYS_EXCLUDED = "48209:34137"; // real program county, deliberately never slated for this rail (P-145 not landed).
-const GOLD = "48491:R302477"; // Williamson IS slated for setbackRules.
+const RAIL_KEY = "setbackRules";
+const SLATED = "48021:34137";
+const UNSLATED = "48103:100";
+
+/** Counts every parcel_record query. Any call at all from an unslated pair is a defect. */
+function countingStore(): { store: ParcelRecordQueryable; calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      async query() {
+        calls += 1;
+        return { rows: [] };
+      },
+    } as ParcelRecordQueryable,
+  };
+}
 
 afterEach(() => {
-  resetSetbackRulesVerdictStoreForTests();
   resetParcelRecordQueryableForTests();
 });
 
-describe("loadSetbackRulesFactForServe — never-slated pairs", () => {
-  it("Hays resolves to the typed not-cut-over refusal, never a store call", async () => {
-    setSetbackRulesVerdictStoreForTests(null);
-    const result = await loadSetbackRulesFactForServe(HAYS_EXCLUDED);
-    expect(result).toEqual({
-      state: "refused",
-      code: "not-cut-over",
-      source: "setback-rules-fact",
-      entityId: HAYS_EXCLUDED,
-      reason:
-        "setbackRules has no legacy serve path -- it is served only from parcel_record, and only once this (county, rail) pair is slated with a passing gate verdict. Not there yet for this parcel.",
-    });
+describe("setbackRulesFactServeCutover — the slate is the switch", () => {
+  it("the slate says what this suite assumes about its two counties", () => {
+    expect(isSlatedForCellServe("48021", RAIL_KEY)).toBe(true);
+    expect(isSlatedForCellServe("48103", RAIL_KEY)).toBe(false);
   });
 
-  it("FALSIFIER: even a fabricated PASS verdict has no effect for a non-slated county (Hays, P-145 not landed) — the slate check short-circuits first", async () => {
-    setSetbackRulesVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48209", railKey: "setbackRules", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-11T00:00:00Z", runId: "test" },
-      ]),
+  it("an UNSLATED pair never touches parcel_record — it runs the pre-cutover path, unchanged, with zero I/O", async () => {
+    const withoutStore = await loadSetbackRulesFactForServe(UNSLATED);
+    const counter = countingStore();
+    setParcelRecordQueryableForTests(counter.store);
+    const withStore = await loadSetbackRulesFactForServe(UNSLATED);
+    expect(counter.calls()).toBe(0);
+    expect(withStore).toEqual(withoutStore);
+  });
+
+  it("FALSIFIER 2: an unaccounted cell on a SLATED pair is a declared refusal carrying the cell's reason, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [{ placeKey: SLATED, railKey: RAIL_KEY, cellState: { kind: "unaccounted" } }],
+      }),
     );
-    const result = await loadSetbackRulesFactForServe(HAYS_EXCLUDED);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+    const served = await loadSetbackRulesFactForServe(SLATED);
+    const preCutover = notCutOverSetbackRulesFact(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-unaccounted");
+    expect(wire).toContain("has not yet examined this rail");
+    expect(served).not.toEqual(preCutover);
   });
 
-  it("a malformed parcelNodeId resolves to not-cut-over without touching the verdict store", async () => {
-    const malformed = "not-a-valid-id";
-    const result = await loadSetbackRulesFactForServe(malformed);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-    expect(result.entityId).toBe(malformed);
-  });
-
-  it("a store failure still resolves to not-cut-over, not a thrown error", async () => {
-    setSetbackRulesVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const result = await loadSetbackRulesFactForServe(HAYS_EXCLUDED);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-});
-
-describe("loadSetbackRulesFactForServe — SLATED pairs (48021/48055/48309/48453/48491, OPS-21 P-150)", () => {
-  it("a real PASS verdict on Williamson genuinely reaches the companion-row parcel_record adapter", async () => {
-    setSetbackRulesVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48491", railKey: "setbackRules", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-11T14:09:19Z", runId: "test" },
-      ]),
-    );
+  it("an engine-refused cell on a SLATED pair is a declared refusal carrying the engine's own words", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({
         cells: [
           {
-            placeKey: GOLD,
-            railKey: "setbackRules",
-            cellState: { kind: "value", source: "@empressaio/setback-corpus@1.1.0:round-rock-tx", vintage: "2026-09-10T22:36:30.509Z", rowCount: 1, disposition: "rows" },
-          },
-        ],
-        companionRows: [
-          {
-            placeKey: GOLD,
-            railKey: "setbackRules",
-            rowIndex: 0,
-            payload: {
-              matchKind: "matched",
-              citationUrl: "https://roundrock-tx.elaws.us/code/coor_ptiii_ch2_artii_sec2-26",
-              districtCode: "SF2",
-              districtName: "SF-2 Single-Family Residential 2 (Conventional)",
-              effectiveDate: null,
-              jurisdictionKey: "round-rock-tx",
-              resolvedTableKey: "round-rock-tx",
-              note: "RECONCILED 2026-09-07",
-            },
-            source: "@empressaio/setback-corpus@1.1.0:round-rock-tx",
-            vintage: "2026-09-10T22:36:30.509Z",
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "refused", reason: "no source covers this parcel" },
           },
         ],
       }),
     );
-    const result = await loadSetbackRulesFactForServe(GOLD);
-    expect(result.state).toBe("present");
-    if (result.state !== "present") throw new Error("unreachable");
-    expect(result.districtCode).toBe("SF2");
-    expect(result.matchKind).toBe("matched");
+    const served = await loadSetbackRulesFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-engine-refused");
+    expect(wire).toContain("no source covers this parcel");
   });
 
-  it("no verdict row on Williamson falls back to not-cut-over, not a thrown error or a fabricated present", async () => {
-    setSetbackRulesVerdictStoreForTests(memoryParcelGateVerdicts([]));
-    const result = await loadSetbackRulesFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-
-  it("a REFUSE verdict on Williamson still falls back to not-cut-over -- attempted but refused, not record", async () => {
-    setSetbackRulesVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48491", railKey: "setbackRules", verdict: "refuse", unaccountedCount: 9, evaluatedAt: "2026-09-11T00:00:00Z", runId: "test" },
-      ]),
+  it("FALSIFIER 1: a 48021 parcel whose own cell is earned is served that cell even though the county's verdict may read refuse", async () => {
+    // No verdict store is injected anywhere in this file, and the wrapper has no
+    // verdict seam left to inject one into: the verdict cannot reach this decision.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "absent-verified", basis: { method: "sweep", finding: "swept, none found" } },
+          },
+        ],
+      }),
     );
-    const result = await loadSetbackRulesFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+    const served = await loadSetbackRulesFactForServe(SLATED);
+    expect(served?.state).toBe("absent");
   });
 
-  it("a store failure on Williamson fails closed to not-cut-over, not a thrown error", async () => {
-    setSetbackRulesVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const result = await loadSetbackRulesFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+  it("a SLATED pair whose cell row does not exist is a declared refusal naming the missing row", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const served = await loadSetbackRulesFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-cell-miss");
+  });
+
+  it("an unreadable/unconfigured store on a SLATED pair is a declared refusal, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(null);
+    const served = await loadSetbackRulesFactForServe(SLATED);
+    const preCutover = notCutOverSetbackRulesFact(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-store-not-configured");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("a malformed parcelNodeId keeps the pre-cutover path's own answer (no place_key is guessed)", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const malformed = "not-a-valid-id";
+    const viaWrapper = await loadSetbackRulesFactForServe(malformed);
+    resetParcelRecordQueryableForTests();
+    const withoutStore = await loadSetbackRulesFactForServe(malformed);
+    expect(viaWrapper).toEqual(withoutStore);
   });
 });
