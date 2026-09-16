@@ -332,4 +332,19 @@ describe("austin-tx — P-258 lane-a rows", () => {
     expect(austin().districts.find((d) => d.district_name.startsWith("MF-3 "))!.front_ft).toBe(15);
     expect(austin().note).toMatch(/KNOWN CONFLICT NOT TOUCHED/);
   });
+
+  it("keeps the reproduction route for the §25-2-492(D) read, because a plain fetch of the citation URL returns only the Municode shell", () => {
+    // F-1 (wave planner, 2026-09-16T21:05Z): a citation a successor lane cannot
+    // reproduce is the defect this assertion pins shut. The route was a browser
+    // render of the Municode page, so the note must keep saying that plainly,
+    // keep naming the plain-fetch limitation that reproduces it, and keep the
+    // plain-fetch mirror labelled a corroborator rather than a citation.
+    expect(austin().note).toMatch(/BROWSER RENDER/);
+    expect(austin().note).toMatch(
+      /a plain fetch of this URL returns only the Municode application shell/,
+    );
+    expect(austin().note).toMatch(/NO plain-fetch URL returns the CURRENT table/);
+    expect(austin().note).toMatch(/PLAIN-FETCH CORROBORATOR, NOT A CITATION/);
+    expect(austin().note).toMatch(/austin-tx\.elaws\.us/);
+  });
 });
