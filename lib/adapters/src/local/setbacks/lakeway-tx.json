@@ -1,0 +1,1293 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "lakeway-tx",
+  "jurisdictionDisplayName": "City of Lakeway, TX",
+  "note": "City of Lakeway, Texas — Code of Ordinances, Chapter 30 Zoning, Article 30.03 \"Zoning Use Regulations\" (§ 30.03.001 – § 30.03.023), which defines one base district per numbered section and carries that district's \"Minimum building setbacks\" block. This is a classic enumerated Euclidean ordinance (each district has its own numbered section), not a form-based code, so the front/side/rear numbers are direct district-specific citations. ROUTE: read from the eCode360 article page at the citation_url above, whose copy of Article 30.03 DOES render the full section text and the flattened setback blocks to a plain fetch (verified 2026-09-16; unlike Chapter 3 of Jonestown's UDC, no print endpoint was needed for this article). The setback blocks are FLATTENED TABLES: each cell is rendered on its own line (\"Street(s):\" / \"25\" / \"Side:\" / \"5 (golf course 25)\"), so the quotes below render each block as its label/value sequence with the cell text unaltered. No number is paraphrased, rounded or converted. VINTAGE (checked at source before extracting): each section cited here carries its own trailing amendment line, and the most recent amending ordinance named anywhere in the article is Ordinance 2026-06-15-02 adopted 6/15/2026 (on § 30.03.009 C-1 and § 30.03.010 C-2). § 30.03.023 (VPCO) carries Ordinance 2025-06-16-02 adopted 6/16/2025 and § 30.03.002 carries Ordinance 2025-06-16-02 adopted 6/16/2025. The ordinance is in force; nothing here is a retired scheme. The City's zoning layer is already staged for this jurisdiction (8,202 of 8,259 census parcels carry a district stamp), so this table's job is to fill an existing router gap, not to create a zoning source. SENTINEL CONVENTION: every not_specified field carries the numeric sentinel 999 together with provenance.not_specified = true and a verbatim quote of the source language that caused the gap. 999 sits outside every gate sanity band, so if a not_specified flag were ever dropped the value would FLAG rather than silently read as a real standard. CONDITIONAL (NON-SCALAR) CELLS. Where the source states a base value plus a conditional exception — the recurring \"(golf course 25)\" parenthetical on the R-district side and rear yards, R-2's \"(10' if adjacent to external residential)\", R-8's \"(25 ft. if abutting R-4, R-5, R-6, or R-7 districts)\", and the \"10*\" / \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage ... or golf course\" pattern in HM, GUI, AV and REC — the GENERAL/BASE value is codified and the conditional exception is preserved verbatim in that field's provenance quote, matching the precedent set by hutto-tx.json and belton-tx.json. The conditional branch is NOT dropped and must not be read as absent. TIERED SETBACKS (C-1, C-2, C-3): these three districts state their setbacks twice over, keyed first on whether the building abuts a residential or a nonresidential use and then on building footprint (\"0–50,000 sq. ft.\" vs \"50,000 and greater\" / \"50,000 - 100,000 sq. ft.\"). Four combinations are therefore in force per district and no single number is the district's setback. The base case codified here is the SMALLEST-FOOTPRINT, NONRESIDENTIAL-ABUTTING column (\"0–50,000 sq. ft.\" under \"when abutting a nonresidential usage\"), which appears in every one of the three sections, and the full four-combination block is quoted verbatim in each affected field's provenance. A caller must not read the codified figure as the setback for a 50,000+ sq. ft. building or for a building abutting a residence. OMITTED (deliberate): § 30.03.020 GB (Greenbelts) carries no dimensional block in the article; § 30.03.021 PUD is expressly a negotiated district whose standards \"are described in the adopting ordinance for that district\" and § 30.03.021(g)(2) lists the dimensional topics the PUD application must itself define, which is the PUD-refusal case rather than a table row; § 30.03.023 VPCO (View Protection Conditional Overlay) is an overlay that \"do[es] not negate any of the base zoning district regulations except for maximum height\", and that height is set case by case by the ZAPCO up to the base district's 32 ft., so it cannot be reduced to a district row. NOT READ: Articles 30.02 (establishment of districts/map), 30.04 and following were not read this pass, and Article 28.10 (environmental and impervious cover) — which several districts' lot-coverage lines point at — was not read, so every lot-coverage and impervious-cover figure that the source does not state numerically is coded 999/not_specified rather than estimated from that article. No cross-check against a second primary source was possible: this jurisdiction has no code-section atom corpus, so every value is primary-source-verified.",
+  "districts": [
+    {
+      "district_name": "R-1 and R-1* Single-Family Residential (Lakeway § 30.03.002)",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional: the side yard is 25 ft. where it adjoins a golf course. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional: the rear yard is 25 ft. where it adjoins a golf course. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.002",
+          "quote": "§ 30.03.002(g) Maximum height: \"No part of any structure within this district, except for chimneys, attic ventilators and plumbing vent stacks, may exceed 32 feet in height above the highest natural grade under the slab.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.002",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-2 Single-Family Residential - Garden/Patio Home (Lakeway § 30.03.003)",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\" Two conditionals are attached: 25 ft. where the side yard adjoins a golf course, and 10 ft. where it is adjacent to external residential. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\" Two conditionals are attached: 25 ft. where the rear yard adjoins a golf course, and 10 ft. where it is adjacent to external residential. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\" § 30.03.003's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.003",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25' / Side: 5' (golf course 25') (10' if adjacent to external residential) / Rear: 5' (golf course 25') (10' if adjacent to external residential)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.003",
+          "quote": "§ 30.03.003(d) states \"Lot coverage (max. percentage): 60% impervious cover per lot\", and the following paragraph repeats \"The maximum amount of impervious cover, inclusive of garages, porches, driveways, sidewalks, patios, overhangs, etc., shall be 60%.\" This district therefore states a real numeric impervious-cover cap and no separate building-footprint coverage cap.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "R-3 Single-Family Residential - Zero Lot Line-Modified (Lakeway § 30.03.004)",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" § 30.03.004's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.004",
+          "quote": "(e) Minimum building setbacks: \"Street(s) 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-4 Duplex (Lakeway § 30.03.005)",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" § 30.03.005's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.005",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-5 Condominium (Lakeway § 30.03.005.5)",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\" § 30.03.005.5's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.005.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 25 / Rear: 25\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-6 Single-Family Residential - Rural (Lakeway § 30.03.006)",
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The parenthetical \"(golf course 25)\" is a real conditional. 5 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.006",
+          "quote": "§ 30.03.006(g) states 32 ft. with a floodplain exception: \"Exception: Structures built in the floodplain and not subject to the View Protection Corridor Overlay (VPCO) may have a maximum height not to exceed 33 feet in height above the FEMA base flood elevation.\" 32 ft. is codified as the general case.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.006",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 5 (golf course 25) / Rear: 5 (golf course 25)\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-7 Retirement Living (Lakeway § 30.03.007)",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 999,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district states two full sets: residential structures 25/25/25 and nonresidential structures 40/40/40. The residential set is codified as the base; the nonresidential set is real and quoted in the block.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district states two full sets: residential structures 25/25/25 and nonresidential structures 40/40/40. The residential set is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district states two full sets: residential structures 25/25/25 and nonresidential structures 40/40/40. The residential set is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.007",
+          "quote": "§ 30.03.007(g) Maximum height: \"No part of any structure within this district ... may exceed three (3) stories or 40 feet in height above the highest natural grade under the slab.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.007",
+          "quote": "(d) Minimum building setbacks, \"(1) Residential structures\": \"Street(s): 25 / Side: 25 / Rear: 25\"; and \"(2) Nonresidential structures\": \"Street(s): 40 / Side: 40 / Rear: 40\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-8 Medium Density Multifamily Residential (Lakeway § 30.03.008)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\" The parenthetical \"(25 ft. if abutting R-4, R-5, R-6, or R-7 districts)\" is a real conditional. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.008",
+          "quote": "§ 30.03.008(g) Maximum height: \"No part of any structure within this district ... may exceed three (3) stories or 40 feet in height above the highest natural grade under the slab.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.008",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 10 ft. (25 ft. if abutting R-4, R-5, R-6, or R-7 districts) / Rear: 40 ft.\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-9 High Density Multifamily Residential (Lakeway § 30.03.008.5)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 25,
+      "side_corner_ft": 999,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.008.5",
+          "quote": "§ 30.03.008.5(g) Maximum height: \"No part of any structure within this district ... may exceed three (3) stories or 40 feet in height above the highest natural grade under the slab.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.008.5",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 ft. / Side: 25 ft. / Rear: 40 ft.\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-1 Office/Retail (Lakeway § 30.03.009)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" FOUR combinations are in force: side 25 (0–50,000 sq. ft., abutting residential), 100 (50,000+, abutting residential), 10 with a 25 ft. golf-course conditional (0–50,000 sq. ft., abutting nonresidential), or 50 (50,000+, abutting nonresidential). The smallest-footprint, nonresidential-abutting figure (10) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" FOUR combinations are in force: rear 40, 100, 40, or 50 depending on footprint and on whether the building abuts a residential or nonresidential use. The smallest-footprint, nonresidential-abutting figure (40) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.009",
+          "quote": "§ 30.03.009(j) Maximum height: \"... may exceed 32 feet in height above the highest natural grade under the slab\" (stated as a prohibition on exceeding 32 ft.).",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.009",
+          "quote": "(g) Minimum building setbacks, \"Building footprint (sq. ft.), organized sewer or private facility when abutting a residential area\": \"Street(s) (ft.): 40 / 40; Side (ft.): 25 / 100; Rear (ft.): 40 / 100\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\"; and \"Building footprint (sq. ft.), organized sewer or private facility when abutting a nonresidential usage\": \"Street(s): 40 / 40; Side: 10 (25 golf course) / 50; Rear: 40 / 50\" for \"0–50,000 sq. ft.\" / \"50,000 and greater\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-2 Commercial/Light Industrial (Lakeway § 30.03.010)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 25,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" FOUR combinations are in force: side 40, 100, 25, or 50 depending on footprint and on whether the building abuts a residential or nonresidential use. The smallest-footprint, nonresidential-abutting figure (25) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" FOUR combinations are in force: rear 40, 100, 40, or 50. The smallest-footprint, nonresidential-abutting figure (40) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.010",
+          "quote": "§ 30.03.010(j) Maximum height: \"... may exceed 32 feet in height above the highest natural grade under the slab\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.010",
+          "quote": "(g) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-3 Pawnshop (Lakeway § 30.03.011)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 25,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" FOUR combinations are in force: side 40, 100, 25, or 50. The smallest-footprint, nonresidential-abutting figure (25) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" FOUR combinations are in force: rear 40, 100, 40, or 50. The smallest-footprint, nonresidential-abutting figure (40) is codified as the base only. See the table note on TIERED SETBACKS (C-1, C-2, C-3): the codified figure is the smallest-footprint, nonresidential-abutting column only.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.011",
+          "quote": "§ 30.03.011(f) Maximum height: \"... may exceed 32 feet in height above the highest natural grade under the slab\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.011",
+          "quote": "(d) Minimum building setbacks, abutting a residential area: \"Street(s) (ft.): 40 / 40; Side (ft.): 40 / 100; Rear (ft.): 40 / 100\" for \"0 - 50,000 sq. ft.\" / \"50,000 - 100,000 sq. ft.\"; abutting a nonresidential usage: \"Street(s): 40 / 40; Side: 25 / 50; Rear: 40 / 50\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "C-4 Automotive sales and service (Lakeway § 30.03.011.5)",
+      "front_ft": 999,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 999,
+      "max_height_ft": 37,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.011.5",
+          "quote": "This district states no front/side/rear split at all — only a single PERIMETER building setback of 100 ft. where the site abuts a residential use and 40 ft. where it abuts a nonresidential use. There is no number that answers \"front setback\" for this district, so 999 (not_specified) is coded rather than forcing the perimeter figure into a front-yard slot.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "30.03.011.5",
+          "quote": "Only the perimeter rule exists (100 ft. residential / 40 ft. nonresidential); no side-specific figure is stated. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "30.03.011.5",
+          "quote": "Only the perimeter rule exists (100 ft. residential / 40 ft. nonresidential); no rear-specific figure is stated. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.011.5",
+          "quote": "(d) Minimum perimeter building setbacks: \"Abutting a: Residential Use / Nonresidential Use\" with the values \"100 feet\" and \"40 feet\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.011.5",
+          "quote": "§ 30.03.011.5(h)(1) Height: \"All structures in this district shall be limited to a maximum of two (2) stories, and shall be limited to 37 feet (excluding cupolas and other architectural features approved by staff) above the highest natural grade under the slab.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.011.5",
+          "quote": "(d) Minimum perimeter building setbacks: \"Abutting a: Residential Use / Nonresidential Use\" with the values \"100 feet\" and \"40 feet\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.011.5",
+          "quote": "§ 30.03.011.5(g)(1) Impervious cover: \"Impervious cover may not exceed forty percent (40%) of the net site area. In accordance with article 28.10, Environmental and Impervious Cover Regulations, of the Code of Ordinances, a transfer of impervious cover credit may be approved at the city's discretion.\"",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "HM Hotel/Motel (Lakeway § 30.03.012)",
+      "front_ft": 40,
+      "rear_ft": 40,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The footnote condition is real: the side yard is 40 ft. where it adjoins residential usage or a golf course. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" § 30.03.012's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.012",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 40 / Side: 10* / Rear: 40\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "M Marina (Lakeway § 30.03.013)",
+      "front_ft": 999,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.013",
+          "quote": "The ordinance states the district's entire setback block as \"Subject to approval of city council\" — there is no number to cite for any yard. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "30.03.013",
+          "quote": "The ordinance states the district's entire setback block as \"Subject to approval of city council\" — there is no number to cite. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "30.03.013",
+          "quote": "The ordinance states the district's entire setback block as \"Subject to approval of city council\" — there is no number to cite. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.013",
+          "quote": "(e) Minimum building setbacks: \"Subject to approval of city council.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.013",
+          "quote": "(e) Minimum building setbacks: \"Subject to approval of city council.\" § 30.03.013's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.013",
+          "quote": "(e) Minimum building setbacks: \"Subject to approval of city council.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.013",
+          "quote": "(e) Minimum building setbacks: \"Subject to approval of city council.\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "AG Agricultural (Lakeway § 30.03.014)",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" Two sets are stated. The residential-dwelling set (25/10/10) is codified as the base because the census district stamp is a residential agricultural district; the agricultural-building set (100/100, or 25 where it adjoins other agricultural land) is real and quoted in the block.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" The agricultural-building side yard is 100 ft., or 25 ft. where the lot adjoins other agricultural land. The residential-dwelling figure (10 ft.) is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" The agricultural-building rear yard is 100 ft., or 25 ft. where the lot adjoins other agricultural land. The residential-dwelling figure (10 ft.) is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" § 30.03.014's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.014",
+          "quote": "(e) Minimum building setbacks, \"(1) Residential dwellings\": \"Streets(s): 25 / Sides: 10 / Rear: 10\"; and \"(2) Agricultural buildings (barns, animals pens etc.)\": \"Street(s): 100 / Side: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land) / Rear: 100 (unless adjoins other agricultural land) 25 (if adjoins other agricultural land)\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "GUI Governmental, Utility and Institutional (Lakeway § 30.03.015)",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The footnote condition is real: the side yard is 25 ft. where it adjoins residential usage or a golf course. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The footnote condition is real: the rear yard is 25 ft. where it adjoins residential usage or a golf course. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" § 30.03.015's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.015",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 10*\", with the footnote \"*A minimum of 10 feet except a minimum of 25 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6) or golf course.\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "AV Aviation (Lakeway § 30.03.016)",
+      "front_ft": 40,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 60,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\" The footnote condition is real: the side yard is 40 ft. where it adjoins residential use or a golf course. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\" The footnote condition is real: the rear yard is 40 ft. where it adjoins residential use or a golf course. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\" § 30.03.016's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.016",
+          "quote": "(g) Minimum building setbacks: \"Street(s): 40. / Side: 10*. / Rear: 10*.\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential use (e.g. districts R-1 through R-6) or golf course.\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.016",
+          "quote": "§ 30.03.016(f) states \"Lot coverage (max. percentage): To minimize the risk of hazardous materials related to aviation activities draining into nearby waterways or Lake Travis, the maximum allowable impervious cover shall be 60% of the net site area.\"",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        }
+      }
+    },
+    {
+      "district_name": "REC Recreational (Lakeway § 30.03.017)",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\" The footnote condition is real: the side yard is 40 ft. where it adjoins residential usage. 10 ft. is codified as the base.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\" The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\" § 30.03.017's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.017",
+          "quote": "(e) Minimum building setbacks: \"Street(s): 25 / Side: 10* / Rear: 25\", with the footnote \"*A minimum of 10 feet except a minimum of 40 feet for any side(s) that adjoin residential usage (e.g. R-1 through R-6).\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "P-1 Public Park (Lakeway § 30.03.018)",
+      "front_ft": 999,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.018",
+          "quote": "§ 30.03.018 contains no \"Minimum building setbacks\" subsection: its lettered subsections run (a) purpose, (b) uses, (c) Maximum height. No yard standard is stated for this district anywhere in the section, so 999 (not_specified) is coded. This is an honest absence, not a zero.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "30.03.018",
+          "quote": "No setback subsection exists in § 30.03.018; no side-yard standard is stated. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "30.03.018",
+          "quote": "No setback subsection exists in § 30.03.018; no rear-yard standard is stated. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.018",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.018",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. § 30.03.018's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.018",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.018",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "P-2 Private Park (Lakeway § 30.03.019)",
+      "front_ft": 999,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 999,
+      "max_height_ft": 32,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.019",
+          "quote": "§ 30.03.019 contains no \"Minimum building setbacks\" subsection: its lettered subsections run (a) purpose, (b) uses, (c) Maximum height. No yard standard is stated, so 999 (not_specified) is coded. This is an honest absence, not a zero.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "30.03.019",
+          "quote": "No setback subsection exists in § 30.03.019; no side-yard standard is stated. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "30.03.019",
+          "quote": "No setback subsection exists in § 30.03.019; no rear-yard standard is stated. 999 is the not_specified sentinel.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.019",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district states no separate corner-lot / street-side side yard; the only street-related figure in its block is the \"Street(s)\" yard already coded to front_ft, so there is no second number to cite. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "30.03.019",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. § 30.03.019's Maximum height paragraph states \"... may exceed 32 feet in height above the highest natural grade under the slab\" — i.e. 32 ft. is the cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.019",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.019",
+          "quote": "(c) Maximum height. The section contains no setback subsection at all. The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MMC Major Medical Center (Lakeway § 30.03.022)",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 20,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/39617034",
+      "provenance": {
+        "front_ft": {
+          "section_number": "30.03.022",
+          "quote": "(i) Minimum lot building setbacks, \"Unless otherwise approved as part of the preliminary plan process\": \"Street: 25 feet / Side: 10 feet; for corner lots, there shall be a side yard of 20 feet, where adjacent to a street / Rear: 10 feet\" The setback is stated as the single word \"Street: 25 feet\", i.e. the street-facing yard. 25 is codified as front_ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "30.03.022",
+          "quote": "(i) Minimum lot building setbacks, \"Unless otherwise approved as part of the preliminary plan process\": \"Street: 25 feet / Side: 10 feet; for corner lots, there shall be a side yard of 20 feet, where adjacent to a street / Rear: 10 feet\" The base (non-corner) side yard is 10 ft.; the 20 ft. figure applies only to corner lots adjacent to a street and is coded to side_corner_ft.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "30.03.022",
+          "quote": "(i) Minimum lot building setbacks, \"Unless otherwise approved as part of the preliminary plan process\": \"Street: 25 feet / Side: 10 feet; for corner lots, there shall be a side yard of 20 feet, where adjacent to a street / Rear: 10 feet\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "30.03.022",
+          "quote": "This is the only Lakeway district in this table that states a separate corner-lot side yard: \"for corner lots, there shall be a side yard of 20 feet, where adjacent to a street\". Coded 20 as a real corner figure.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "30.03.022",
+          "quote": "The article's § 30.03.022 text as read contains no maximum-height figure for MMC in its dimensional subsections, so 999 (not_specified) is coded rather than borrowing another district's height. This is an honest gap in what was read, not a claim that the district has no height limit.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "30.03.022",
+          "quote": "(i) Minimum lot building setbacks, \"Unless otherwise approved as part of the preliminary plan process\": \"Street: 25 feet / Side: 10 feet; for corner lots, there shall be a side yard of 20 feet, where adjacent to a street / Rear: 10 feet\" The district's \"Lot coverage (max. percentage)\" line reads \"See development ordinance.\" (or \"See section 28.10.007\" / \"See watershed development ordinance\" for C-3 / R-6), i.e. the ordinance states no numeric lot-coverage cap in this article and defers it to a separate document that was not read. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "30.03.022",
+          "quote": "(i) Minimum lot building setbacks, \"Unless otherwise approved as part of the preliminary plan process\": \"Street: 25 feet / Side: 10 feet; for corner lots, there shall be a side yard of 20 feet, where adjacent to a street / Rear: 10 feet\" The district states no impervious-cover percentage in Article 30.03; the ordinance defers environmental and impervious cover to article 28.10 of the Code of Ordinances, which was not read this pass. 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}

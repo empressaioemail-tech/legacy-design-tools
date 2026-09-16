@@ -46,6 +46,7 @@ import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" 
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
 import jonestownTx from "./jonestown-tx.json" with { type: "json" };
+import lakewayTx from "./lakeway-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -175,6 +176,12 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // file's own note for the print-endpoint route, the 999 sentinel convention
   // and the deliberately omitted RV/PUD districts.
   "jonestown-tx": jonestownTx as SetbackTable,
+  // P-258 lane-e (2026-09-16), no-table half. Lakeway is the largest lane-e
+  // city (8,259 census parcels) and the largest single gap in this batch: it
+  // HAS a staged zoning layer (8,202 parcels carry a district stamp) and no
+  // setback table at all, so every one of those parcels was serving an
+  // absence. Table is Ch. 30 Art. 30.03 (§ 30.03.001 – § 30.03.023).
+  "lakeway-tx": lakewayTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
