@@ -127,6 +127,7 @@ export type RunReportEnvelope = RunReportHonestyFields &
 export function buildRunReportEnvelope(
   parcelNodeId: string,
   cortexBodyText: string,
+  canSeeOwner = false,
 ): RunReportEnvelope {
   const honesty: RunReportHonestyFields = {
     reportKind: "R1-baked-snapshot",
@@ -139,7 +140,7 @@ export function buildRunReportEnvelope(
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return {
         ...honesty,
-        ...normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+        ...normalizeR1BodyForExternal(parsed as Record<string, unknown>, canSeeOwner),
       };
     }
   } catch {
@@ -527,15 +528,51 @@ export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
 }
 
 /**
+ * P-220. `ownerFact` (ownerName, ownerMailingAddress, exemptionFlags) is a
+ * Studio/Team-gated read this server's own tool descriptions promise never
+ * ships at any depth -- but `/research/brief` is a single shared upstream
+ * response and this package composes get_smart_site and run_report from it
+ * verbatim, so a caller whose account-wide tier and per-parcel property
+ * unlock both fail to grant it must never see it here regardless of what
+ * upstream sent. Defense in depth, mirroring brokerageNodeFacets.ts's own
+ * belt-and-suspenders posture on the facets path (`sanitizeNodeFacetPayload`)
+ * rather than trusting the upstream gate alone. Replaces the whole value
+ * with a typed refusal -- never a bare delete -- so a consumer sees a
+ * declared state, the same honesty convention every other facet in this
+ * file follows. `exemptionFlags` lives inside `ownerFact` and is removed
+ * with it; nothing else in the body is touched, so `taxYear` on
+ * `structuralFact` / `valueHistoryFact` and every valuation rail survive.
+ */
+export const OWNER_FACT_NOT_CARRIED_FOR_CALLER = {
+  state: "refused",
+  code: "studio-gated",
+  source: "owner-fact",
+  reason:
+    "owner-fact is Studio or Team only, or requires an active property unlock on this parcel. This tool does not carry owner data at any depth without one of those.",
+} as const;
+
+export function stripOwnerFactForCaller<T extends Record<string, unknown>>(
+  body: T,
+  canSeeOwner: boolean,
+): T {
+  if (canSeeOwner || !("ownerFact" in body)) return body;
+  return { ...body, ownerFact: OWNER_FACT_NOT_CARRIED_FOR_CALLER };
+}
+
+/**
  * Ensures MCP clients never see bare null section data without a disposition.
  * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
  * `draw` is optional; invalid stubs are omitted (fail closed).
  */
 export function normalizeR1BodyForExternal(
   body: Record<string, unknown>,
+  canSeeOwner = false,
 ): Record<string, unknown> {
   const draw = sanitizeExternalDraw(body.draw);
-  const withDraw: Record<string, unknown> = { ...body };
+  const withDraw: Record<string, unknown> = stripOwnerFactForCaller(
+    { ...body },
+    canSeeOwner,
+  );
   delete withDraw.draw;
   if (draw) withDraw.draw = draw;
   const brief = withDraw.brief;
@@ -723,12 +760,27 @@ export function mapScreensGateNonOk(
   return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message };
 }
 
-/** Batch node rows keep per-parcel brief honesty; stubs pass through. */
+/**
+ * Batch node rows keep per-parcel brief honesty; stubs pass through.
+ *
+ * `canSeeOwner` for a batch (an array `parcelNodeId`, `stub-or-batch` mode
+ * with node-depth rows) is account-wide only (Studio|Team), never a
+ * per-parcel property-unlock lookup: the unlock table is a per-parcel async
+ * read and this function is a pure text transform. A caller holding an
+ * unlock on one parcel in a batch is under-served here (that parcel's owner
+ * row reads refused rather than granted) rather than over-served -- the
+ * conservative direction for a P1 privacy strip. The single-node path below
+ * carries the real per-parcel check; run_report (always single-parcel) does
+ * too. Known narrowness, not silently dropped.
+ */
 export function normalizeGetSmartSiteResponseText(
   cortexBodyText: string,
   mode: "single-node" | "stub-or-batch",
+  canSeeOwner = false,
 ): string {
-  if (mode === "single-node") return normalizeR1ResponseText(cortexBodyText);
+  if (mode === "single-node") {
+    return normalizeR1ResponseText(cortexBodyText, canSeeOwner);
+  }
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -742,7 +794,7 @@ export function normalizeGetSmartSiteResponseText(
         if (!row || typeof row !== "object" || Array.isArray(row)) return row;
         const parcel = row as Record<string, unknown>;
         if (!parcel.brief) return parcel;
-        return normalizeR1BodyForExternal(parcel);
+        return normalizeR1BodyForExternal(parcel, canSeeOwner);
       }),
     });
   } catch {
@@ -830,12 +882,15 @@ export function sanitizeAskTheMapErrorBody(body: string): string {
 }
 
 /** Parse cortex R1 JSON and normalize for get_smart_site / run_report. */
-export function normalizeR1ResponseText(cortexBodyText: string): string {
+export function normalizeR1ResponseText(
+  cortexBodyText: string,
+  canSeeOwner = false,
+): string {
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return JSON.stringify(
-        normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+        normalizeR1BodyForExternal(parsed as Record<string, unknown>, canSeeOwner),
       );
     }
   } catch {

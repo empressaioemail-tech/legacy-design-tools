@@ -784,6 +784,158 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
       });
     });
   });
+
+  /**
+   * P-220. get_smart_site and run_report both compose their response from
+   * `/research/brief`, the same upstream body brokerageNodeFacets.ts's
+   * `/node/:id/facets` route already strips ownerFact from correctly. This
+   * server's own tool descriptions state twice that owner data is a separate
+   * Studio/Team-gated read never carried at any depth; it was not stripped —
+   * ownerFact rode through verbatim regardless of caller tier. Fixture is
+   * the real shape measured live on Bastrop 48021:34137, 2026-09-15/16.
+   */
+  describe("get_smart_site / run_report ownerFact co-gate — Studio/Team OR a property unlock (P-220)", () => {
+    const OWNER_FACT = {
+      state: "present",
+      source: "owner-fact",
+      taxYear: 2025,
+      ownerName: "SMITH, RICHARD P & SUSAN J",
+      ownerMailingAddress: "908 PINE ST, BASTROP, TX 78602",
+      exemptionFlags: {
+        homestead: true,
+        seniorOrDisability: true,
+        agricultural: false,
+        veteran: false,
+      },
+    };
+
+    function mockOwnerBearingBrief(): void {
+      mockCortexFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            runId: "r1-owner-test",
+            parcelNodeId: "48021:34137",
+            brief: { sections: [], disclosure: [] },
+            structuralFact: { state: "present", taxYear: 2025, yearBuilt: 1910 },
+            ownerFact: OWNER_FACT,
+          }),
+          { status: 200 },
+        ),
+      );
+    }
+
+    it.each(["free", "solo"] as const)(
+      "%s tier, no property unlock: get_smart_site node depth never carries ownerFact",
+      async (tier) => {
+        mockAuth = authFor(tier);
+        mockOwnerBearingBrief();
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "get_smart_site",
+            arguments: { parcelNodeId: "48021:34137", depth: "node" },
+          });
+          const text = (result.content?.[0] as { text: string }).text;
+          expect(text).not.toContain("SMITH, RICHARD");
+          expect(text).not.toContain("908 PINE ST");
+          expect(text).not.toContain("seniorOrDisability");
+          const parsed = JSON.parse(text) as { ownerFact?: { state?: string; code?: string } };
+          if (parsed.ownerFact) {
+            expect(parsed.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+          }
+          // Sibling fact with an unrelated taxYear of its own must survive.
+          expect(parsed).toMatchObject({ structuralFact: { taxYear: 2025, yearBuilt: 1910 } });
+        });
+      },
+    );
+
+    it.each(["studio", "team"] as const)(
+      "%s tier: get_smart_site node depth keeps ownerFact (entitled caller, unlock never queried)",
+      async (tier) => {
+        mockAuth = authFor(tier);
+        mockOwnerBearingBrief();
+        await withTestClient(async (client) => {
+          const result = await client.callTool({
+            name: "get_smart_site",
+            arguments: { parcelNodeId: "48021:34137", depth: "node" },
+          });
+          const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+          expect(parsed.ownerFact).toEqual(OWNER_FACT);
+          expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
+        });
+      },
+    );
+
+    it("solo WITH a property unlock on this exact parcel: get_smart_site keeps ownerFact — parity with the server-side co-gate", async () => {
+      mockAuth = authFor("solo");
+      mockHasPropertyUnlock.mockResolvedValue(true);
+      mockOwnerBearingBrief();
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "get_smart_site",
+          arguments: { parcelNodeId: "48021:34137", depth: "node" },
+        });
+        const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+        expect(parsed.ownerFact).toEqual(OWNER_FACT);
+        expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-solo", "48021:34137");
+      });
+    });
+
+    it("solo tier, no unlock: run_report never carries ownerFact", async () => {
+      mockAuth = authFor("solo");
+      mockOwnerBearingBrief();
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "run_report",
+          arguments: { parcelNodeId: "48021:34137" },
+        });
+        const text = (result.content?.[0] as { text: string }).text;
+        expect(text).not.toContain("SMITH, RICHARD");
+        const parsed = JSON.parse(text);
+        expect(parsed.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+      });
+    });
+
+    it("studio tier: run_report keeps ownerFact", async () => {
+      mockAuth = authFor("studio");
+      mockOwnerBearingBrief();
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "run_report",
+          arguments: { parcelNodeId: "48021:34137" },
+        });
+        const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+        expect(parsed.ownerFact).toEqual(OWNER_FACT);
+      });
+    });
+
+    it("solo, no unlock: a node-depth BATCH read never carries ownerFact on any row (account-wide narrowness, documented)", async () => {
+      mockAuth = authFor("solo");
+      mockCortexFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            parcels: [
+              { parcelNodeId: "48021:34137", brief: { sections: [] }, ownerFact: OWNER_FACT },
+              { parcelNodeId: "48453:289990", brief: { sections: [] }, ownerFact: OWNER_FACT },
+            ],
+            notFound: [],
+          }),
+          { status: 200 },
+        ),
+      );
+      await withTestClient(async (client) => {
+        const result = await client.callTool({
+          name: "get_smart_site",
+          arguments: { parcelNodeId: ["48021:34137", "48453:289990"], depth: "node" },
+        });
+        const text = (result.content?.[0] as { text: string }).text;
+        expect(text).not.toContain("SMITH, RICHARD");
+        const parsed = JSON.parse(text) as { parcels: Array<{ ownerFact?: { state?: string } }> };
+        for (const row of parsed.parcels) {
+          expect(row.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+        }
+      });
+    });
+  });
 });
 
 const GOLD_DRAW = {
