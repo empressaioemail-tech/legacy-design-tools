@@ -45,6 +45,7 @@ import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
+import jonestownTx from "./jonestown-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -166,6 +167,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // package's waco-tx.json) rather than re-authored; see that file's own
   // note for the full source trail.
   "waco-tx": wacoTx as SetbackTable,
+  // P-258 lane-e (2026-09-16), no-table half. Jonestown carried 2,769 Travis
+  // parcels with no setback table and no staged zoning layer; its Development
+  // Code charts (Ch. 3 UDC Sec. 3.1.1, Ordinance 2025-O-650 adopted 1/9/2025)
+  // are real and were read at source. No code-section atom corpus exists for
+  // this jurisdiction, so every value is primary-source-verified. See the
+  // file's own note for the print-endpoint route, the 999 sentinel convention
+  // and the deliberately omitted RV/PUD districts.
+  "jonestown-tx": jonestownTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
