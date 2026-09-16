@@ -882,7 +882,7 @@
         },
         "max_height_ft": {
           "section_number": "53-662",
-          "quote": "§ 53-662: Max. Height | 2 stories. Height is stated in STORIES only in the NC building-placement table, with no feet figure anywhere in Division 24; 100 is a non-binding sentinel, not an asserted feet entitlement. (P-258 lane-c, 2026-09-16: sentinel normalized from 100 to the gate's canonical 999 per rule G7 — the value is not_specified either way and the flag, not the number, is the payload.)",
+          "quote": "§ 53-662: Max. Height | 2 stories. Height is stated in STORIES only in the NC building-placement table, with no feet figure anywhere in Division 24; 100 is a non-binding sentinel, not an asserted feet entitlement. (P-258 lane-c, 2026-09-16: sentinel normalized from 100 to the canonical 999 defined by rule G7 in hauska-setback-corpus/src/setbacks/gate.ts (NOT_SPECIFIED_MAX_HEIGHT_FT) — the value is not_specified either way and the flag, not the number, is the payload. CORRECTED 2026-09-16: this parenthetical first read 'the gate's canonical 999 per rule G7', which is true of the corpus package's gate and false of legacy-design-tools' own gate.ts (rule union G1-G6, no G7); and it is NOT true that 999 is sanity-flagged — G3's band check is skipped whenever not_specified is set, in both gates. See this file's P-258 LANE-C CORRECTION block.)",
           "confidence": 0.6,
           "verification_state": "primary-source-verified",
           "not_specified": true

@@ -77,7 +77,15 @@ function assertAddedDistrictsGateClean(city: string, names: string[]) {
   expect(report.passed).toBe(true);
 }
 
-/** A not_specified max_height_ft must carry the canonical 999 (gate rule G7). */
+/**
+ * A `not_specified` max_height_ft must carry the canonical 999 sentinel. That
+ * value is `NOT_SPECIFIED_MAX_HEIGHT_FT`, defined by rule G7 in
+ * hauska-setback-corpus's gate.ts. NOTE, because an earlier draft of this file
+ * claimed otherwise: legacy-design-tools' OWN gate.ts (the one this suite runs)
+ * has no G7 (its rule union is G1-G6), and neither gate's G3 sanity band flags
+ * 999, because G3 is skipped whenever not_specified is set. See
+ * san-marcos-tx.json's `P-258 LANE-C CORRECTION` block.
+ */
 function assertHeightSentinel(table: SetbackTable) {
   for (const d of table.districts) {
     if (d.provenance?.max_height_ft?.not_specified) {
@@ -166,7 +174,7 @@ describe("P-258 lane-c — Round Rock (Pt. III Ch. 2 §2-36/2-49/2-61/2-78)", ()
     }
   });
 
-  it("normalizes every stories-only height to the canonical 999 sentinel (gate G7)", () => {
+  it("normalizes every stories-only height to the canonical 999 sentinel", () => {
     assertHeightSentinel(getSetbackTable("round_rock_tx")!);
     const c1 = getSetbackDistrict("round_rock_tx", "C-1 General Commercial District")!;
     expect(c1.max_height_ft).toBe(999);
@@ -267,20 +275,64 @@ describe("P-258 lane-c — Buda, Kyle, Cedar Park, Pflugerville, Georgetown", ()
   });
 });
 
-describe("P-258 lane-c — San Marcos legacy rows", () => {
-  const ADDED = [
+describe("P-258 lane-c — San Marcos rows and the declared pre-existing correction", () => {
+  /**
+   * These four rows were NOT added by this lane: they shipped on main with
+   * max_height_ft 100. This lane moved them to 999 and amended their
+   * provenance, which the first push did not declare (review finding F-1).
+   * They are pinned here so the sentinel cannot drift silently again, and the
+   * file's note carries the dated `P-258 LANE-C CORRECTION` block that
+   * declares the mutation.
+   */
+  const PREEXISTING_NORMALIZED = [
     "CC Community Commercial (legacy)",
     "GC General Commercial (legacy)",
     "NC Neighborhood Commercial (legacy)",
     "OP Office Professional (legacy)",
-    "MH Manufactured Home District",
   ];
+  const ADDED = ["MH Manufactured Home District"];
 
-  it("adds the legacy commercial districts plus MH with stories-only heights at 999", () => {
+  it("adds the MH row with its stories-only height at 999", () => {
     const table = getSetbackTable("san-marcos-tx")!;
     assertWellFormed(table);
     for (const n of ADDED) expect(table.districts.map((d) => d.district_name)).toContain(n);
     assertHeightSentinel(table);
+  });
+
+  it("pins the four PRE-EXISTING legacy rows at the canonical 999 and declares the change in the note", () => {
+    const table = getSetbackTable("san-marcos-tx")!;
+    for (const n of PREEXISTING_NORMALIZED) {
+      const d = getSetbackDistrict("san-marcos-tx", n)!;
+      expect(d, n).toBeDefined();
+      expect(d.max_height_ft, n).toBe(999);
+      expect(d.provenance!.max_height_ft!.not_specified, n).toBe(true);
+      // the provenance must say the value was normalized, not merely carry 999
+      expect(d.provenance!.max_height_ft!.quote, n).toMatch(/normalized from 100/);
+    }
+    const note = table.note ?? "";
+    expect(note).toMatch(/P-258 LANE-C CORRECTION/);
+    expect(note).toMatch(/FOUR PRE-EXISTING ROWS WERE MODIFIED/);
+    for (const n of PREEXISTING_NORMALIZED) expect(note, n).toContain(n);
+    expect(note).toMatch(/100/);
+    expect(note).toMatch(/999/);
+  });
+
+  it("leaves the 999 sentinel unflagged under this repo's own gate: no G7 rule exists here, and G3 skips not_specified", () => {
+    const full = getSetbackTable("san-marcos-tx")! as unknown as GatedSetbackTable;
+    const wanted = new Set(PREEXISTING_NORMALIZED);
+    const subset: GatedSetbackTable = {
+      ...full,
+      districts: full.districts.filter((d) => wanted.has(d.district_name)),
+    };
+    expect(subset.districts).toHaveLength(PREEXISTING_NORMALIZED.length);
+    const report = runSetbackGate({ table: subset, atoms: [] });
+    // G7 is a hauska-setback-corpus rule; this repo's gate union is G1-G6.
+    expect(report.results.filter((r) => (r.rule as string) === "G7")).toEqual([]);
+    // G3's sanity band [0,300] is guarded by `if (!isNotSpecified)` in
+    // BOTH gates, so these 999 cells are not "out-of-band" flags.
+    expect(
+      report.results.filter((r) => r.rule === "G3" && r.field === "max_height_ft"),
+    ).toEqual([]);
   });
 
   it("is gate-clean on the added districts and on the whole table", () => {
