@@ -253,13 +253,15 @@ export type PanelParcel = {
 };
 
 export type PanelKind = "board" | "parcel" | "parcels" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
-export type MissClass = "absent" | "unbaked" | "unstated";
+export type MissClass = "absent" | "unbaked" | "retired" | "unstated";
 export type MissRow = {
   parcelNodeId: string;
   county: string;
   missClass: MissClass;
   reason: string;
   parcelExists: boolean | "unmeasured";
+  /** P-206: the retirement's `asOf` vintage, on a `retired` row only. */
+  retiredAsOf?: string;
 };
 export type RefusedRow = { parcelNodeId: string; reason: string };
 /** B2: a later query that resolved to a node an earlier query already held; declared, never written (peScreenSave ScreenDuplicate). */
@@ -404,6 +406,29 @@ export function notOnFileSentence(id: unknown): string {
 
 export function noBakedSnapshotSentence(id: unknown): string {
   return NO_BAKED_SNAPSHOT_PREFIX + " " + String(id == null ? "" : id);
+}
+
+/**
+ * P-206 (2026-09-16). Copy for a node whose record carries an EARNED
+ * retirement -- a positive, checked claim that the parcel's record was looked
+ * for and is gone -- as opposed to `notOnFileSentence`'s "we have no record",
+ * which is the sentence a genuinely unknown node earns.
+ *
+ * TELEMETRY DEBT, DECLARED: `NOT_ON_FILE_PREFIX` and `NO_BAKED_SNAPSHOT_PREFIX`
+ * are read from `@empressaio/atom-contract/display`, but that package is NOT in
+ * this repository, so this new prefix cannot follow them there from here. It is
+ * a local literal with the same shape, and moving it into the shared display
+ * vocabulary is a named leave-behind of this lane, not a claim that it already
+ * lives in the one place. `retiredRecordSentence` takes the retirement's own
+ * `asOf` so the vintage travels with the claim rather than being implied.
+ */
+export const RETIRED_RECORD_PREFIX =
+  "Record retired (earned, verified absence)";
+
+export function retiredRecordSentence(id: unknown, asOf?: string): string {
+  const base =
+    RETIRED_RECORD_PREFIX + " " + countyForNodeId(id) + " " + String(id == null ? "" : id);
+  return asOf && asOf.trim() !== "" ? base + " as of " + asOf.trim() : base;
 }
 
 export function escapeHtml(value: unknown): string {
@@ -2622,15 +2647,33 @@ function missRowsFrom(rec: Record<string, unknown>): MissRow[] | null {
   if (ids.length === 0) return null;
   const parcelExists: boolean | "unmeasured" =
     rec.parcelExists === true ? true : rec.parcelExists === false ? false : "unmeasured";
+  // P-206: `record_retired` is checked FIRST. It reaches here with
+  // parcelExists "unmeasured", but even if an upstream ever sent `false` this
+  // row must not be painted as "not on file" -- a retired record IS on file.
+  const retirement = rec.retirement;
+  const retiredAsOf =
+    retirement && typeof retirement === "object" && !Array.isArray(retirement) &&
+    typeof (retirement as Record<string, unknown>).asOf === "string"
+      ? String((retirement as Record<string, unknown>).asOf)
+      : undefined;
   const missClass: MissClass =
-    reason === "parcel_not_found" || parcelExists === false
-      ? "absent"
-      : reason === "baked_snapshot_not_found"
-        ? "unbaked"
-        : "unstated";
+    reason === "record_retired"
+      ? "retired"
+      : reason === "parcel_not_found" || parcelExists === false
+        ? "absent"
+        : reason === "baked_snapshot_not_found"
+          ? "unbaked"
+          : "unstated";
   const out: MissRow[] = [];
   for (const id of ids) {
-    out.push({ parcelNodeId: id, county: countyForNodeId(id), missClass, reason, parcelExists });
+    out.push({
+      parcelNodeId: id,
+      county: countyForNodeId(id),
+      missClass,
+      reason,
+      parcelExists,
+      ...(retiredAsOf ? { retiredAsOf } : {}),
+    });
   }
   return out;
 }
@@ -2880,6 +2923,7 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   countyForNodeId,
   notOnFileSentence,
   noBakedSnapshotSentence,
+  retiredRecordSentence,
   escapeHtml,
   rowFromUnknown,
   ringFromDraw,
@@ -3450,6 +3494,7 @@ export function htmlContractViolations(html: string): string[] {
     OPEN_SENT,
     NOT_ON_FILE_PREFIX,
     NO_BAKED_SNAPSHOT_PREFIX,
+    RETIRED_RECORD_PREFIX,
     UPGRADE_TO_OPEN,
     /* P-101: declaredLineHtml is embedded BY SOURCE, so a constant it closes
      * over that is not emitted as a `var` throws ReferenceError in the iframe
@@ -3716,6 +3761,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var COUNTY_UNKNOWN=${JSON.stringify(COUNTY_UNKNOWN)};
   var NOT_ON_FILE_PREFIX=${JSON.stringify(NOT_ON_FILE_PREFIX)};
   var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(NO_BAKED_SNAPSHOT_PREFIX)};
+  var RETIRED_RECORD_PREFIX=${JSON.stringify(RETIRED_RECORD_PREFIX)};
   var EDGE_WORDS=${JSON.stringify(EDGE_WORDS)};
   var ACROSS_ROW=${JSON.stringify(ACROSS_ROW)};
   var EDGE_TIP_HINT=${JSON.stringify(EDGE_TIP_HINT)};
@@ -4075,6 +4121,7 @@ ${inlineSharedSource()}
   function missLine(m){
     if(m.missClass==="absent") return '<p class="miss"><b>'+esc(notOnFileSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
     if(m.missClass==="unbaked") return '<p class="miss"><b>'+esc(noBakedSnapshotSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
+    if(m.missClass==="retired") return '<p class="miss miss-retired"><b>'+esc(retiredRecordSentence(m.parcelNodeId,m.retiredAsOf))+"</b>"+idLine(m.parcelNodeId)+"</p>";
     return '<p class="miss"><b>'+${JSON.stringify(NOT_RETURNED)}+"</b>"+idLine(m.parcelNodeId)+reasonLine(m.reason)+"</p>";
   }
   function refusedLine(r){

@@ -30,6 +30,8 @@ import {
   escapeHtml,
   noBakedSnapshotSentence,
   notOnFileSentence,
+  retiredRecordSentence,
+  RETIRED_RECORD_PREFIX,
   parseToolContent,
   edgeCaption,
   envelopeHuman,
@@ -596,6 +598,60 @@ describe("Wave J honesty", () => {
     expect(Object.keys(COUNTY_BY_FIPS).sort()).toEqual(["48021", "48055", "48209", "48453", "48491"]);
   });
 
+  /**
+   * P-206 (2026-09-16). A retired record reaching the panel must not be
+   * painted as "not on file". Before this, `record_retired` did not exist as a
+   * class at all, so a retired node arrived here as `parcel_not_found` and got
+   * the `absent` sentence -- the same sentence a genuinely unknown id earns.
+   */
+  it("P-206: a retired record is its own miss class, and carries its vintage", () => {
+    const retired = parseToolResult(
+      JSON.stringify({
+        parcels: [],
+        notFound: ["48209:84629"],
+        reason: "record_retired",
+        parcelExists: "unmeasured",
+        retirement: {
+          status: "retired",
+          verdict: "absent-verified",
+          authority: "Hays CAD",
+          scopeSearched: "Hays County Appraisal District current roll",
+          asOf: "2026-09-14T03:31:56Z",
+          basis: "Account 84629 was searched for and carries no current parcel record.",
+          lastSeenTaxYear: 2025,
+        },
+      }),
+    );
+    expect(retired.kind).toBe("miss");
+    expect(retired.misses?.[0]?.missClass).toBe("retired");
+    expect(retired.misses?.[0]?.retiredAsOf).toBe("2026-09-14T03:31:56Z");
+    // The prose the customer reads is the retirement's, not the absence's.
+    const sentence = retiredRecordSentence("48209:84629", retired.misses?.[0]?.retiredAsOf);
+    expect(sentence).toContain("2026-09-14T03:31:56Z");
+    expect(sentence).toContain("48209:84629");
+    expect(sentence).not.toBe(notOnFileSentence("48209:84629"));
+    expect(retiredRecordSentence("48209:84629")).toBe(RETIRED_RECORD_PREFIX + " Hays 48209:84629");
+  });
+
+  it("P-206 negative control: absent still earns the not-on-file sentence, retired is not swallowed by it", () => {
+    // A retired row that (wrongly) also carries parcelExists false must NOT be
+    // painted absent: a retired record IS on file, it is the parcel that isn't.
+    const contradictory = parseToolResult(
+      JSON.stringify({
+        parcels: [],
+        notFound: ["48209:84629"],
+        reason: "record_retired",
+        parcelExists: false,
+      }),
+    );
+    expect(contradictory.misses?.[0]?.missClass).toBe("retired");
+    expect(contradictory.misses?.[0]?.retiredAsOf).toBeUndefined();
+    const absent = parseToolResult(
+      JSON.stringify({ parcels: [], notFound: ["48209:999999"], reason: "parcel_not_found", parcelExists: false }),
+    );
+    expect(absent.misses?.[0]?.missClass).toBe("absent");
+  });
+
   it("parses miss, refused, unreadable, and batch stub as their own kinds", () => {
     const absent = parseToolResult(
       JSON.stringify({ parcels: [], notFound: ["48021:900099"], reason: "parcel_not_found", parcelExists: false }),
@@ -624,8 +680,7 @@ describe("Wave J honesty", () => {
     expect(contradiction.misses?.[0]?.missClass).toBe("absent");
     const unstated = parseToolResult(JSON.stringify({ parcels: [], notFound: ["48021:1"], reason: "something_else" }));
     expect(unstated.kind).toBe("miss");
-    expect(unstated.misses?.[0]?.missClass).toBe("unstated");
-    const legacy = parseToolResult(JSON.stringify({ parcels: [], notFound: ["48021:900099"] }));
+    expect(unstated.misses?.[0]?.missClass).toBe("unstated");    const legacy = parseToolResult(JSON.stringify({ parcels: [], notFound: ["48021:900099"] }));
     expect(legacy.kind).toBe("board");
     expect(legacy.rows[0]).toMatchObject({ query: "48021:900099", parcelNodeId: null, resolution: "unresolved" });
     const refused = parseToolResult(

@@ -6,7 +6,7 @@ import {
   AccessParseError,
   type AccessPair,
 } from "@empressaio/atom-contract/access";
-import { isEarnedRecordRetirement } from "./recordRetirement";
+import { isEarnedRecordRetirement, type Tier1RecordRetirement } from "./recordRetirement";
 import { LANDUSE_JOIN_DISABLED_FIPS_SEED } from "./joinNormalize";
 
 const PUNCTUATION_ONLY_RE = /^[\s,.\-;:'"`]+$/;
@@ -216,19 +216,45 @@ export function refusePayloadAtServe(payload: unknown): void {
  * well-formedness gate is `isEarnedRecordRetirement`, the same predicate
  * every other retirement consumer uses -- a half-built object buys nothing.
  *
- * Callers treat `true` as "no baked snapshot": the brokerage node-facets
- * route answers its existing `404 no_coverage/not_baked`, which is the
- * decline the P-177 close asked for.
+ * P-206 AMENDMENT (2026-09-16). This function used to be the WHOLE consumer,
+ * and it returned a bare `boolean`, so every caller was forced into the
+ * reading recorded above: "true means no baked snapshot". Measured live on
+ * production 2026-09-16, that reading is a defect, because it is the same
+ * answer the route gives a node that never existed at all:
+ * `48209:84629` (an earned retirement, per P-180's own store read) and
+ * `48209:999999` (a fabricated id) both answer the byte-identical
+ * `404 {"error":"not_baked","errorClass":"no_coverage"}`. On the
+ * property-explorer route the collapse is worse, because `sendBriefMiss`
+ * answers `parcel_not_found`, which `smartsite-mcp`'s `mapGetSmartSiteNonOk`
+ * turns into `parcelExists: false` -- an affirmative statement that no parcel
+ * was ever on file, made about a record whose retirement this server is
+ * holding in its hand at the moment it declines.
+ *
+ * Declining is correct and is NOT what changed. What changed is that the
+ * decline now carries its reason: `retiredRecordAtServe` returns the
+ * retirement itself, and `shouldDeclineRetiredRecordAtServe` is a thin
+ * `!== null` over it so the rule keeps exactly ONE implementation. The
+ * gate-blocked-county scoping and the `isEarnedRecordRetirement`
+ * well-formedness gate are untouched -- a half-built object still buys
+ * nothing, and a non-blocked county is still a strict no-op.
  */
+export function retiredRecordAtServe(
+  parcelNodeId: string,
+  payload: unknown,
+  blockedFips: ReadonlySet<string> = LANDUSE_JOIN_DISABLED_FIPS_SEED,
+): Tier1RecordRetirement | null {
+  const countyFips = String(parcelNodeId).split(":")[0]?.trim() ?? "";
+  if (!blockedFips.has(countyFips)) return null;
+  if (!payload || typeof payload !== "object") return null;
+  const retirement = (payload as Record<string, unknown>).recordRetirement;
+  return isEarnedRecordRetirement(retirement) ? retirement : null;
+}
+
+/** True when `retiredRecordAtServe` would return a retirement. */
 export function shouldDeclineRetiredRecordAtServe(
   parcelNodeId: string,
   payload: unknown,
   blockedFips: ReadonlySet<string> = LANDUSE_JOIN_DISABLED_FIPS_SEED,
 ): boolean {
-  const countyFips = String(parcelNodeId).split(":")[0]?.trim() ?? "";
-  if (!blockedFips.has(countyFips)) return false;
-  if (!payload || typeof payload !== "object") return false;
-  return isEarnedRecordRetirement(
-    (payload as Record<string, unknown>).recordRetirement,
-  );
+  return retiredRecordAtServe(parcelNodeId, payload, blockedFips) !== null;
 }

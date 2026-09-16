@@ -56,6 +56,7 @@ import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
+  readBakedNodeFacetSnapshot,
 } from "./brokerageNodeFacets";
 import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
@@ -770,6 +771,40 @@ function sendScreenSaveRefuse(
  * collapsed into either 404.
  */
 async function sendBriefMiss(res: Response, parcelNodeId: string): Promise<void> {
+  // P-206 (2026-09-16). Before the existence probe, ask the store the one
+  // question the probe cannot answer. Measured live on production 2026-09-16:
+  // a node carrying an earned record retirement is declined at serve by
+  // `retiredRecordAtServe` (lib/serveGuards.ts), and this function then
+  // reported it as `parcel_not_found` -- which smartsite-mcp's
+  // `mapGetSmartSiteNonOk` translates into
+  // `{reason: "parcel_not_found", parcelExists: false}`, an affirmative claim
+  // that no parcel was ever on file. The row's own example, 48209:84629,
+  // answers exactly that, and a fabricated id answers it identically, so the
+  // two states are indistinguishable to the customer.
+  //
+  // The retirement is a RECORD-level fact, so it is checked FIRST: it is true
+  // whether or not a `txgio_parcel` row exists, and for the account-keyed
+  // nodes this is about there is deliberately no such row -- which is exactly
+  // why the existence probe below reads "not found" for them and why the
+  // probe alone can never produce an honest answer here.
+  try {
+    const bakedRead = await readBakedNodeFacetSnapshot(parcelNodeId);
+    if (bakedRead.kind === "retired") {
+      res.status(404).json({
+        error: "record_retired",
+        message:
+          "This parcel node's record is retired: an earned, verified absence. The node was checked and no current record exists for it, so there is nothing to brief.",
+        parcelNodeId,
+        retirement: bakedRead.retirement,
+      });
+      return;
+    }
+  } catch (err) {
+    // A store read that fails must not invent a retirement claim, and must not
+    // become a new way for this route to fail: fall through to the probe,
+    // which owns the 503 path.
+    logger.warn({ err, parcelNodeId }, "pe_brief_retirement_probe_unavailable");
+  }
   // Same existence seam add_to_screen uses (peScreenSaveResolve.cortexNodeLookup),
   // never a direct txgioAddressResolve import: that module reads @workspace/db
   // tables at load, and the route suites mock the seam, not the store.

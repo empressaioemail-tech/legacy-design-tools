@@ -675,7 +675,63 @@ export function normalizeR1BodyForExternal(
 
 export type GetSmartSiteMissReason =
   | "parcel_not_found"
-  | "baked_snapshot_not_found";
+  | "baked_snapshot_not_found"
+  /**
+   * P-206 (2026-09-16). The node's record carries an EARNED retirement, so
+   * the serve declines it deliberately. This is NOT `parcel_not_found` and
+   * the two must never collapse into each other again: `parcel_not_found` is
+   * an affirmative claim that no parcel was ever on file, and this is the
+   * positive, checked claim that the parcel's record was looked for and is
+   * gone. Measured live on production before this existed: `48209:84629`
+   * (retired, per P-180's own store read) and `48209:999999` (a fabricated
+   * id) both reached the customer as `parcel_not_found` with
+   * `parcelExists: false`.
+   */
+  | "record_retired";
+
+/**
+ * P-206. The retirement the serve declined for, carried through as the
+ * declared verification basis rather than reduced to a token.
+ *
+ * Structurally what `artifacts/api-server`'s `Tier1RecordRetirement` declares.
+ * This artifact cannot import that one, so the fields that matter are
+ * validated here on the same discipline (`isEarnedRecordRetirement`): a
+ * half-formed object is DROPPED, never passed along to stand in for a
+ * retirement that was not actually earned.
+ */
+export type GetSmartSiteRetirement = {
+  status: "retired";
+  verdict: "absent-verified";
+  authority: string;
+  scopeSearched: string;
+  asOf: string;
+  basis: string;
+  lastSeenTaxYear: number | null;
+};
+
+function readGetSmartSiteRetirement(
+  value: unknown,
+): GetSmartSiteRetirement | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  if (r.status !== "retired" || r.verdict !== "absent-verified") return null;
+  for (const field of ["authority", "scopeSearched", "asOf", "basis"] as const) {
+    const v = r[field];
+    if (typeof v !== "string" || v.trim() === "") return null;
+  }
+  if (r.lastSeenTaxYear !== null && typeof r.lastSeenTaxYear !== "number") {
+    return null;
+  }
+  return {
+    status: "retired",
+    verdict: "absent-verified",
+    authority: r.authority as string,
+    scopeSearched: r.scopeSearched as string,
+    asOf: r.asOf as string,
+    basis: r.basis as string,
+    lastSeenTaxYear: r.lastSeenTaxYear as number | null,
+  };
+}
 
 export type GetSmartSiteRefusal = {
   parcelNodeId: string;
@@ -693,6 +749,8 @@ export type GetSmartSiteNonOkResult =
       notFound: [string];
       reason: GetSmartSiteMissReason;
       parcelExists: boolean | "unmeasured";
+      /** P-206: present only on `record_retired`, and only when well-formed. */
+      retirement?: GetSmartSiteRetirement;
     }
   | { parcels: []; notFound: []; refused: GetSmartSiteRefusal[] };
 
@@ -738,6 +796,23 @@ export function mapGetSmartSiteNonOk(
 
   if (httpStatus !== 404 || parcelNodeIds.length !== 1) return null;
   const id = parcelNodeIds[0]!;
+
+  if (body.error === "record_retired") {
+    // P-206 (2026-09-16). `parcelExists` is `"unmeasured"`, NOT `false`. The
+    // serve answered about the RECORD -- this node's record is retired -- and
+    // said nothing about whether a parcel row exists for the account, so this
+    // response carries no evidence either way. `false` here was the defect:
+    // it turned a deliberate, verified absence into "no parcel ever existed".
+    const retirement = readGetSmartSiteRetirement(body.retirement);
+    const retired: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "record_retired",
+      parcelExists: "unmeasured",
+      ...(retirement ? { retirement } : {}),
+    };
+    return JSON.stringify(retired);
+  }
 
   if (body.error === "parcel_not_found") {
     const absent: GetSmartSiteNonOkResult = {
