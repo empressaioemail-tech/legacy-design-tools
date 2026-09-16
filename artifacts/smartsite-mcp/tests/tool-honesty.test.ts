@@ -1091,6 +1091,102 @@ describe("mapGetSmartSiteNonOk (P-91 build plan 4.1)", () => {
   });
 });
 
+/**
+ * P-206 (2026-09-16). Declining a retired record at serve is correct (P-180);
+ * reporting it as `parcel_not_found` was not. `parcel_not_found` is an
+ * affirmative claim that NO PARCEL WAS EVER ON FILE. Measured live on
+ * production before this fix: 48209:84629, whose record P-180's own store read
+ * shows carries an earned retirement, and 48209:999999, a fabricated id, both
+ * reached the customer through this function as `parcel_not_found` with
+ * `parcelExists: false` -- indistinguishable. These tests are two-directional:
+ * the negative control below shows the older `parcel_not_found` mapping is
+ * UNCHANGED, so a passing `record_retired` case is not passing by accident.
+ */
+describe("P-206 mapGetSmartSiteNonOk: a retired record is not a missing parcel", () => {
+  const ID = "48209:84629";
+  const RETIREMENT = {
+    status: "retired",
+    verdict: "absent-verified",
+    authority: "Hays CAD",
+    scopeSearched: "Hays County Appraisal District current roll",
+    asOf: "2026-09-14T03:31:56Z",
+    basis: "Account 84629 was searched for and carries no current parcel record.",
+    lastSeenTaxYear: 2025,
+  };
+  const retiredBody = (retirement: unknown) =>
+    JSON.stringify({ error: "record_retired", parcelNodeId: ID, retirement });
+
+  it("maps to reason record_retired, carries the retirement, and does NOT assert parcelExists false", () => {
+    const text = mapGetSmartSiteNonOk(404, retiredBody(RETIREMENT), [ID]);
+    expect(text).not.toBeNull();
+    expect(JSON.parse(text!)).toEqual({
+      parcels: [],
+      notFound: [ID],
+      reason: "record_retired",
+      parcelExists: "unmeasured",
+      retirement: RETIREMENT,
+    });
+  });
+
+  it("the two states are not the same answer (the defect the row measured)", () => {
+    const retired = mapGetSmartSiteNonOk(404, retiredBody(RETIREMENT), [ID])!;
+    const absent = mapGetSmartSiteNonOk(
+      404,
+      JSON.stringify({ error: "parcel_not_found", parcelNodeId: ID }),
+      [ID],
+    )!;
+    expect(retired).not.toBe(absent);
+    expect(JSON.parse(retired).reason).not.toBe(JSON.parse(absent).reason);
+    expect(JSON.parse(retired).parcelExists).not.toBe(false);
+  });
+
+  it("negative control: parcel_not_found still maps to parcelExists false, unchanged", () => {
+    expect(
+      JSON.parse(
+        mapGetSmartSiteNonOk(
+          404,
+          JSON.stringify({ error: "parcel_not_found", parcelNodeId: ID }),
+          [ID],
+        )!,
+      ),
+    ).toEqual({
+      parcels: [],
+      notFound: [ID],
+      reason: "parcel_not_found",
+      parcelExists: false,
+    });
+  });
+
+  it("a half-formed retirement buys nothing: the reason stands, the object is dropped", () => {
+    for (const bad of [
+      undefined,
+      null,
+      "retired",
+      { ...RETIREMENT, verdict: "probably" },
+      { ...RETIREMENT, asOf: "   " },
+      { ...RETIREMENT, authority: "" },
+      { ...RETIREMENT, lastSeenTaxYear: "2025" },
+    ]) {
+      const mapped = JSON.parse(mapGetSmartSiteNonOk(404, retiredBody(bad), [ID])!);
+      expect(mapped.reason).toBe("record_retired");
+      expect(mapped.parcelExists).toBe("unmeasured");
+      expect(mapped).not.toHaveProperty("retirement");
+    }
+  });
+
+  it("lastSeenTaxYear null is a well-formed retirement, not a missing field", () => {
+    const mapped = JSON.parse(
+      mapGetSmartSiteNonOk(404, retiredBody({ ...RETIREMENT, lastSeenTaxYear: null }), [ID])!,
+    );
+    expect(mapped.retirement).toEqual({ ...RETIREMENT, lastSeenTaxYear: null });
+  });
+
+  it("still a single-id 404 only, like every mapped miss", () => {
+    expect(mapGetSmartSiteNonOk(404, retiredBody(RETIREMENT), ["a:1", "a:2"])).toBeNull();
+    expect(mapGetSmartSiteNonOk(500, retiredBody(RETIREMENT), [ID])).toBeNull();
+  });
+});
+
 describe("P-91 v3 V3: dispositionDisplayText on every section", () => {
   type Section = { id?: string; disposition: string; dispositionDisplayText?: string };
   const sectionsOf = (body: Record<string, unknown>): Section[] =>

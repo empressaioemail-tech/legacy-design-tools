@@ -241,7 +241,8 @@ import { db, placeLayerSnapshots } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { refusePayloadAtServe, shouldDeclineRetiredRecordAtServe } from "../lib/serveGuards";
+import { refusePayloadAtServe, retiredRecordAtServe } from "../lib/serveGuards";
+import type { Tier1RecordRetirement } from "../lib/recordRetirement";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
 import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
@@ -665,13 +666,28 @@ export const brokerageNodeFacetsRouter: IRouter = Router();
 brokerageNodeFacetsRouter.use(brokerageCors);
 
 /**
+ * P-206 (2026-09-16). What a node's baked read actually resolved to.
+ *
+ * `loadBakedNodeFacetSnapshot` below collapses `retired` and `none` into the
+ * same `null`, which is what forced the P-180 decline to be reported as the
+ * generic `404 no_coverage/not_baked` and, on the property-explorer route, as
+ * `parcel_not_found`. Those are two DIFFERENT facts and the serve now says
+ * which one it is: `retired` carries the earned retirement it declined for,
+ * `none` means no tier-1 row was ever written.
+ */
+export type BakedNodeFacetRead =
+  | { kind: "snapshot"; snapshot: BakedNodeFacetSnapshot }
+  | { kind: "retired"; retirement: Tier1RecordRetirement }
+  | { kind: "none" };
+
+/**
  * Shared pure-read path for the public facet endpoint and paid Property
  * Explorer reports. Keeps R1 tethered to the same owner-free baked snapshot
  * rather than introducing a second query or compute path.
  */
-export async function loadBakedNodeFacetSnapshot(
+export async function readBakedNodeFacetSnapshot(
   parcelNodeId: string,
-): Promise<BakedNodeFacetSnapshot | null> {
+): Promise<BakedNodeFacetRead> {
   const placeKey = placeKeyForNode(parcelNodeId);
   const rows = await db
     .select({
@@ -694,12 +710,13 @@ export async function loadBakedNodeFacetSnapshot(
     .limit(2);
 
   const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
-  if (!row) return null;
+  if (!row) return { kind: "none" };
   // P-180: a retired record in a gate-blocked county declines at serve rather
   // than presenting a hollow account-keyed card (48209:84639 and siblings).
-  if (shouldDeclineRetiredRecordAtServe(parcelNodeId, row.payloadJson)) {
-    return null;
-  }
+  // P-206: the decline keeps the retirement it declined for, so callers can
+  // declare it instead of reporting the node as never-having-existed.
+  const retirement = retiredRecordAtServe(parcelNodeId, row.payloadJson);
+  if (retirement) return { kind: "retired", retirement };
   try {
     refusePayloadAtServe(row.payloadJson);
   } catch (err) {
@@ -711,7 +728,7 @@ export async function loadBakedNodeFacetSnapshot(
     ? extractTier2Overlay(tier2Row.payloadJson, tier2Row.snapshotAt)
     : null;
 
-  return {
+  return { kind: "snapshot", snapshot: {
     parcelNodeId,
     facets: sanitizeNodeFacetPayload(
       stripZombieEnvelopeFromFacets(row.payloadJson),
@@ -729,7 +746,21 @@ export async function loadBakedNodeFacetSnapshot(
       Number(row.lngRounded),
       Number(row.latRounded),
     ),
-  };
+  } };
+}
+
+/**
+ * The pre-P-206 shape, kept for every caller that only wants the snapshot.
+ *
+ * P-206: this deliberately still collapses `retired` and `none` into `null`,
+ * so no existing consumer's behaviour moved. A caller that must tell the two
+ * apart reads `readBakedNodeFacetSnapshot` instead.
+ */
+export async function loadBakedNodeFacetSnapshot(
+  parcelNodeId: string,
+): Promise<BakedNodeFacetSnapshot | null> {
+  const read = await readBakedNodeFacetSnapshot(parcelNodeId);
+  return read.kind === "snapshot" ? read.snapshot : null;
 }
 
 brokerageNodeFacetsRouter.get(
@@ -755,7 +786,7 @@ brokerageNodeFacetsRouter.get(
     }
 
     const grantsOwnerFact = await callerGrantsOwnerFact(req, parcelNodeId);
-    let snapshot;
+    let bakedRead: BakedNodeFacetRead;
     let floodHazardFact;
     let landUseFactRaw;
     let specialDistrictFact;
@@ -782,7 +813,7 @@ brokerageNodeFacetsRouter.get(
     try {
       const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
-        snapshot,
+        bakedRead,
         floodHazardFact,
         landUseFactRaw,
         specialDistrictFact,
@@ -807,7 +838,7 @@ brokerageNodeFacetsRouter.get(
         maxLotCoveragePctFact,
         maxFootprintSqFtFact,
       ] = await Promise.all([
-        loadBakedNodeFacetSnapshot(parcelNodeId),
+        readBakedNodeFacetSnapshot(parcelNodeId),
         loadFloodHazardFactForServe(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
         loadSpecialDistrictFactForServe(parcelNodeId),
@@ -857,6 +888,10 @@ brokerageNodeFacetsRouter.get(
       }
       throw err;
     }
+    // P-206: `retired` and `none` are different facts with different answers,
+    // so the route keeps the typed read and only the snapshot half is threaded
+    // through the existing rail code unchanged.
+    const snapshot = bakedRead.kind === "snapshot" ? bakedRead.snapshot : null;
     const ownerFact =
       ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
     // City limits FIRST: the zoning verdict derives incorporation from this
@@ -878,6 +913,32 @@ brokerageNodeFacetsRouter.get(
       // the web app falls back to a live envelope fetch for un-baked nodes — so
       // we answer 404 with the honest "not baked" signal and the node id so the
       // client can route to its fallback deterministically.
+      //
+      // P-206 (2026-09-16). A DECLINED EARNED RETIREMENT is not "no baked
+      // snapshot". P-180 declined it here correctly but reported it through
+      // this same branch, and the collapse was measured live on production:
+      // `48209:84629` (retired, per P-180's own store read) and `48209:999999`
+      // (a fabricated id) both answered this byte-identical body, so the panel
+      // could not tell a deliberate retirement from a node that never existed.
+      // The retirement is in hand at this point; it is served instead of
+      // discarded. Same 404 status and same `no_coverage` class as before, so
+      // the client's fallback routing is untouched and this change cannot
+      // become an outage; what moves is the `error` token, from the generic
+      // `not_baked` to a declared `record_retired`, plus the retirement
+      // object itself. The GTM error CLASS taxonomy is deliberately NOT
+      // widened here -- adding a class is a ruled change with its own
+      // consumers, and the token already carries the distinction.
+      if (bakedRead.kind === "retired") {
+        res.status(404).json(
+          gtmErrorBody(
+            "no_coverage",
+            "record_retired",
+            "This parcel node's record is retired: an earned, verified absence. The node was checked and the county carries no current parcel for it, so there is no card to bake.",
+            { retirement: bakedRead.retirement },
+          ),
+        );
+        return;
+      }
       res.status(404).json(
         gtmErrorBody(
           "no_coverage",
