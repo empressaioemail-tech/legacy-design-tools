@@ -420,7 +420,9 @@ describe("San Marcos pilot registration", () => {
   it("serves a cited, populated table with explicit omitted-code gaps", () => {
     const table = getSetbackTable("san-marcos-tx");
     expect(table).not.toBeNull();
-    expect(table!.districts).toHaveLength(8);
+    // P-258 lane-c (2026-09-16) added 19 rows (legacy commercial + MH + the
+    // character/neighborhood/industrial districts) on top of the pilot 8.
+    expect(table!.districts).toHaveLength(27);
     expect(table!.note).toMatch(/ND-3/i);
     expect(table!.note).toMatch(/conditional/i);
     expect(table!.districts).toEqual(
@@ -447,7 +449,8 @@ describe("San Marcos pilot registration", () => {
     const table = getSetbackTable("cedar_park_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("cedar-park-tx");
-    expect(table!.districts).toHaveLength(16);
+    // 10 rows at registration + P-258 lane-c's UR row (2026-09-16).
+    expect(table!.districts).toHaveLength(17);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -466,7 +469,8 @@ describe("San Marcos pilot registration", () => {
     const table = getSetbackTable("pflugerville_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("pflugerville-tx");
-    expect(table!.districts).toHaveLength(10);
+    // 10 rows at registration + P-258 lane-c's CL3/CL4/CL5 (2026-09-16).
+    expect(table!.districts).toHaveLength(13);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
