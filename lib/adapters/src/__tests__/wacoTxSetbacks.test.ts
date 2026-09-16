@@ -138,7 +138,20 @@ describe("waco-tx", () => {
     expect(quote).toMatch(/codification quirk/i);
   });
 
-  it("does not disturb the five pre-existing rows it did not research", () => {
+  it("cites the authoritative instrument (Municode) on every added row, never the dead elaws host (P-258 lane-b correction, 2026-09-16)", () => {
+    for (const code of Object.keys(ADDED)) {
+      const url = row(code).citation_url;
+      expect(url, code).toMatch(/^https:\/\/library\.municode\.com\/tx\/waco/);
+      expect(url, code).not.toMatch(/elaws\.us/);
+    }
+    // ...and the note states the corrected citation chain and the currency gap.
+    const note = getSetbackTable("waco-tx")!.note;
+    expect(note).toMatch(/CORRECTED 2026-09-16/);
+    expect(note).toMatch(/THE CURRENCY DATE WAS NOT READ AT SOURCE/);
+    expect(note).toMatch(/MUNICODE RETURNED HTTP 403 TO A PLAIN AUTOMATED FETCH/);
+  });
+
+  it("keeps the five pre-existing rows' own citation and does not disturb them", () => {
     const unchanged: Record<string, [number, number, number, number, number]> = {
       "R-E": [35, 50, 25, 15, 35],
       "R-1A": [30, 30, 10, 15, 35],
