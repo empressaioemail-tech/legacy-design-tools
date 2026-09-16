@@ -75,6 +75,7 @@ import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover"
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { gateValueHistoryFactValuation } from "../lib/valueHistoryFactRead";
 import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
 import { loadParcelAreaSqFtFactForServe } from "../lib/parcelAreaSqFtFactServeCutover";
 import { loadMaxHeightFtFactForServe } from "../lib/maxHeightFtFactServeCutover";
@@ -407,7 +408,19 @@ async function assembleNodeBriefBody(
     // PE/MCP-vs-facets parity audit (2026-09-07, D1): same loader
     // brokerageNodeFacets.ts's facets route already uses; this response
     // never fetched or carried it at all before.
-    valueHistoryFact,
+    //
+    // P-246 (2026-09-16): valueHistoryFact was carried onto the wire
+    // unabridged here while the four CAD dollar rails just above it
+    // (onRecord.cadRoll) were already gated by grantsCadRollValuation --
+    // a Solo caller got a typed studio-gated refusal on cadRoll.marketValue
+    // and the SAME dollar figure one field later on
+    // valueHistoryFact.entries[0].marketValue. Gated with the identical
+    // predicate this function already receives as its own parameter, never
+    // a second independent tier check.
+    valueHistoryFact: gateValueHistoryFactValuation(
+      valueHistoryFact,
+      grantsCadRollValuation,
+    ),
     // OPS-21 S5 (P-148): same five loaders brokerageNodeFacets.ts's own
     // node-facets route now uses; this response never fetched or carried
     // them at all before. Only parcelAreaSqFt is slated; the other four

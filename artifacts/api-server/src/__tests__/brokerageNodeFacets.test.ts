@@ -86,6 +86,10 @@ import {
   setParcelRecordQueryableForTests,
 } from "../lib/parcelRecordCellRead";
 import {
+  resetValueHistoryVerdictStoreForTests,
+  setValueHistoryVerdictStoreForTests,
+} from "../lib/valueHistoryFactServeCutover";
+import {
   SETBACK_FRONT_FT_RAIL_KEY,
   SETBACK_SIDE_FT_RAIL_KEY,
   SETBACK_REAR_FT_RAIL_KEY,
@@ -2908,6 +2912,197 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.status).toBe(200);
     expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
       v: 397260,
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // P-246 (2026-09-16). valueHistoryFact carries the SAME four CAD dollar
+  // fields as baseFacts.cadRoll, one entry per tax year, but was reaching
+  // the wire unabridged regardless of grantsOwnerFact -- a Solo caller was
+  // refused cadRoll.marketValue above and handed the identical 2025 dollar
+  // figure back one field later via valueHistoryFact.entries[0].marketValue.
+  // Fixture entry matches the live 908 PINE / 48021:34137 read the dispatch
+  // cited (taxYear 2025, marketValue 511345, assessedValue null on this
+  // parcel, landValue 106715, improvementValue 404630, viaCrosswalk false).
+  // -------------------------------------------------------------------
+  describe("valueHistoryFact dollar gate (P-246)", () => {
+    const gold = "48021:34137";
+    const liveEntry = {
+      taxYear: 2025,
+      marketValue: "511345",
+      assessedValue: null,
+      landValue: "106715",
+      improvementValue: "404630",
+      viaCrosswalk: false,
+    };
+
+    async function seedValueHistoryPresent(placeKey: string) {
+      setValueHistoryVerdictStoreForTests(
+        memoryParcelGateVerdicts([
+          {
+            countyFips: "48021",
+            railKey: "valueHistory",
+            verdict: "pass",
+            unaccountedCount: 0,
+            evaluatedAt: "2026-09-16T00:00:00Z",
+            runId: "test-p246",
+          },
+        ]),
+      );
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey,
+              railKey: "valueHistory",
+              cellState: {
+                kind: "value",
+                disposition: "rows",
+                rowCount: 1,
+                source: "cad_property",
+                vintage: "2025",
+              },
+            },
+          ],
+          companionRows: [
+            {
+              placeKey,
+              railKey: "valueHistory",
+              rowIndex: 0,
+              payload: liveEntry,
+              source: "cad_property",
+              vintage: "2025",
+            },
+          ],
+        }),
+      );
+    }
+
+    afterEach(() => {
+      resetValueHistoryVerdictStoreForTests();
+      resetParcelRecordQueryableForTests();
+    });
+
+    it("anonymous GET refuses all four valueHistory dollar fields with a typed studio-gated refusal; taxYear/viaCrosswalk survive", async () => {
+      await seedValueHistoryPresent(gold);
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.state).toBe("present");
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.taxYear).toBe(2025);
+      expect(entry.viaCrosswalk).toBe(false);
+      for (const field of [
+        "marketValue",
+        "assessedValue",
+        "landValue",
+        "improvementValue",
+      ]) {
+        expect(entry[field]).toEqual({
+          state: "refused",
+          code: "studio-gated",
+          reason: expect.any(String),
+        });
+      }
+      expect(JSON.stringify(res.body.valueHistoryFact)).not.toContain(
+        "511345",
+      );
+      expect(JSON.stringify(res.body.valueHistoryFact)).not.toContain(
+        "404630",
+      );
+    });
+
+    it("signed-in Solo GET MUST refuse the valueHistory dollar fields", async () => {
+      const userId = "user_valuehistory_solo";
+      await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.entries[0].marketValue).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    });
+
+    it("Property-Unlock-only GET on THIS parcel MUST GRANT the valueHistory dollar fields", async () => {
+      const userId = "user_valuehistory_unlock";
+      await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+      await dbMod.db.insert(pePropertyUnlocks).values({
+        ownerUserId: userId,
+        tenantId: DEFAULT_TENANT_ID,
+        parcelNodeId: gold,
+        source: "stripe",
+      });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.marketValue).toBe(511345);
+      expect(entry.landValue).toBe(106715);
+      expect(entry.improvementValue).toBe(404630);
+      expect(entry.assessedValue).toBeNull();
+    });
+
+    it("Property-Unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse the valueHistory dollar fields", async () => {
+      const otherParcel = "48021:99999";
+      const userId = "user_valuehistory_unlock_other_parcel";
+      await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+      await dbMod.db.insert(pePropertyUnlocks).values({
+        ownerUserId: userId,
+        tenantId: DEFAULT_TENANT_ID,
+        parcelNodeId: otherParcel,
+        source: "stripe",
+      });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.entries[0].marketValue).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    });
+
+    it("Studio GET serves the real valueHistory dollar values", async () => {
+      const userId = "user_valuehistory_studio";
+      await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.marketValue).toBe(511345);
+      expect(entry.landValue).toBe(106715);
+      expect(entry.improvementValue).toBe(404630);
     });
   });
 });

@@ -28,7 +28,21 @@
  * for live. This adapter reuses cadRollValue.ts's nonNegativeDollarOrNull
  * for the same coercion and the same 0-vs-absent, negative-vs-absent rules
  * every other CAD dollar rail in this program uses.
+ *
+ * GATING (P-246, 2026-09-16). This module's own loader carries no tier
+ * predicate -- serializeTwinOnRecord's cadRoll gate ran AFTER this fact
+ * already reached the wire unabridged, which is exactly the bypass P-246
+ * found live (a Solo caller refused cadRoll.marketValue and handed the
+ * same 2025 dollar figure back one field later via
+ * valueHistoryFact.entries[0].marketValue). `gateValueHistoryFactValuation`
+ * below is the fix: same predicate, same refusal shape, reused from
+ * cadRollValue.ts, never a new tier check.
  */
+
+import {
+  studioGatedCadRollValuationRefusal,
+  type CadRollValuationRefusal,
+} from "./cadRollValue";
 
 export const VALUE_HISTORY_FACT_SOURCE = "value-history-fact" as const;
 export const VALUE_HISTORY_RAIL_KEY = "valueHistory" as const;
@@ -85,6 +99,58 @@ export type ValueHistoryFactRead =
   | ValueHistoryFactPresent
   | ValueHistoryFactAbsent
   | ValueHistoryFactRefusal;
+
+/** One entry, gated: each dollar key may carry a typed studio-gated refusal
+ *  in place of its value. taxYear and viaCrosswalk are never gated -- they
+ *  are not dollar figures. */
+export type ValueHistoryEntryWire = {
+  taxYear: number;
+  marketValue: number | null | CadRollValuationRefusal;
+  assessedValue: number | null | CadRollValuationRefusal;
+  landValue: number | null | CadRollValuationRefusal;
+  improvementValue: number | null | CadRollValuationRefusal;
+  viaCrosswalk: boolean;
+};
+
+export type ValueHistoryFactPresentWire = Omit<
+  ValueHistoryFactPresent,
+  "entries"
+> & {
+  entries: ValueHistoryEntryWire[];
+};
+
+export type ValueHistoryFactReadWire =
+  | ValueHistoryFactPresentWire
+  | ValueHistoryFactAbsent
+  | ValueHistoryFactRefusal;
+
+/**
+ * Gate every dollar key on every entry with the SAME
+ * `grantsCadRollValuation` predicate serializeTwinOnRecord's cadRoll dollar
+ * rails already use (OPS-16 A-103 item 5 / A-104, widened 2026-09-05: Solo
+ * stays excluded). Reuses `studioGatedCadRollValuationRefusal` verbatim --
+ * never a second, independently-worded refusal. `taxYear` and
+ * `viaCrosswalk` survive untouched on every entry; the entry itself is
+ * never dropped (P-246: a bare delete would be silent degradation, not a
+ * declared state). A granted caller, or a fact that is not `present`
+ * (nothing to gate on absent/refused), passes through unchanged.
+ */
+export function gateValueHistoryFactValuation(
+  fact: ValueHistoryFactRead,
+  granted: boolean,
+): ValueHistoryFactRead | ValueHistoryFactPresentWire {
+  if (granted || fact.state !== "present") return fact;
+  return {
+    ...fact,
+    entries: fact.entries.map((entry) => ({
+      ...entry,
+      marketValue: studioGatedCadRollValuationRefusal(),
+      assessedValue: studioGatedCadRollValuationRefusal(),
+      landValue: studioGatedCadRollValuationRefusal(),
+      improvementValue: studioGatedCadRollValuationRefusal(),
+    })),
+  };
+}
 
 export function notCutOverValueHistoryFact(
   parcelNodeId: string,
