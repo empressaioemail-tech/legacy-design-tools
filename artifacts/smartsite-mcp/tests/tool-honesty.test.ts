@@ -195,6 +195,136 @@ describe("buildRunReportEnvelope", () => {
   });
 });
 
+/**
+ * P-220. get_smart_site's own description states twice that this server
+ * never carries owner data at any depth -- it is a separate Studio/Team (or
+ * property-unlock) read. It was not stripped: `/research/brief` is one
+ * shared upstream response and ownerFact rode through get_smart_site (node
+ * depth, single and batch) and run_report verbatim. These fixtures are the
+ * real shape measured live on Bastrop 48021:34137 and Travis 48453:289990
+ * 2026-09-15/16 (ownerName, ownerMailingAddress, exemptionFlags all
+ * present), not an invented one.
+ */
+const OWNER_FACT_FIXTURE = {
+  state: "present",
+  source: "owner-fact",
+  boundAs: "48021:34137:2025",
+  tried: ["48021:34137", "48021:34137.00000000"],
+  entityId: "48021:34137:2025",
+  taxYear: 2025,
+  ownerName: "SMITH, RICHARD P & SUSAN J",
+  ownerMailingAddress: "908 PINE ST, BASTROP, TX 78602",
+  exemptionFlags: {
+    homestead: true,
+    seniorOrDisability: true,
+    agricultural: false,
+    veteran: false,
+  },
+  sourceAdapter: "cad-property-owner-v1",
+  sourceVintage: "data-export-01.14.2026",
+  evaluatedAt: "2026-08-12T13:23:51.755Z",
+} as const;
+
+describe("P-220: ownerFact never survives for a caller this server does not grant it to", () => {
+  it("normalizeR1BodyForExternal replaces ownerFact with a typed refusal when canSeeOwner is false (the default)", () => {
+    const body = normalizeR1BodyForExternal({
+      parcelNodeId: "48021:34137",
+      ownerFact: OWNER_FACT_FIXTURE,
+      structuralFact: { state: "present", taxYear: 2025, yearBuilt: 1910 },
+      valueHistoryFact: {
+        state: "present",
+        entries: [{ taxYear: 2025, marketValue: 511345 }],
+      },
+    });
+    expect(body.ownerFact).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      source: "owner-fact",
+      reason:
+        "owner-fact is Studio or Team only, or requires an active property unlock on this parcel. This tool does not carry owner data at any depth without one of those.",
+    });
+    // Falsifier: no owner-shaped string survives ANYWHERE in the serialized
+    // body, not just at the top-level key this function knows to replace.
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("SMITH, RICHARD");
+    expect(serialized).not.toContain("908 PINE ST");
+    expect(serialized).not.toContain("seniorOrDisability");
+    // Confirm nothing else vanished: sibling taxYear-bearing facts, which
+    // are unrelated occurrences of the same field name on different
+    // objects, are untouched by a strip scoped to the ownerFact key alone.
+    expect(body.structuralFact).toEqual({
+      state: "present",
+      taxYear: 2025,
+      yearBuilt: 1910,
+    });
+    expect(body.valueHistoryFact).toEqual({
+      state: "present",
+      entries: [{ taxYear: 2025, marketValue: 511345 }],
+    });
+  });
+
+  it("normalizeR1BodyForExternal leaves ownerFact untouched when canSeeOwner is true", () => {
+    const body = normalizeR1BodyForExternal(
+      { parcelNodeId: "48021:34137", ownerFact: OWNER_FACT_FIXTURE },
+      true,
+    );
+    expect(body.ownerFact).toEqual(OWNER_FACT_FIXTURE);
+  });
+
+  it("is a no-op when the body carries no ownerFact key at all", () => {
+    const body = normalizeR1BodyForExternal({ parcelNodeId: "48021:34137" });
+    expect(body).not.toHaveProperty("ownerFact");
+  });
+
+  it("buildRunReportEnvelope (run_report) strips ownerFact by default and keeps it when granted", () => {
+    const cortexBody = JSON.stringify({
+      parcelNodeId: "48453:289990",
+      ownerFact: OWNER_FACT_FIXTURE,
+      brief: { sections: [], disclosure: [] },
+    });
+    const denied = buildRunReportEnvelope("48453:289990", cortexBody);
+    expect(denied.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+    expect(JSON.stringify(denied)).not.toContain("SMITH, RICHARD");
+
+    const granted = buildRunReportEnvelope("48453:289990", cortexBody, true);
+    expect(granted.ownerFact).toEqual(OWNER_FACT_FIXTURE);
+  });
+
+  it("normalizeGetSmartSiteResponseText strips ownerFact on every row of a node-depth batch by default", () => {
+    const cortexBody = JSON.stringify({
+      parcels: [
+        { parcelNodeId: "48021:34137", brief: { sections: [] }, ownerFact: OWNER_FACT_FIXTURE },
+        { parcelNodeId: "48453:289990", brief: { sections: [] }, ownerFact: OWNER_FACT_FIXTURE },
+      ],
+      notFound: [],
+    });
+    const deniedText = normalizeGetSmartSiteResponseText(cortexBody, "stub-or-batch", false);
+    expect(deniedText).not.toContain("SMITH, RICHARD");
+    const denied = JSON.parse(deniedText) as { parcels: Array<{ ownerFact: unknown }> };
+    for (const row of denied.parcels) {
+      expect(row.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+    }
+
+    const grantedText = normalizeGetSmartSiteResponseText(cortexBody, "stub-or-batch", true);
+    const granted = JSON.parse(grantedText) as { parcels: Array<{ ownerFact: unknown }> };
+    for (const row of granted.parcels) {
+      expect(row.ownerFact).toEqual(OWNER_FACT_FIXTURE);
+    }
+  });
+
+  it("normalizeGetSmartSiteResponseText single-node mode strips ownerFact by default", () => {
+    const cortexBody = JSON.stringify({
+      parcelNodeId: "48021:34137",
+      ownerFact: OWNER_FACT_FIXTURE,
+      brief: { sections: [] },
+    });
+    const deniedText = normalizeGetSmartSiteResponseText(cortexBody, "single-node", false);
+    expect(deniedText).not.toContain("908 PINE ST");
+    const denied = JSON.parse(deniedText) as { ownerFact: unknown };
+    expect(denied.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+  });
+});
+
 describe("stripSavedPropertiesForExternal", () => {
   it("drops snapshot blobs and keeps list summary fields", () => {
     const rows = stripSavedPropertiesForExternal([

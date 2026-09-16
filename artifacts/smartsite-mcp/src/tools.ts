@@ -874,6 +874,18 @@ export function registerTools(server: McpServer): void {
               !Array.isArray(parcelNodeId) && effectiveDepth === "node";
             const readsAnchorBatch =
               Array.isArray(parcelNodeId) && effectiveDepth === "node";
+            // P-220: ownerFact travels on this same brief response and this
+            // tool's own description promises it never does. A single-id
+            // node read can carry a real per-parcel property-unlock, exactly
+            // like the server-side co-gate does; a batch read stays
+            // account-wide only (see normalizeGetSmartSiteResponseText's own
+            // comment for why) rather than running an unlock lookup per id.
+            const canSeeOwnerAccountWide = canRunStudioReport(entitlement);
+            const canSeeOwner =
+              readsAnchor && !canSeeOwnerAccountWide
+                ? canSeeOwnerAccountWide ||
+                  (await hasPropertyUnlock(auth.userId, parcelNodeId as string))
+                : canSeeOwnerAccountWide;
             return withCortex(async (config) => {
               const briefPromise = cortexFetch(
                 config,
@@ -919,7 +931,11 @@ export function registerTools(server: McpServer): void {
                 Array.isArray(parcelNodeId) || depth === "stub"
                   ? "stub-or-batch"
                   : "single-node";
-              const normalized = normalizeGetSmartSiteResponseText(body, mode);
+              const normalized = normalizeGetSmartSiteResponseText(
+                body,
+                mode,
+                canSeeOwner,
+              );
               const batchOutcome = await batchPromise;
               const anchored = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
@@ -977,6 +993,13 @@ export function registerTools(server: McpServer): void {
             if (!canRunDeepReport(entitlement)) {
               return upgradeRequiredResult(refuseDeepReport(entitlement));
             }
+            // P-220: same co-gate as get_smart_site's single-node read --
+            // account-wide Studio|Team, or a property unlock on this exact
+            // parcel. run_report is always single-parcel, so the real
+            // per-parcel check always applies here, no batch narrowness.
+            const canSeeOwner =
+              canRunStudioReport(entitlement) ||
+              (await hasPropertyUnlock(auth.userId, parcelNodeId));
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -994,7 +1017,7 @@ export function registerTools(server: McpServer): void {
                 // its own keys as a declared error (H1).
                 return upstreamErrorResult(res.status, body);
               }
-              const envelope = buildRunReportEnvelope(parcelNodeId, body);
+              const envelope = buildRunReportEnvelope(parcelNodeId, body, canSeeOwner);
               return {
                 content: [
                   { type: "text" as const, text: JSON.stringify(envelope) },
