@@ -8,7 +8,8 @@
     "./txgio-geo": "./src/txgio/geo.ts",
     "./zoning-layers": "./src/txgio/zoning-layers.ts",
     "./boundary": "./src/boundary/containment.ts",
-    "./city-limits": "./src/boundary/cityLimitsFact.ts"
+    "./city-limits": "./src/boundary/cityLimitsFact.ts",
+    "./etj": "./src/boundary/etjFact.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -25,6 +26,8 @@
     "permits-ingest": "tsx src/permits/cli.ts",
     "address-ingest": "tsx src/address/cli.ts",
     "boundary-ingest": "tsx src/boundary/cli.ts",
+    "etj-ingest": "tsx src/boundary/etjCli.ts",
+    "etj-verify": "tsx src/boundary/etjCli.ts --verify",
     "nfhl-ingest": "tsx src/nfhl/cli.ts"
   },
   "dependencies": {

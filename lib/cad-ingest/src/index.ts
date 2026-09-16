@@ -211,6 +211,9 @@ export {
   resolveCountyContainment,
   resolveCountyContainmentAtPoint,
   representativePoint,
+  buildEtjBoundaryIndex,
+  resolveEtj,
+  resolveEtjAtPoint,
 } from "./boundary/containment";
 export type {
   CityBoundaryIndexEntry,
@@ -218,6 +221,9 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
   EtjStatus,
+  EtjBoundaryIndexEntry,
+  EtjSourceCoverageEntry,
+  EtjContainmentResult,
 } from "./boundary/containment";
 export {
   CITY_LIMITS_SOURCE,
@@ -229,6 +235,68 @@ export type {
   CityLimitsFact,
   CityLimitsStatus,
 } from "./boundary/cityLimitsFact";
+export {
+  ETJ_SOURCE,
+  etjFactFromContainment,
+  unmeasuredEtjFact,
+  usableEtjQueryPoint,
+} from "./boundary/etjFact";
+export type { EtjFact, EtjDisposition } from "./boundary/etjFact";
+export {
+  ETJ_REGISTRY,
+  ETJ_SOURCE_VINTAGE,
+  cityLimitsOnlyEntries,
+  etjPredicateMustBeSelective,
+  etjRegistryEntry,
+  etjSourceEntries,
+  etjWhereClause,
+} from "./boundary/etjRegistry";
+export type {
+  EtjRegistryEntry,
+  EtjSourceMode,
+  EtjMembershipPredicate,
+} from "./boundary/etjRegistry";
+export {
+  ETJ_MAX_PAGE_SIZE,
+  ETJ_RATE_MS,
+  countEtjFeatures,
+  fetchEtjBoundaryFeatures,
+  fetchEtjSourceMetadata,
+} from "./boundary/etjService";
+export type {
+  EtjRawFeature,
+  EtjSourceMetadata,
+  EtjFetchOptions,
+} from "./boundary/etjService";
+export {
+  normalizeEtjBoundaryFeature,
+  readObjectId,
+  readRingLabel,
+} from "./boundary/etjParse";
+export type { TxEtjBoundaryRecord } from "./boundary/etjParse";
+export {
+  ETJ_DEFAULT_BATCH_SIZE,
+  deleteEtjBoundariesForSources,
+  upsertEtjBoundaries,
+  upsertEtjSources,
+} from "./boundary/etjIngest";
+export type {
+  EtjIngestDb,
+  EtjSourceRowMeta,
+  EtjUpsertOptions,
+  EtjUpsertSummary,
+} from "./boundary/etjIngest";
+export {
+  ETJ_CONTROL_POINTS,
+  verifyEtjControlPoints,
+} from "./boundary/etjVerify";
+export type {
+  EtjControlPoint,
+  EtjControlOutcome,
+  EtjPublisherGuard,
+  EtjVerifyResult,
+  EtjVerifyOptions,
+} from "./boundary/etjVerify";
 export {
   NFHL_DEFAULT_SOURCE,
   NFHL_DEFAULT_VINTAGE,
