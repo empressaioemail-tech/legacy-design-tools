@@ -560,6 +560,57 @@ export function stripOwnerFactForCaller<T extends Record<string, unknown>>(
 }
 
 /**
+ * P-246. Defense in depth, mirroring stripOwnerFactForCaller's own posture
+ * just above: upstream (api-server's propertyExplorer.ts / brokerageNode
+ * Facets.ts) now gates every dollar key on every valueHistoryFact entry
+ * with the same grantsCadRollValuation/grantsOwnerCoGatedFields predicate
+ * this file's own `canSeeOwner` already carries, but this package composes
+ * get_smart_site and run_report from that same upstream response verbatim,
+ * so a caller whose tier and per-parcel unlock both fail to grant it must
+ * never see a raw dollar figure here even if a future upstream regression
+ * reopens the gap P-246 found live. Not a new tier check -- reuses the
+ * identical `canSeeOwner` boolean already threaded through this file for
+ * ownerFact. taxYear/viaCrosswalk and the entry itself are never dropped;
+ * each dollar key gets a typed refusal, never a bare delete.
+ */
+const VALUE_HISTORY_DOLLAR_KEYS = [
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+] as const;
+
+export const VALUE_HISTORY_DOLLAR_NOT_CARRIED_FOR_CALLER = {
+  state: "refused",
+  code: "studio-gated",
+  reason:
+    "County tax-assessed valuation (market/land/improvement/assessed value) is Studio or Team only. Anonymous, free, Solo, unlock, and identified-only callers receive no dollar value.",
+} as const;
+
+export function stripValueHistoryDollarsForCaller<
+  T extends Record<string, unknown>,
+>(body: T, canSeeOwner: boolean): T {
+  if (canSeeOwner) return body;
+  const vh = body.valueHistoryFact;
+  if (!vh || typeof vh !== "object" || Array.isArray(vh)) return body;
+  const vhRecord = vh as Record<string, unknown>;
+  if (vhRecord.state !== "present" || !Array.isArray(vhRecord.entries)) {
+    return body;
+  }
+  const entries = vhRecord.entries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return entry;
+    }
+    const gated: Record<string, unknown> = { ...entry };
+    for (const key of VALUE_HISTORY_DOLLAR_KEYS) {
+      if (key in gated) gated[key] = VALUE_HISTORY_DOLLAR_NOT_CARRIED_FOR_CALLER;
+    }
+    return gated;
+  });
+  return { ...body, valueHistoryFact: { ...vhRecord, entries } };
+}
+
+/**
  * Ensures MCP clients never see bare null section data without a disposition.
  * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
  * `draw` is optional; invalid stubs are omitted (fail closed).
@@ -569,8 +620,8 @@ export function normalizeR1BodyForExternal(
   canSeeOwner = false,
 ): Record<string, unknown> {
   const draw = sanitizeExternalDraw(body.draw);
-  const withDraw: Record<string, unknown> = stripOwnerFactForCaller(
-    { ...body },
+  const withDraw: Record<string, unknown> = stripValueHistoryDollarsForCaller(
+    stripOwnerFactForCaller({ ...body }, canSeeOwner),
     canSeeOwner,
   );
   delete withDraw.draw;

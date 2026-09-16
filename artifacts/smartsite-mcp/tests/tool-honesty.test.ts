@@ -257,9 +257,72 @@ describe("P-220: ownerFact never survives for a caller this server does not gran
       taxYear: 2025,
       yearBuilt: 1910,
     });
+    // P-246 (2026-09-16): this used to assert marketValue: 511345 survived
+    // HERE unchanged -- that was the bug this card fixes (a Solo caller was
+    // refused the identical dollar figure on onRecord.cadRoll one field
+    // above and handed it back raw via valueHistoryFact). Defense-in-depth
+    // strip now gates it with the same canSeeOwner boolean, never a leak.
     expect(body.valueHistoryFact).toEqual({
       state: "present",
-      entries: [{ taxYear: 2025, marketValue: 511345 }],
+      entries: [
+        {
+          taxYear: 2025,
+          marketValue: {
+            state: "refused",
+            code: "studio-gated",
+            reason: expect.stringContaining("Studio or Team only"),
+          },
+        },
+      ],
+    });
+  });
+
+  it("P-246: normalizeR1BodyForExternal leaves valueHistoryFact dollar fields untouched when canSeeOwner is true", () => {
+    const body = normalizeR1BodyForExternal(
+      {
+        parcelNodeId: "48021:34137",
+        valueHistoryFact: {
+          state: "present",
+          entries: [
+            {
+              taxYear: 2025,
+              marketValue: 511345,
+              assessedValue: null,
+              landValue: 106715,
+              improvementValue: 404630,
+              viaCrosswalk: false,
+            },
+          ],
+        },
+      },
+      true,
+    );
+    expect(body.valueHistoryFact).toEqual({
+      state: "present",
+      entries: [
+        {
+          taxYear: 2025,
+          marketValue: 511345,
+          assessedValue: null,
+          landValue: 106715,
+          improvementValue: 404630,
+          viaCrosswalk: false,
+        },
+      ],
+    });
+  });
+
+  it("P-246: is a no-op when the body carries no valueHistoryFact key, or the fact is absent/refused", () => {
+    const noKey = normalizeR1BodyForExternal({ parcelNodeId: "48021:34137" });
+    expect(noKey).not.toHaveProperty("valueHistoryFact");
+
+    const refused = normalizeR1BodyForExternal({
+      parcelNodeId: "48021:34137",
+      valueHistoryFact: { state: "refused", code: "not-cut-over" },
+    });
+    expect(refused.valueHistoryFact).toEqual({
+      state: "refused",
+      code: "not-cut-over",
     });
   });
 
@@ -322,6 +385,102 @@ describe("P-220: ownerFact never survives for a caller this server does not gran
     expect(deniedText).not.toContain("908 PINE ST");
     const denied = JSON.parse(deniedText) as { ownerFact: unknown };
     expect(denied.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
+  });
+
+  // P-246: same coverage, one rail down, for valueHistoryFact's dollar keys.
+  const VALUE_HISTORY_FIXTURE = {
+    state: "present",
+    entries: [
+      {
+        taxYear: 2025,
+        marketValue: 511345,
+        assessedValue: null,
+        landValue: 106715,
+        improvementValue: 404630,
+        viaCrosswalk: false,
+      },
+    ],
+  } as const;
+
+  it("RED-TEST PROOF (falsifier 2): the raw fixture carries a real dollar value that must never reach a denied caller", () => {
+    expect(VALUE_HISTORY_FIXTURE.entries[0].marketValue).toBe(511345);
+    const body = normalizeR1BodyForExternal({
+      parcelNodeId: "48021:34137",
+      valueHistoryFact: VALUE_HISTORY_FIXTURE,
+    });
+    const entry = (
+      body.valueHistoryFact as { entries: Array<Record<string, unknown>> }
+    ).entries[0];
+    expect(entry.marketValue).not.toBe(511345);
+    expect(JSON.stringify(body)).not.toContain("511345");
+  });
+
+  it("buildRunReportEnvelope (run_report) strips valueHistoryFact dollar fields by default and keeps them when granted", () => {
+    const cortexBody = JSON.stringify({
+      parcelNodeId: "48453:289990",
+      valueHistoryFact: VALUE_HISTORY_FIXTURE,
+      brief: { sections: [], disclosure: [] },
+    });
+    const denied = buildRunReportEnvelope("48453:289990", cortexBody);
+    const deniedEntry = (
+      denied.valueHistoryFact as { entries: Array<Record<string, unknown>> }
+    ).entries[0];
+    expect(deniedEntry.marketValue).toMatchObject({
+      state: "refused",
+      code: "studio-gated",
+    });
+    expect(deniedEntry.taxYear).toBe(2025);
+    expect(deniedEntry.viaCrosswalk).toBe(false);
+    expect(JSON.stringify(denied)).not.toContain("511345");
+
+    const granted = buildRunReportEnvelope("48453:289990", cortexBody, true);
+    expect(granted.valueHistoryFact).toEqual(VALUE_HISTORY_FIXTURE);
+  });
+
+  it("normalizeGetSmartSiteResponseText strips valueHistoryFact dollar fields on every row of a node-depth batch by default", () => {
+    const cortexBody = JSON.stringify({
+      parcels: [
+        { parcelNodeId: "48021:34137", brief: { sections: [] }, valueHistoryFact: VALUE_HISTORY_FIXTURE },
+        { parcelNodeId: "48453:289990", brief: { sections: [] }, valueHistoryFact: VALUE_HISTORY_FIXTURE },
+      ],
+      notFound: [],
+    });
+    const deniedText = normalizeGetSmartSiteResponseText(cortexBody, "stub-or-batch", false);
+    expect(deniedText).not.toContain("511345");
+    const denied = JSON.parse(deniedText) as {
+      parcels: Array<{ valueHistoryFact: { entries: Array<Record<string, unknown>> } }>;
+    };
+    for (const row of denied.parcels) {
+      expect(row.valueHistoryFact.entries[0].marketValue).toMatchObject({
+        state: "refused",
+        code: "studio-gated",
+      });
+    }
+
+    const grantedText = normalizeGetSmartSiteResponseText(cortexBody, "stub-or-batch", true);
+    const granted = JSON.parse(grantedText) as {
+      parcels: Array<{ valueHistoryFact: unknown }>;
+    };
+    for (const row of granted.parcels) {
+      expect(row.valueHistoryFact).toEqual(VALUE_HISTORY_FIXTURE);
+    }
+  });
+
+  it("normalizeGetSmartSiteResponseText single-node mode strips valueHistoryFact dollar fields by default", () => {
+    const cortexBody = JSON.stringify({
+      parcelNodeId: "48021:34137",
+      valueHistoryFact: VALUE_HISTORY_FIXTURE,
+      brief: { sections: [] },
+    });
+    const deniedText = normalizeGetSmartSiteResponseText(cortexBody, "single-node", false);
+    expect(deniedText).not.toContain("511345");
+    const denied = JSON.parse(deniedText) as {
+      valueHistoryFact: { entries: Array<Record<string, unknown>> };
+    };
+    expect(denied.valueHistoryFact.entries[0].marketValue).toMatchObject({
+      state: "refused",
+      code: "studio-gated",
+    });
   });
 });
 

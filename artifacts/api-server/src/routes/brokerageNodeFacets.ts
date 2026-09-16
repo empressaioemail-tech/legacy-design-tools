@@ -255,6 +255,7 @@ import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover"
 import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { gateValueHistoryFactValuation } from "../lib/valueHistoryFactRead";
 import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
 import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
 import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
@@ -983,7 +984,16 @@ brokerageNodeFacetsRouter.get(
       // counties; entries is plural, one per distinct tax_year, never a
       // picked lead. Resolves to a typed not-cut-over refusal until a gate
       // evaluation for this rail lands.
-      valueHistoryFact,
+      //
+      // P-246 (2026-09-16): gated with the SAME grantsOwnerFact predicate
+      // as ownerFact above (grantsOwnerCoGatedFields) -- a Solo caller was
+      // getting a typed studio-gated refusal on the CAD dollar rails and
+      // the identical dollar figures unabridged one field later on
+      // valueHistoryFact.entries[]. Never a second independent tier check.
+      valueHistoryFact: gateValueHistoryFactValuation(
+        valueHistoryFact,
+        grantsOwnerFact,
+      ),
       // parcel_record-only, no legacy path (see module doc, D6). Additive --
       // does not resurrect facets.envelope, which stays permanently null.
       // Resolves to a typed not-cut-over refusal until a gate evaluation for
