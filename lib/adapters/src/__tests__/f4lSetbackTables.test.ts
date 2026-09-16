@@ -194,7 +194,9 @@ describe("F4l setback tables", () => {
 
   it("populates WDLL 51 cited no-honest-empty tables", () => {
     const expectedCounts = {
-      "austin-tx": 9,
+      // 9 WDLL-51 rows + 28 P-258 lane-a rows added 2026-09-16 (austin row
+      // coverage is asserted in detail by austinSetbacks.test.ts).
+      "austin-tx": 37,
       "liberty-hill-tx": 14,
       "lockhart-tx": 7,
       "san-antonio-tx": 21,

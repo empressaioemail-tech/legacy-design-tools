@@ -82,9 +82,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "grand-county-ut": grandCountyUt as SetbackTable,
   "lemhi-county-id": lemhiCountyId as SetbackTable,
   "bastrop-tx": bastropTx as SetbackTable,
-  // Austin: SF-1/2/3 + MF-1..MF-6 scalar rows (austin-tx.json). Wired to
-  // Publish_Zoning_AGOL BASE_ZONE stamp 2026-07-24; remaining GIS codes are
-  // zoning-present / setback-pending until the table deepens.
+  // Austin: 37 scalar rows (austin-tx.json) — the original SF-1/2/3 + MF-1..MF-6
+  // rows, plus P-258 lane-a's 28 rows (2026-09-16) read from LDC §25-2-492(D)
+  // (Municode; codified through Ord. No. 20260122-059, eff. 2026-02-02, the
+  // CBD 350 ft height coming from Ord. No. 20251023-063, eff. 2025-11-03).
+  // Wired to Publish_Zoning_AGOL BASE_ZONE stamp 2026-07-24. GIS codes the
+  // Euclidean table does not govern deliberately have NO row — TOD, NBG, ERC
+  // and TND are Subchapter E form-based districts, UNZ is unzoned, and the MH
+  // column is em dashes throughout; see the table note for those non-rows.
   "austin-tx": austinTx as SetbackTable,
   // Tables contain only code-backed scalar rules. A conditional rule that the
   // envelope cannot evaluate is explicitly omitted in the table note.
