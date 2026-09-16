@@ -1,0 +1,458 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "riesel-tx",
+  "jurisdictionDisplayName": "City of Riesel, TX",
+  "note": "Riesel, TX -- the eight residential and agricultural districts of the Riesel comprehensive zoning ordinance, read from the 'APPENDIX 1. ZONING DISTRICT AREA REGULATIONS' table that the district sections cross-reference for every dimensional standard ('Height and area regulations. See appendix 1 (area, setback, height, and coverage regulations)'). INSTRUMENT AND VINTAGE: the document read is titled 'CITY OF RIESEL, TEXAS ORDINANCE NO. 2026-04 AN ORDINANCE OF THE CITY OF RIESEL, TEXAS, REPEALING ORDINANCE 2026-02 AND ADOPTING A COMPREHENSIVE ZONING ORDINANCE AND ZONING MAP, ATTACHED AS EXHIBITS A AND B RESPECTIVELY'. Section 3 of that ordinance ('Adoption') adopts 'the Comprehensive Zoning Ordinance of the City of Riesel, Texas establishing regulations for land use and development, establishing the boundaries and requirements of the twelve zoning districts' as Exhibit A, and Section 5 repeals Ordinance No. 2026-02 and replaces it with this one. So the ordinance in force is Ordinance 2026-04 and the scheme it replaces is 2026-02 -- the vintage question matters here because this is a 2026 adoption, not a long-standing code, and any table built before it describes a retired scheme. No adoption or effective DATE is asserted: the caption as read carries the ordinance number but no date line, and no signature or effective-date block was read at source. What the text does state, read at source, is the public-hearing date -- 'the required public hearing on the proposed Zoning Ordinance and Zoning Map was held by the City Council on the 16th day of June, 2026' -- so the instrument is identified by number, by the repeal clause and by that hearing date, rather than by a date I did not see. ROUTE: read from the city's own publication on cityofriesel.org. The development page publishes the documents as a list in which the link text carries the label, so the URLs had to be read as anchor text/href pairs over HTTP (a markdown render of the same page drops the hrefs and shows the labels alone); the labelled 'ZONING ORDINANCE' link at the citation_url is the PDF read here, and WebFetch converted that PDF to text. The pairing matters: one of the page's other PDF links, sampled first, turned out to be the hydraulic-investigation application form, not an ordinance. Note also that the city's own /ordinances index lists subdivision, water, budget and tax ordinances but no zoning ordinance -- the zoning document is published on the development page, not the ordinances page. OMITTED AND WHY: the ordinance establishes twelve zoning districts, and Appendix 1 prints TWO tables. The first is the residential/agricultural table coded here (AG, R-1, SF-TH, TF, MH-1, MH-2, MF-1, MF-2). The second is a nonresidential table for C-1, C-2, I-1, I-2 and CBRD, and it is NOT coded: in the text as converted from the PDF that table's rows collapse ('Maximum building height (feet) 25 1 Story 35 35 35 35'), giving more tokens than the table has columns, so cell-to-column attribution cannot be recovered without a rendered read, and the footnote letters printed under it collide with those under the first table ((a) means 'Zero one side with 10 feet separation between buildings' under the first table and '25 feet where adjacent to residential district' under the second). Coding those five rows from this route would be guessing. The PD Planned Development District and the FP Floodplain overlay likewise carry no Appendix 1 column and are omitted. NON-SCALAR CELLS FLAGGED rather than flattened: SF-TH's interior side yard cell contains no number at all -- only footnote (b), '14 feet between ends of buildings', which is a building-to-building separation and not a lot-line setback -- so it is coded not_specified. TF's interior side yard is footnote (c), '5 feet or 10% of the lot width, whichever is greater', a floor plus a proportion, coded at the stated 5 ft with not_specified set. R-1's interior side yard is 10 ft with footnote (a), 'Zero one side with 10 feet separation between buildings', a zero-lot-line alternative that is quoted in the field it qualifies rather than collapsed into the 10. Every max_lot_coverage_pct value is the table's own 'Max. lot coverage (%)' cell and every max_impervious_pct is a not_specified sentinel, because the ordinance states no impervious figure at all -- a lot-coverage cap and an impervious cap are different metrics and the former must not be read as the latter.",
+  "districts": [
+    {
+      "district_name": "AG Agricultural District",
+      "front_ft": 35,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "36.008-36.023",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-1 Single-Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10 Footnotes printed with the table: (a) Zero one side with 10 feet separation between buildings. (b) 14 feet between ends of buildings. (c) 5 feet or 10% of the lot width, whichever is greater. (d) The required rear yard shall be open and unobstructed to the sky from a point 30 inches above the average elevation of the graded rear yard, except for accessory buildings as permitted herein. Eaves, covered porches, and roof extensions without structural support in the rear yard may extend into the rear yard a distance not to exceed four feet. Balconies shall not project into the required rear yard.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "SF-TH Single-Family Residential District - Townhomes",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 100,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10 Footnotes printed with the table: (a) Zero one side with 10 feet separation between buildings. (b) 14 feet between ends of buildings. (c) 5 feet or 10% of the lot width, whichever is greater. (d) The required rear yard shall be open and unobstructed to the sky from a point 30 inches above the average elevation of the graded rear yard, except for accessory buildings as permitted herein. Eaves, covered porches, and roof extensions without structural support in the rear yard may extend into the rear yard a distance not to exceed four feet. Balconies shall not project into the required rear yard. The SF-TH interior side yard cell states no number: it carries only footnote (b)('14 feet between ends of buildings'), which is a building-separation dimension, not a lot-line side setback. No side-yard figure is coded.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "TF Two-Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 100,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10 Footnotes printed with the table: (a) Zero one side with 10 feet separation between buildings. (b) 14 feet between ends of buildings. (c) 5 feet or 10% of the lot width, whichever is greater. (d) The required rear yard shall be open and unobstructed to the sky from a point 30 inches above the average elevation of the graded rear yard, except for accessory buildings as permitted herein. Eaves, covered porches, and roof extensions without structural support in the rear yard may extend into the rear yard a distance not to exceed four feet. Balconies shall not project into the required rear yard. The TF interior side yard cell carries only footnote (c)('5 feet or 10% of the lot width, whichever is greater') -- a floor plus a proportion, not a scalar. 5 (the stated floor) is coded and flagged; do not read it as a flat 5 ft side yard.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MH-1 Manufactured Home District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MH-2 Manufactured Home Park District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-1 Multiple-Family Residential District - Low Density",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "MF-2 Multiple-Family Residential District - High Density",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.cityofriesel.org/_files/ugd/ec4de1_8eb51d297fe24f2cbefe39b4aa5a729f.pdf",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Front yard setback (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Rear yard setback (feet) (d)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 25 | 25 | 25 | 25 | 25 | 25 | 25",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, interior (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 15 | (10)(a) | (b) | (c) | 10 | 10 | 10 | 10",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Side yard setback, corner lot, street side (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 25 | 15 | 10 | 10 | 15 | 15 | 15 | 15",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Maximum height (feet)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 35 | 35 | 35 | 35 | 35 | 35 | 45 | 45",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Appendix 1",
+          "quote": "APPENDIX 1. ZONING DISTRICT AREA REGULATIONS -- row 'Max. lot coverage (%)', columns in the table's own order AG | R-1 | SF-TH | TF | MH-1 | MH-2 | MF-1 | MF-2: 40% | 45% | 60% | 50% | 60% | 50% | 40% | 50%",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "Appendix 1",
+          "quote": "The Riesel zoning ordinance (Ordinance No. 2026-04) states no impervious-coverage figure anywhere. Its Appendix 1 table carries a 'Max. lot coverage (%)' row, which is a lot-coverage figure, not an impervious figure; the ordinance's other dimensional sections (36.008-36.023) regulate use, height, area, parking, screening and signs. No impervious value exists to cite.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}

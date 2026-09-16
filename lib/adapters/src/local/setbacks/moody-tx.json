@@ -1,0 +1,407 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "moody-tx",
+  "jurisdictionDisplayName": "City of Moody, TX",
+  "note": "Moody, TX -- the seven straight-zoned districts of the City of Moody Zoning Ordinance (Ordinance 12012009, adopted 12/1/09), read from Article 3 (Zoning Districts). ROUTE: read as rendered ordinance text on Zoneomics at the citation_url (.../moody-TX/chapter_3, where chapter_N is Article N of the ordinance; chapter_1 = Article 1 General Provisions, chapter_3 = Article 3 Zoning Districts). Moody publishes no Municode or eCode360 codification that could be found, and the city's own site did not surface the ordinance text to this pass, so the Zoneomics mirror of the ordinance is the route; it reproduces each district's 'Area Requirements' table cell-for-cell together with the ordinance's own '(Ordinance 12012009 adopted 12/1/09)' stamp at the foot of each section. VINTAGE: every section read carries '(Ordinance 12012009 adopted 12/1/09)' as its history note, which is the adoption date read at source. Section 11.1 fixes the same date as the nonconforming-use cut-off ('Uses, that are in existence prior to December 1, 2009 shall be deemed to be legal nonconforming uses'). No later amendment stamp appears in Article 3 as read. TWO DESIGNATION MISMATCHES IN THE ORDINANCE, RECORDED NOT RESOLVED: (1) Article 1 Section 4 lists the districts as R1 'Single-Family Residential District - 8,000 s.f.', R2 'Multifamily Residential District', R3 'Manufactured Housing Residential District', B1 'General Commercial District', B2 'Central Business District', CBD 'Highway Commercial District' and I 'Industrial District', and adds two special districts (PD Planned Development, MHO Manufactured Home Overlay). (2) Article 3's use-section headings disagree with that list -- the Article 3 table of contents titles Section 18 \"B1\" Neighborhood Commercial District and Section 19 \"HC\" Highway Commercial District, while the area-requirements table printed under Section 18 is headed the \"GC\" Zoning District Area Requirements. This table codes the districts the dimensional tables themselves name: R1, R2, R3, GC (Article 3 Section 18), HC (Section 19), CBD (Section 20) and I (Section 21). Anyone joining these rows to a parcel's district stamp should expect the B1/B2/CBD/HC/GC designations to disagree with the Article 1 list and should read the underlying section. OMITTED AND WHY: PD (Planned Development District) -- Article 3 Section 22 provides that 'In approving a Planned Development or a use designation in a Planned Development, the City Council shall specify density, area, height, screening, parking, landscaping, and other development criteria', so PD has no Euclidean block and is a per-ordinance shape. MHO (Manufactured Home Overlay) is an overlay, not a base district, and states no dimensional block of its own. An 'AG' Agricultural district is referenced twice (Section 6.1.H and Section 7.1 make newly annexed territory and unresolvable parcels AG) but Article 1's district list does not include it and Article 3 has no AG section, so it too is omitted: no AG dimensional standard exists to code. CONDITIONAL SIDE YARDS PRESERVED: CBD's side yard is '10 ft. adjacent to residential use, 0 ft. adjacent to \"CBD\"' and I's is '10 ft. adjacent to residential use, 0 ft. adjacent to other districts'. Both are coded at the 10-ft figure with the full clause quoted and reduced confidence; the zero branch is real and is not averaged away. The CBD and I corner-lot figures (0 ft and 10 ft) are stated directly in their own tables, unlike Woodway's, where the corner rule lives in a separate section. NO COVERAGE STANDARD IS STATED: see the per-field sentinel. Neither a lot-coverage nor an impervious-coverage figure appears in any of the seven district tables, in Article 4 (whose Section 26 states 'General Yard Requirements' in narrative form), or in the Article 3 section preambles, which nonetheless name 'maximum percent of lot coverage by buildings' as one of the things the tables set. Every coverage field in this table is therefore not_specified.",
+  "districts": [
+    {
+      "district_name": "R1 Single-Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 7.5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "15.3",
+          "quote": "“R1” Zoning District Area Requirements: Minimum Front Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "15.3",
+          "quote": "“R1” Zoning District Area Requirements: Minimum Rear Yard | 20 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "15.3",
+          "quote": "“R1” Zoning District Area Requirements: Minimum Side Yard | 7.5 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "15.3",
+          "quote": "“R1” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 15 ft. (same as Front Yard)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "15.3",
+          "quote": "“R1” Zoning District Area Requirements: Maximum Building Height | 2.5 story or 35 ft. -- 35 ft is stated directly in feet; the '2.5 story' figure is not converted.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "15.3",
+          "quote": "Section 15 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R1\" district, shall conform to the provisions provided in the Area Requirements for the \"R1\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "15.3",
+          "quote": "Section 15 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R1\" district, shall conform to the provisions provided in the Area Requirements for the \"R1\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R2 Multifamily Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "16.3",
+          "quote": "“R2” Zoning District Area Requirements: Minimum Front Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "16.3",
+          "quote": "“R2” Zoning District Area Requirements: Minimum Rear Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "16.3",
+          "quote": "“R2” Zoning District Area Requirements: Minimum Side Yard | 10 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "16.3",
+          "quote": "“R2” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 25 ft. (same as Front Yard)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "16.3",
+          "quote": "“R2” Zoning District Area Requirements: Maximum Building Height | 35 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "16.3",
+          "quote": "Section 16 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R2\" district, shall conform to the provisions provided in the Area Requirements for the \"R2\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "16.3",
+          "quote": "Section 16 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R2\" district, shall conform to the provisions provided in the Area Requirements for the \"R2\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R3 HUD-Code Manufactured Housing Residential District",
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 7.5,
+      "side_corner_ft": 25,
+      "max_height_ft": 20,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "17.3",
+          "quote": "“R3” Zoning District Area Requirements: Minimum Front Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "17.3",
+          "quote": "“R3” Zoning District Area Requirements: Minimum Rear Yard | 10 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "17.3",
+          "quote": "“R3” Zoning District Area Requirements: Minimum Side Yard | 7.5 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "17.3",
+          "quote": "“R3” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 25 ft. (same as Front Yard)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "17.3",
+          "quote": "“R3” Zoning District Area Requirements: Maximum Building Height | 20 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "17.3",
+          "quote": "Section 17 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R3\" district, shall conform to the provisions provided in the Area Requirements for the \"R3\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "17.3",
+          "quote": "Section 17 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"R3\" district, shall conform to the provisions provided in the Area Requirements for the \"R3\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "GC General Commercial District (Article 3, Section 18)",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "18.3",
+          "quote": "“GC” Zoning District Area Requirements: Minimum Front Yard | 25 ft. -- the area-requirements table printed under Article 3 Section 18 is headed 'GC'; Section 4 of Article 1 lists the corresponding designation as B1 'General Commercial District', and Article 3's own table of contents calls Section 18 the \"B1\" Neighborhood Commercial District.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "18.3",
+          "quote": "“GC” Zoning District Area Requirements: Minimum Rear Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "18.3",
+          "quote": "“GC” Zoning District Area Requirements: Minimum Side Yard | 5 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "18.3",
+          "quote": "“GC” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 25 ft. (same as Front Yard)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "18.3",
+          "quote": "“GC” Zoning District Area Requirements: Maximum Building Height | 35 ft. Section 18.5 adds: 'No building shall exceed 35 feet in height except as provided in Section 26 [25] General Height Requirements.'",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "18.3",
+          "quote": "Section 18 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"GC\" district, shall conform to the provisions provided in the Area Requirements for the \"GC\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "18.3",
+          "quote": "Section 18 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"GC\" district, shall conform to the provisions provided in the Area Requirements for the \"GC\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "HC Highway Commercial District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "19.3",
+          "quote": "“HC” Zoning District Area Requirements: Minimum Front Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "19.3",
+          "quote": "“HC” Zoning District Area Requirements: Minimum Rear Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "19.3",
+          "quote": "“HC” Zoning District Area Requirements: Minimum Side Yard | 5 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "19.3",
+          "quote": "“HC” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 25 ft. (same as Front Yard)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "19.3",
+          "quote": "“HC” Zoning District Area Requirements: Maximum Building Height | 35 ft. Section 19.5 adds: 'No building shall exceed 35 feet in height except as provided in Section 26 [25] General Height Requirements.'",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "19.3",
+          "quote": "Section 19 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"HC\" district, shall conform to the provisions provided in the Area Requirements for the \"HC\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "19.3",
+          "quote": "Section 19 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"HC\" district, shall conform to the provisions provided in the Area Requirements for the \"HC\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "CBD Central Business District",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 10,
+      "side_corner_ft": 0,
+      "max_height_ft": 70,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "20.3",
+          "quote": "“CBD” Zoning District Area Requirements: Minimum Front Yard | 0 ft. -- 0 is coded for 'no front yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "20.3",
+          "quote": "“CBD” Zoning District Area Requirements: Minimum Rear Yard | 0 ft. -- 0 is coded for 'no rear yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "20.3",
+          "quote": "“CBD” Zoning District Area Requirements: Minimum Side Yard | 10 ft. adjacent to residential use, 0 ft. adjacent to \"CBD\" -- coded at the 10-ft residential-adjacency figure; the 0-ft CBD-adjacency branch is real and is quoted, not averaged away.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "20.3",
+          "quote": "“CBD” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 0 ft. -- 0 is coded for 'no corner side yard required' (a real standard), not as a gap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "20.3",
+          "quote": "“CBD” Zoning District Area Requirements: Maximum Building Height | 70 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "20.3",
+          "quote": "Section 20 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"CBD\" district, shall conform to the provisions provided in the Area Requirements for the \"CBD\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "20.3",
+          "quote": "Section 20 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"CBD\" district, shall conform to the provisions provided in the Area Requirements for the \"CBD\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "I Industrial District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 70,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/moody-TX/chapter_3",
+      "provenance": {
+        "front_ft": {
+          "section_number": "21.3",
+          "quote": "“I” Zoning District Area Requirements: Minimum Front Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "21.3",
+          "quote": "“I” Zoning District Area Requirements: Minimum Rear Yard | 25 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "21.3",
+          "quote": "“I” Zoning District Area Requirements: Minimum Side Yard | 10 ft. adjacent to residential use, 0 ft. adjacent to other districts. -- coded at the 10-ft residential-adjacency figure; the 0-ft other-district branch is real and is quoted, not averaged away.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "21.3",
+          "quote": "“I” Zoning District Area Requirements: Minimum Side Yard adjacent to street (corner lot) | 10 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "21.3",
+          "quote": "“I” Zoning District Area Requirements: Maximum Building Height | 70 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "21.3",
+          "quote": "Section 21 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"I\" district, shall conform to the provisions provided in the Area Requirements for the \"I\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "21.3",
+          "quote": "Section 21 opens with 'The requirements regulating the maximum permissible residential density, minimum lot size, minimum yard sizes, maximum building height, and maximum percent of lot coverage by buildings, as pertains to the \"I\" district, shall conform to the provisions provided in the Area Requirements for the \"I\" Zoning District table.' The table that follows states density, lot area, lot width, lot depth, front/side/rear yards, building height and (for R1 and R3) minimum dwelling size -- but states NO lot-coverage figure, and no impervious figure. The preamble names a lot-coverage requirement the table does not carry, an apparent drafting gap; no coverage value is coded.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}
