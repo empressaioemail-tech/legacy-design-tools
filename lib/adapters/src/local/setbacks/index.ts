@@ -52,6 +52,7 @@ import westTx from "./west-tx.json" with { type: "json" };
 import woodwayTx from "./woodway-tx.json" with { type: "json" };
 import beverlyHillsTx from "./beverly-hills-tx.json" with { type: "json" };
 import moodyTx from "./moody-tx.json" with { type: "json" };
+import rieselTx from "./riesel-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -206,6 +207,10 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "woodway-tx": woodwayTx as SetbackTable,
   "beverly-hills-tx": beverlyHillsTx as SetbackTable,
   "moody-tx": moodyTx as SetbackTable,
+  //   riesel-tx        -- Ordinance No. 2026-04 Appendix 1 residential table
+  //                       (city site PDF; the nonresidential table in the same
+  //                       appendix is omitted, reason in the file's note).
+  "riesel-tx": rieselTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);

@@ -29,6 +29,7 @@ const MCLENNAN: Array<[key: string, districts: number]> = [
   ["woodway-tx", 9],
   ["beverly-hills-tx", 4],
   ["moody-tx", 7],
+  ["riesel-tx", 8],
 ];
 
 describe("McLennan batch-2 setback tables (lane-d)", () => {
