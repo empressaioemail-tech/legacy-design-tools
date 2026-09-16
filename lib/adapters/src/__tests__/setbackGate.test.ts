@@ -449,7 +449,10 @@ describe("San Marcos pilot registration", () => {
     const table = getSetbackTable("cedar_park_tx");
     expect(table).not.toBeNull();
     expect(table!.jurisdictionKey).toBe("cedar-park-tx");
-    // 10 rows at registration + P-258 lane-c's UR row (2026-09-16).
+    // 16 rows as registered + P-258 lane-c's UR conservative-envelope row
+    // (2026-09-16) = 17. (The pre-existing "10 rows at registration" comment
+    // here was already wrong before this pass; the assertion it annotated said
+    // 16, and the table did hold 16 rows at lane start.)
     expect(table!.districts).toHaveLength(17);
     expect(table!.districts).toEqual(
       expect.arrayContaining([
