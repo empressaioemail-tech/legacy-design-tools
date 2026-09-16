@@ -118,8 +118,22 @@ export type EntitlementGateRefusal = {
    * paid tier (Solo+) or a property unlock, neither held. Distinct from
    * `deep_report` (run_report's unchanged paid-tier-only local gate) so the
    * two refusal copies do not drift into meaning the same thing by accident.
+   *
+   * `purchased_record_read` (P-242): list_purchased_records /
+   * read_purchased_record's own gate — reading a previously-purchased,
+   * already-extracted record. Distinct from `studio_report` because that
+   * reason's message is written for the site-plan/terrain/feasibility
+   * EXPORT gates and names a property-unlock alternative those gates
+   * actually have; neither tool this reason covers exports anything or
+   * clears its gate on a property unlock, so reusing `studio_report`'s
+   * copy here was a defect (A-171 residue), not a shared shape.
    */
-  reason: "deep_report" | "studio_report" | "studio_screens" | "property_export";
+  reason:
+    | "deep_report"
+    | "studio_report"
+    | "studio_screens"
+    | "property_export"
+    | "purchased_record_read";
   tier: "free" | "paid";
   subscriptionTier: PeSubscriptionTier | null;
   message: string;
@@ -147,6 +161,27 @@ export function refuseStudioReport(
     subscriptionTier: snap.subscriptionTier,
     message:
       "Studio or Team subscription, or a 30-day property unlock on this parcel, is required for this export.",
+  };
+}
+
+/**
+ * list_purchased_records / read_purchased_record refusal (P-242, A-171
+ * residue): reading a previously-purchased, already-extracted record.
+ * Neither tool exports anything and neither clears its gate on a property
+ * unlock (recordsExtraction.ts checks `canRunStudioReport` alone, with no
+ * `hasPropertyUnlock` fallback) — so this message names neither, unlike
+ * {@link refuseStudioReport}, which is correct for the export gates that
+ * still call it (site plan, terrain, feasibility).
+ */
+export function refusePurchasedRecordRead(
+  snap: SmartsiteEntitlementSnapshot,
+): EntitlementGateRefusal {
+  return {
+    status: "upgrade_required",
+    reason: "purchased_record_read",
+    tier: snap.tier,
+    subscriptionTier: snap.subscriptionTier,
+    message: "Studio or Team subscription is required to read purchased records.",
   };
 }
 

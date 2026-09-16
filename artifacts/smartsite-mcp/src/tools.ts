@@ -36,7 +36,6 @@ import {
 } from "./export-instrument.js";
 import { executeFeasibilityExport } from "./feasibility-export.js";
 import { hasPropertyUnlock } from "./property-unlock.js";
-import { listPurchasedRecords, readPurchasedRecord } from "./recordsExtraction.js";
 import {
   buildRunReportEnvelope,
   declarePlaceSearchRefusal,
@@ -1222,22 +1221,12 @@ export function registerTools(server: McpServer): void {
               };
             });
           }
-          case "list_purchased_records": {
-            const { parcelNodeId } = args as { parcelNodeId: string };
-            return listPurchasedRecords(entitlement, auth.userId, {
-              parcelNodeId,
-            });
-          }
-          case "read_purchased_record": {
-            const { parcelNodeId, artifactId } = args as {
-              parcelNodeId: string;
-              artifactId: string;
-            };
-            return readPurchasedRecord(entitlement, auth.userId, {
-              parcelNodeId,
-              artifactId,
-            });
-          }
+          // list_purchased_records / read_purchased_record have no handler
+          // here while readiness is "blocked" (P-242): the blocked branch
+          // above answers not_ready before the switch, the same as
+          // request_records/check_request and ask_the_map. Re-arming either
+          // tool means restoring a case here that calls listPurchasedRecords
+          // / readPurchasedRecord from recordsExtraction.ts.
           // P-110: re-armed. The three rulings P-109 left open are closed
           // (A-096): there is no upstream "brief" export kind, so it is
           // refused before any config load or network call, never proxied;

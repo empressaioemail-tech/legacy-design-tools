@@ -118,7 +118,14 @@ describe("P-109 item 4: the catalog and the runtime agree", () => {
     for (const tool of blocked) {
       const reason = (tool as { blockedReason?: string }).blockedReason;
       expect(reason, `${tool.name} blockedReason`).toBeTruthy();
-      expect(reason, `${tool.name} blockedReason`).toMatch(/^P-\d+ item \d+/);
+      // A plan row alone (e.g. "P-242") is as valid a trace target as a
+      // row-plus-item (e.g. "P-85 item 4"): the item suffix names a specific
+      // numbered item inside a row's own doc when the row is subdivided,
+      // which P-242 is not. Requiring the suffix unconditionally would make
+      // this check fail a reason that already traces correctly.
+      expect(reason, `${tool.name} blockedReason`).toMatch(
+        /^P-\d+( item \d+)?/,
+      );
     }
   });
 

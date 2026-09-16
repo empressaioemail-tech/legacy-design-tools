@@ -106,7 +106,7 @@ describe("recordsExtraction — Studio gate (never a silent empty result, never 
     expect(result.isError).toBe(true);
     const body = JSON.parse(result.content[0]!.text);
     expect(body.status).toBe("upgrade_required");
-    expect(body.reason).toBe("studio_report");
+    expect(body.reason).toBe("purchased_record_read");
     expect(body.message).toMatch(/studio/i);
   });
 
@@ -137,7 +137,7 @@ describe("recordsExtraction — Studio gate (never a silent empty result, never 
     expect(listResult.isError).toBe(true);
     const listBody = JSON.parse(listResult.content[0]!.text);
     expect(listBody.status).toBe("upgrade_required");
-    expect(listBody.reason).toBe("studio_report");
+    expect(listBody.reason).toBe("purchased_record_read");
     expect(listBody.subscriptionTier).toBe("solo");
 
     const readResult = await readPurchasedRecord(SOLO, USER_A, {
@@ -147,7 +147,7 @@ describe("recordsExtraction — Studio gate (never a silent empty result, never 
     expect(readResult.isError).toBe(true);
     const readBody = JSON.parse(readResult.content[0]!.text);
     expect(readBody.status).toBe("upgrade_required");
-    expect(readBody.reason).toBe("studio_report");
+    expect(readBody.reason).toBe("purchased_record_read");
   });
 
   it("a Studio caller is NOT refused (positive case — not vacuous)", async () => {

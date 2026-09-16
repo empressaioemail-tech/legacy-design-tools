@@ -6,6 +6,7 @@ import {
   isPropertyExportKind,
   isStudioExportKind,
   refusePropertyExport,
+  refusePurchasedRecordRead,
   refuseStudioReport,
   resolveEntitlementSnapshot,
   subscriptionTierGrantsStudio,
@@ -147,5 +148,23 @@ describe("export gate refusals carry a distinct reason per gate (P-119, A-103)",
     expect(refusal.reason).toBe("property_export");
     expect(refusal.message).toMatch(/property unlock/i);
     expect(refusal.message).toMatch(/solo/i);
+  });
+
+  // P-242, A-171 residue: list_purchased_records / read_purchased_record
+  // used to reuse refuseStudioReport's "required for this export" copy even
+  // though neither tool exports anything or offers a property-unlock
+  // alternative. refusePurchasedRecordRead is the distinct, accurate
+  // replacement for that gate.
+  it("refusePurchasedRecordRead names purchased_record_read and never claims export or a property unlock", () => {
+    const solo = resolveEntitlementSnapshot({
+      accessTier: "paid",
+      subscriptionTier: "solo",
+      devRole: false,
+    });
+    const refusal = refusePurchasedRecordRead(solo);
+    expect(refusal.reason).toBe("purchased_record_read");
+    expect(refusal.message).toMatch(/studio/i);
+    expect(refusal.message).not.toMatch(/export/i);
+    expect(refusal.message).not.toMatch(/property unlock/i);
   });
 });

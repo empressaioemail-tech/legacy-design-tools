@@ -32,14 +32,27 @@
  * absent.
  *
  * GATING. Both exported handlers take an already-resolved
- * SmartsiteEntitlementSnapshot and call the EXISTING canRunStudioReport /
- * refuseStudioReport from ./entitlement.ts — the same helper tools.ts
- * already uses to gate run_report's Studio-tier siblings, and whose own doc
- * comment ("Studio deliverables … records package") already named this
- * exact use before this lane existed. This module adds no new copy of the
- * tier check; subscriptionTierGrantsStudio already has independent copies
- * in peEntitlement.ts and this package's entitlement.ts, and a further copy
- * here would be a fourth.
+ * SmartsiteEntitlementSnapshot and call the EXISTING canRunStudioReport from
+ * ./entitlement.ts — the same tier predicate tools.ts already uses to gate
+ * run_report's Studio-tier siblings, and whose own doc comment ("Studio
+ * deliverables … records package") already named this exact use before this
+ * lane existed. This module adds no new copy of the tier check;
+ * subscriptionTierGrantsStudio already has independent copies in
+ * peEntitlement.ts and this package's entitlement.ts, and a further copy
+ * here would be a fourth. The REFUSAL these handlers build on a failed check
+ * is its own function, refusePurchasedRecordRead (P-242): earlier this
+ * reused refuseStudioReport's response, but that copy is written for the
+ * site-plan/terrain/feasibility EXPORT gates ("required for this export",
+ * naming a property-unlock alternative) and this module exports nothing and
+ * has no property-unlock path — a defect named and fixed in P-242, not a
+ * shared shape.
+ *
+ * As of P-242, both tools are ALSO flagged `readiness: "blocked"` in
+ * constants.ts, so registerTools's dispatch wrapper (tools.ts) refuses every
+ * call before it ever reaches this module, at any entitlement tier. The gate
+ * below still runs for any caller of these functions directly (this module
+ * exports them), which is exactly what the P-242 dispatch's falsifier 4
+ * asked this lane to check for.
  */
 
 import { and, desc, eq } from "drizzle-orm";
@@ -53,7 +66,7 @@ import {
 
 import {
   canRunStudioReport,
-  refuseStudioReport,
+  refusePurchasedRecordRead,
   type SmartsiteEntitlementSnapshot,
 } from "./entitlement.js";
 import { looksLikeParcelNodeId } from "./mcp-app.js";
@@ -252,10 +265,11 @@ function textResult(body: unknown, isError: boolean): ToolResult {
   };
 }
 
-/** Same refusal body/wrapping tools.ts already uses for run_report via its
- * local upgradeRequiredResult — reused, not reinvented, here. */
+/** Same envelope shape (status/tier/subscriptionTier/message) tools.ts's own
+ * local upgradeRequiredResult wraps for run_report, built on this gate's own
+ * refusePurchasedRecordRead (P-242) rather than the export gates' copy. */
 function upgradeRequiredResult(entitlement: SmartsiteEntitlementSnapshot): ToolResult {
-  return textResult(refuseStudioReport(entitlement), true);
+  return textResult(refusePurchasedRecordRead(entitlement), true);
 }
 
 function invalidParcelNodeIdResult(parcelNodeId: unknown): ToolResult {
