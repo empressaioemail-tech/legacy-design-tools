@@ -1,0 +1,930 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "smithville-tx",
+  "jurisdictionDisplayName": "City of Smithville, TX",
+  "effectiveDate": "2018-10-16",
+  "note": "City of Smithville, Bastrop County, TX. INSTRUMENT: the \"Zoning Ordinance of the City of Smithville, Texas\" (Sec. 1.1, title), adopted as Ordinance 2018-555 on October 16, 2018 and included as Exhibit A to Chapter 14 of the City of Smithville Code of Ordinances, as amended -- Code Sec. 14.02.001 states verbatim: \"The zoning ordinance, Ordinance 2018-555, adopted by the city on October 16, 2018, as amended, is included at the end of this chapter as exhibit A.\" Sec. 1.2 (Effective Date) reads: \"This Ordinance shall become effective immediately upon its passage and publication, as the law in such cases provides, and it is accordingly so ordained.\" Sec. 1.3 amends and reenacts the prior zoning code \"in its entirety, replacing all prior provisions with the provisions herein,\" so there is no retired scheme to lift rows from -- every row here is from the in-force text. effectiveDate is the 2018-10-16 adoption. eCODE360 SCRAPE RULING (doc_repo _decisions/2026-08-04_ecode360_partnership_retired_scrape_posture.md: zoning is public record, acquired by scraping; the ruling's own words name the proof target as proving the ecode360-scraper adapter or the citizen-portal path, whichever lands the corpus). SATISFIED, and with a live re-verification rather than only the prior proof: this lane re-fetched https://ecode360.com/39658868 on 2026-09-16 with User-Agent \"Mozilla/5.0 (compatible; PublicLawTextFetcher/1.0)\" and got HTTP 200 with the full Sec. 2.2 text (the UA profile is the one the B1 proof recorded in P:/tmp/tx_scraper_proofs/smithville/STATUS.md -- robots.txt allows the numeric content paths and /SM6484, and a Chrome-UA \"browser\" profile gets a Cloudflare 403 challenge instead, which is why the plain-browser route is NOT the citation route). The extracted Sec. 2.2 paragraph sequence was then byte-compared against the same section in the 2026-07-30 B1 scrape artifact (normalized.json: sourceUrl https://ecode360.com/SM6484, fetchedAt 2026-07-30T03:36:52.351Z, eCode360-scraper adapter, 155 pages, custId SM6484): 676 paragraphs on each side, ONE difference, and it is an encoding artifact (the artifact stores \">65 ft from front property line\" where the live HTML carries the entity &gt;). The text coded here is therefore the same text the two routes independently return. VINTAGE: the eCode360 landing page for SM6484, read live 2026-09-16, reports the published code revision as displayLabel \"2025-07-14\", versionNumber 6, publishedRevision 4478807, and the newest supplement note it carries is \"Ord. No. 2025-689 adopted July 14, 2025.\" The July 2026 scrape metadata records the same publicationDate 2025-07-14, so the scraped revision and the currently published revision agree; the rows below are the revision in force. The citation URL that reproduces them is the section route named above, not a bare URL: a plain fetch of https://ecode360.com/39658868 WITHOUT the UA profile does not return the text. SCOPE OF THIS TABLE: all 16 Euclidean districts whose dimension tables Sec. 2.2 states, numbered by their subsection in the ordinance (Sec. 2.1 fixes the district list, and the ORDER of the Sec. 2.2 subsections is confirmed independently by two self-references in the text itself -- Sec. 2.2.11 is the CBD and Sec. 2.2.15 is the CF district, which match the 11th and 15th subsections below): SF-1 (2.2.1), SF-2 (2.2.2), TH (2.2.3), MF (2.2.4), MH (2.2.5), MHS (2.2.6), MR (2.2.7), C-1 (2.2.8), C-2 (2.2.9), C-3 (2.2.10), CBD (2.2.11), RVP (2.2.12), I (2.2.13), P (2.2.14), CF (2.2.15), PD-Z (2.2.17). NOT CODED, deliberately: PDD (2.2.16) is a planned development district whose standards are set by the individual development plan and the ordinance establishing it, not by a district schedule -- it routes to the PUD refusal, and asserting a row for it would invent a standard the code does not state; HD (2.2.18) and HCD (2.2.19) are overlay districts layered on a base district with no independent dimensional schedule (their text regulates certificates of appropriateness, prohibited uses and design standards, not yards or height). READING RULES APPLIED. (1) Where a dimension states a base case plus a conditional one, the BASE case is coded and the condition is preserved verbatim in the quote: SF-1/SF-2 rear = 20 ft (\"or 20% of lot depth\", the smaller governs); SF-1/SF-2 side = the one-story figure (7-1/2 ft and 5 ft respectively) with the over-one-story figure (10 ft) in the quote; MHS and MR corner-side = 25 ft (\"25 feet for all other conditions\" with 15 ft only when backing onto/abutting another corner lot) whereas SF-1 and SF-2 corner-side = 15 ft (\"25 feet when abutting another corner lot\"); C-1/C-2/C-3 side 10 ft and rear 10 ft; MF rear = 25 ft with the 50-ft parking-and-adjacency condition quoted. (2) MH's yard figures are alternative site conditions rather than a single scalar (25 ft fronting a public street vs 10 ft fronting an internal private street; 15 ft if the home is centered on the lot vs 30 ft if it sits on a lot line; 25 ft rear abutting a public street vs 10 ft abutting a private street): the public-street/centered case is coded and the alternative is quoted, at reduced confidence 0.75, because a MH-park parcel's answer depends on the site plan, not on the district alone. (3) PD-Z's side standard is stated COMBINED -- \"Minimum combined side yard setback for both attached units: 15 feet\" -- which is not a per-side scalar, so side_ft is coded not_specified with the combined figure quoted rather than halved or guessed. (4) Districts that state no yard standard at all (I, P) are not_specified, not 0: their dimension rows simply omit yards, and this lane will not read silence as a permissive zero. CBD is different and IS coded 0 for front and side because the ordinance says so affirmatively: \"Front yard setback: Not required\" / \"Side yard setback: Not required.\" (5) No district in Sec. 2.2 states an impervious-surface standard distinct from lot coverage, so max_impervious_pct is not_specified for all 16 rows; several districts state no lot-coverage cap either, and those rows are not_specified for max_lot_coverage_pct too, with the district's actual dimension-row list quoted so the absence is checkable. COVERAGE BASIS: the P-255 census's no-table city rows carry no per-district stamp breakdown, so this table was checked against the ordinance's own district list (Sec. 2.1) and every dimensional district in it has a row except the planned-development and overlay districts named above. The live GIS stamp vocabulary for Smithville could NOT be re-read in this pass (no staged layer for this city and no district list in the census row); that check is left open rather than assumed. SENTINELS: not_specified fields carry 100, the Belton/ldt fan-out convention, EXCEPT max_height_ft, which carries the corpus gate's G7 canonical 999 where a district states no height at all (no Smithville district here needed it -- every coded district states a height, and the not_specified height count in this table is zero). No value in this table is a converted or interpolated number; every quoted number is the ordinance's own.",
+  "districts": [
+    {
+      "district_name": "SF-1 Single Family District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Minimum rear yard setback (min. setback is the smaller of the two)\": \"20 feet\". The ordinance states 20 feet or 20% of lot depth, whichever is smaller; the stated 20 feet is coded.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Minimum side yard setback, primary building\": \"7-1/2 feet (one story building)\". The alternate column reads \"or 10 feet for buildings over one story\"; the one-story figure is the base case coded here. Churches carry a 25-ft side yard and accessory buildings 3 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Minimum side yard setback, corner lots, first 65 ft from front property line\": \"15 feet\". The condition \"25 feet when abutting another corner lot\" is stated, and beyond 65 ft from the front property line the corner lot reverts to the interior standard (\"7-1/2 feet or 10 feet for buildings over one story\").",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Maximum Height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet\"; 35 ft is the ordinance's own feet figure, not a conversion.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Maximum lot coverage by all buildings on the lot\": \"40% lot area\". A separate row caps accessory buildings at 30% of the rear yard.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.1",
+          "quote": "§ 2.2.1 \"Maximum lot coverage by all buildings on the lot\": \"40% lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 7.5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "SF-2 Single Family and Duplex District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Minimum rear yard setback (min. setback is the smaller of the two)\": \"20 feet\". 20 feet or 20% of lot depth, whichever is smaller.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Minimum side yard setback, primary building\": \"5 feet (one story building)\". The alternate column reads \"or 10 feet for buildings over one story\"; the one-story figure is coded as the base case.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Minimum side yard setback, corner lots, first 65 ft from front property line\": \"15 feet\". The condition \"25 feet when abutting another corner lot\" is stated; beyond 65 ft the interior standard applies.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Maximum Height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Maximum lot coverage by all buildings on the lot\": \"40% of lot area\".",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.2",
+          "quote": "§ 2.2.2 \"Maximum lot coverage by all buildings on the lot\": \"40% of lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "TH Townhouse District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Minimum front yard setback\": \"15 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Minimum rear yard setback (min. setback is the smaller of the two)\": \"20 feet(1)\". Note (1) explains that the setbacks apply where there is no shared wall with a neighboring unit; or 20% of lot depth, whichever is smaller.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Minimum side yard setback, end unit, interior lot\": \"7-1/2 feet(1)\". End-unit corner lots carry 15 ft; the interior-lot figure is coded as the base case.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Minimum side yard setback, end unit, corner lot\": \"15 feet (1)\".",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Maximum lot coverage by all buildings on the lot\": \"70% lot area\". A separate row requires 30% gross land area as minimum open space.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.3",
+          "quote": "§ 2.2.3 \"Maximum lot coverage by all buildings on the lot\": \"70% lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 20,
+      "side_ft": 7.5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 70,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MF Multiple Family Residential District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Minimum rear yard setback\": \"25 feet\". The alternate reads \"or 50 feet (including parking areas) if lot backs up to SF-2 or more restrictive district.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Minimum side yard\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Minimum side yard\": \"25 feet\". Sec. 2.2.4 states no separate corner-lot side yard; the district's single 25-ft side yard is the only side standard stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Maximum lot coverage by all buildings on the lot\": \"70% lot area\". Minimum open space is 30% gross land area.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.4",
+          "quote": "§ 2.2.4 \"Maximum lot coverage by all buildings on the lot\": \"70% lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 70,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MH Manufactured Housing Park Residential District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Minimum front yard setback\": \"25 feet if fronting a public street\". The alternative site condition is quoted in the source: \"or 10 feet if fronting an internal (private) street.\" The figure depends on the site plan, not on the district alone.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Minimum rear yard setback\": \"25 feet if abutting a public street\". The alternative is \"or 10 feet if abutting an internal (private) street.\"",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Minimum side yard\": \"15 feet if centered within lot\". The alternative is \"or 30 feet if home is on a lot line.\"",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Minimum side yard\": \"15 feet if centered within lot\". No corner-lot side yard is stated for this district; the site-condition side yard is repeated here rather than asserting a corner standard the ordinance does not state.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Minimum distance between buildings\": \"30 feet\". Sec. 2.2.5's dimension rows are \"Maximum building height\", \"Minimum front yard setback\", \"Minimum side yard\", \"Minimum rear yard setback\", \"Minimum distance between buildings\", \"Minimum size of manufactured housing park\" and \"Minimum lot size\" -- there is no lot-coverage row, so no numeric coverage standard exists for this district.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.5",
+          "quote": "§ 2.2.5 \"Maximum lot coverage by all buildings on the lot\": \"30 feet\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MHS Manufactured Home Subdivision District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Minimum rear yard setback (smaller value is the standard)\": \"25 feet\". Or 20% of the lot depth, whichever is smaller. Accessory buildings carry a 3-ft rear yard.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Minimum side yard\": \"7-1/2 feet for one story buildings\". The next row reads \"10 feet for buildings over one story\"; the one-story figure is coded as the base case.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Minimum side yard, corner lots\": \"15 feet when backing onto another corner lot\". The following row states \"25 feet for all other conditions\" -- so 25 ft is the general case coded here and 15 ft applies only back-to-back.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Maximum building height\": \"1-1/2 stories\". The alternate column reads \"or 20 feet\"; 20 ft is the ordinance's own feet figure.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Maximum lot coverage by buildings\": \"40% of lot area\". Accessory buildings are separately capped at 30% of the rear yard.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.6",
+          "quote": "§ 2.2.6 \"Maximum lot coverage by all buildings on the lot\": \"40% of lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 7.5,
+      "side_corner_ft": 25,
+      "max_height_ft": 20,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MR Mixed Residential District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Minimum rear yard setback (smaller value is the standard)\": \"20 feet\". Or 20% of the lot depth, whichever is smaller.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Minimum side yard\": \"5 feet for one story buildings\". The next row reads \"10 feet for buildings over one story\"; churches carry 25 ft and accessory buildings 3 ft.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Minimum side yard, corner lots\": \"15 feet when abutting another corner lot\". The following row states \"25 feet for all other conditions\" -- 25 ft is the general case coded here and 15 ft applies only back-to-back.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Maximum lot coverage by buildings\": \"40% of lot area\".",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.7",
+          "quote": "§ 2.2.7 \"Maximum lot coverage by all buildings on the lot\": \"40% of lot area\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-1 Neighborhood Shopping District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Minimum rear yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Minimum side yard\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Minimum side yard\": \"10 feet\". Sec. 2.2.8 states a single side yard and no separate corner-lot standard; the district's side figure is repeated rather than asserting a corner rule the ordinance does not state.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Minimum lot size, country inn and religious facilities\": \"21,000 sf\". Sec. 2.2.8's dimension rows are height, front yard, side yard, rear yard and that lot-size row only -- the district states no lot-coverage cap.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.8",
+          "quote": "§ 2.2.8 \"Maximum lot coverage by all buildings on the lot\": \"21,000 sf\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-2 General Commercial District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Minimum rear yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Minimum side yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Minimum side yard setback\": \"10 feet\". No separate corner-lot standard is stated; the district's side figure is repeated rather than asserted as a corner rule.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Minimum lot size, country inn\": \"21,000 sf\". Sec. 2.2.9's dimension rows are height, front, side, rear and that lot-size row only -- no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.9",
+          "quote": "§ 2.2.9 \"Maximum lot coverage by all buildings on the lot\": \"21,000 sf\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-3 Highway Commercial District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Minimum rear yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Minimum side yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Minimum side yard setback\": \"10 feet\". No separate corner-lot standard is stated; the district's side figure is repeated rather than asserted as a corner rule.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Minimum lot size, country inn\": \"21,000 sf\". Sec. 2.2.10's dimension rows are height, front, side, rear and that lot-size row only -- no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.10",
+          "quote": "§ 2.2.10 \"Maximum lot coverage by all buildings on the lot\": \"21,000 sf\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 10,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "CBD Central Business District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Front yard setback\": \"Not required\". 0 codes the ordinance's own affirmative \"Not required\" -- this is a stated standard, not a missing one.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Minimum rear yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Side yard setback\": \"Not required\". 0 codes the stated \"Not required.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Side yard setback\": \"Not required\". Because the district requires no side yard at all, it states no separate corner-lot side yard; 0 follows from the stated standard rather than from silence.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Maximum building height\": \"50 feet\". Stated in feet directly, with no stories alternative.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Minimum lot size, country inn\": \"21,000 sf\". Sec. 2.2.11's dimension rows are height, front, side, rear and that lot-size row only -- no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.11",
+          "quote": "§ 2.2.11 \"Maximum lot coverage by all buildings on the lot\": \"21,000 sf\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 0,
+      "rear_ft": 10,
+      "side_ft": 0,
+      "side_corner_ft": 0,
+      "max_height_ft": 50,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "RVP Recreational Vehicle Park District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Minimum Front yard setback\": \"40 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Minimum rear yard setback\": \"10 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Minimum Side yard setback\": \"40 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Minimum Side yard setback\": \"40 feet\". No separate corner-lot standard is stated; the district's side figure is repeated rather than asserted as a corner rule.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Maximum building height\": \"35 feet\". Stated in feet directly.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Maximum building height\": \"35 feet\". Sec. 2.2.12's dimension rows are height, front yard, side yard and rear yard only -- no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.12",
+          "quote": "§ 2.2.12 \"Maximum lot coverage by all buildings on the lot\": \"35 feet\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 40,
+      "rear_ft": 10,
+      "side_ft": 40,
+      "side_corner_ft": 40,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "I Industrial District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". Sec. 2.2.13's dimension rows are \"Maximum building height\" (50 feet) and \"Minimum lot size, country inn\" (21,000 sf) only -- the district states NO yard standard, and this lane does not read silence as a permissive zero.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". No rear yard standard is stated anywhere in Sec. 2.2.13.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". No side yard standard is stated anywhere in Sec. 2.2.13.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". No side or corner standard is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". Stated in feet directly.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum building height\": \"50 feet\". No lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.13",
+          "quote": "§ 2.2.13 \"Maximum lot coverage by all buildings on the lot\": \"50 feet\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 50,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "P Parks and Open Space District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"Maximum building height\": \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\". Sec. 2.2.14's only dimensional rule is that height sentence; it states no yard standard, and silence is not read here as a permissive zero.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"Maximum building height\": \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\". No rear yard standard is stated in Sec. 2.2.14.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"Maximum building height\": \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\". No side yard standard is stated in Sec. 2.2.14.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"Maximum building height\": \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\". No side or corner standard is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\": \"two and one-half (2-1/2) stories or thirty-five (35) feet\". 35 ft is the ordinance's own feet figure.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet in height.\": \"two and one-half (2-1/2) stories or thirty-five (35) feet\". No lot-coverage cap is stated for this district.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.14",
+          "quote": "§ 2.2.14 \"Maximum lot coverage by all buildings on the lot\": \"two and one-half (2-1/2) stories or thirty-five (35) feet\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "CF Community Facilities District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Minimum front yard setback\": \"25 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Minimum rear yard setback\": \"30 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Minimum side yard\": \"10 feet\". The alternate column reads \"or 25 feet from an intersecting street\" -- the intersecting-street case is coded as the corner figure.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Minimum side yard\": \"or 25 feet from an intersecting street\".",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Minimum front yard setback\": \"25 feet\". Sec. 2.2.15's dimension rows are height, front yard, side yard and rear yard only -- no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.15",
+          "quote": "§ 2.2.15 \"Maximum lot coverage by all buildings on the lot\": \"25 feet\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 30,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "PD-Z Zero Lot Line Garden Home District",
+      "citation_url": "https://ecode360.com/39658868",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Minimum front yard setback\": \"20 feet\".",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Minimum front yard setback\": \"20 feet\". Sec. 2.2.17's dimension rows are height, front yard, combined side yard, lot size, lot width and lot coverage -- the district states no rear yard standard, which is consistent with its zero-lot-line design.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Minimum combined side yard setback for both attached units\": \"15 feet\". The ordinance states the side yard COMBINED for both attached units, which is not a per-side scalar; the combined figure is quoted rather than halved or guessed, so side_ft is not_specified.",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Minimum combined side yard setback for both attached units\": \"15 feet\". No corner-lot standard is stated, and the only side standard in the district is the combined one.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Maximum building height\": \"2-1/2 stories\". The alternate column reads \"or 35 feet.\"",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Maximum lot coverage by buildings\": \"40%\".",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 2.2.17",
+          "quote": "§ 2.2.17 \"Maximum lot coverage by all buildings on the lot\": \"40%\". Sec. 2.2 states no impervious-surface standard distinct from lot coverage for this district; the ordinance's only site-coverage measure is lot coverage, so no separate impervious figure is asserted.",
+          "confidence": 0.75,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    }
+  ]
+}

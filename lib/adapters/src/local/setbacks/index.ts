@@ -46,6 +46,7 @@ import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" 
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
 import lulingTx from "./luling-tx.json" with { type: "json" };
+import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -175,6 +176,15 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // in the file's own note rather than silently resolved (C-3 Table 1 /
   // Sec. 3.09 column transposition; MH lot coverage 40% vs 55%).
   "luling-tx": lulingTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Bastrop County, CP1's eCode360 trap.
+  // Smithville's Zoning Ordinance (Ord. 2018-555, adopted 2018-10-16) is
+  // published as Exhibit A to Code Ch. 14 on eCode360; acquired under the
+  // 2026-08-04 scrape ruling, with this lane's live re-fetch byte-compared
+  // against the 2026-07-30 B1 scrape artifact. No atom corpus for
+  // smithville_tx, so every value is primary-source-verified; the PDD and
+  // the two historic overlay districts are omitted (PUD refusal / no
+  // independent dimensional schedule).
+  "smithville-tx": smithvilleTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
