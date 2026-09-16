@@ -45,6 +45,7 @@ import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
+import lulingTx from "./luling-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -166,6 +167,14 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // package's waco-tx.json) rather than re-authored; see that file's own
   // note for the full source trail.
   "waco-tx": wacoTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Caldwell County. Luling's Appendix B zoning
+  // text was read from a full-text render of the Municode chapter (the
+  // citation URL is an SPA that returns no ordinance text to a plain fetch).
+  // No code-section atom corpus exists for luling_tx, so every value is
+  // primary-source-verified. Two conflicts inside the ordinance are carried
+  // in the file's own note rather than silently resolved (C-3 Table 1 /
+  // Sec. 3.09 column transposition; MH lot coverage 40% vs 55%).
+  "luling-tx": lulingTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
