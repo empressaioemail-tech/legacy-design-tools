@@ -53,6 +53,15 @@ import woodwayTx from "./woodway-tx.json" with { type: "json" };
 import beverlyHillsTx from "./beverly-hills-tx.json" with { type: "json" };
 import moodyTx from "./moody-tx.json" with { type: "json" };
 import rieselTx from "./riesel-tx.json" with { type: "json" };
+import lulingTx from "./luling-tx.json" with { type: "json" };
+import jarrellTx from "./jarrell-tx.json" with { type: "json" };
+// P-258 lane-f (2026-09-16): Williamson County. Jarrell UDC Chapter 4.00
+// Sec. 4.11 Table 4-11 (Lot Design Standards). eCode360 (JA6361) is the
+// authoritative host; its section body is client-rendered, so the quotes come
+// from a mirror of the same text, disclosed in the file note. PUD is outside
+// Table 4-11 by design and routes to the PUD refusal.
+import martindaleTx from "./martindale-tx.json" with { type: "json" };
+import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -259,6 +268,31 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   //                       (city site PDF; the nonresidential table in the same
   //                       appendix is omitted, reason in the file's note).
   "riesel-tx": rieselTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Caldwell County. Luling's Appendix B zoning
+  // text was read from a full-text render of the Municode chapter (the
+  // citation URL is an SPA that returns no ordinance text to a plain fetch).
+  // No code-section atom corpus exists for luling_tx, so every value is
+  // primary-source-verified. Two conflicts inside the ordinance are carried
+  // in the file's own note rather than silently resolved (C-3 Table 1 /
+  // Sec. 3.09 column transposition; MH lot coverage 40% vs 55%).
+  "luling-tx": lulingTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Bastrop County, CP1's eCode360 trap.
+  // Smithville's Zoning Ordinance (Ord. 2018-555, adopted 2018-10-16) is
+  // published as Exhibit A to Code Ch. 14 on eCode360; acquired under the
+  // 2026-08-04 scrape ruling, with this lane's live re-fetch byte-compared
+  // against the 2026-07-30 B1 scrape artifact. No atom corpus for
+  // smithville_tx, so every value is primary-source-verified; the PDD and
+  // the two historic overlay districts are omitted (PUD refusal / no
+  // independent dimensional schedule).
+  "smithville-tx": smithvilleTx as SetbackTable,
+  // P-258 lane-f (2026-09-16): Caldwell County. Martindale Ch. 155 district
+  // standards. The authoritative host (codelibrary.amlegal.com) returns 403
+  // to this lane's fetches, so the text was read from the City's own zoning
+  // page; the wall and the resulting currency caveat are in the file note.
+  // MU is carried with every dimension not_specified because the district's
+  // standard is per-parcel context, not a scalar.
+  "martindale-tx": martindaleTx as SetbackTable,
+  "jarrell-tx": jarrellTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);

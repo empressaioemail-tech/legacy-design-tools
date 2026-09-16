@@ -1,0 +1,520 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "martindale-tx",
+  "jurisdictionDisplayName": "City of Martindale, TX",
+  "effectiveDate": "2013-08-20",
+  "note": "City of Martindale, Caldwell County, TX. INSTRUMENT: Code of Ordinances Chapter 155 (Zoning), Sec. 155.075 - Sec. 155.084, \"Property development standards\" per district. The chapter's own ordinance-history parentheticals name Ord. 08-347 (passed 2008) for the district standards, with Sec. 155.076 (R-1), Sec. 155.077 (R-1A), Sec. 155.079 (R-3), Sec. 155.080 (R-4) and Sec. 155.082 (C-1) additionally amended by Ord. 2013-08-06 (passed 8-6-2013) and Ord. 2013-08-20-1 (passed 8-20-2013); effectiveDate is that latest recorded amendment, 2013-08-20, NOT a code-currency date. ROUTE AND THE WALL, STATED PLAINLY: the authoritative host for this code is American Legal Publishing (codelibrary.amlegal.com/codes/martindale/latest/martindale_tx). It is NOT reachable from this lane: a plain fetch with a Chrome UA returns HTTP 403 with the Cloudflare interstitial (\"Performing security verification ... Enable JavaScript and cookies to continue\", issued 2026-09-16), and a sub-request to the chapter TOC route 0-0-0-1629 returned the same 403. The text coded here was instead read from the CITY'S OWN official zoning page, https://www.martindale.texas.gov/2211/Zoning, fetched live 2026-09-16, which reproduces Sec. 155.076 - Sec. 155.084 verbatim with their section numbers and their (Ord. ...) history lines, and which the city publishes with the notice \"This website is intended for general information purposes only. Please review Sec. 155 Zoning Code of the City's Code of Ordinances for complete zoning regulations.\" A CURRENCY RISK REMAINS AND IS NOT HIDDEN: because the code host is walled to this lane, the chapter's \"current through\" revision date could not be read at source, so a post-2013 amendment to these district standards cannot be ruled out. Field values are coded at confidence 0.85 rather than the 0.9 used where the host itself was readable. MODELING. (1) The ordinance regulates IMPERVIOUS COVER, not building footprint coverage: every district's Sec. 155.08x(C)(7) reads \"Maximum impervious cover for all uses in the ... District shall be ...% of the lot area.\" Those figures are coded under max_impervious_pct as real values, and max_lot_coverage_pct is not_specified for every district because the chapter states no separate building-coverage cap. (2) \"Street side setback\" is the corner-lot / side-street standard, coded under side_corner_ft; the interior side yard is coded under side_ft. Several districts state the street-side standard as ten feet \"unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet\" -- ten feet is the general case coded, and the thoroughfare condition is preserved in the quote. (3) R-2's street-side sentence contains a drafting cross-reference error in the source: it reads \"The minimum street side setback for all uses in the R-1A district\" inside Sec. 155.078 (R-2). The R-2 value is coded (ten feet, thoroughfare 20 feet, identical to R-1A's) and the error is preserved verbatim in the quote rather than silently corrected. (4) MU (Sec. 155.081) is coded with every dimensional field not_specified on purpose: the district states \"Because the MU Mixed Use District encompasses the downtown core of the city, limited district-based property development standards shall apply\" and requires new or in-fill development to \"conform to the setbacks, height and massing of existing structures found throughout the Mixed Use District\" -- a per-parcel context standard, not a scalar, so no number is asserted and the district should be treated as a refusal rather than a served row. (5) I (Sec. 155.084, Industrial) states no height standard at all -- its development-standards list runs lot size, front, rear, interior side, street side, lot coverage, landscaping -- so max_height_ft is not_specified and carries the gate's canonical 999 sentinel (rule G7). SENTINELS: not_specified carries 100 for the yard/coverage fields and 999 for max_height_ft, per the corpus gate's G7 rule. No value in this table is a converted or interpolated number; 28.5 feet is the ordinance's own figure (it is the 2-1/2-story height it states alongside). COVERAGE BASIS: the P-255 census's no-table city rows carry no per-district stamp breakdown for Martindale, so the row set is the ordinance's own district list (Sec. 155.075 - Sec. 155.084): R-1, R-1A, R-2, R-3, R-4, MU, C-1, C-2, I -- nine rows, one per district. The live GIS stamp vocabulary could not be re-read in this lane (no staged layer for this city).",
+  "districts": [
+    {
+      "district_name": "R-1 Single-Family Residential District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(2): \"The minimum front setback for all uses in the R-1 District shall be 25 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(3): \"The minimum rear setback for all uses in the R-1 District other than in-ground swimming pools shall be 20 feet; for in-ground swimming pools, the rear setback shall be eight feet.\" 20 ft coded as the general case.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(4): \"The minimum interior side setback for all uses in the R-1 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(5): \"The minimum street side setback for all uses in the R-1 District shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\" 10 ft is the general case; 20 ft applies only on a major thoroughfare.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(6): \"The maximum height for all uses in the R-1 District shall be 28.5 feet or two and one-half stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(7): \"The maximum impervious cover for all uses in the R-1 District shall be 35% of the lot area.\" The district regulates impervious cover, not building footprint coverage, so no lot-coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.076",
+          "quote": "§ 155.076(C)(7): \"The maximum impervious cover for all uses in the R-1 District shall be 35% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 28.5,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 35
+    },
+    {
+      "district_name": "R-1A One- and Two-Family Residential District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(2): \"The minimum front setback for all uses in the R-1A district shall be 25 feet, subject to compatibility standards of § 155.060 above.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(3): \"The minimum rear setback for all uses in the R-1A district, other than in-ground swimming pools, shall be 20 feet; for in-ground swimming pools, the rear setback shall be eight feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(4): \"The minimum interior side setback for all uses in the R-1A district shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(5): \"The minimum street side setback for all uses in the R-1A district shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(6): \"The maximum height for all uses in the R-1A district shall be 28.5 feet or two and one-half stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(7): \"Maximum impervious cover for all uses in the R-1A district shall be 50% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.077",
+          "quote": "§ 155.077(C)(7): \"Maximum impervious cover for all uses in the R-1A district shall be 50% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 28.5,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "R-2 Manufactured Home District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(2): \"The minimum front setback for all uses in the R-2 District shall be 25 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(3): \"The minimum rear setback for all uses in the R-2 District , other than in-ground swimming pools, shall be 20 feet; for in-ground swimming pools, the rear setback shall be eight feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(4): \"The minimum interior side setback for all uses in the R-2 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(5): \"The minimum street side setback for all uses in the R-1A district shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\" DRAFTING ERROR IN THE SOURCE, PRESERVED: this sentence sits in Sec. 155.078 (R-2) but names the R-1A district. The figure is identical to R-1A's, so the value is coded as written in R-2 rather than silently corrected.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(6): \"The maximum height for all uses in the R-2 District shall be 28.5 feet or two and one-half stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(7): \"Maximum impervious cover for all uses in the R-2 District shall be 50% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.078",
+          "quote": "§ 155.078(C)(7): \"Maximum impervious cover for all uses in the R-2 District shall be 50% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 28.5,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "R-3 Multi-Family Residential District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(2): \"The minimum front setback for all uses in the R-3 District shall be 20 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(3): \"The minimum rear setback for all uses in the R-3 District, other than in-ground swimming pools, shall be 15 feet; for in-ground swimming pools, the rear setback shall be eight feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(4): \"The minimum interior side setback for all uses in the R-3 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(5): \"The minimum street side setback for all uses in the R-3 District shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(6): \"The maximum height for all uses in the R-3 District shall be 28.5 feet or two and one-half stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(7): \"Maximum impervious cover for all uses in the R-3 District shall be 75% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.079",
+          "quote": "§ 155.079(C)(7): \"Maximum impervious cover for all uses in the R-3 District shall be 75% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 28.5,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 75
+    },
+    {
+      "district_name": "R-4 Multi-Family Residential District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(2): \"The minimum front setback for all uses in the R-4 District shall be 20 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(3): \"The minimum rear setback for all uses in the R-4 District, other than in-ground swimming pools, shall be ten feet; for in-ground swimming pools, the rear setback shall be eight feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(4): \"The minimum interior side setback for all uses in the R-4 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(5): \"The minimum street side setback for all uses in the R-4 District shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(6): \"The maximum height for all uses in the R-4 District shall be 35 feet or three stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(7): \"Maximum impervious cover for all uses in the R-4 District shall be 75% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.080",
+          "quote": "§ 155.080(C)(7): \"Maximum impervious cover for all uses in the R-4 District shall be 75% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 10,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 75
+    },
+    {
+      "district_name": "MU Mixed Use District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(1)-(2): \"Because the MU Mixed Use District encompasses the downtown core of the city, limited district-based property development standards shall apply.\" and \"New or in-fill development shall conform to the setbacks, height and massing of existing structures found throughout the Mixed Use District boundaries in order to maintain the character of the downtown area.\" The district sets NO scalar yard standard -- its standard is per-parcel context, so nothing is asserted.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(2): \"New or in-fill development shall conform to the setbacks, height and massing of existing structures found throughout the Mixed Use District boundaries in order to maintain the character of the downtown area.\" No scalar rear yard is stated.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(2): \"New or in-fill development shall conform to the setbacks, height and massing of existing structures found throughout the Mixed Use District boundaries in order to maintain the character of the downtown area.\" No scalar side yard is stated.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(4): \"If the immediately adjacent properties are vacant, then existing structures on the next developed lot(s) shall serve as examples of the required setbacks, height and massing.\" No scalar corner standard is stated.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(2): \"New or in-fill development shall conform to the setbacks, height and massing of existing structures found throughout the Mixed Use District boundaries in order to maintain the character of the downtown area.\" No numeric height is stated; the 999 sentinel is the gate's canonical not_specified value for max_height_ft (rule G7).",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(3): \"See the use table in § 155.096 for specific development standards.\" No lot-coverage cap is stated for this district.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.081",
+          "quote": "§ 155.081(C)(1)-(3): \"limited district-based property development standards shall apply\" -- the district states no impervious-cover figure.",
+          "confidence": 0.7,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-1 Commercial District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(2): \"The minimum front setback for all uses in the C-1 District shall be 15 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(3): \"The minimum rear setback for all uses in the C-1 District shall be ten feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(4): \"The minimum interior side setback for all uses in the C-1 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(5): \"The minimum side setback adjacent to a street for all uses in the C-1 District shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(6): \"The maximum height for all uses in the C-1 District shall be 35 feet or three stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(7): \"Maximum impervious cover for all uses in the C-1 District shall be 50% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.082",
+          "quote": "§ 155.082(C)(7): \"Maximum impervious cover for all uses in the C-1 District shall be 50% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "C-2 Heavy Commercial District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(2): \"The minimum front setback for all uses in the C-2 District shall be 15 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(3): \"The minimum rear setback for all uses in the C-2 District shall be ten feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(4): \"The minimum interior side setback for all uses in the C-2 District shall be six feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(5): \"The minimum side setback adjacent to a street for all uses in the C-2 District shall be ten feet, unless the side street is a major thoroughfare, in which case the minimum street side setback shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(6): \"The maximum height for all uses in the C-2 District shall be 35 feet, or three stories.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(7): \"Maximum impervious cover for all uses in the C-2 District shall be 50% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.083",
+          "quote": "§ 155.083(C)(7): \"Maximum impervious cover for all uses in the C-2 District shall be 50% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 6,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "I Industrial Use District",
+      "citation_url": "https://codelibrary.amlegal.com/codes/martindale/latest/martindale_tx/0-0-0-1629",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(2): \"The minimum front setback for all uses in the I District shall be 25 feet, subject to compatibility standards of § 155.060.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "rear_ft": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(3): \"The minimum rear setback for all uses in the I District shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_ft": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(4): \"The minimum interior side setback for all uses in the I District shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(5): \"The minimum side setback adjacent to a street for all uses in the I District shall be 20 feet.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        },
+        "max_height_ft": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C): Sec. 155.084(C) lists \"Lot size\", \"Front setback\", \"Rear setback\", \"Interior side setback\", \"Street side setback\", \"Lot coverage\" and \"Landscaping\" -- it states NO height standard for the I District, so no height is asserted and the 999 sentinel is used per gate rule G7.",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(6): \"Maximum impervious cover for all uses in the I District shall be 80% of the lot area.\" No building-footprint coverage cap is stated.",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 155.084",
+          "quote": "§ 155.084(C)(6): \"Maximum impervious cover for all uses in the I District shall be 80% of the lot area.\"",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 20,
+      "side_corner_ft": 20,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 80
+    }
+  ]
+}
