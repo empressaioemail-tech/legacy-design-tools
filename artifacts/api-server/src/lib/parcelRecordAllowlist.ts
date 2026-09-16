@@ -38,6 +38,7 @@
  */
 
 import { loadParcelGateVerdict } from "./parcelGateVerdictRead";
+import type { ParcelGateVerdictKind } from "./parcelGateVerdictVocabulary";
 import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
 
 export type ParcelAllowlistState = "record" | "legacy" | "refused";
@@ -529,13 +530,24 @@ function slateKey(countyFips: string, railKey: string): string {
 /**
  * Pure decision function. Tests drive every branch without a store: not in
  * slate (any verdict, including a fabricated 'pass') -> legacy; in slate +
- * no verdict -> legacy; in slate + pass -> record; in slate + refuse ->
- * refused; in slate + excluded -> refused.
+ * no verdict -> legacy; in slate + pass -> record; in slate + any recognised
+ * non-pass verdict -> refused.
+ *
+ * P-293 (2026-09-16): "any recognised non-pass" now includes the factory's
+ * P-201 `excluded-*` kinds -- 'excluded-not-applicable',
+ * 'excluded-mid-cutover', 'excluded-no-acquisition-path' -- which resolve
+ * 'refused' exactly as the bare 'excluded' already did. THE DECISION TABLE
+ * BELOW IS UNCHANGED: P-201 widened the vocabulary upstream of this
+ * function, and this function's parameter type now follows
+ * `parcelGateVerdictVocabulary.ts` so the two cannot drift apart. Note the
+ * ordering too: a string the vocabulary does NOT recognise never reaches
+ * here at all -- `parcelGateVerdictRead.ts` logs it and returns null, which
+ * this function resolves to 'legacy' through the `!verdict` branch above.
  */
 export function resolveAllowlistState(
   countyFips: string,
   railKey: string,
-  verdict: { verdict: "pass" | "refuse" | "excluded" } | null,
+  verdict: { verdict: ParcelGateVerdictKind } | null,
 ): ParcelAllowlistState {
   if (!PARCEL_RECORD_SLATE.has(slateKey(countyFips, railKey))) return "legacy";
   if (!verdict) return "legacy";
