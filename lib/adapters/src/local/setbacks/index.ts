@@ -45,6 +45,13 @@ import sanAntonioTx from "./san-antonio-tx.json" with { type: "json" };
 import utahUnincorporated from "./utah-unincorporated.json" with { type: "json" };
 import idahoUnincorporated from "./idaho-unincorporated.json" with { type: "json" };
 import wacoTx from "./waco-tx.json" with { type: "json" };
+import hewittTx from "./hewitt-tx.json" with { type: "json" };
+import robinsonTx from "./robinson-tx.json" with { type: "json" };
+import bellmeadTx from "./bellmead-tx.json" with { type: "json" };
+import westTx from "./west-tx.json" with { type: "json" };
+import woodwayTx from "./woodway-tx.json" with { type: "json" };
+import beverlyHillsTx from "./beverly-hills-tx.json" with { type: "json" };
+import moodyTx from "./moody-tx.json" with { type: "json" };
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -166,6 +173,39 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // package's waco-tx.json) rather than re-authored; see that file's own
   // note for the full source trail.
   "waco-tx": wacoTx as SetbackTable,
+  // P-258 lane-d, McLennan County batch 2 (2026-09-16): four more McLennan
+  // cities whose ordinances carry a real Euclidean dimensional block. Read at
+  // source, every value primary-source-verified (no code-section atom corpus
+  // exists for any of these four jurisdictions yet). See each file's own note
+  // for the route (which fetch returned text and which did not) and for the
+  // districts deliberately omitted rather than interpolated:
+  //   hewitt-tx   -- Appendix A Parts 5/6/7 (Municode, server-rendered);
+  //                  MH and the planned districts omitted, reasons in note.
+  //   robinson-tx -- Zoning Ordinance Article 6 district tables (Zoneomics
+  //                  render; Municode is a JS shell) cross-checked against the
+  //                  city's own agenda packets; PDD is per-ordinance.
+  //   bellmead-tx -- Zoning Ordinance Sections V-IX (Zoneomics render;
+  //                  Municode is a JS shell); R-1A omitted, no dimensional
+  //                  subsection exists; B-1/B-2/I yards are use-keyed.
+  //   west-tx     -- Zoning Ordinance Sec. 20 Schedule of District
+  //                  Regulations (eCode360, Ord. 210406 adopted 4/6/2021).
+  "hewitt-tx": hewittTx as SetbackTable,
+  "robinson-tx": robinsonTx as SetbackTable,
+  "bellmead-tx": bellmeadTx as SetbackTable,
+  "west-tx": westTx as SetbackTable,
+  // P-258 lane-d, McLennan County batch 2, second group (2026-09-16): three
+  // more McLennan cities with a real Euclidean block. Read at source, every
+  // value primary-source-verified. Routes and omissions are stated per file:
+  //   woodway-tx       -- Appendix A Parts 2-5 (Zoneomics render; Municode is a
+  //                       JS shell); R-MH and PUD omitted, reasons in note.
+  //   beverly-hills-tx -- Zoning Ordinance Ord. 040412 (eCode360 Part 6 Yards +
+  //                       Part 1 Districts; Part 5 height via the Zoneomics
+  //                       mirror after an eCode360 403/Cloudflare block).
+  //   moody-tx         -- Zoning Ordinance Ord. 12012009 Article 3 (Zoneomics
+  //                       render); PD and MHO omitted, no AG section exists.
+  "woodway-tx": woodwayTx as SetbackTable,
+  "beverly-hills-tx": beverlyHillsTx as SetbackTable,
+  "moody-tx": moodyTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
