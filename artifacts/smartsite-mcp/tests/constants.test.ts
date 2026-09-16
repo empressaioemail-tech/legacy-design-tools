@@ -13,23 +13,33 @@ describe("smartsite-mcp constants", () => {
     expect(SERVER_NAME).toBe("Smart Site");
   });
 
-  it("marks the records pair and ask_the_map blocked, each with a reason", () => {
+  it("marks both records pairs and ask_the_map blocked, each with a reason", () => {
     const blocked = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
     expect(blocked.map((t) => t.name).sort()).toEqual([
       "ask_the_map",
       "check_request",
+      "list_purchased_records",
+      "read_purchased_record",
       "request_records",
     ]);
     for (const tool of blocked) {
       expect(
         (tool as { blockedReason?: string }).blockedReason,
         `${tool.name} blockedReason`,
-      ).toMatch(/^P-\d+ item \d+/);
+      ).toMatch(/^P-\d+( item \d+)?/);
     }
     const askTheMap = SMARTSITE_MCP_TOOLS.find((t) => t.name === "ask_the_map");
     expect((askTheMap as { blockedReason?: string }).blockedReason).toContain(
       "P-91 item 34",
     );
+    // P-242 (this row): list_purchased_records / read_purchased_record are a
+    // DIFFERENT, more recent governing decision than request_records /
+    // check_request's P-85 item 4 — a future reader must trace to the right
+    // one, so the two pairs carry distinct blockedReason values.
+    for (const name of ["list_purchased_records", "read_purchased_record"] as const) {
+      const tool = SMARTSITE_MCP_TOOLS.find((t) => t.name === name);
+      expect((tool as { blockedReason?: string }).blockedReason).toBe("P-242");
+    }
   });
 
   // P-110: export_instrument is live again, rewired to the real two-hop

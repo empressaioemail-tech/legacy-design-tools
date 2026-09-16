@@ -6,18 +6,27 @@
  * wiring's own test, at the dispatch layer records-extraction.test.ts does
  * not reach.
  *
+ * P-242 (operator ruling 2026-09-15, coming-soon on every surface): both
+ * tools flip from `readiness: "live"` to `readiness: "blocked"` in
+ * constants.ts. registerTools's dispatch wrapper (tools.ts) checks
+ * `tool.readiness === "blocked"` BEFORE calling recordsExtraction.ts at all
+ * — before the Studio entitlement gate, before parcelNodeId/artifactId
+ * validation, at any caller tier. The tests below that used to prove a
+ * free-tier caller reaches the real Studio gate, and that a Studio caller
+ * reaches recordsExtraction.ts's own arg validation, are REWRITTEN here to
+ * prove the opposite: every caller, regardless of tier or argument shape,
+ * now gets the declared not_ready envelope and never reaches
+ * recordsExtraction.ts. The Studio-tier case is the one that matters most
+ * (P-242 falsifier 1): it is the one path that reached the real handler
+ * before this row, so it is the only one whose still-succeeding would be
+ * proof this row did nothing.
+ *
  * Deliberately does NOT mock ../src/recordsExtraction.js: every assertion
- * here exercises the REAL module through the REAL MCP dispatch, proving the
- * tool names resolve to the actual implementation rather than a stub. It
- * stays DB-free by only exercising response paths recordsExtraction.ts
- * itself resolves before ever touching @workspace/db (the Studio
- * entitlement gate, and the parcelNodeId / artifactId shape checks) — the
- * exact same reason a FREE-tier caller never reaches Postgres in
- * production. The DB-backed rows (an actual purchased job/document) stay
- * covered by tests/records-extraction.test.ts's real-Postgres suite; this
- * file's job is "does tools/list carry these two tools, and does calling
- * them reach recordsExtraction.ts with the arguments the caller gave" —
- * not re-testing recordsExtraction.ts's own DB logic.
+ * here exercises the REAL dispatch wrapper and the REAL module, proving the
+ * block fires in the actual dispatch path rather than in a stub. Stays
+ * DB-free the same way it always did: the blocked check (like the
+ * entitlement gate it now pre-empts) resolves before @workspace/db is ever
+ * touched.
  */
 import { describe, expect, it, vi } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -77,10 +86,12 @@ function firstBody(result: unknown): unknown {
 }
 
 describe("P-113 registration: list_purchased_records / read_purchased_record", () => {
-  it("both tools appear in tools/list with readiness live and the catalog's title", async () => {
+  it("both tools still appear in tools/list, now readiness blocked with the P-242 blockedReason", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
+      // P-242 predicate 3 / falsifier 2: coming-soon means listed-and-
+      // refusing, never removed from the catalog.
       expect(names).toContain("list_purchased_records");
       expect(names).toContain("read_purchased_record");
 
@@ -90,8 +101,10 @@ describe("P-113 registration: list_purchased_records / read_purchased_record", (
       const readCatalog = SMARTSITE_MCP_TOOLS.find(
         (t) => t.name === "read_purchased_record",
       );
-      expect(listCatalog?.readiness).toBe("live");
-      expect(readCatalog?.readiness).toBe("live");
+      expect(listCatalog?.readiness).toBe("blocked");
+      expect(readCatalog?.readiness).toBe("blocked");
+      expect(listCatalog?.blockedReason).toBe("P-242");
+      expect(readCatalog?.blockedReason).toBe("P-242");
 
       const listTool = tools.find((t) => t.name === "list_purchased_records");
       const readTool = tools.find((t) => t.name === "read_purchased_record");
@@ -103,8 +116,8 @@ describe("P-113 registration: list_purchased_records / read_purchased_record", (
     });
   });
 
-  it("list_purchased_records dispatches to the real Studio gate for a free-tier caller", async () => {
-    mockAuth = FREE_AUTH;
+  it("P-242 falsifier 1: a Studio-tier caller — the one path that reached the real handler before this row — now declines with not_ready on list_purchased_records", async () => {
+    mockAuth = STUDIO_AUTH;
     await withTestClient(async (client) => {
       const result = await client.callTool({
         name: "list_purchased_records",
@@ -112,15 +125,15 @@ describe("P-113 registration: list_purchased_records / read_purchased_record", (
       });
       expect(result.isError).toBe(true);
       expect(firstBody(result)).toMatchObject({
-        status: "upgrade_required",
-        reason: "studio_report",
-        tier: "free",
+        status: "not_ready",
+        tool: "list_purchased_records",
+        reason: "P-242",
       });
     });
   });
 
-  it("read_purchased_record dispatches to the real Studio gate for a free-tier caller", async () => {
-    mockAuth = FREE_AUTH;
+  it("P-242 falsifier 1: a Studio-tier caller now declines with not_ready on read_purchased_record", async () => {
+    mockAuth = STUDIO_AUTH;
     await withTestClient(async (client) => {
       const result = await client.callTool({
         name: "read_purchased_record",
@@ -128,14 +141,33 @@ describe("P-113 registration: list_purchased_records / read_purchased_record", (
       });
       expect(result.isError).toBe(true);
       expect(firstBody(result)).toMatchObject({
-        status: "upgrade_required",
-        reason: "studio_report",
-        tier: "free",
+        status: "not_ready",
+        tool: "read_purchased_record",
+        reason: "P-242",
       });
     });
   });
 
-  it("a Studio caller's malformed parcelNodeId reaches recordsExtraction.ts's own validation (proves the arg is threaded through, not swallowed at dispatch)", async () => {
+  it("a free-tier caller ALSO gets not_ready, not the Studio-gate upgrade_required — the block fires before any entitlement check", async () => {
+    mockAuth = FREE_AUTH;
+    await withTestClient(async (client) => {
+      const listResult = await client.callTool({
+        name: "list_purchased_records",
+        arguments: { parcelNodeId: "48453:R123456" },
+      });
+      expect(listResult.isError).toBe(true);
+      expect(firstBody(listResult)).toMatchObject({ status: "not_ready" });
+
+      const readResult = await client.callTool({
+        name: "read_purchased_record",
+        arguments: { parcelNodeId: "48453:R123456", artifactId: "art-1" },
+      });
+      expect(readResult.isError).toBe(true);
+      expect(firstBody(readResult)).toMatchObject({ status: "not_ready" });
+    });
+  });
+
+  it("a Studio caller's malformed parcelNodeId still gets not_ready, never recordsExtraction.ts's own validation — proves the block runs before args are even inspected, not merely before valid args succeed", async () => {
     mockAuth = STUDIO_AUTH;
     await withTestClient(async (client) => {
       const result = await client.callTool({
@@ -143,29 +175,11 @@ describe("P-113 registration: list_purchased_records / read_purchased_record", (
         arguments: { parcelNodeId: "not-a-parcel-id" },
       });
       expect(result.isError).toBe(true);
-      expect(firstBody(result)).toMatchObject({
-        status: "refused",
-        reason: "parcel_node_id_invalid",
-        parcelNodeId: "not-a-parcel-id",
-      });
+      expect(firstBody(result)).toMatchObject({ status: "not_ready" });
     });
   });
 
-  it("a Studio caller's missing artifactId reaches recordsExtraction.ts's own validation on read_purchased_record", async () => {
-    mockAuth = STUDIO_AUTH;
-    await withTestClient(async (client) => {
-      // artifactId is required by the tool's own inputSchema (.strict()), so
-      // omitting it is refused at the schema boundary before the handler
-      // runs — still proof the schema for this new tool is wired correctly.
-      const result = await client.callTool({
-        name: "read_purchased_record",
-        arguments: { parcelNodeId: "48453:R123456" },
-      });
-      expect(result.isError).toBe(true);
-    });
-  });
-
-  it("read_purchased_record's inputSchema rejects an unknown extra key (registered as .strict(), like its siblings)", async () => {
+  it("read_purchased_record's inputSchema still rejects an unknown extra key at the schema boundary (schema validation is unaffected by readiness)", async () => {
     mockAuth = STUDIO_AUTH;
     await withTestClient(async (client) => {
       const result = await client.callTool({
