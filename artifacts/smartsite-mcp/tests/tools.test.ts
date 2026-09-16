@@ -834,11 +834,15 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
             name: "get_smart_site",
             arguments: { parcelNodeId: "48021:34137", depth: "node" },
           });
+          // P-243: content[0] is now shaped prose, not raw JSON; the full
+          // record (including ownerFact) lives in structuredContent.
           const text = (result.content?.[0] as { text: string }).text;
           expect(text).not.toContain("SMITH, RICHARD");
           expect(text).not.toContain("908 PINE ST");
           expect(text).not.toContain("seniorOrDisability");
-          const parsed = JSON.parse(text) as { ownerFact?: { state?: string; code?: string } };
+          const parsed = (result as { structuredContent?: Record<string, unknown> }).structuredContent as {
+            ownerFact?: { state?: string; code?: string };
+          };
           if (parsed.ownerFact) {
             expect(parsed.ownerFact).toMatchObject({ state: "refused", code: "studio-gated" });
           }
@@ -858,7 +862,15 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
             name: "get_smart_site",
             arguments: { parcelNodeId: "48021:34137", depth: "node" },
           });
-          const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+          // P-243: shaping never renders owner data in content[0] at any
+          // tier (a deliberate choice, not a gate -- the co-gate above is
+          // the actual security boundary and is untouched); it still lives
+          // in structuredContent for an entitled caller.
+          const text = (result.content?.[0] as { text: string }).text;
+          expect(text).not.toContain("SMITH, RICHARD");
+          const parsed = (result as { structuredContent?: Record<string, unknown> }).structuredContent as {
+            ownerFact?: unknown;
+          };
           expect(parsed.ownerFact).toEqual(OWNER_FACT);
           expect(mockHasPropertyUnlock).not.toHaveBeenCalled();
         });
@@ -874,7 +886,9 @@ describe("smartsite-mcp tier gates (P-87 item 11)", () => {
           name: "get_smart_site",
           arguments: { parcelNodeId: "48021:34137", depth: "node" },
         });
-        const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+        const parsed = (result as { structuredContent?: Record<string, unknown> }).structuredContent as {
+          ownerFact?: unknown;
+        };
         expect(parsed.ownerFact).toEqual(OWNER_FACT);
         expect(mockHasPropertyUnlock).toHaveBeenCalledWith("user-solo", "48021:34137");
       });
@@ -1020,7 +1034,11 @@ describe("get_smart_site batch and depth (P-91 items 3–5)", () => {
         arguments: { parcelNodeId: "48021:34137" },
       });
       expect(result.isError).toBe(false);
-      const parsed = JSON.parse((result.content?.[0] as { text: string }).text);
+      // P-243: single-id node reads shape content[0]; the full record
+      // (including draw, byte-identical to before) moves to structuredContent.
+      const parsed = (result as { structuredContent?: Record<string, unknown> }).structuredContent as {
+        draw: typeof GOLD_DRAW;
+      };
       // V3: the raw machine token on the envelope overlay's `reason` field
       // (this is the exact live-session bug: "atom_path_pending" reaching
       // the model with no display string) now carries the panel's own

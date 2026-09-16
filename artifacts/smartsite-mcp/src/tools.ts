@@ -49,7 +49,12 @@ import {
   stripSavedPropertiesForExternal,
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
-import { appMetaFor, registerMcpApp } from "./mcp-app.js";
+import {
+  appMetaFor,
+  registerMcpApp,
+  APP_MIME,
+  APP_RESOURCE_URI,
+} from "./mcp-app.js";
 import {
   registerVocabularyResource,
   STANDING_VOCAB_CONTENT_PART,
@@ -326,7 +331,8 @@ function isDeclaredErrorText(text: string): boolean {
  */
 function ensureDeclaredError(result: ToolResult): ToolResult {
   if (!result.isError) return result;
-  const text = result.content[0]?.text;
+  const first = result.content[0];
+  const text = first && first.type === "text" ? first.text : undefined;
   if (typeof text !== "string" || isDeclaredErrorText(text)) return result;
   return {
     ...result,
@@ -581,7 +587,18 @@ function annotationsFor(name: SmartsiteToolName) {
   return { readOnlyHint: true };
 }
 
-type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
+type HandlerResult = ToolResult & {
+  /**
+   * P-243: set only by a handler branch that has already composed its own
+   * prose from the vocabulary (never raw tokens a model would need this
+   * glossary to translate). Internal to this module -- stripped below,
+   * never reaches the wire. Every OTHER tool, and every other branch of
+   * get_smart_site (stub, batch, error, not-implemented, refused), is
+   * unaffected: this flag is opt-in per result, not per tool.
+   */
+  skipStandingVocab?: boolean;
+};
+type ToolHandler = (args: Record<string, unknown>) => Promise<HandlerResult>;
 
 /**
  * V2 (P-91 v3), payload half, standing-block leg. Every tool result gets
@@ -589,14 +606,190 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
  * every call. content[0] — the tool's own JSON — is never touched or
  * reordered, so every existing caller that reads content[0] sees exactly
  * what it saw before this wrapper existed; this is purely additive.
+ *
+ * P-243 amendment: a result may opt out via skipStandingVocab when its own
+ * content[0] is already composed prose, not raw tokens.
  */
 function attachStandingVocabBlock(handler: ToolHandler): ToolHandler {
   return async (args) => {
-    const result = await handler(args);
+    const { skipStandingVocab, ...result } = await handler(args);
+    if (skipStandingVocab) return result;
     return {
       ...result,
       content: [...result.content, STANDING_VOCAB_CONTENT_PART],
     };
+  };
+}
+
+type BriefSection = {
+  id?: string;
+  title?: string;
+  data?: Record<string, unknown> | null;
+  citations?: Array<{ url?: string }>;
+  citationsDegraded?: boolean;
+  disposition?: string;
+  dispositionDisplayText?: string;
+  reason?: string;
+  agentGuidance?: string;
+};
+
+function mono(value: unknown): string {
+  return "`" + String(value) + "`";
+}
+
+/** Citation column: never invents a link where citationsDegraded is true (falsifier 3). */
+function citationText(section: BriefSection): string {
+  if (section.citationsDegraded) return "citation degraded";
+  const url = section.citations?.[0]?.url;
+  return url ? url : "no citation on record";
+}
+
+function briefSectionRow(section: BriefSection): string {
+  const value = briefSectionValue(section);
+  const disposition = section.dispositionDisplayText ?? section.disposition ?? "unknown";
+  const note = section.disposition === "present" ? citationText(section) : (section.reason ?? disposition);
+  return `| ${section.title ?? section.id ?? "?"} | ${value} | ${disposition} | ${note} |`;
+}
+
+function briefSectionValue(section: BriefSection): string {
+  if (section.disposition !== "present" || !section.data) return "—";
+  const d = section.data;
+  switch (section.id) {
+    case "zoning":
+      return mono(d.district ?? "?");
+    case "setbacks-envelope":
+      return mono(`${d.frontFt ?? "-"}/${d.sideFt ?? "-"}/${d.rearFt ?? "-"}/${d.cornerFt ?? "-"} ft (F/S/R/C)`);
+    case "flood":
+      return mono(`${d.floodZone ?? "?"}${d.floodway ? " (floodway)" : ""}`);
+    case "land-use":
+      return mono(d.landUseLabel ? `${d.landUseCode} - ${d.landUseLabel}` : `${d.landUseCode ?? "?"}`);
+    default:
+      return mono(JSON.stringify(d));
+  }
+}
+
+/**
+ * P-243. Replaces get_smart_site's single-node content[0] -- previously the
+ * entire raw JSON record (measured 2026-09-16 on 48021:34137: 31,826 bytes
+ * across two content parts) -- with a short plain-language paragraph plus a
+ * compact cited-value table, per the Claude-view design of record. The FULL
+ * record moves to structuredContent, unchanged, so nothing the panel needs
+ * (geometry, edges, footprint, every *Fact rail) is dropped -- it is
+ * relocated, not deleted. A resource_link to the app board tells any
+ * spec-compliant client that a panel exists for this result, which is the
+ * literal gap the dispatch measured (no content-array reference to
+ * ui://smartsite/app-p562.html anywhere). skipStandingVocab is set because
+ * this content[0] is now server-composed prose, not raw tokens a model
+ * needs the glossary to translate -- the vocabulary resource remains
+ * registered and fetchable, and every other tool keeps inlining it.
+ *
+ * Deliberately NOT rendered in the table (see CP1 _inbox/2026-09-16_p243-*
+ * and the close): ownerFact (P-220 is a separate gated concern, out of
+ * scope here) and valueHistoryFact's dollar figures (the same call's own
+ * cadRoll refuses those dollar categories as studio-gated for this caller;
+ * rendering valueHistoryFact's unrestricted figures in the new shaped
+ * surface would launder that inconsistency rather than report it). Both
+ * remain fully present in structuredContent, untouched.
+ */
+export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(rawText) as Record<string, unknown>;
+  } catch {
+    // Defensive only: normalizeGetSmartSiteResponseText/attachAnchorToResponseText
+    // are expected to always hand back valid JSON. Fail closed to the raw
+    // text rather than throwing, and skip shaping rather than guess.
+    return { content: [{ type: "text" as const, text: rawText }], isError: false };
+  }
+
+  const draw = (data.draw ?? {}) as Record<string, unknown>;
+  const onRecord = (data.onRecord ?? {}) as Record<string, unknown>;
+  const cityLimits = data.cityLimitsFact as Record<string, unknown> | undefined;
+  const structural = data.structuralFact as Record<string, unknown> | undefined;
+  const pipeline = data.pipelineFact as Record<string, unknown> | undefined;
+  const overlays = (draw.overlays ?? []) as Array<Record<string, unknown>>;
+  const pipelineOverlay = overlays.find((o) => o.id === "pipeline");
+  const sections = ((data.brief as Record<string, unknown> | undefined)?.sections ??
+    []) as BriefSection[];
+
+  const label =
+    (typeof draw.label === "string" ? draw.label.replace(/\s+,/, ",").trim() : null) ??
+    (onRecord.apn ? `parcel APN ${onRecord.apn}` : "this parcel");
+  const acreage = (onRecord.acreage as Record<string, unknown> | undefined)?.value;
+  const countyName = onRecord.countyName;
+  const zoningSection = sections.find((s) => s.id === "zoning");
+  const zoningDistrict =
+    zoningSection?.disposition === "present" ? (zoningSection.data?.district as string) : null;
+
+  const proseParts: string[] = [];
+  proseParts.push(
+    `${label}${countyName ? `, ${countyName} County` : ""}${
+      typeof acreage === "number" ? `, ${acreage} acres` : ""
+    }${zoningDistrict ? `, zoned ${zoningDistrict}` : ""}.`,
+  );
+  if (cityLimits?.status) {
+    proseParts.push(
+      `${cityLimits.status === "incorporated" ? "Inside" : "Outside"} city limits${
+        cityLimits.cityName ? ` (${cityLimits.cityName})` : ""
+      }.`,
+    );
+  }
+  if (structural?.yearBuilt) {
+    proseParts.push(`Structure on record from ${structural.yearBuilt}.`);
+  }
+  const degradedCount = sections.filter((s) => s.citationsDegraded).length;
+  const unreadCount = sections.filter((s) => s.disposition && s.disposition !== "present").length;
+  if (degradedCount || unreadCount) {
+    proseParts.push(
+      `${degradedCount ? `${degradedCount} section(s) below carry a degraded citation (source exists, no verifiable link).` : ""} ${
+        unreadCount ? `${unreadCount} section(s) were not read or are absent on this call.` : ""
+      }`.trim(),
+    );
+  }
+
+  const rows: string[] = [
+    "| Rail | Value | Disposition | Citation / note |",
+    "| --- | --- | --- | --- |",
+    ...sections.map(briefSectionRow),
+  ];
+  if (cityLimits) {
+    rows.push(
+      `| City limits | ${mono(cityLimits.status ?? "unknown")} | ${cityLimits.status ? "Present" : "unknown"} | ${cityLimits.basis ?? "no citation on record"} |`,
+    );
+  }
+  if (structural?.yearBuilt) {
+    rows.push(`| Year built | ${mono(structural.yearBuilt)} | Present | ${structural.source ?? "cad_property"} |`);
+  }
+  if (pipeline) {
+    // P-217, not fixed here: the structured fact and its own map overlay
+    // disagree on confidence. Both halves render; neither is collapsed into
+    // the other (dispatch known trap, reproduced live 2026-09-16).
+    rows.push(
+      `| Pipeline (staged RRC data) | ${mono(pipeline.nearPipeline === false ? "no pipeline within ~500 ft" : "present nearby")} | ${pipeline.state ?? "unknown"} | source vintage ${pipeline.sourceVintage ?? "unknown"} |`,
+    );
+    if (pipelineOverlay) {
+      rows.push(
+        `| Pipeline (map confidence) | ${mono(pipelineOverlay.state ?? "unknown")} | ${pipelineOverlay.state === "unknown" ? "Not a finding either way" : String(pipelineOverlay.state)} | ${pipelineOverlay.reason ?? pipelineOverlay.reasonDisplayText ?? "-"} |`,
+      );
+    }
+  }
+
+  const text = `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nFull record, geometry, and the map panel are attached to this result; owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`;
+
+  return {
+    content: [
+      { type: "text" as const, text },
+      {
+        type: "resource_link" as const,
+        uri: APP_RESOURCE_URI,
+        name: "Smart Site board",
+        mimeType: APP_MIME,
+        description: "Interactive parcel panel: map, boundary, and buildable envelope for this read.",
+      },
+    ],
+    structuredContent: data,
+    isError: false,
+    skipStandingVocab: true,
   };
 }
 
@@ -940,6 +1133,9 @@ export function registerTools(server: McpServer): void {
               const anchored = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
+              if (mode === "single-node") {
+                return shapeSmartSiteNodeResult(anchored);
+              }
               return {
                 content: [{ type: "text" as const, text: anchored }],
                 isError: false,
