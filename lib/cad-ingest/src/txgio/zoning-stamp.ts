@@ -22,6 +22,11 @@
  * parcel whose representative point falls in NO zoning polygon (outside the
  * city, or an un-zoned pocket) is left unstamped (null) — the honest
  * conservative-fallback path, never a guessed district.
+ *
+ * Same rule, one step further out (P-259): a parcel that lands in a polygon
+ * whose published value has no base district in this city's vocabulary
+ * (`parse.kind: "unrecognised"`) is reported as its own bucket, stamped with
+ * the published value verbatim rather than with a truncated prefix.
  */
 
 import {
@@ -31,6 +36,7 @@ import {
   type GeoBbox,
   type GeoJsonGeometry,
 } from "./geo";
+import type { BaseCodeParse } from "./zoning-base-code";
 
 /** One zoning polygon plus its raw district code, ready for indexed PIP. */
 export interface ZoningPolygon {
@@ -40,6 +46,31 @@ export interface ZoningPolygon {
   description?: string | null;
   geometry: GeoJsonGeometry;
   bbox: GeoBbox;
+  /**
+   * OPTIONAL (P-259). Set only for a layer whose config carries
+   * `baseCodeParse` — the parse of the published value this polygon came from.
+   * `parse.kind` decides what `code` means:
+   *  - `base` — `code` is the resolved base district.
+   *  - `planned-development` — `code` is the published PUD/PDD/PD/PC value.
+   *  - `unrecognised` — `code` is the published value VERBATIM, and it is
+   *    still what gets stamped: the raw value is a fact about the parcel and
+   *    the router has a designed decline path for a code it cannot resolve,
+   *    whereas writing NULL would assert "no zoning on record". What is never
+   *    written is a truncated prefix (for "CS-1-MU-…" that would be CS, a
+   *    different district with its own row). The polygon is kept in the index
+   *    so a parcel inside it is not miscounted as "outside the city", and the
+   *    stamp summary counts it in `parcelsUnrecognised`.
+   *
+   * `parse.interim` (P-259b) is carried unchanged and is what the writer reads
+   * to set `txgio_parcel.zoning_district_interim` — a declared interim qualifier
+   * (`I-<base>`) means the base district's standards apply by ordinance while
+   * the zoning itself is interim. It is TRUE for a resolved interim base AND for
+   * an interim value that resolved to nothing, so an unresolved `I-XYZ` is
+   * disclosed as interim rather than folded into the generic unrecognised set.
+   * It never changes `code`: "I-SF-2-NP" still stamps SF-2, exactly its base.
+   * Absent for every other layer, where the published code IS the district.
+   */
+  parse?: BaseCodeParse;
 }
 
 /**
@@ -50,7 +81,12 @@ export interface ZoningPolygon {
  * holds the query point.
  */
 export function buildZoningIndex(
-  features: Array<{ code: string | null | undefined; description?: string | null; geometry: GeoJsonGeometry | null | undefined }>,
+  features: Array<{
+    code: string | null | undefined;
+    description?: string | null;
+    geometry: GeoJsonGeometry | null | undefined;
+    parse?: BaseCodeParse;
+  }>,
 ): ZoningPolygon[] {
   const out: ZoningPolygon[] = [];
   for (const f of features) {
@@ -59,7 +95,13 @@ export function buildZoningIndex(
     if (!f.geometry) continue;
     const bbox = bboxOfGeometry(f.geometry);
     if (!bbox) continue;
-    out.push({ code, description: f.description ?? null, geometry: f.geometry, bbox });
+    out.push({
+      code,
+      description: f.description ?? null,
+      geometry: f.geometry,
+      bbox,
+      parse: f.parse,
+    });
   }
   return out;
 }
@@ -179,12 +221,17 @@ export function representativePoint(
  * the point is in no zoning polygon. Bbox pre-filter then even-odd ray-cast
  * (`pointInGeometry`). First containing polygon wins (zoning layers do not
  * overlap; on the rare shared boundary the first is as correct as any).
+ *
+ * `parse` (P-259) is carried straight off the polygon so the caller can tell a
+ * real district from a published value this city's vocabulary does not carry:
+ * the latter is stamped VERBATIM and counted apart (never a truncated prefix,
+ * never a silent null).
  */
 export function zoningCodeAtPoint(
   index: ZoningPolygon[],
   longitude: number,
   latitude: number,
-): { code: string; description?: string | null } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse } | null {
   const pointBbox: GeoBbox = {
     westLng: longitude,
     southLat: latitude,
@@ -194,10 +241,32 @@ export function zoningCodeAtPoint(
   for (const poly of index) {
     if (!bboxesIntersect(poly.bbox, pointBbox)) continue;
     if (pointInGeometry(longitude, latitude, poly.geometry)) {
-      return { code: poly.code, description: poly.description };
+      return {
+        code: poly.code,
+        description: poly.description,
+        parse: poly.parse,
+      };
     }
   }
   return null;
+}
+
+/**
+ * True when the matched zoning polygon's published value carried a DECLARED
+ * interim qualifier (P-259b) — Austin's `I-<base>` family. The stamped district
+ * is the base district, which is what the ordinance gives it; the extra fact is
+ * that the zoning is INTERIM (granted on annexation until permanent zoning is
+ * established), which is not the same as stably-zoned `SF-2` and is disclosed
+ * separately on the parcel row rather than in `zoning_district`.
+ *
+ * Reads `parse.interim` and nothing else, so it is true for an interim value
+ * that resolved to a base, an interim planned-development value, and an
+ * unresolved interim value alike.
+ */
+export function isInterimDistrict(
+  hit: { parse?: BaseCodeParse } | null | undefined,
+): boolean {
+  return hit?.parse?.interim === true;
 }
 
 /**
@@ -209,7 +278,7 @@ export function zoningCodeAtPoint(
 export function stampParcelZoning(
   index: ZoningPolygon[],
   parcelGeometry: GeoJsonGeometry,
-): { code: string; description?: string | null } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse } | null {
   const centroid = representativePoint(parcelGeometry);
   if (centroid) {
     const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);

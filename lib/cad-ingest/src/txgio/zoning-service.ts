@@ -12,9 +12,22 @@
  * CRL endpoint is unreachable from a sandboxed runner; the CLI is run with
  * the sandbox relaxed for this fetch (the reader here just uses global
  * fetch and is fully injectable for tests).
+ *
+ * Frame and vintage (P-259): the requested frame is `outSR=4326` and the
+ * RESPONSE is verified against the WGS84 degree bounds on every page
+ * (`assertWgs84Frame`) — Austin's layer is published in state-plane feet, so a
+ * host that ignored the parameter would otherwise have degrees point-in-
+ * polygon'd against feet and report a clean 0%, indistinguishable from an
+ * unzoned city. The layer's own `spatialReference` and
+ * `editingInfo.lastEditDate` are read at source and handed to the caller
+ * through `onMeta`: a vintage that is read, never inferred from the source's
+ * kind (most-current-source ruling, 2026-09-11).
  */
 
 import type { GeoJsonGeometry } from "./geo";
+import { bboxOfGeometry, isPlausibleTexasWgs84Bbox } from "./geo";
+import type { BaseCodeParse } from "./zoning-base-code";
+import { parseBaseCode } from "./zoning-base-code";
 import type { ZoningLayerConfig } from "./zoning-layers";
 
 /** Server page size cap; ArcGIS commonly maxes at 2000. */
@@ -81,6 +94,15 @@ export interface RawZoningFeature {
   code: string | null;
   description: string | null;
   geometry: GeoJsonGeometry | null;
+  /**
+   * OPTIONAL (P-259). Set only when the layer config carries `baseCodeParse`:
+   * the full parse of the published value — kind, base, overlays and the
+   * reason. Absent for every other layer, where absent means "the published
+   * value IS the district" (the Georgetown/Austin-old contract). It travels
+   * with the polygon all the way into the stamp summary so overlays a later
+   * ruling may need are never discarded at the layer boundary.
+   */
+  parse?: BaseCodeParse;
 }
 
 function str(v: unknown): string | null {
@@ -155,6 +177,7 @@ export function reduceZoningFeature(
     | "codeExtractRegex"
     | "codeDomainMap"
     | "nullDistrictCodes"
+    | "baseCodeParse"
   >,
 ): RawZoningFeature {
   const { properties: props, geometry } = normalizeZoningPageFeature(feature);
@@ -163,10 +186,30 @@ export function reduceZoningFeature(
     cfg.codeDomainMap,
   );
   const code = extractCode(decoded, cfg.codeExtractRegex);
+  const description = cfg.descriptionField
+    ? str(props[cfg.descriptionField])
+    : null;
+  if (isNullDistrictCode(code, cfg.nullDistrictCodes)) {
+    return { code: null, description, geometry };
+  }
+  if (!cfg.baseCodeParse || code === null) {
+    return { code, description, geometry };
+  }
+  // Base-code layers (Austin): resolve the compound published value to its
+  // base district. `unrecognised` keeps the RAW value in `code` — the published
+  // value is stamped verbatim (never a truncated prefix; see
+  // `ZoningPolygon.parse`), and the polygon stays in the PIP index so a parcel
+  // inside it is not miscounted as "outside the city". `planned-development`
+  // keeps the raw value too, which is what makes A-164's PUD message fire on it
+  // exactly as it did before this parser existed. An INTERIM value
+  // (`parse.interim`, P-259b) resolves to its base district and carries the flag
+  // on the parse; the flag, not this function, decides what the stamp writes.
+  const parse = parseBaseCode(code, cfg.baseCodeParse);
   return {
-    code: isNullDistrictCode(code, cfg.nullDistrictCodes) ? null : code,
-    description: cfg.descriptionField ? str(props[cfg.descriptionField]) : null,
+    code: parse.kind === "base" ? (parse.base ?? code) : code,
+    description,
     geometry,
+    parse,
   };
 }
 
@@ -179,6 +222,119 @@ export interface ZoningFetchOptions {
   /** Cap features fetched (bounded sample runs). */
   limit?: number;
   onPage?: (info: { offset: number; got: number; total: number }) => void;
+  /**
+   * Called once, before the first page, with what the layer says about
+   * itself (source spatial reference, vintage). Purely observational: a host
+   * that publishes no metadata yields nulls, and the fetch still runs.
+   */
+  onMeta?: (meta: ZoningLayerMeta) => void;
+}
+
+/**
+ * What a layer publishes about itself — READ AT SOURCE, never assumed.
+ *
+ * The projection is the reason this exists: Austin's layer is state-plane
+ * FEET (wkid 102739 / latestWkid 2277) while `txgio_parcel` geometry is WGS84
+ * degrees, so `outSR=4326` is requested on every page and the response frame
+ * is verified (see {@link assertWgs84Frame}). `lastEditDate` is the layer
+ * vintage the most-current-source ruling requires be read from the source
+ * itself rather than inferred from the source's kind.
+ */
+export interface ZoningLayerMeta {
+  /** Layer name as published. */
+  name: string | null;
+  /** Publisher's own spatial reference wkid (Austin: 102739). */
+  sourceWkid: number | null;
+  /** Publisher's `latestWkid` (Austin: 2277 = TX Central state plane feet). */
+  sourceLatestWkid: number | null;
+  /** `editingInfo.lastEditDate` as an ISO string — the layer's vintage. */
+  lastEditDate: string | null;
+  /** Server page cap as published. */
+  maxRecordCount: number | null;
+  /** True when the layer metadata could not be read (fields stay null). */
+  unavailable: boolean;
+}
+
+const EMPTY_META: ZoningLayerMeta = {
+  name: null,
+  sourceWkid: null,
+  sourceLatestWkid: null,
+  lastEditDate: null,
+  maxRecordCount: null,
+  unavailable: true,
+};
+
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** ArcGIS sends epoch ms; an ISO string is passed through. */
+function epochToIso(v: unknown): string | null {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+    return new Date(v).toISOString();
+  }
+  const s = str(v);
+  if (s && !Number.isNaN(Date.parse(s))) return new Date(s).toISOString();
+  return null;
+}
+
+/** Read a layer's own metadata (`?f=json`). Never throws, never guesses. */
+export async function fetchZoningLayerMeta(
+  layerUrl: string,
+  fetchJson: FetchJson = defaultFetchJson,
+): Promise<ZoningLayerMeta> {
+  const base = layerUrl.replace(/\/+$/, "");
+  try {
+    const m = (await fetchJson(`${base}?f=json`)) as {
+      name?: unknown;
+      maxRecordCount?: unknown;
+      spatialReference?: { wkid?: unknown; latestWkid?: unknown } | null;
+      editingInfo?: { lastEditDate?: unknown } | null;
+    };
+    const sr = m.spatialReference ?? null;
+    return {
+      name: str(m.name),
+      sourceWkid: num(sr?.wkid),
+      sourceLatestWkid: num(sr?.latestWkid),
+      lastEditDate: epochToIso(m.editingInfo?.lastEditDate),
+      maxRecordCount: num(m.maxRecordCount),
+      unavailable: false,
+    };
+  } catch {
+    // A host that refuses `?f=json` (or an unreachable OCSP endpoint) must not
+    // stop the fetch — but the caller is told the metadata is UNAVAILABLE
+    // rather than handed an assumed projection or vintage.
+    return { ...EMPTY_META };
+  }
+}
+
+/**
+ * Verify that a fetched page really is in WGS84 degrees.
+ *
+ * `outSR=4326` is REQUESTED on every page, but a host that ignores it returns
+ * its own source frame (Austin's is state-plane FEET, x ≈ 3.1e6). PIP would
+ * then compare degrees against feet, match nothing, and report a clean 0% —
+ * indistinguishable from "the city has no zoning here". A bbox outside the
+ * plausible Texas WGS84 envelope (the same `isPlausibleTexasWgs84Bbox` guard
+ * the parcel ingest uses, reused rather than re-derived) is proof the request
+ * was ignored, so the run fails loudly instead of stamping nothing.
+ */
+export function assertWgs84Frame(
+  features: RawZoningFeature[],
+  layerUrl: string,
+): void {
+  for (const f of features) {
+    if (!f.geometry) continue;
+    const bbox = bboxOfGeometry(f.geometry);
+    if (!bbox || isPlausibleTexasWgs84Bbox(bbox)) continue;
+    throw new Error(
+      `zoning layer ${layerUrl} returned geometry outside the plausible Texas ` +
+        `WGS84 envelope (west=${bbox.westLng}, south=${bbox.southLat}, ` +
+        `east=${bbox.eastLng}, north=${bbox.northLat}) — outSR=4326 was ` +
+        "ignored, so PIP against WGS84 parcels would silently match nothing; " +
+        "refusing to continue",
+    );
+  }
 }
 
 /**
@@ -191,20 +347,9 @@ export interface ZoningFetchOptions {
  * Asking above the server cap both under-fetches (silent truncate) and can
  * 400 on later offsets (Killeen MapServer at offset 5000 with want=2000).
  */
-async function resolveZoningPageSize(
-  layerUrl: string,
-  fetchJson: FetchJson,
-): Promise<number> {
-  try {
-    const meta = (await fetchJson(`${layerUrl}?f=json`)) as {
-      maxRecordCount?: unknown;
-    };
-    const max = meta.maxRecordCount;
-    if (typeof max === "number" && Number.isFinite(max) && max > 0) {
-      return Math.min(ZONING_PAGE_SIZE, Math.floor(max));
-    }
-  } catch {
-    // Fall through to default — paging loop still handles full-page continue.
+function pageSizeFromMeta(meta: ZoningLayerMeta): number {
+  if (meta.maxRecordCount !== null && meta.maxRecordCount > 0) {
+    return Math.min(ZONING_PAGE_SIZE, Math.floor(meta.maxRecordCount));
   }
   return ZONING_PAGE_SIZE;
 }
@@ -216,7 +361,12 @@ export async function fetchZoningFeatures(
   const rateMs = opts.rateMs ?? ZONING_RATE_MS;
   const base = opts.cfg.layerUrl.replace(/\/+$/, "");
   const out: RawZoningFeature[] = [];
-  let pageSize = await resolveZoningPageSize(base, fetchJson);
+  // Read the layer's own metadata FIRST: page size off its published cap,
+  // source spatial reference + vintage reported to the caller, and every page
+  // verified to really be in the WGS84 frame that was requested.
+  const meta = await fetchZoningLayerMeta(base, fetchJson);
+  opts.onMeta?.(meta);
+  let pageSize = pageSizeFromMeta(meta);
 
   let offset = 0;
   for (;;) {
@@ -238,8 +388,10 @@ export async function fetchZoningFeatures(
       exceededTransferLimit?: boolean;
     };
     const feats = Array.isArray(page.features) ? page.features : [];
-    for (const f of feats) {
-      out.push(reduceZoningFeature(f, opts.cfg));
+    const reduced = feats.map((f) => reduceZoningFeature(f, opts.cfg));
+    assertWgs84Frame(reduced, base);
+    for (const f of reduced) {
+      out.push(f);
       if (opts.limit !== undefined && out.length >= opts.limit) {
         opts.onPage?.({ offset, got: feats.length, total: out.length });
         return out;
