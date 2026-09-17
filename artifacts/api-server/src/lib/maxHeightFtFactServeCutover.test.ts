@@ -1,137 +1,142 @@
 /**
- * The serve-layer integration point for maxHeightFt (F-01, OPS-21 P-148
- * built the wrapper; OPS-21 P-150 slates it). GOLD is 48021, one of the 5
- * counties P-150 slates (Bastrop, Caldwell, McLennan, Travis, Williamson --
- * Hays excluded, P-145 not landed).
+ * maxHeightFtFactServeCutover.ts — P-297 (operator ruling A-193, OPS-24 law 7): the serve switch
+ * is the code-owned SLATE, and what a parcel shows comes from ITS OWN cell.
+ *
+ * Rail note: maxHeightFt has no legacy reader; its fallback is a not-cut-over refusal.
+ *
+ * THIS FILE REPLACES the pre-P-297 suite, which pinned the old contract
+ * ("only a PASS verdict reaches the record; refuse / excluded / no verdict /
+ * store failure / no store all fall back to the legacy value"). Those
+ * assertions encoded the exact defect the ruling names -- one unaccounted cell
+ * anywhere in a slated county turning every parcel in it back to the bake --
+ * so they are deleted rather than kept passing. The adapter's own answer
+ * shapes are covered by <rail>FactFromParcelRecord.test.ts; what this file
+ * covers is the SWITCH, per the dispatch's falsifiers 1, 2 and 4.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  memoryParcelGateVerdicts,
-  memoryParcelGateVerdictsThatFails,
-} from "./parcelGateVerdictRead";
+import { loadMaxHeightFtFactForServe } from "./maxHeightFtFactServeCutover";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
+  type ParcelRecordQueryable,
 } from "./parcelRecordCellRead";
-import {
-  loadMaxHeightFtFactForServe,
-  resetMaxHeightFtVerdictStoreForTests,
-  setMaxHeightFtVerdictStoreForTests,
-} from "./maxHeightFtFactServeCutover";
+import { isSlatedForCellServe } from "./cellServeRule";
+import { notCutOverMaxHeightFtFact } from "./maxHeightFtFactRead";
 
-const HAYS_EXCLUDED = "48209:34137"; // real program county, deliberately never slated for this rail (P-145 not landed).
-const GOLD = "48021:34137"; // Bastrop IS slated for maxHeightFt.
+const RAIL_KEY = "maxHeightFt";
+const SLATED = "48021:34137";
+const UNSLATED = "48103:100";
+
+/** Counts every parcel_record query. Any call at all from an unslated pair is a defect. */
+function countingStore(): { store: ParcelRecordQueryable; calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      async query() {
+        calls += 1;
+        return { rows: [] };
+      },
+    } as ParcelRecordQueryable,
+  };
+}
 
 afterEach(() => {
-  resetMaxHeightFtVerdictStoreForTests();
   resetParcelRecordQueryableForTests();
 });
 
-describe("loadMaxHeightFtFactForServe — never-slated pairs", () => {
-  it("Hays resolves to the typed not-cut-over refusal, never a store call", async () => {
-    setMaxHeightFtVerdictStoreForTests(null);
-    const result = await loadMaxHeightFtFactForServe(HAYS_EXCLUDED);
-    expect(result).toEqual({
-      state: "refused",
-      code: "not-cut-over",
-      source: "max-height-ft-fact",
-      entityId: HAYS_EXCLUDED,
-      reason:
-        "maxHeightFt has no legacy serve path -- it is served only from parcel_record, and only once this (county, rail) pair is slated with a passing gate verdict. Not there yet for this parcel.",
-    });
+describe("maxHeightFtFactServeCutover — the slate is the switch", () => {
+  it("the slate says what this suite assumes about its two counties", () => {
+    expect(isSlatedForCellServe("48021", RAIL_KEY)).toBe(true);
+    expect(isSlatedForCellServe("48103", RAIL_KEY)).toBe(false);
   });
 
-  it("FALSIFIER: even a fabricated PASS verdict has no effect for a non-slated county (Hays, P-145 not landed) — the slate check short-circuits first", async () => {
-    setMaxHeightFtVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48209", railKey: "maxHeightFt", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-11T00:00:00Z", runId: "test" },
-      ]),
+  it("an UNSLATED pair never touches parcel_record — it runs the pre-cutover path, unchanged, with zero I/O", async () => {
+    const withoutStore = await loadMaxHeightFtFactForServe(UNSLATED);
+    const counter = countingStore();
+    setParcelRecordQueryableForTests(counter.store);
+    const withStore = await loadMaxHeightFtFactForServe(UNSLATED);
+    expect(counter.calls()).toBe(0);
+    expect(withStore).toEqual(withoutStore);
+  });
+
+  it("FALSIFIER 2: an unaccounted cell on a SLATED pair is a declared refusal carrying the cell's reason, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [{ placeKey: SLATED, railKey: RAIL_KEY, cellState: { kind: "unaccounted" } }],
+      }),
     );
-    const result = await loadMaxHeightFtFactForServe(HAYS_EXCLUDED);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+    const served = await loadMaxHeightFtFactForServe(SLATED);
+    const preCutover = notCutOverMaxHeightFtFact(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-unaccounted");
+    expect(wire).toContain("has not yet examined this rail");
+    expect(served).not.toEqual(preCutover);
   });
 
-  it("a malformed parcelNodeId resolves to not-cut-over without touching the verdict store", async () => {
-    const malformed = "not-a-valid-id";
-    const result = await loadMaxHeightFtFactForServe(malformed);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-    expect(result.entityId).toBe(malformed);
-  });
-
-  it("a store failure still resolves to not-cut-over, not a thrown error", async () => {
-    setMaxHeightFtVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const result = await loadMaxHeightFtFactForServe(HAYS_EXCLUDED);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-});
-
-describe("loadMaxHeightFtFactForServe — SLATED pairs (48021/48055/48309/48453/48491, OPS-21 P-150)", () => {
-  it("a real PASS verdict on Bastrop genuinely reaches the parcel_record adapter", async () => {
-    setMaxHeightFtVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "maxHeightFt", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-11T14:03:45Z", runId: "test" },
-      ]),
-    );
+  it("an engine-refused cell on a SLATED pair is a declared refusal carrying the engine's own words", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({
         cells: [
           {
-            placeKey: GOLD,
-            railKey: "maxHeightFt",
-            cellState: {
-              kind: "value",
-              value: 35,
-              source: "@empressaio/setback-corpus@1.1.0:bastrop-development-code",
-              vintage: "2026-09-11T01:11:32.598Z",
-              citationUrl: "https://www.cityofbastrop.org/page/open/18744/0/ORDINANCE.pdf",
-              districtCode: "SF-1",
-              districtName: "SF-1 Single-Family Residential",
-              jurisdictionKey: "bastrop-development-code",
-              resolvedTableKey: "bastrop-development-code",
-            },
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "refused", reason: "no source covers this parcel" },
           },
         ],
       }),
     );
-    const result = await loadMaxHeightFtFactForServe(GOLD);
-    expect(result.state).toBe("present");
-    if (result.state !== "present") throw new Error("unreachable");
-    expect(result.feet).toBe(35);
+    const served = await loadMaxHeightFtFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-engine-refused");
+    expect(wire).toContain("no source covers this parcel");
   });
 
-  it("no verdict row on Bastrop falls back to not-cut-over, not a thrown error or a fabricated present", async () => {
-    setMaxHeightFtVerdictStoreForTests(memoryParcelGateVerdicts([]));
-    const result = await loadMaxHeightFtFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-
-  it("a REFUSE verdict on Bastrop still falls back to not-cut-over -- attempted but refused, not record", async () => {
-    setMaxHeightFtVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "maxHeightFt", verdict: "refuse", unaccountedCount: 9, evaluatedAt: "2026-09-11T00:00:00Z", runId: "test" },
-      ]),
+  it("FALSIFIER 1: a 48021 parcel whose own cell is earned is served that cell even though the county's verdict may read refuse", async () => {
+    // No verdict store is injected anywhere in this file, and the wrapper has no
+    // verdict seam left to inject one into: the verdict cannot reach this decision.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "absent-verified", basis: { method: "sweep", finding: "swept, none found" } },
+          },
+        ],
+      }),
     );
-    const result = await loadMaxHeightFtFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+    const served = await loadMaxHeightFtFactForServe(SLATED);
+    expect(served?.state).toBe("absent");
   });
 
-  it("a store failure on Bastrop fails closed to not-cut-over, not a thrown error", async () => {
-    setMaxHeightFtVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const result = await loadMaxHeightFtFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
+  it("a SLATED pair whose cell row does not exist is a declared refusal naming the missing row", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const served = await loadMaxHeightFtFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-cell-miss");
+  });
+
+  it("an unreadable/unconfigured store on a SLATED pair is a declared refusal, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(null);
+    const served = await loadMaxHeightFtFactForServe(SLATED);
+    const preCutover = notCutOverMaxHeightFtFact(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-store-not-configured");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("a malformed parcelNodeId keeps the pre-cutover path's own answer (no place_key is guessed)", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const malformed = "not-a-valid-id";
+    const viaWrapper = await loadMaxHeightFtFactForServe(malformed);
+    resetParcelRecordQueryableForTests();
+    const withoutStore = await loadMaxHeightFtFactForServe(malformed);
+    expect(viaWrapper).toEqual(withoutStore);
   });
 });

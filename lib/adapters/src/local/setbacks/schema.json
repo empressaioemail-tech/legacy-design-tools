@@ -55,14 +55,20 @@
             "properties": {
               "atom_did": {
                 "type": "string",
-                "description": "Omitted for verification_state \"primary-source-verified\" -- no real atom exists yet to reference. Required in practice (by gate.ts rule G2) for \"asserted\" / \"human-verified\", both of which claim atom backing."
+                "description": "Omitted for verification_state \"primary-source-verified\" or \"transcription-read\" -- neither claims a real atom exists to reference. Required in practice (by gate.ts rule G2) for \"asserted\" / \"human-verified\", both of which claim atom backing."
               },
               "section_number": { "type": "string" },
               "quote": { "type": "string" },
               "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
               "verification_state": {
                 "type": "string",
-                "enum": ["asserted", "human-verified", "primary-source-verified"]
+                "enum": [
+                  "asserted",
+                  "human-verified",
+                  "primary-source-verified",
+                  "transcription-read"
+                ],
+                "description": "\"transcription-read\" (P-299 OT-2, 2026-09-17): the value was read out of a COPY of the governing instrument (third-party mirror, browser render, transcription) rather than off the instrument's own text. Makes no atom-backing claim like \"primary-source-verified\", and carries a 0.75 confidence ceiling enforced by gate.ts rule G9."
               },
               "not_specified": { "type": "boolean" }
             }

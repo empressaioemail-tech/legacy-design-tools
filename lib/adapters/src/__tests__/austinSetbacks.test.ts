@@ -16,13 +16,18 @@
  *
  * No code-section atom corpus is supplied for Austin here (the gate takes
  * its atom list from the caller; this suite supplies an empty one, exactly
- * as the Belton/Seguin/Cibolo suite does), so every new value is
- * `primary-source-verified`, never `asserted`/`human-verified`.
+ * as the Belton/Seguin/Cibolo suite does), so every new value carries no
+ * atom_did and is `transcription-read` (P-299: read from the Municode
+ * browser render, a COPY of the instrument), never `asserted`/`human-verified`.
  */
 
 import { describe, expect, it } from "vitest";
 import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/index.js";
-import { runSetbackGate, type GatedSetbackTable } from "../local/setbacks/gate.js";
+import {
+  runSetbackGate,
+  TRANSCRIPTION_READ,
+  type GatedSetbackTable,
+} from "../local/setbacks/gate.js";
 
 /** Codes this lane added, largest parcel count first (lane priority order). */
 const LANE_A_CODES = [
@@ -140,8 +145,9 @@ describe("austin-tx — P-258 lane-a rows", () => {
     expect(report.counts.block).toBe(0);
     expect(report.passed).toBe(true);
     expect(report.gated).toBe(true);
-    // Every one of the 28 x 7 values is primary-source-verified, so G2 reports
-    // its own honest category rather than resolving an atom.
+    // Every one of the 28 x 7 values makes no atom claim (transcription-read
+    // since P-299), so G2 reports its own honest category rather than
+    // resolving an atom.
     const g2 = report.results.filter((r) => r.rule === "G2");
     expect(g2).toHaveLength(28 * 7);
     expect(g2.every((r) => r.level === "pass")).toBe(true);
@@ -253,7 +259,11 @@ describe("austin-tx — P-258 lane-a rows", () => {
       const p = prov(d);
       for (const f of NUMERIC_FIELDS) {
         expect(p[f], `${d.district_name}.${f}`).toBeTruthy();
-        expect(p[f]!.verification_state, `${d.district_name}.${f}`).toBe("primary-source-verified");
+        // P-299 OT-2: Austin's values were read out of Municode's browser
+        // render (a copy of the instrument), so the honest state is
+        // transcription-read — still no atom claim, but not a direct read of
+        // the instrument's own text either.
+        expect(p[f]!.verification_state, `${d.district_name}.${f}`).toBe(TRANSCRIPTION_READ);
         expect(p[f]!.quote.length, `${d.district_name}.${f}`).toBeGreaterThan(40);
         expect(p[f]!.section_number.length, `${d.district_name}.${f}`).toBeGreaterThan(0);
         expect(p[f]!.confidence, `${d.district_name}.${f}`).toBeGreaterThan(0);

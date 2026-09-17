@@ -19,7 +19,11 @@
 
 import { describe, expect, it } from "vitest";
 import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/index.js";
-import { runSetbackGate, type GatedSetbackTable } from "../local/setbacks/gate.js";
+import {
+  runSetbackGate,
+  TRANSCRIPTION_READ,
+  type GatedSetbackTable,
+} from "../local/setbacks/gate.js";
 
 const MCLENNAN: Array<[key: string, districts: number]> = [
   ["robinson-tx", 14],
@@ -31,6 +35,20 @@ const MCLENNAN: Array<[key: string, districts: number]> = [
   ["moody-tx", 7],
   ["riesel-tx", 8],
 ];
+
+/**
+ * P-299 OT-2: four of these eight tables were read through a COPY of the
+ * instrument (the tables' own notes record which mirror/render/print route) and
+ * are relabelled `transcription-read`; the other four reached the instrument's
+ * own text and stay `primary-source-verified`. Both states make no atom claim,
+ * which is what this suite has always been asserting.
+ */
+const TRANSCRIPTION_READ_TABLES = new Set([
+  "robinson-tx",
+  "bellmead-tx",
+  "woodway-tx",
+  "beverly-hills-tx",
+]);
 
 describe("McLennan batch-2 setback tables (lane-d)", () => {
   for (const [key, count] of MCLENNAN) {
@@ -51,11 +69,14 @@ describe("McLennan batch-2 setback tables (lane-d)", () => {
 
     it(`${key} claims no atom backing anywhere (no corpus exists for these jurisdictions)`, () => {
       const table = getSetbackTable(key) as unknown as GatedSetbackTable;
+      const expectedState = TRANSCRIPTION_READ_TABLES.has(key)
+        ? TRANSCRIPTION_READ
+        : "primary-source-verified";
       for (const district of table.districts) {
         const prov = district.provenance as Record<string, { verification_state: string; atom_did?: string }>;
         for (const [field, entry] of Object.entries(prov)) {
           expect(entry.verification_state, `${district.district_name}.${field}`).toBe(
-            "primary-source-verified",
+            expectedState,
           );
           expect(entry.atom_did, `${district.district_name}.${field}`).toBeUndefined();
         }

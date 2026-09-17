@@ -63,6 +63,7 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
       "side_ft",
       "side_corner_ft",
       "max_height_ft",
+      "max_height_ft_not_specified",
       "max_lot_coverage_pct",
       "max_impervious_pct",
       "citation_url",
@@ -86,6 +87,9 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
       max_lot_coverage_pct: 30,
       max_impervious_pct: 40,
     });
+    // P-299: the projection grew a field, and it must say that a SERVED number
+    // is not an absence (this test is what noticed the new key arriving).
+    expect(rr1.max_height_ft_not_specified).toBe(false);
     expect(typeof rr1.citation_url).toBe("string");
     expect(rr1.citation_url.length).toBeGreaterThan(0);
   });

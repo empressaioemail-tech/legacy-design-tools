@@ -151,7 +151,16 @@ describe("attachVerdictLayersToFacets zoning precedence", () => {
     expect((out.facetCoverage as Record<string, unknown>).zoning).toBe(false);
   });
 
-  it("a REFUSED ledger fact is never surfaced -- falls through to the baked stamp exactly like 'not cut over'", () => {
+  /**
+   * P-297 / A-193. INVERTED, NOT DELETED: these two used to assert that a
+   * refused ledger fact is "never surfaced" and falls through to the baked
+   * stamp / the city-limits verdict. The ruling forbids that fall-through --
+   * "refused and unaccounted are served as a declared refusal with the cell's
+   * reason ... the legacy or baked value is never the answer for a slated
+   * rail" -- so the rail now carries the refusal and the bake is not served
+   * for it, whether or not a baked stamp exists.
+   */
+  it("P-297: a REFUSED ledger fact IS surfaced -- it never falls through to the baked stamp", () => {
     const out = attachVerdictLayersToFacets(
       { zoning: BAKED_STAMP, facetCoverage: { zoning: true } },
       ABSENT_STRUCTURAL,
@@ -159,10 +168,12 @@ describe("attachVerdictLayersToFacets zoning precedence", () => {
       undefined,
       REFUSED_LEDGER_FACT,
     );
-    expect(out.zoning).toEqual(BAKED_STAMP);
+    expect(out.zoning).toEqual(REFUSED_LEDGER_FACT);
+    expect(out.zoning).not.toEqual(BAKED_STAMP);
+    expect((out.facetCoverage as Record<string, unknown>).zoning).toBe(false);
   });
 
-  it("a REFUSED ledger fact with no baked stamp falls through to the city-limits verdict, unchanged", () => {
+  it("P-297: a REFUSED ledger fact with no baked stamp never reaches the city-limits verdict", () => {
     const out = attachVerdictLayersToFacets(
       { zoning: null, facetCoverage: { zoning: false } },
       ABSENT_STRUCTURAL,
@@ -170,7 +181,8 @@ describe("attachVerdictLayersToFacets zoning precedence", () => {
       undefined,
       REFUSED_LEDGER_FACT,
     );
-    expect(out.zoning).toEqual(CITY_LIMITS_VERDICT);
+    expect(out.zoning).toEqual(REFUSED_LEDGER_FACT);
+    expect(out.zoning).not.toEqual(CITY_LIMITS_VERDICT);
   });
 
   it("P-124 CTX-MIRROR: an ENGINE-REFUSED ledger fact (code parcel-record-engine-refused) is now surfaced honestly, not silently replaced by the baked stamp", () => {
@@ -197,19 +209,27 @@ describe("attachVerdictLayersToFacets zoning precedence", () => {
     expect(out.zoning).not.toEqual(CITY_LIMITS_VERDICT);
   });
 
-  it("other refusal codes are UNCHANGED by the CTX-MIRROR fix: unaccounted still falls through to the city-limits fallback, not to \"refused\"", () => {
-    // Regression guard for the narrowed scope decided at CP1: only
-    // code===\"parcel-record-engine-refused\" gets the honest projection.
-    // ELGIN_UNACCOUNTED (defined below) must keep falling through exactly as
-    // before this fix.
+  /**
+   * P-297 / A-193. INVERTED, NOT DELETED: this used to pin the "narrowed scope
+   * decided at CP1" -- only code==="parcel-record-engine-refused" got the
+   * honest projection and every other code kept falling through. The ruling
+   * collapses that distinction: the serve switch is the cell, so a cell that
+   * refuses refuses for its own reason, whatever its code.
+   */
+  it("P-297: EVERY refusal code is surfaced now -- unaccounted is a declared refusal, never the city-limits fallback", () => {
+    const unaccounted: ZoningFactRead = {
+      ...REFUSED_LEDGER_FACT,
+      code: "parcel-record-unaccounted",
+    };
     const out = attachVerdictLayersToFacets(
       { zoning: null, facetCoverage: { zoning: false } },
       ABSENT_STRUCTURAL,
       CITY_LIMITS_VERDICT,
       undefined,
-      { ...REFUSED_LEDGER_FACT, code: "parcel-record-unaccounted" },
+      unaccounted,
     );
-    expect(out.zoning).toEqual(CITY_LIMITS_VERDICT);
+    expect(out.zoning).toEqual(unaccounted);
+    expect(out.zoning).not.toEqual(CITY_LIMITS_VERDICT);
   });
 
   it("a null ledger fact (not cut over for this parcel) behaves identically to omitting the argument", () => {
@@ -277,7 +297,9 @@ function withProvenance(facets: Record<string, unknown>, zoningSource: unknown =
 const railVerdict = (cell: unknown): unknown => {
   const rec = cell as Record<string, unknown> | null;
   if (!rec) return null;
-  return rec.verdict ?? (rec.absence as Record<string, unknown> | undefined)?.kind ?? null;
+  // P-297: a refusal cell carries its state, not a `verdict` field -- the rail's
+  // own verdict for it IS "refused", so the twin's must be too.
+  return rec.verdict ?? (rec.absence as Record<string, unknown> | undefined)?.kind ?? rec.state ?? null;
 };
 
 const mirrorOf = (out: Record<string, unknown>): Record<string, unknown> =>
@@ -323,7 +345,17 @@ describe("CTX-LEAVES: provenance.zoningSource mirrors the zoning rail", () => {
     expect(mirrorOf(out).verdict).toBe(railVerdict(out.zoning));
   });
 
-  it("ELGIN: an unaccounted rail plus an in-city containment gives stamp-missing on BOTH, and absent-verified on NEITHER", () => {
+  /**
+   * P-297 / A-193. INVERTED, NOT DELETED. The rail assertion used to be
+   * ELGIN_IN_CITY_VERDICT (the city-limits stamp-missing fallback) with the
+   * twin's basis explaining the containment. Under the ruling the unaccounted
+   * cell is the answer for this rail, so the rail carries the refusal, the
+   * twin mirrors it verbatim, and the twin's basis is the cell's own reason.
+   * The ELGIN INVARIANT THIS TEST EXISTS FOR IS UNCHANGED AND STILL ASSERTED:
+   * nothing on the payload may claim Elgin's unmatched parcels are
+   * absent-verified -- not the rail, and not the twin.
+   */
+  it("ELGIN: an unaccounted rail is a declared refusal on BOTH leaves, and absent-verified on NEITHER", () => {
     const out = attachVerdictLayersToFacets(
       withProvenance({ zoning: null, facetCoverage: { zoning: false } }),
       ABSENT_STRUCTURAL,
@@ -331,13 +363,12 @@ describe("CTX-LEAVES: provenance.zoningSource mirrors the zoning rail", () => {
       undefined,
       ELGIN_UNACCOUNTED,
     );
-    expect(out.zoning).toEqual(ELGIN_IN_CITY_VERDICT);
-    expect(mirrorOf(out).verdict).toBe("stamp-missing");
+    expect(out.zoning).toEqual(ELGIN_UNACCOUNTED);
     expect(mirrorOf(out).verdict).toBe(railVerdict(out.zoning));
-    // The standing ruling: Elgin's unmatched parcels are NOT verifiably
+    // The twin still carries the rail's reason, so the two leaves agree.
+    expect(mirrorOf(out).reason).toBe(ELGIN_UNACCOUNTED.reason);    // The standing ruling: Elgin's unmatched parcels are NOT verifiably
     // unzoned, so nothing on this payload may say they are.
     expect(JSON.stringify(out)).not.toContain("absent-verified");
-    expect(mirrorOf(out).basis).toContain("zoning authority is not absent");
   });
 
   it("a parcel_record ABSENT determination is projected with its own verdict and its own reason as the basis", () => {

@@ -20,7 +20,24 @@ export interface LocalSetbackDistrict {
   rear_ft: number;
   side_ft: number;
   side_corner_ft: number;
-  max_height_ft: number;
+  /** Feet, or null when the code states no feet-based height for this
+district (P-299). The corpus's canonical stated-absence sentinel is
+999 and means "read the provenance flag" — never "999 feet" — so the
+route resolves a flagged (or bare-sentinel) height to null instead of
+putting the placeholder on the wire. A null here is NOT "unlimited":
+the district's height is stated in another unit (e.g. stories) or is
+conditional; the table's own `note` records which.
+ */
+  max_height_ft: number | null;
+  /** Why `max_height_ft` is null, said in the corpus's own vocabulary
+(P-299): true when the row's `provenance.max_height_ft.not_specified`
+flag is set, or when the raw field carries the canonical 999 sentinel
+with no flag; false when a real feet value is served. A bare null
+would be an absence with its reason dropped, which is the failure
+this field exists to prevent. Additive: a consumer that ignores it
+sees exactly the null it saw before.
+ */
+  max_height_ft_not_specified: boolean;
   max_lot_coverage_pct: number;
   max_impervious_pct: number;
   citation_url: string;
