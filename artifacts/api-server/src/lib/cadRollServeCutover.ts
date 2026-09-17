@@ -1,122 +1,114 @@
 /**
- * The PARCEL-B-SLATE2 integration point (F-01,
+ * Serve-layer cutover wrapper for the CAD roll dollar rails + yearBuilt +
+ * livingAreaSqft (F-01, PARCEL-B-SLATE2,
  * `_decisions/2026-09-02_step7_consumer_c_then_b.md`).
  *
- * Unlike wells/specialDistricts/cityLimits (slate-1: one legacy loader per
- * rail, a whole-function swap), the six dollar/structural rails do not admit
- * a whole-object swap:
+ * P-297 (2026-09-16, operator ruling A-193) replaced the county-verdict gate
+ * this file used to apply. Until P-297 this module asked `resolveAllowlist`
+ * once per rail and served the record's own answer only on `record`, which
+ * required a PASSING county gate verdict -- so ONE unaccounted cell anywhere
+ * in a slated county turned all four dollar rails, sqft and yearBuilt back to
+ * the offline bake for EVERY parcel in that county. The verdict is a
+ * completeness and publish grade; it stopped deciding what a parcel shows.
  *
- *   - marketValue/assessedValue/landValue/improvementValue are baked into
- *     place_layer_snapshots (facets.baseFacts.cadRoll.*) by an offline job,
- *     not read live -- the legacy value is whatever the last bake wrote.
- *   - yearBuilt is ALSO baked (facets.baseFacts.yearBuilt) at
- *     brokerageNodeFacets.ts, but is served LIVE (via structuralFactRead.ts,
- *     bundled with livingAreaSqft) at propertyExplorer.ts -- two different
- *     legacy sources for the same rail, depending on call site.
- *   - livingAreaSqft is served live at both call sites via
- *     structuralFactRead.ts, bundled with yearBuilt in one read.
+ * The decision now comes from PARCEL_RECORD_SLATE and the parcel's OWN cell,
+ * through the one rule in `cellServeRule.ts`:
  *
- * This module resolves the allowlist for all six rails once per request
- * (parallel), and for each rail resolved to "record", fetches the
- * parcel_record-sourced value. Callers OVERLAY these onto whatever the
- * legacy path already produced -- never a whole-object swap -- and a rail
- * resolved to "legacy" or "refused" is represented as `null` here, meaning
- * "the caller must keep its own legacy value," not "no value exists."
+ *   - a rail whose (county, rail) pair is NOT in the slate -> `null` for that
+ *     rail, meaning "the caller's own pre-cutover path is the answer"
+ *     (propertyExplorer/brokerageNodeFacets keep their baked
+ *     baseFacts.cadRoll / structural fields), and NO parcel_record I/O runs
+ *     for it at all;
+ *   - a slated rail -> this parcel's own cell, served AS-IS: a value with its
+ *     source and vintage, a stated absence with its reason, or a declared
+ *     refusal carrying the cell's reason (P-269). Never the baked value.
+ *
+ * `resolveValueBasisFromParcelRecord` (the CTX-B1/A1 tier determination) runs
+ * only when at least one dollar rail is actually slated, and returns `null`
+ * when the store asserts nothing -- so the label is never defaulted onto a
+ * refused cell, and an unslated parcel does not pay for the read.
+ *
+ * The county verdict is no longer read on this path at all;
+ * `cellServeRule.test.ts` fails if this file imports the verdict reader again.
  */
 
-import { resolveAllowlist } from "./parcelRecordAllowlist";
-import { resolveVerdictStore } from "./parcelGateVerdictRead";
+import { isSlatedForCellServe } from "./cellServeRule";
 import {
+  DOLLAR_SCALAR_RAIL_KEYS,
   dollarFactFromParcelRecord,
   livingAreaSqftFromParcelRecord,
-  yearBuiltFromParcelRecord,
   resolveValueBasisFromParcelRecord,
-  DOLLAR_SCALAR_RAIL_KEYS,
+  yearBuiltFromParcelRecord,
+  type CadRollServedDollarField,
   type DollarScalarRailKey,
   type LivingAreaSqftFromParcelRecord,
   type YearBuiltFromParcelRecord,
 } from "./cadRollFactFromParcelRecord";
-import type { CadRollValueWire, ValueBasis } from "./cadRollValue";
-import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
-
-/** Test/deploy seam, same shape as wellFactServeCutover.ts's own. */
-let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
-
-export function setCadRollVerdictStoreForTests(
-  store: ParcelRecordQueryable | null,
-): void {
-  injectedVerdictStore = store;
-}
-
-export function resetCadRollVerdictStoreForTests(): void {
-  injectedVerdictStore = undefined;
-}
+import type { ValueBasis } from "./cadRollValue";
 
 export type CadRollOverlay = {
-  marketValue: CadRollValueWire | null;
-  assessedValue: CadRollValueWire | null;
-  landValue: CadRollValueWire | null;
-  improvementValue: CadRollValueWire | null;
+  marketValue: CadRollServedDollarField;
+  assessedValue: CadRollServedDollarField;
+  landValue: CadRollServedDollarField;
+  improvementValue: CadRollServedDollarField;
   livingAreaSqft: LivingAreaSqftFromParcelRecord;
   yearBuilt: YearBuiltFromParcelRecord;
 };
 
-async function dollarOverlayIfRecord(
-  store: ParcelRecordQueryable | null,
+async function dollarOverlayIfSlated(
   countyFips: string,
   propId: string,
   railKey: DollarScalarRailKey,
-  valueBasis: ValueBasis,
-): Promise<CadRollValueWire | null> {
-  const state = await resolveAllowlist(store, countyFips, railKey);
-  if (state !== "record") return null;
+  valueBasis: ValueBasis | null,
+): Promise<CadRollServedDollarField> {
+  if (!isSlatedForCellServe(countyFips, railKey)) return null;
   return dollarFactFromParcelRecord(countyFips, propId, railKey, valueBasis);
 }
 
-async function livingAreaOverlayIfRecord(
-  store: ParcelRecordQueryable | null,
+async function livingAreaOverlayIfSlated(
   countyFips: string,
   propId: string,
 ): Promise<LivingAreaSqftFromParcelRecord> {
-  const state = await resolveAllowlist(store, countyFips, "livingAreaSqft");
-  if (state !== "record") return null;
+  if (!isSlatedForCellServe(countyFips, "livingAreaSqft")) return null;
   return livingAreaSqftFromParcelRecord(countyFips, propId);
 }
 
-async function yearBuiltOverlayIfRecord(
-  store: ParcelRecordQueryable | null,
+async function yearBuiltOverlayIfSlated(
   countyFips: string,
   propId: string,
 ): Promise<YearBuiltFromParcelRecord> {
-  const state = await resolveAllowlist(store, countyFips, "yearBuilt");
-  if (state !== "record") return null;
+  if (!isSlatedForCellServe(countyFips, "yearBuilt")) return null;
   return yearBuiltFromParcelRecord(countyFips, propId);
 }
 
 /**
- * Resolve every slate-2 rail's overlay for one parcel, in parallel. Each
- * field is `null` (or `{status:"absent-in-record"}`/absent-wire for the two
- * fields whose own "no value" shape is distinct from "not cut over") when
- * the caller should keep its legacy value -- either not slated, verdict
- * refused/excluded, or the parcel_record cell itself refused/miscoerced.
+ * Resolve the six parcel_record-sourced fields this rail group serves.
+ *
+ * No store parameter and no test seam of its own any more: the reads go
+ * through `parcelRecordCellRead.ts`'s own `setParcelRecordQueryableForTests`
+ * injection (the same seam every rail adapter already uses), because the
+ * decision no longer involves a county verdict store at all.
  */
 export async function resolveCadRollOverlaysForServe(
   countyFips: string,
   propId: string,
 ): Promise<CadRollOverlay> {
-  const store = resolveVerdictStore(injectedVerdictStore);
-  // One tier determination per parcel, shared by all four dollar rails
-  // (CTX-B1, operator ruling A1) -- never re-derived per rail, so a single
-  // row cannot serve two different valueBasis values across its own fields.
-  const valueBasis = await resolveValueBasisFromParcelRecord(countyFips, propId);
+  const anyDollarSlated = DOLLAR_SCALAR_RAIL_KEYS.some((railKey) =>
+    isSlatedForCellServe(countyFips, railKey),
+  );
+  // One tier determination per parcel (CTX-B1/A1), never re-derived per rail
+  // -- and never computed at all when no dollar rail is slated to serve.
+  const valueBasis = anyDollarSlated
+    ? await resolveValueBasisFromParcelRecord(countyFips, propId)
+    : null;
   const [marketValue, assessedValue, landValue, improvementValue, livingAreaSqft, yearBuilt] =
     await Promise.all([
-      dollarOverlayIfRecord(store, countyFips, propId, "marketValue", valueBasis),
-      dollarOverlayIfRecord(store, countyFips, propId, "assessedValue", valueBasis),
-      dollarOverlayIfRecord(store, countyFips, propId, "landValue", valueBasis),
-      dollarOverlayIfRecord(store, countyFips, propId, "improvementValue", valueBasis),
-      livingAreaOverlayIfRecord(store, countyFips, propId),
-      yearBuiltOverlayIfRecord(store, countyFips, propId),
+      dollarOverlayIfSlated(countyFips, propId, "marketValue", valueBasis),
+      dollarOverlayIfSlated(countyFips, propId, "assessedValue", valueBasis),
+      dollarOverlayIfSlated(countyFips, propId, "landValue", valueBasis),
+      dollarOverlayIfSlated(countyFips, propId, "improvementValue", valueBasis),
+      livingAreaOverlayIfSlated(countyFips, propId),
+      yearBuiltOverlayIfSlated(countyFips, propId),
     ]);
   return { marketValue, assessedValue, landValue, improvementValue, livingAreaSqft, yearBuilt };
 }

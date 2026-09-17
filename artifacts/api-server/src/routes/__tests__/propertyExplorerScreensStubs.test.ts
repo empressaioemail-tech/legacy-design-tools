@@ -142,22 +142,33 @@ vi.mock("../../lib/verdictLayerServe", () => ({
   countyFipsFromParcelNodeId: (id: string) => id.split(":")[0] ?? null,
 }));
 
-vi.mock("../../lib/floodHazardFactRead", () => ({
+vi.mock("../../lib/floodHazardFactRead", async (importOriginal) => ({
+  // P-297 (2026-09-16, operator ruling A-193): a slated rail serves the
+  // parcel's OWN cell now, so these routes reach the `*FactFromParcelRecord`
+  // adapters, which import source constants from these read modules. Stubbing
+  // a hand-picked subset made those imports throw out of the handler (a 500);
+  // keep the real surface and stub only the atom reads this suite fakes.
+  ...(await importOriginal<typeof import("../../lib/floodHazardFactRead")>()),
   loadFloodHazardFactAtom: (id: string) => fakes.flood(id),
 }));
-vi.mock("../../lib/boundaryEdgeFactRead", () => ({
+vi.mock("../../lib/boundaryEdgeFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/boundaryEdgeFactRead")>()),
   loadBoundaryEdgeFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/pipelineFactRead", () => ({
+vi.mock("../../lib/pipelineFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/pipelineFactRead")>()),
   loadPipelineFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/wellFactRead", () => ({
+vi.mock("../../lib/wellFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/wellFactRead")>()),
   loadWellFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/structuralFactRead", () => ({
+vi.mock("../../lib/structuralFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/structuralFactRead")>()),
   loadStructuralFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/specialDistrictFactRead", () => ({
+vi.mock("../../lib/specialDistrictFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/specialDistrictFactRead")>()),
   loadSpecialDistrictFactAtom: vi.fn(async () => null),
 }));
 
@@ -281,12 +292,24 @@ function assertMixedRows(rows: WireRow[]): void {
   const ok = byQuery.get(OK)!;
   expect(ok.resolution).toBe("resolved");
   expect(ok.stubRead).toBe("ok");
+  /**
+   * P-297 (2026-09-16, operator ruling A-193) moved these three rails from the
+   * bake to the parcel's own cell. This suite configures no parcel-record
+   * store, and 48021 is slated for `zoningDistrict`, `flood` and
+   * `setbackFrontFt`, so the ruled answer for the OK row is a DECLARED
+   * REFUSAL naming the unreadable store -- before the ruling these three fell
+   * through to the bake-derived computation and read `present`/`unknown`.
+   * `landUse` and `drainage` are not cell-served rails and are unchanged. The
+   * measured-miss row below still reads `unknown` everywhere because it never
+   * reaches the store: unknown means "not read", refused means "read,
+   * declined" -- the same distinction `stubRead` carries.
+   */
   expect(ok.stub).toMatchObject({
-    zoning: "present",
+    zoning: "refused",
     landUse: "present",
-    flood: "unknown",
+    flood: "refused",
     drainage: "unread",
-    envelope: "unknown",
+    envelope: "refused",
   });
   expect(Object.keys(ok.stub!).sort()).toEqual([...RAILS].sort());
   for (const rail of RAILS) expect(VOCAB).toContain(ok.stub![rail]);

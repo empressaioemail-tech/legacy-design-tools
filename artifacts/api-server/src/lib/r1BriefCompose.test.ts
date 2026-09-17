@@ -137,7 +137,18 @@ describe("buildR1Brief — zoning/setbacks OPS-16 A-096/A-097/A-098 wiring", () 
     expect(envelopeSection?.disposition).toBe("absent");
   });
 
-  it("REGRESSION GUARD: a refused record fact falls through to the legacy bake-derived zoning, never regressing a parcel with a real bake answer", () => {
+  /**
+   * P-297 / A-193 (operator ruling, 2026-09-16). INVERTED, NOT DELETED: this
+   * guard used to assert the opposite -- "a refused record fact falls through
+   * to the legacy bake-derived zoning, never regressing a parcel with a real
+   * bake answer". That fall-through was the pre-ruling policy
+   * (`_decisions/2026-09-16_county_verdict_is_not_the_serve_switch.md`: "a
+   * refused or unaccounted cell is served as a declared refusal with the
+   * cell's reason ... the legacy or baked value is never the answer for a
+   * slated rail"), and the ruling names it as the defect. The assertion is
+   * rewritten so the file still says what the section is required to do.
+   */
+  it("P-297: a refused record fact is a DECLARED REFUSAL with the cell's reason, never the bake-derived zoning", () => {
     const facets = { zoning: { district: "C-1", jurisdictionKey: "austin_tx" } };
     const zoningFact: ZoningFactRead = {
       state: "refused",
@@ -148,11 +159,15 @@ describe("buildR1Brief — zoning/setbacks OPS-16 A-096/A-097/A-098 wiring", () 
     };
     const brief = buildR1Brief(facets, null, { parcelRecordZoningFact: zoningFact });
     const zoningSection = brief.sections.find((s) => s.id === "zoning");
-    expect(zoningSection?.disposition).toBe("present");
-    expect(zoningSection?.data).toEqual(facets.zoning);
+    expect(zoningSection?.disposition).toBe("refused");
+    // The bake's own answer is NOT served for the rail, and the reason travels.
+    expect(zoningSection?.data).toBeNull();
+    expect(zoningSection?.reason).toBe("malformed cell");
+    expect(zoningSection?.refusal).toMatchObject({ state: "refused", code: "parcel-record-malformed-cell" });
   });
 
-  it("REGRESSION GUARD: a refused setbacks record fact falls through to the legacy bake-derived envelope section", () => {
+  /** Setbacks' own mirror of the flipped zoning guard above -- same ruling, same reason. */
+  it("P-297: a refused setbacks record fact is a DECLARED REFUSAL, never the bake-derived envelope section", () => {
     const facets = { envelope: { status: "ok", geojson: {} } };
     const setbacksFact: SetbacksFactRead = {
       state: "refused",
@@ -163,7 +178,9 @@ describe("buildR1Brief — zoning/setbacks OPS-16 A-096/A-097/A-098 wiring", () 
     };
     const brief = buildR1Brief(facets, null, { parcelRecordSetbacksFact: setbacksFact });
     const envelopeSection = brief.sections.find((s) => s.id === "setbacks-envelope");
-    expect(envelopeSection?.disposition).toBe("present");
+    expect(envelopeSection?.disposition).toBe("refused");
+    expect(envelopeSection?.data).toBeNull();
+    expect(envelopeSection?.reason).toBe("malformed cell");
   });
 });
 

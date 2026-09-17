@@ -1,13 +1,18 @@
 /**
- * cadRollFactFromParcelRecord.ts — the PARCEL-B-SLATE2 adapter. Fixtures
- * mirror LIVE parcel_record data, read 2026-09-03 via the RO credential:
- * gold parcel 48021:34137 (improvementValue=404630, landValue=106715,
- * marketValue=511345, yearBuilt=1910, assessedValue and livingAreaSqft both
- * absent-verified) and the mandatory Williamson wire-probe pair
- * R664999/R665023 (S6-COLLISION's own post-fix honest state: landValue,
- * improvementValue, assessedValue all absent-verified; marketValue a
- * genuinely shared, native, correct 134000 on both -- confirmed by
- * S6-COLLISION's own close, NOT a collision artifact).
+ * cadRollFactFromParcelRecord.ts — the PARCEL-B-SLATE2 adapter, as amended by
+ * P-269 (folded into P-297, operator ruling A-193). Fixtures mirror LIVE
+ * parcel_record data, read 2026-09-03 via the RO credential: gold parcel
+ * 48021:34137 (improvementValue=404630, landValue=106715, marketValue=511345,
+ * yearBuilt=1910, assessedValue and livingAreaSqft both absent-verified) and
+ * the mandatory Williamson wire-probe pair R664999/R665023 (S6-COLLISION's own
+ * post-fix honest state: landValue, improvementValue, assessedValue all
+ * absent-verified; marketValue a genuinely shared, native, correct 134000 on
+ * both -- confirmed by S6-COLLISION's own close, NOT a collision artifact).
+ *
+ * P-269's own assertions live at the bottom of each describe block: a refused
+ * cell, a malformed value, an unreadable store, and an absent valueBasis all
+ * produce a DECLARED REFUSAL (or, for valueBasis, no label at all) -- never
+ * the null that used to mean "the caller keeps the legacy value".
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,7 +22,9 @@ import {
   setParcelRecordQueryableForTests,
 } from "./parcelRecordCellRead";
 import {
+  PARCEL_RECORD_REFUSAL_CODES,
   dollarFactFromParcelRecord,
+  isParcelRecordRefusal,
   livingAreaSqftFromParcelRecord,
   resolveValueBasisFromParcelRecord,
   yearBuiltFromParcelRecord,
@@ -108,20 +115,6 @@ describe("dollarFactFromParcelRecord", () => {
     expect(result?.state).toBe("absent");
   });
 
-  it("a refused cell (unaccounted) returns null -- caller keeps the legacy value, refusal is not a fourth wire state", async () => {
-    setParcelRecordQueryableForTests(
-      memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "unaccounted" } }] }),
-    );
-    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", "county-assessed");
-    expect(result).toBeNull();
-  });
-
-  it("store not configured returns null, never throws -- caller keeps the legacy value", async () => {
-    setParcelRecordQueryableForTests(null);
-    const result = await dollarFactFromParcelRecord("48021", "34137", "marketValue", "county-assessed");
-    expect(result).toBeNull();
-  });
-
   it("CTX-B1: valueBasis is a pass-through parameter, not re-derived per rail -- a stratmap-redistributed tier serialises unchanged, never coerced to county-assessed", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({
@@ -132,6 +125,76 @@ describe("dollarFactFromParcelRecord", () => {
     );
     const result = await dollarFactFromParcelRecord("48309", "184293", "marketValue", "stratmap-redistributed");
     expect(result).toMatchObject({ state: "present", v: 6506490, valueBasis: "stratmap-redistributed" });
+  });
+
+  /**
+   * P-269's headline falsifier: "a test that fails if a refused cell ever
+   * yields the legacy value". Before P-269 this call returned `null`, and
+   * `null` is precisely how the caller (attachCadRollOverlaysToFacets) was
+   * told to keep the offline bake's number.
+   */
+  it("FALSIFIER (P-269): an unaccounted cell is a DECLARED REFUSAL, never null, never the legacy value", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "unaccounted" } }] }),
+    );
+    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", "county-assessed");
+    expect(result).not.toBeNull();
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.code).toBe(PARCEL_RECORD_REFUSAL_CODES.unaccounted);
+    expect(result.reason).toContain("has not yet examined this rail");
+  });
+
+  it("FALSIFIER (P-269): an engine-refused cell carries the engine's own reason to the wire", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "refused", reason: "no CAD district covers this account" } },
+        ],
+      }),
+    );
+    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", "county-assessed");
+    expect(result).toEqual({
+      state: "refused",
+      code: PARCEL_RECORD_REFUSAL_CODES["engine-refused"],
+      reason: "no CAD district covers this account",
+    });
+  });
+
+  it("FALSIFIER (P-269): a value cell whose payload does not coerce is a malformed-cell refusal, never null", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "value", value: "not-a-number", source: "cad_property", vintage: "v" } },
+        ],
+      }),
+    );
+    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", "county-assessed");
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.code).toBe(PARCEL_RECORD_REFUSAL_CODES["malformed-cell"]);
+    expect(result.reason).toContain("not-a-number");
+  });
+
+  it("FALSIFIER (P-269): an unconfigured store is a declared refusal, never null -- 'the read did not happen' is not 'no value'", async () => {
+    setParcelRecordQueryableForTests(null);
+    const result = await dollarFactFromParcelRecord("48021", "34137", "marketValue", "county-assessed");
+    expect(result.state).toBe("refused");
+    if (result.state !== "refused") throw new Error("unreachable");
+    expect(result.code).toBe(PARCEL_RECORD_REFUSAL_CODES["store-not-configured"]);
+  });
+
+  it("FALSIFIER (P-269): a null valueBasis is OMITTED from the wire, not defaulted to a label nothing verified", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48021:1", railKey: "marketValue", cellState: { kind: "value", value: "250000", source: "cad_property", vintage: "v" } },
+        ],
+      }),
+    );
+    const result = await dollarFactFromParcelRecord("48021", "1", "marketValue", null);
+    expect(result).toEqual({ state: "present", v: 250000, source: "cad_property", vintage: "v" });
+    expect("valueBasis" in result).toBe(false);
   });
 });
 
@@ -149,6 +212,17 @@ describe("resolveValueBasisFromParcelRecord", () => {
     expect(basis).toBe("stratmap-redistributed");
   });
 
+  it("a not-applicable assessedValue cell resolves stratmap-redistributed too -- a stated absence is not an assertion about provenance, but it is not silence either (P-269 CP1 answer)", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48309:184294", railKey: "assessedValue", cellState: { kind: "not-applicable", reason: "county does not assess this account class" } },
+        ],
+      }),
+    );
+    expect(await resolveValueBasisFromParcelRecord("48309", "184294")).toBe("stratmap-redistributed");
+  });
+
   it("control: a genuine present assessedValue resolves county-assessed -- Caldwell 48055:32541", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({
@@ -161,12 +235,27 @@ describe("resolveValueBasisFromParcelRecord", () => {
     expect(basis).toBe("county-assessed");
   });
 
-  it("a refused or unreadable assessedValue cell defaults to stratmap-redistributed, never asserts county-assessed without evidence", async () => {
+  it("FALSIFIER (P-269): a refused/unaccounted assessedValue cell asserts NOTHING -- the answer is null, not a publisher's label", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "assessedValue", cellState: { kind: "unaccounted" } }] }),
     );
-    const basis = await resolveValueBasisFromParcelRecord("48021", "1");
-    expect(basis).toBe("stratmap-redistributed");
+    expect(await resolveValueBasisFromParcelRecord("48021", "1")).toBeNull();
+  });
+
+  it("FALSIFIER (P-269): an unreadable store asserts nothing either -- null, never county-assessed and never stratmap-redistributed", async () => {
+    setParcelRecordQueryableForTests(null);
+    expect(await resolveValueBasisFromParcelRecord("48021", "34137")).toBeNull();
+  });
+
+  it("FALSIFIER (P-269): a value cell that does not coerce is not evidence of a CAD-district export -- null, not county-assessed", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: "48021:2", railKey: "assessedValue", cellState: { kind: "value", value: "n/a", source: "cad_property", vintage: "v" } },
+        ],
+      }),
+    );
+    expect(await resolveValueBasisFromParcelRecord("48021", "2")).toBeNull();
   });
 });
 
@@ -187,12 +276,24 @@ describe("livingAreaSqftFromParcelRecord", () => {
     expect(result).toEqual({ status: "populated", value: 2800 });
   });
 
-  it("falsifier: a stored 0 sqft is absent, never a populated zero (sqft is never zero, per positiveSqftOrNull)", async () => {
+  it("FALSIFIER (P-269): a stored 0 sqft is a declared malformed-cell refusal, never null-as-keep-legacy and never a populated zero", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "livingAreaSqft", cellState: { kind: "value", value: "0", source: "cad_property", vintage: "v" } }] }),
     );
     const result = await livingAreaSqftFromParcelRecord("48021", "1");
-    expect(result).toBeNull();
+    expect(isParcelRecordRefusal(result)).toBe(true);
+    if (!isParcelRecordRefusal(result)) throw new Error("unreachable");
+    expect(result.code).toBe(PARCEL_RECORD_REFUSAL_CODES["malformed-cell"]);
+  });
+
+  it("FALSIFIER (P-269): a refused cell is a declared refusal, never null", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "livingAreaSqft", cellState: { kind: "refused", reason: "no footprint source" } }] }),
+    );
+    const result = await livingAreaSqftFromParcelRecord("48021", "1");
+    expect(isParcelRecordRefusal(result)).toBe(true);
+    if (!isParcelRecordRefusal(result)) throw new Error("unreachable");
+    expect(result.reason).toBe("no footprint source");
   });
 });
 
@@ -205,7 +306,7 @@ describe("yearBuiltFromParcelRecord", () => {
     expect(result).toEqual({ v: 1910, source: "parcel_record", vintage: "2026-09-02T18:13:56.751Z" });
   });
 
-  it("LIVE-SHAPE: the Williamson pair's absent yearBuilt returns null, never a fabricated year", async () => {
+  it("LIVE-SHAPE: the Williamson pair's absent yearBuilt returns null -- a stated absence, the only shape this rail's consumers have for one", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({ cells: [{ placeKey: "48491:R664999", railKey: "yearBuilt", cellState: { kind: "absent-verified", basis: {} } }] }),
     );
@@ -213,11 +314,23 @@ describe("yearBuiltFromParcelRecord", () => {
     expect(result).toBeNull();
   });
 
-  it("falsifier: a year of 0 is refused as invalid, never served as a real year", async () => {
+  it("FALSIFIER (P-269): a year of 0 is a declared malformed-cell refusal, never null-as-keep-legacy and never served as a real year", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "yearBuilt", cellState: { kind: "value", value: 0, source: "cad_property", vintage: "v" } }] }),
     );
     const result = await yearBuiltFromParcelRecord("48021", "1");
-    expect(result).toBeNull();
+    expect(isParcelRecordRefusal(result)).toBe(true);
+    if (!isParcelRecordRefusal(result)) throw new Error("unreachable");
+    expect(result.code).toBe(PARCEL_RECORD_REFUSAL_CODES["malformed-cell"]);
+  });
+
+  it("FALSIFIER (P-269): a refused yearBuilt cell is a declared refusal carrying the cell's reason", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: "48021:1", railKey: "yearBuilt", cellState: { kind: "refused", reason: "construction year ambiguous" } }] }),
+    );
+    const result = await yearBuiltFromParcelRecord("48021", "1");
+    expect(isParcelRecordRefusal(result)).toBe(true);
+    if (!isParcelRecordRefusal(result)) throw new Error("unreachable");
+    expect(result.reason).toBe("construction year ambiguous");
   });
 });

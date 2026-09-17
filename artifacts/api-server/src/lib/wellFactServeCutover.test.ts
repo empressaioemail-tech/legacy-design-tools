@@ -1,169 +1,145 @@
 /**
- * The serve-layer integration point PARCEL-B-READER shipped and
- * PARCEL-B-SLATE1 activated for wells (5 counties: 48021/48209/48309/
- * 48453/48491; Caldwell 48055 stays legacy, its own known geometry gap).
+ * wellFactServeCutover.ts — P-297 (operator ruling A-193, OPS-24 law 7): the serve switch
+ * is the code-owned SLATE, and what a parcel shows comes from ITS OWN cell.
  *
- * Two load-bearing assertions, both proven here at the unit level:
- *   - UNSLATED pairs (any other county, e.g. 48103) still produce
- *     byte-identical output to loadWellFactAtom, regardless of what the
- *     verdict store says -- the slate gates everything.
- *   - SLATED pairs (the five wells counties) genuinely reach the record
- *     adapter on a real pass verdict, and genuinely fall back to legacy on
- *     refuse/no-verdict/store-failure -- fail closed even when slated.
- * Every test injects an explicit verdict store (never relies on the
- * env-resolved default being absent) so this suite is deterministic
- * regardless of what FACTORY_DATABASE_URL_RO happens to be in the
- * running process.
+ * Rail note: wells' slate is 48021/48209/48309/48453/48491; Caldwell (48055) deliberately stays
+ * legacy (its own known geometry gap). Its fallback is a REAL reader -- the well-fact atom
+ * store (dual-grammar bind, 152m near-parcel radius) -- not a not-cut-over refusal, so the
+ * distinction this file pins is "the cell's own answer" vs "the atom store's answer".
+ *
+ * THIS FILE REPLACES the pre-P-297 suite, which pinned the old contract
+ * ("only a PASS verdict reaches the record; refuse / excluded / no verdict /
+ * store failure / no store all fall back to the legacy value"). Those
+ * assertions encoded the exact defect the ruling names -- one unaccounted cell
+ * anywhere in a slated county turning every parcel in it back to the bake --
+ * so they are deleted rather than kept passing. The adapter's own answer
+ * shapes are covered by <rail>FactFromParcelRecord.test.ts; what this file
+ * covers is the SWITCH, per the dispatch's falsifiers 1, 2 and 4.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  memoryParcelGateVerdicts,
-  memoryParcelGateVerdictsThatFails,
-} from "./parcelGateVerdictRead";
+import { loadWellFactForServe } from "./wellFactServeCutover";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
+  type ParcelRecordQueryable,
 } from "./parcelRecordCellRead";
-import {
-  interpretWellFactRows,
-  memoryWellFactAtoms,
-  resetWellFactAtomQueryableForTests,
-  setWellFactAtomQueryableForTests,
-} from "./wellFactRead";
-import {
-  loadWellFactForServe,
-  resetWellsVerdictStoreForTests,
-  setWellsVerdictStoreForTests,
-} from "./wellFactServeCutover";
+import { isSlatedForCellServe } from "./cellServeRule";
+import { loadWellFactAtom } from "./wellFactRead";
 
-const GOLD = "48021:34137"; // 48021 IS slated for wells.
-const CRANE = "48103:100"; // 48103 is NOT slated for wells.
-const CRANE_LEAD_BODY = {
-  entityType: "well-fact",
-  parcelNodeId: CRANE,
-  wellKey: "42000001030000",
-  apiNumber14: "42000001030000",
-  wellStatus: "dry",
-  wellType: "unknown",
-  orphaned: false,
-  parcelRelation: "on-parcel" as const,
-  proximityRadiusMeters: 152,
-  surfaceLocation: { lat: 31.48020694, lng: -102.75930581 },
-  sourceTier: "texas-rrc-gis",
-  sourceAdapter: "tx-rrc-well-staged-v1",
-  evaluatedAt: "2026-08-16T09:57:36.576Z",
-};
+const RAIL_KEY = "wells";
+const SLATED = "48021:34137";
+const UNSLATED = "48103:100";
+
+/** Counts every parcel_record query. Any call at all from an unslated pair is a defect. */
+function countingStore(): { store: ParcelRecordQueryable; calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      async query() {
+        calls += 1;
+        return { rows: [] };
+      },
+    } as ParcelRecordQueryable,
+  };
+}
 
 afterEach(() => {
-  resetWellFactAtomQueryableForTests();
-  resetWellsVerdictStoreForTests();
   resetParcelRecordQueryableForTests();
 });
 
-describe("loadWellFactForServe — UNSLATED pairs stay byte-identical to loadWellFactAtom", () => {
-  it("a present on-parcel well: identical shape via the wrapper and the direct call", async () => {
-    setWellFactAtomQueryableForTests(
-      memoryWellFactAtoms([{ entityId: `${CRANE}:42000001030000`, body: CRANE_LEAD_BODY }]),
-    );
-    setWellsVerdictStoreForTests(null);
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(CRANE));
-    const viaWrapper = await loadWellFactForServe(CRANE);
-    expect(viaWrapper).toEqual(direct);
+describe("wellFactServeCutover — the slate is the switch", () => {
+  it("the slate says what this suite assumes about its two counties", () => {
+    expect(isSlatedForCellServe("48021", RAIL_KEY)).toBe(true);
+    expect(isSlatedForCellServe("48103", RAIL_KEY)).toBe(false);
   });
 
-  it("a parcel with no well-fact atom at all, in an unslated county: identical atom-miss refusal via both paths", async () => {
-    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
-    setWellsVerdictStoreForTests(null);
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(CRANE));
-    const viaWrapper = await loadWellFactForServe(CRANE);
-    expect(viaWrapper).toEqual(direct);
-    expect(direct.state).toBe("refused");
+  it("an UNSLATED pair never touches parcel_record — it runs the pre-cutover path, unchanged, with zero I/O", async () => {
+    const withoutStore = await loadWellFactForServe(UNSLATED);
+    const counter = countingStore();
+    setParcelRecordQueryableForTests(counter.store);
+    const withStore = await loadWellFactForServe(UNSLATED);
+    expect(counter.calls()).toBe(0);
+    expect(withStore).toEqual(withoutStore);
   });
 
-  it("FALSIFIER: even a fabricated verdict store with a PASS row has no effect for an UNSLATED county — the slate check short-circuits first", async () => {
-    setWellFactAtomQueryableForTests(
-      memoryWellFactAtoms([{ entityId: `${CRANE}:42000001030000`, body: CRANE_LEAD_BODY }]),
-    );
-    setWellsVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48103", railKey: "wells", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
-      ]),
-    );
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(CRANE));
-    const viaWrapper = await loadWellFactForServe(CRANE);
-    expect(viaWrapper).toEqual(direct);
-  });
-
-  it("a malformed parcelNodeId (no county prefix) falls through to loadWellFactAtom's own existing refusal, unchanged", async () => {
-    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
-    setWellsVerdictStoreForTests(null);
-    const malformed = "not-a-valid-id";
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(malformed));
-    const viaWrapper = await loadWellFactForServe(malformed);
-    expect(viaWrapper).toEqual(direct);
-  });
-});
-
-describe("loadWellFactForServe — SLATED pairs (gold, 48021) genuinely reach the record adapter", () => {
-  it("a real PASS verdict on a slated county serves from parcel_record, not the legacy atom store", async () => {
-    setWellFactAtomQueryableForTests(
-      memoryWellFactAtoms([{ entityId: `${GOLD}:42000001030000`, body: { ...CRANE_LEAD_BODY, parcelNodeId: GOLD } }]),
-    );
-    setWellsVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "wells", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
-      ]),
-    );
+  it("FALSIFIER 2: an unaccounted cell on a SLATED pair is a declared refusal carrying the cell's reason, never the pre-cutover answer", async () => {
     setParcelRecordQueryableForTests(
       memoryParcelRecordStore({
-        cells: [{ placeKey: GOLD, railKey: "wells", cellState: { kind: "absent-verified", basis: { method: "zone-major-sweep", finding: "no tx_rrc_well point falls within this parcel's geometry" } } }],
+        cells: [{ placeKey: SLATED, railKey: RAIL_KEY, cellState: { kind: "unaccounted" } }],
       }),
     );
-    const result = await loadWellFactForServe(GOLD);
-    // The record adapter's own absence shape, NOT the legacy atom's -- proves
-    // this request never touched the atom store's fixture at all (it was
-    // seeded with a PRESENT well above; a legacy read would have found it).
-    expect(result.state).toBe("absent");
-    if (result.state !== "absent") throw new Error("unreachable");
-    expect(result.sourceAdapter).toBe("parcel_record");
+    const served = await loadWellFactForServe(SLATED);
+    const preCutover = loadWellFactAtom(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-unaccounted");
+    expect(wire).toContain("has not yet examined this rail");
+    expect(served).not.toEqual(preCutover);
   });
 
-  it("REFUSE verdict on a slated county still falls back to legacy -- attempted but refused, not record", async () => {
-    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
-    setWellsVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "wells", verdict: "refuse", unaccountedCount: 12, evaluatedAt: "2026-09-02T18:00:00Z", runId: "test" },
-      ]),
+  it("an engine-refused cell on a SLATED pair is a declared refusal carrying the engine's own words", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "refused", reason: "no source covers this parcel" },
+          },
+        ],
+      }),
     );
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(GOLD));
-    const viaWrapper = await loadWellFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+    const served = await loadWellFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-engine-refused");
+    expect(wire).toContain("no source covers this parcel");
   });
 
-  it("a store failure on a slated county fails closed to legacy, not a thrown error", async () => {
-    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
-    setWellsVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(GOLD));
-    const viaWrapper = await loadWellFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+  it("FALSIFIER 1: a 48021 parcel whose own cell is earned is served that cell even though the county's verdict may read refuse", async () => {
+    // No verdict store is injected anywhere in this file, and the wrapper has no
+    // verdict seam left to inject one into: the verdict cannot reach this decision.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "absent-verified", basis: { method: "sweep", finding: "swept, none found" } },
+          },
+        ],
+      }),
+    );
+    const served = await loadWellFactForServe(SLATED);
+    expect(served?.state).toBe("absent");
   });
 
-  it("a null verdict store (not configured) on a slated county fails closed to legacy", async () => {
-    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
-    setWellsVerdictStoreForTests(null);
-    const direct = await import("./wellFactRead").then((m) => m.loadWellFactAtom(GOLD));
-    const viaWrapper = await loadWellFactForServe(GOLD);
-    expect(viaWrapper).toEqual(direct);
+  it("a SLATED pair whose cell row does not exist is a declared refusal naming the missing row", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const served = await loadWellFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-cell-miss");
   });
-});
 
-describe("interpretWellFactRows sanity (unchanged, confirms the sibling module was not edited)", () => {
-  it("still refuses atom-miss the same way", () => {
-    const result = interpretWellFactRows(GOLD, []);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("atom-miss");
+  it("an unreadable/unconfigured store on a SLATED pair is a declared refusal, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(null);
+    const served = await loadWellFactForServe(SLATED);
+    const preCutover = loadWellFactAtom(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-store-not-configured");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("a malformed parcelNodeId keeps the pre-cutover path's own answer (no place_key is guessed)", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const malformed = "not-a-valid-id";
+    const viaWrapper = await loadWellFactForServe(malformed);
+    resetParcelRecordQueryableForTests();
+    const withoutStore = await loadWellFactForServe(malformed);
+    expect(viaWrapper).toEqual(withoutStore);
   });
 });

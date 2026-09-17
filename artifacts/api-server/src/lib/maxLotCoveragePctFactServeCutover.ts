@@ -1,52 +1,55 @@
 /**
  * Serve-layer cutover wrapper for maxLotCoveragePct (F-01, OPS-21 P-148 /
- * P-133), on the allowlist pattern maxImperviousCoverPctFactServeCutover.ts
- * established.
+ * P-133). The "not served from the ledger" branch is not a legacy reader --
+ * maxLotCoveragePct has none -- and resolves to `notCutOverMaxLotCoveragePctFact`.
  *
- * The "not record" branch here is not a legacy reader -- maxLotCoveragePct
- * has none. NOT SLATED by this card (fails the gate on every in-scope
- * county, blocked on the 3,376-parcel zoningDistrict residual Z1/P-147
- * owns -- see parcelRecordAllowlist.ts). Every (county, "maxLotCoveragePct")
- * pair therefore resolves to notCutOverMaxLotCoveragePctFact today, by
- * construction, not by omission.
+ * P-297 (2026-09-16, operator ruling A-193) replaced the county-verdict
+ * gate this file used to apply. Until P-297 the wrapper asked
+ * `resolveAllowlist` for (record | legacy | refused) and served the record's
+ * own answer only on `record`, which required a PASSING county gate verdict
+ * -- so a slated county whose verdict read `refuse` (one unaccounted cell on
+ * this rail, anywhere in the county) fell back for EVERY parcel in it,
+ * including parcels whose own cell was earned and correct. The verdict is a
+ * completeness and publish grade; it stopped deciding what a parcel shows.
+ *
+ * The wrapper now decides from PARCEL_RECORD_SLATE and the PARCEL'S OWN CELL
+ * through the one rule in `cellServeRule.ts`:
+ *
+ *   - pair NOT in the slate -> the fallback below, short-circuiting before any
+ *     I/O, byte-identical to the behavior before this file existed. The slate,
+ *     not the verdict, is the cut-over switch.
+ *   - pair in the slate -> this parcel's own cell, served through the record
+ *     adapter AS-IS: a value with its source and vintage, a stated absence
+ *     with its reason, or a declared refusal carrying the cell's own reason
+ *     (unaccounted, engine-refused, cell-miss, malformed-cell,
+ *     store-not-configured). Never the legacy or baked value.
+ *
+ * The county verdict is no longer read on this path; `cellServeRule.test.ts`
+ * fails if this file imports the verdict reader again.
  */
 
-import { resolveAllowlist } from "./parcelRecordAllowlist";
-import { countyFipsFromParcelNodeId } from "./verdictLayerServe";
-import { resolveVerdictStore } from "./parcelGateVerdictRead";
+import { loadCellServeDecision } from "./cellServeRule";
+import { parseParcelNodeId } from "./parcelNodeId";
 import { maxLotCoveragePctFactFromParcelRecord } from "./maxLotCoveragePctFactFromParcelRecord";
 import {
   notCutOverMaxLotCoveragePctFact,
   MAX_LOT_COVERAGE_PCT_RAIL_KEY,
   type MaxLotCoveragePctFactRead,
 } from "./maxLotCoveragePctFactRead";
-import type { ParcelRecordQueryable } from "./parcelRecordCellRead";
-
-let injectedVerdictStore: ParcelRecordQueryable | null | undefined;
-
-export function setMaxLotCoveragePctVerdictStoreForTests(
-  store: ParcelRecordQueryable | null,
-): void {
-  injectedVerdictStore = store;
-}
-
-export function resetMaxLotCoveragePctVerdictStoreForTests(): void {
-  injectedVerdictStore = undefined;
-}
 
 export async function loadMaxLotCoveragePctFactForServe(
   parcelNodeId: string,
 ): Promise<MaxLotCoveragePctFactRead> {
-  const countyFips = countyFipsFromParcelNodeId(parcelNodeId);
-  if (!countyFips) {
+  const parsed = parseParcelNodeId(parcelNodeId);
+  if (!parsed) {
     return notCutOverMaxLotCoveragePctFact(parcelNodeId);
   }
-  const state = await resolveAllowlist(
-    resolveVerdictStore(injectedVerdictStore),
-    countyFips,
+  const decision = await loadCellServeDecision(
+    parsed.countyFips,
+    parsed.propId,
     MAX_LOT_COVERAGE_PCT_RAIL_KEY,
   );
-  if (state !== "record") {
+  if (decision.serve === "current-path") {
     return notCutOverMaxLotCoveragePctFact(parcelNodeId);
   }
   return maxLotCoveragePctFactFromParcelRecord(parcelNodeId);
