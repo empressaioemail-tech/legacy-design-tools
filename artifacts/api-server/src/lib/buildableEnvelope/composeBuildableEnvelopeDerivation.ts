@@ -21,7 +21,7 @@ import {
   deriveBuildableEnvelope,
   type BuildableEnvelopeResult,
 } from "./derive";
-import { reconcileWithAtomEnvelope } from "./reconcileAtomEnvelope";
+import { reconcileWithAtomEnvelope, withholdUnverifiedAreaFigure } from "./reconcileAtomEnvelope";
 import type { DistrictMappingResult } from "./districtMapping";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import type { Ring } from "./geometry";
@@ -131,18 +131,26 @@ export function composeBuildableEnvelopeDerivation(args: {
   } = args;
 
   const rawDerived = deriveBuildableEnvelope({ ring, table, district, labeling });
-  const derived = reconcileWithAtomEnvelope(
+  // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
+  // state, so the wire's promotion fields travel with the outcome. Absent
+  // fields read as unverified (see isEnvelopeAtomVerified).
+  const atomPromotion = {
+    depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
+    sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
+  };
+  const reconciled = reconcileWithAtomEnvelope(
     rawDerived,
     atomChain?.buildableEnvelope?.outcome ?? null,
-    // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
-    // state, so the wire's promotion fields travel with the outcome. Absent
-    // fields read as unverified (see isEnvelopeAtomVerified).
-    {
-      depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
-      sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
-    },
+    atomPromotion,
   );
-  const atomReconciled = derived !== rawDerived;
+  const atomReconciled = reconciled !== rawDerived;
+  // P-304 (2026-09-17): the area FIGURE is a separate entitlement from the
+  // polygon. Without a ground-truth verified atom (A-180) the envelope still
+  // draws but the two area properties are withheld — last, so it holds for
+  // every path that produces a figure, including the reconcile branch above,
+  // and covers the free-standing caller of this composition
+  // (`parcelDrawEnvelopeModel.ts`) as well as the route.
+  const derived = withholdUnverifiedAreaFigure(reconciled, atomPromotion);
 
   const estimate =
     atomChain?.buildableEnvelope?.readContract?.axes?.assertedConfidence
