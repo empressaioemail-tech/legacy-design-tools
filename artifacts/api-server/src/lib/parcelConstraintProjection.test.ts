@@ -209,7 +209,7 @@ describe("parcel constraint projection", () => {
     for (const j of ["in-city", "unincorporated", null] as const) {
       expect(project(IN_CITY_ZONED, j).cells.etj).toMatchObject({
         state: "unread",
-        basis: "no-etj-source-in-store",
+        basis: "etj-rail-not-projected-here",
       });
     }
   });

@@ -38,16 +38,19 @@ export const CONSTRAINT_RAIL_STATES = SMART_SITE_RAIL_STATES;
 
 /**
  * The v1 rail set, in the card's own order. `county` is the projection's key
- * and is not a rail. `etj` IS declared here and has NO source table in the
- * deployment store as of 2026-09-02: the store carries `tx_city_boundary`,
+ * and is not a rail. `etj` IS declared here and stayed a declared-ahead rail
+ * through 2026-09-02 because NO source table carried an extraterritorial
+ * jurisdiction ring (the store held `tx_city_boundary`,
  * `tx_county_boundary`, `tx_special_district` and
- * `landing_parcel_jurisdiction`, and nothing carries an extraterritorial
- * jurisdiction ring. It is carried as a declared-ahead rail per
- * `_decisions/2026-09-01_parcel_record_rails_v2_template.md`: the column
- * exists so "we do not carry this" stays distinguishable from "this parcel
- * does not have it", its state is `unread` on every row, and every filter
- * over it is refused. A declared-ahead rail never enters a coverage number
- * as live.
+ * `landing_parcel_jurisdiction`). P-296 (2026-09-17) ingested the source
+ * (`tx_etj_boundary` + `tx_etj_source`), but this rail is still declared-ahead
+ * HERE, and the reason is now a missing INPUT rather than a missing source:
+ * this projection takes a tier1 bake row, and a bake row has no query point,
+ * so it cannot evaluate a ring. ETJ is resolved by point at serve time and
+ * served on the city-limits fact's own `etjStatus`
+ * (`cityLimitsFactServeCutover.ts`); the etj column here is unpopulated, its
+ * state is `unread` on every row, and every filter over it is refused. A
+ * declared-ahead rail never enters a coverage number as live.
  */
 export const CONSTRAINT_RAILS = [
   "acreage",
@@ -388,9 +391,15 @@ export function projectConstraintCells(
     acreage: acreageCell(tier1Record),
     landUse: landUseCell(tier1Record),
     cityLimits: cityLimitsCell(input.jurisdictionDisposition ?? null),
-    // No extraterritorial-jurisdiction source exists in the deployment store.
-    // Declared ahead, unread everywhere, and every filter over it refuses.
-    etj: unread("no-etj-source-in-store"),
+    // The ETJ rail stays declared-ahead and unread on every row. P-296
+    // (2026-09-17) acquired and ingested the ETJ source (`tx_etj_boundary` +
+    // `tx_etj_source`), but this projection has no ETJ input and no query
+    // point: it projects a tier1 bake row, and ETJ is resolved by point at
+    // serve time. The served determination is the city-limits fact's
+    // `etjStatus` (see `cityLimitsFactServeCutover.ts`); this index's own etj
+    // column remains unpopulated, so every filter over it refuses rather than
+    // reading an absence that was never measured here.
+    etj: unread("etj-rail-not-projected-here"),
     zoningDistrict: zoningCell(tier1Record, input.jurisdictionDisposition ?? null),
     flood: floodCell(input.flood ?? null),
     specialDistrict: specialDistrictCell(input.specialDistrict ?? null),
