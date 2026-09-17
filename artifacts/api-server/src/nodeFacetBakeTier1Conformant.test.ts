@@ -477,7 +477,14 @@ describe("explicit absence where a facet has no source (never an omitted key)", 
     // asserted toBeNull(), and that null is exactly what Hays's staging walk
     // failed BP-CONTENT-01 on across 22,805 rows in the six CTX counties.
     expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
-    expect(n.facetCoverage.baseFacts).toBe(true); // apn still present
+    // P-273: TRUE because this parcel's base facts carry real content — the
+    // claim's own situsCity/situsZip/landUse plus the CAD roll dollars and
+    // yearBuilt. NOT because `apn` is present: `apn` is
+    // `parcelNodeId.split(":")[1]` and exists for every parcel that exists,
+    // which is the degeneracy `baseFactsCarryReadContent` removed. The parcel
+    // that must read false (nothing but apn and the FIPS-derived situsState)
+    // is covered in p273BaseFactsCoverage.test.ts.
+    expect(n.facetCoverage.baseFacts).toBe(true);
     expect(n).not.toHaveProperty("publishRunId");
     expect(n.countyName).toBe("Bastrop");
   });

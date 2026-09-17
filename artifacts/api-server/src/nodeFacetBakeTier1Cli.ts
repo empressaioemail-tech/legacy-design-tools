@@ -527,6 +527,15 @@ export function buildTier1Payload(
           `feature_index=${row.feature_index}`,
       );
     },
+    // P-273. Same disclosure as the conformant bake's: the stamp is kept and
+    // served, but a run now reports the jurisdiction it cannot route.
+    onUnregisteredZoningStamp: ({ cityKey }) => {
+      console.warn(
+        `[node-facet-bake-t1] UNREGISTERED zoning stamp ` +
+          `jurisdiction=${cityKey} county=${countyFips} ` +
+          `feature_index=${row.feature_index} (no ZONING_LAYERS entry; keeping the stamp)`,
+      );
+    },
   });
 }
 
