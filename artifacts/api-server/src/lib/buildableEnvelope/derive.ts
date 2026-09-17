@@ -25,6 +25,16 @@ import {
 } from "./edgeLabeling";
 import type { DistrictMappingResult } from "./districtMapping";
 import type { RoadClassSetbackDistrictRow } from "./roadClassSetbacks";
+// P-270 (OPS-24 X11): the ONE place that decides whether a served citation's
+// vintage was worth declaring. See that module's doc for the ruling it
+// implements and for why it calls the corpus's own date reader rather than
+// parsing a date itself.
+import {
+  disclosureWithCitationVintage,
+  readSetbackDateFromTable,
+  setbackCitationVintageRow,
+  type SetbackCitationVintageRow,
+} from "./setbackCitationVintage";
 
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
@@ -88,6 +98,25 @@ export interface BuildableEnvelopeProps {
   maxFootprintSqFt: number | null;
   /** Citation URL (Municode) for the setback district. */
   citationUrl: string;
+  /**
+   * P-270 (OPS-24 X11). The effective date of the instrument the citation
+   * above points at, read AT SOURCE from the codified table's own
+   * `effectiveDate` field. Present ONLY when that field held a readable date
+   * AND a citation is being served — the key's absence means the source's
+   * date could not be read, and `citationVintage` beside it says which of the
+   * three causes applies. Never a placeholder: this lane writes no default
+   * date anywhere.
+   */
+  citationEffectiveDate?: string;
+  /**
+   * P-270 (OPS-24 X11). The conflict row, present only when the citation
+   * above is being served WITHOUT a readable effective date. Its absence
+   * means the vintage is known or nothing is cited — never that the payload
+   * declined to say. Composed by the ONE module
+   * `buildableEnvelope/setbackCitationVintage.ts`, byte-identical to
+   * hauska-map's copy of the same sentence.
+   */
+  citationVintage?: SetbackCitationVintageRow;
   /** Empty-envelope reason, when there is no buildable area. */
   emptyReason?: string;
   /**
@@ -122,6 +151,10 @@ export interface BuildableEnvelopeResult {
   /** Set when empty: distinguishes consume-lot from a validation decline. */
   emptyKind?: InsetEmptyKind;
   citationUrl: string;
+  /** P-270 (OPS-24 X11): the citation's readable effective date, or absent. See `BuildableEnvelopeProps`. */
+  citationEffectiveDate?: string;
+  /** P-270 (OPS-24 X11): the conflict row, present only on an undated citation. See `BuildableEnvelopeProps`. */
+  citationVintage?: SetbackCitationVintageRow;
   district: string;
 }
 
@@ -330,11 +363,27 @@ export function deriveBuildableEnvelope(
     heightNotSpecifiedNote,
   );
 
+  // P-270 (OPS-24 X11). The table's own date, read AT SOURCE, and the one
+  // sentence that says so when it cannot be read. Both are gated on a
+  // citation actually being served: with no citation there is nothing for a
+  // vintage to qualify, and declaring one would be a statement about an
+  // instrument this payload does not name. `never-looked` is NOT reachable
+  // here any more, because this line IS the look.
+  const citationUrl = (d.citation_url ?? "").trim();
+  const citationDateRead = readSetbackDateFromTable(table);
+  const citationVintage = setbackCitationVintageRow({
+    date: citationDateRead,
+    citationUrl,
+    sourceLabel: `codified setback table ${table.jurisdictionKey} (${table.jurisdictionDisplayName})`,
+  });
+  const disclosureWithVintage =
+    disclosureWithCitationVintage(disclosure, citationVintage) ?? disclosure;
+
   const props: BuildableEnvelopeProps = {
     kind: "buildable-envelope",
     approximate,
     notSurveyGrade: true,
-    disclosure,
+    disclosure: disclosureWithVintage,
     setbacks: {
       front_ft: d.front_ft,
       side_ft: d.side_ft,
@@ -360,6 +409,10 @@ export function deriveBuildableEnvelope(
     maxHeightFt,
     maxFootprintSqFt,
     citationUrl: d.citation_url,
+    ...(citationDateRead.state === "read" && citationUrl
+      ? { citationEffectiveDate: citationDateRead.sourceDate! }
+      : {}),
+    ...(citationVintage ? { citationVintage } : {}),
     ...(inset.empty ? { emptyReason, emptyKind } : {}),
   };
 
@@ -385,6 +438,10 @@ export function deriveBuildableEnvelope(
     empty: inset.empty,
     ...(emptyKind ? { emptyKind } : {}),
     citationUrl: d.citation_url,
+    ...(citationDateRead.state === "read" && citationUrl
+      ? { citationEffectiveDate: citationDateRead.sourceDate! }
+      : {}),
+    ...(citationVintage ? { citationVintage } : {}),
     district: d.district_name,
   };
 }

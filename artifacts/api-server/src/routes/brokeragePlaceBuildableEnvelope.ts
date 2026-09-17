@@ -1021,6 +1021,16 @@ async function deriveLabelAndRespond(args: {
             approximate: derived.approximate,
             empty: derived.empty,
             citationUrl: derived.citationUrl,
+            // P-270 (OPS-24 X11): this payload is built EXPLICITLY, field by
+            // field, and `wrapEngineEnvelope` passes it through verbatim — so
+            // a declaration `derive.ts` published is dropped here unless it is
+            // named. This is the drawn-envelope path customers actually hit.
+            ...(derived.citationVintage
+              ? { citationVintage: derived.citationVintage }
+              : {}),
+            ...(derived.citationEffectiveDate
+              ? { citationEffectiveDate: derived.citationEffectiveDate }
+              : {}),
             parcel: {
               apn: parcel.apn,
               situsAddress: parcel.situsAddress,

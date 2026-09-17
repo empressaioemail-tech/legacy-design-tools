@@ -341,3 +341,120 @@ describe("P-299 — a flagged height is ABSENT, never 999", () => {
     expect(props.setbacks.not_specified?.max_height).toBe(true);
   });
 });
+
+/**
+ * P-270 (OPS-24 scope X11) — the drawn envelope's citation is served WITH its
+ * vintage, or with a declaration saying the vintage could not be read.
+ *
+ * WHAT THE DEFECT WAS, in this file's own terms: `derive.ts` composed
+ * `citationUrl` out of the district row and never read the table's
+ * `effectiveDate` field at all, so the drawn envelope could not say whether
+ * the rule a customer was looking at was adopted this year or in 2011. That is
+ * the `never-looked` state, and it is what these tests remove: the first
+ * assertion below is that the look now HAPPENS (the state is a read, not a
+ * shrug).
+ *
+ * FALSIFIERS: absent-at-source and unparseable are asserted as DIFFERENT row
+ * states off the same citation; the agreeing control (a readable date) asserts
+ * NO row and a disclosure byte-identical to the pre-lane one; the consume-lot
+ * case asserts the declaration survives an EMPTY envelope, where a naive
+ * implementation that put the row only in the non-empty branch would drop it.
+ */
+describe("deriveBuildableEnvelope — setback-rule citation vintage (P-270, OPS-24 X11)", () => {
+  const VINTAGE_NOTE =
+    "Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.";
+
+  function props(overrides?: Partial<SetbackTable>, ring?: Ring) {
+    const table: SetbackTable = { ...TABLE, ...overrides } as SetbackTable;
+    const r = ring ?? rectRing();
+    const labeling = labelEdges({ ring: r, road: roadSouthOf() })!;
+    const district = mapDistrict(table, "R-MD")!;
+    const res = deriveBuildableEnvelope({ ring: r, table, district, labeling });
+    return { props: res.geojson.features[0]!.properties, res };
+  }
+
+  it("THE DEFECT ITSELF: the shipped table shape (a citation, no `effectiveDate`) yields a declared vintage, not a silent pick", () => {
+    // This is `pflugerville-tx.json`'s live shape: `citation_url` per district,
+    // and no `effectiveDate` key on the table at all.
+    const { props: p, res } = props();
+
+    expect(p.citationUrl).toContain("municode");
+    expect(p.citationVintage).toBeDefined();
+    expect(p.citationVintage!.state).toBe("unreadable-absent-at-source");
+    expect(p.citationVintage!.kind).toBe("setback-citation-vintage-unreadable");
+    expect(p.citationVintage!.note).toBe(VINTAGE_NOTE);
+    // The look HAPPENED — this is not `never-looked` any more. If derive.ts
+    // ever stops reading the table, this is the assertion that fails.
+    expect(p.citationVintage!.state).not.toBe("unreadable-never-looked");
+    // The customer sentence reaches the disclosure paragraph too, APPENDED to
+    // the survey caveat rather than replacing it.
+    expect(p.disclosure).toMatch(/not survey grade/i);
+    expect(p.disclosure!.endsWith(VINTAGE_NOTE)).toBe(true);
+    // ...and it is on the result as well as the feature, so a caller reading
+    // the envelope without walking features still sees it.
+    expect(res.citationVintage).toEqual(p.citationVintage);
+  });
+
+  it("the row names the citation it is about, and it is the same citation printed beside it", () => {
+    const { props: p } = props();
+    expect(p.citationVintage!.citationUrl).toBe(p.citationUrl);
+    expect(p.citationVintage!.sourceLabel).toContain("test-tx");
+  });
+
+  it("THE AGREEING CONTROL: a table whose own effectiveDate is readable publishes a date, NO row, and a pre-lane disclosure", () => {
+    // `bastrop-development-code.json`'s live shape.
+    const { props: p, res } = props({ effectiveDate: "2026-04-14" } as Partial<SetbackTable>);
+
+    expect(p.citationEffectiveDate).toBe("2026-04-14");
+    expect(res.citationEffectiveDate).toBe("2026-04-14");
+    expect(p.citationVintage).toBeUndefined();
+    expect(res.citationVintage).toBeUndefined();
+    // A readable vintage is not a conflict, so the disclosure is UNTOUCHED:
+    // this is what keeps every already-dated jurisdiction byte-identical.
+    expect(p.disclosure).not.toContain("vintage unknown");
+  });
+
+  it("KEEPS THE CAUSES APART: a present-but-unreadable `effectiveDate` is `unparseable`, not `absent-at-source`", () => {
+    const { props: p } = props({ effectiveDate: "2011" } as Partial<SetbackTable>);
+    expect(p.citationVintage).toBeDefined();
+    expect(p.citationVintage!.state).toBe("unreadable-unparseable");
+    // ...and the other direction, on the identical citation:
+    expect(props().props.citationVintage!.state).toBe("unreadable-absent-at-source");
+  });
+
+  it("no citation being served means NOTHING is declared — there is no instrument to qualify", () => {
+    const noCitation: SetbackTable = {
+      ...TABLE,
+      districts: TABLE.districts.map((d) => ({ ...d, citation_url: undefined })),
+    } as unknown as SetbackTable;
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const p = deriveBuildableEnvelope({
+      ring,
+      table: noCitation,
+      district: mapDistrict(noCitation, "R-MD")!,
+      labeling,
+    }).geojson.features[0]!.properties;
+
+    expect(p.citationVintage).toBeUndefined();
+    expect(p.citationEffectiveDate).toBeUndefined();
+    expect(p.disclosure).not.toContain("vintage unknown");
+  });
+
+  it("NEVER DEFAULTS THE DATE: the key is ABSENT, not null and not a placeholder, when nothing was readable", () => {
+    const { props: p } = props();
+    expect("citationEffectiveDate" in p).toBe(false);
+    expect(p.citationEffectiveDate).toBeUndefined();
+    expect(JSON.stringify(p)).not.toContain("1970-01-01");
+  });
+
+  it("the declaration SURVIVES AN EMPTY envelope: a consume-lot result still serves its citation, so it still declares the vintage", () => {
+    // Falsifier for the naive implementation that attaches the row only where
+    // the buildable ring exists. The citation is served either way.
+    const { props: p, res } = props(undefined, rectRing(40, 40));
+    expect(res.empty).toBe(true);
+    expect(p.citationUrl).toContain("municode");
+    expect(p.citationVintage).toBeDefined();
+    expect(p.citationVintage!.note).toBe(VINTAGE_NOTE);
+  });
+});

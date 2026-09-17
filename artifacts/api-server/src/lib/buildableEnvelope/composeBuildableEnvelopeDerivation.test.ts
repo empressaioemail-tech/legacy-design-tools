@@ -33,6 +33,7 @@ import {
   AREA_FIGURE_WITHHELD_DISCLOSURE,
   withholdUnverifiedAreaFigure,
 } from "./reconcileAtomEnvelope";
+import { SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE } from "./setbackCitationVintage";
 import { composeBuildableEnvelopeDerivation } from "./composeBuildableEnvelopeDerivation";
 
 const LNG0 = -97.31;
@@ -269,7 +270,18 @@ describe("composeBuildableEnvelopeDerivation (P-153 Step A extraction)", () => {
     expect(result.derivePath).toBe("labelEdges+derive");
 
     // A reader is told WHY the figure is missing, not left to guess.
-    expect(props.disclosure).toBe(AREA_FIGURE_WITHHELD_DISCLOSURE);
+    //
+    // P-270 (OPS-24 X11): this payload owes a reader a SECOND fact as well.
+    // This fixture's table cites a URL (`citation_url` on every district) and
+    // carries no `effectiveDate`, so its vintage is declared too. Both
+    // sentences, in order: the withholding fact is unchanged, it is simply no
+    // longer the whole story. Asserted as the exact pair rather than a
+    // `toContain`, so a transformer that starts DROPPING the declaration fails
+    // here instead of passing on the withholding sentence alone.
+    expect(props.disclosure).toBe(
+      `${AREA_FIGURE_WITHHELD_DISCLOSURE} ${SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE}`,
+    );
+    expect(props.citationVintage?.note).toBe(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE);
 
     // The LOT area is a measured fact (a county appraisal figure) and is not
     // withdrawn with the modelled figure.

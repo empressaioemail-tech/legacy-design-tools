@@ -54,6 +54,21 @@ export const RESEARCH_AREA_SUBJECT = z.object({
       edgeSignal: z.string().nullish(), // "road" | "point" | "shape"
       disclosure: z.string().nullish(),
       citationUrl: z.string().nullish(),
+      /**
+       * P-270 (OPS-24 X11). The drawn envelope's vintage declaration, present
+       * only when its citation is served without a readable effective date.
+       * `.nullish()` so a payload minted before this lane still parses, and so
+       * a caller can tell `undefined` (old payload) from a declared row.
+       */
+      citationVintage: z
+        .object({
+          kind: z.string(),
+          state: z.string(),
+          sourceLabel: z.string().nullable(),
+          citationUrl: z.string(),
+          note: z.string(),
+        })
+        .nullish(),
     })
     .nullish(),
   parcelFacts: RESEARCH_AREA_SUBJECT_PARCEL_FACTS.nullish(),
@@ -251,6 +266,12 @@ export function formatSubjectConstraintsForLlm(
 
   if (env?.disclosure) detail.push(`- ${env.disclosure}`);
   if (env?.citationUrl) detail.push(`- Source: ${env.citationUrl}`);
+  // P-270 (OPS-24 X11): the citation line above is a bare URL, so the
+  // declaration goes BESIDE it rather than only inside the disclosure
+  // paragraph above it — a reader that copies one line out of this block must
+  // not come away holding a citation with no vintage. Absent whenever the
+  // vintage is known, so a dated citation is unchanged.
+  if (env?.citationVintage?.note) detail.push(`- ${env.citationVintage.note}`);
 
   // Nothing usable to render (no PII in this shape by contract).
   if (!detail.length) return "";

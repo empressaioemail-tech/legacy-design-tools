@@ -23,6 +23,7 @@
 
 import type { InsetEmptyKind } from "./geometry";
 import type { BuildableEnvelopeProps, BuildableEnvelopeResult } from "./derive";
+import { disclosureWithCitationVintage } from "./setbackCitationVintage";
 
 export interface AtomBuildableEnvelopeOutcome {
   kind?: string;
@@ -174,13 +175,22 @@ export function reconcileWithAtomEnvelope(
       coverageCap != null
         ? Math.round(Math.min(atomArea, coverageCap))
         : Math.round(atomArea);
-    const disclosure =
+    const disclosure = disclosureWithCitationVintage(
       `Buildable area from the property atom chain (engine source of truth): ` +
-      `${Math.round(atomArea)} sq ft. ` +
-      (keepsGeometry
-        ? "Approximate — verify with a survey and the city."
-        : "Local map geometry unavailable for this outcome — area shown without a drawn shape. " +
-          "Approximate — verify with a survey and the city.");
+        `${Math.round(atomArea)} sq ft. ` +
+        (keepsGeometry
+          ? "Approximate — verify with a survey and the city."
+          : "Local map geometry unavailable for this outcome — area shown without a drawn shape. " +
+            "Approximate — verify with a survey and the city."),
+      // P-270 (OPS-24 X11): this branch REWRITES the disclosure, so the vintage
+      // sentence `derive.ts` appended would be lost here even though the
+      // declaration row survives on `props` (it is carried by the spread
+      // below). Re-appending it from the row — rather than re-deriving the
+      // sentence — keeps this transformer from becoming a SECOND decider: the
+      // words still come from the one module, and the row is the thing that
+      // decides whether they appear.
+      props.citationVintage ?? null,
+    )!;
 
     const newProps: BuildableEnvelopeProps = {
       ...withoutEmptyFields(props),
@@ -254,10 +264,16 @@ export function reconcileWithAtomEnvelope(
     const reason = isDiagnostic
       ? ENVELOPE_UNVERIFIED_DISCLOSURE
       : (rawReason ?? "Setbacks consume the lot — no buildable area remains.");
-    const disclosure = isDiagnostic
-      ? reason
-      : `No buildable area: ${reason} (property atom chain, engine source of truth). ` +
-        `Approximate — verify with a survey and the city.`;
+    const disclosure = disclosureWithCitationVintage(
+      isDiagnostic
+        ? reason
+        : `No buildable area: ${reason} (property atom chain, engine source of truth). ` +
+          `Approximate — verify with a survey and the city.`,
+      // P-270: same re-append as the resolved branch above — this branch
+      // rewrites the disclosure too, and an empty envelope still serves its
+      // citation, so the declaration must not be dropped here.
+      props.citationVintage ?? null,
+    )!;
 
     const newProps: BuildableEnvelopeProps = {
       ...withoutEmptyFields(props),
@@ -350,9 +366,24 @@ export function withholdUnverifiedAreaFigure(
   // own geometry gates) — that is a different fact and it keeps its words. A
   // drawn envelope gets the withholding disclosure, replacing the mild
   // "approximate" caveat, which understated the situation.
+  //
+  // P-270 (OPS-24 X11): BOTH branches below therefore REPLACE a disclosure that
+  // `derive.ts` had already appended the vintage sentence to. This path is the
+  // common one, not an edge case — the area figure is withheld on every parcel
+  // without a verified atom (P-304) — so without the re-append below the
+  // sentence would be dropped in normal operation while the row survived on
+  // `props`, leaving the disclosure and the row disagreeing about the same
+  // citation. The sentence is re-taken FROM the row, so the one module still
+  // owns the words.
   const withheldProps: BuildableEnvelopeProps = derived.empty
     ? rest
-    : { ...rest, disclosure: AREA_FIGURE_WITHHELD_DISCLOSURE };
+    : {
+        ...rest,
+        disclosure: disclosureWithCitationVintage(
+          AREA_FIGURE_WITHHELD_DISCLOSURE,
+          props.citationVintage ?? null,
+        )!,
+      };
 
   return {
     ...derived,
