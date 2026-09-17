@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "beverly-hills-tx",
   "jurisdictionDisplayName": "City of Beverly Hills, TX",
-  "note": "Beverly Hills, TX -- the city's four districts (one residential, two commercial, one industrial), read from the Zoning Ordinance adopted as Ordinance 040412 on April 12, 2004 and codified as Exhibit 14A to Chapter 14 of the Beverly Hills Code of Ordinances. ROUTE: read from the city's own codification on eCode360 (General Code's product carrying the City of Beverly Hills, TX Code of Ordinances and Exhibit 14A). Part 1 (Districts) and Part 6 (Yards) at the citation_url return server-rendered text to a plain fetch, so those reads are reproducible. Two cautions, stated because they matter: (a) the Part 5 height page's eCode360 identifier is not derivable from the Part 1/Part 6 identifiers, and one attempt to reach it by an inferred identifier returned Cloudflare bot-verification HTML and a plain-HTTP attempt at the same page returned HTTP 403, so the height figures were read under Section 5.101 on Zoneomics' mirror of the same codified ordinance at zoneomics.com/code/beverly-hills-TX/chapter_5, which reproduces the section text and its '(Ordinance 040412 adopted 4/12/04)' stamp; (b) one eCode360 fetch of Part 6 failed on timeout and succeeded on retry, so the route is live but not perfectly reliable. No value comes from a source other than the city's own codified ordinance as reproduced on those two routes. VINTAGE: every section read carries '(Ordinance 040412 adopted 4/12/04)' as its history note, which is the base ordinance adoption date read at source. The codified Exhibit 14A also carries one later amendment in its amendment table: 'Ordinance 2022-0003, adopted 2022-02-08, Amends Zoning Ordinance: Accessory Uses and Buildings Are Regulated, Ch 14A Pt 8'. That amendment touches Part 8 (accessory uses and buildings), not the Parts 1, 5 or 6 coded here, so the dimensional standards coded here are the 4/12/04 text as amended through the codification read. INTERNAL INCONSISTENCY IN THE DISTRICT NAMES, RECORDED NOT RESOLVED: Part 1 Section 1.202, as amended by Ordinance 040412, names the residential district 'R | Single-Family/Duplex District' and the other three 'C-1 Restricted Commercial District', 'C-2 General Commercial District' and 'M Industrial District'. Part 2 (Use of Land or Premises) instead carries a use section headed 'Section 2.01 In the R-1 Single Family Residential', and Part 6 Section 6.101.A says 'R-1 and R-2 districts' while Part 5 Section 5.101.A says 'R-1 and R-2, districts' and then adds 'in R District'. There is no R-2 use section and no R-2 dimensional section anywhere in the ordinance: the codified text carries a stale pair of designations left over from the pre-2004 scheme. This table codes the residential district ONCE, under the name its own use section uses (R-1 Single Family Residential District), and does not invent an R-2 row; the C-1, C-2 and M rows are named as Part 1 names them. WHERE THE ZEROES COME FROM: C-2's side and rear yards and M's front, side and rear yards are coded 0 because the ordinance says so in terms -- 'no side or rear yard minimums shall be required' (C-2) and 'there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district the side or rear yard required in that R district must be provided along the boundary line' (M). Those are real standards, not gaps, and the M district's residential-adjacency condition is preserved verbatim in the quote and is NOT collapsed into the 0. Section 6.102.E adds the same adjacency rule for commercial and industrial lots next to an R district. NO COVERAGE STANDARD EXISTS: the ordinance regulates yards, height, use, nonconforming uses, special uses, off-street spaces and accessory buildings; neither lot coverage nor impervious coverage appears anywhere in Parts 1-8. Every coverage field in this table is a not_specified sentinel stating that. PART 6'S VISIBILITY CLAUSES ARE NOT YARD STANDARDS: Section 6.101.C (corner-lot visibility) and Section 6.101.D (interior-lot visibility) regulate sight lines, not setbacks, and are not coded as corner or side yards. Section 6.102.B's corner-lot rule ties a corner lot's side-street yard to the depth of the adjacent lot's front yard (and to 15 ft where the area to the rear is undeveloped); it is a derived width, not a flat number, and no flat R corner figure is coded beyond Section 6.101.A.1(b)'s 15 ft side-street yard for R dwellings.",
+  "note": "Beverly Hills, TX -- the city's four districts (one residential, two commercial, one industrial), read from the Zoning Ordinance adopted as Ordinance 040412 on April 12, 2004 and codified as Exhibit 14A to Chapter 14 of the Beverly Hills Code of Ordinances. ROUTE: read from the city's own codification on eCode360 (General Code's product carrying the City of Beverly Hills, TX Code of Ordinances and Exhibit 14A). Part 1 (Districts) and Part 6 (Yards) at the citation_url return server-rendered text to a plain fetch, so those reads are reproducible. Two cautions, stated because they matter: (a) the Part 5 height page's eCode360 identifier is not derivable from the Part 1/Part 6 identifiers, and one attempt to reach it by an inferred identifier returned Cloudflare bot-verification HTML and a plain-HTTP attempt at the same page returned HTTP 403, so the height figures were read under Section 5.101 on Zoneomics' mirror of the same codified ordinance at zoneomics.com/code/beverly-hills-TX/chapter_5, which reproduces the section text and its '(Ordinance 040412 adopted 4/12/04)' stamp; (b) one eCode360 fetch of Part 6 failed on timeout and succeeded on retry, so the route is live but not perfectly reliable. No value comes from a source other than the city's own codified ordinance as reproduced on those two routes. VINTAGE: every section read carries '(Ordinance 040412 adopted 4/12/04)' as its history note, which is the base ordinance adoption date read at source. The codified Exhibit 14A also carries one later amendment in its amendment table: 'Ordinance 2022-0003, adopted 2022-02-08, Amends Zoning Ordinance: Accessory Uses and Buildings Are Regulated, Ch 14A Pt 8'. That amendment touches Part 8 (accessory uses and buildings), not the Parts 1, 5 or 6 coded here, so the dimensional standards coded here are the 4/12/04 text as amended through the codification read. INTERNAL INCONSISTENCY IN THE DISTRICT NAMES, RECORDED NOT RESOLVED: Part 1 Section 1.202, as amended by Ordinance 040412, names the residential district 'R | Single-Family/Duplex District' and the other three 'C-1 Restricted Commercial District', 'C-2 General Commercial District' and 'M Industrial District'. Part 2 (Use of Land or Premises) instead carries a use section headed 'Section 2.01 In the R-1 Single Family Residential', and Part 6 Section 6.101.A says 'R-1 and R-2 districts' while Part 5 Section 5.101.A says 'R-1 and R-2, districts' and then adds 'in R District'. There is no R-2 use section and no R-2 dimensional section anywhere in the ordinance: the codified text carries a stale pair of designations left over from the pre-2004 scheme. This table codes the residential district ONCE, under the name its own use section uses (R-1 Single Family Residential District), and does not invent an R-2 row; the C-1, C-2 and M rows are named as Part 1 names them. WHERE THE ZEROES COME FROM: C-2's side and rear yards and M's front, side and rear yards are coded 0 because the ordinance says so in terms -- 'no side or rear yard minimums shall be required' (C-2) and 'there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district the side or rear yard required in that R district must be provided along the boundary line' (M). Those are real standards, not gaps, and the M district's residential-adjacency condition is preserved verbatim in the quote and is NOT collapsed into the 0. Section 6.102.E adds the same adjacency rule for commercial and industrial lots next to an R district. NO COVERAGE STANDARD EXISTS: the ordinance regulates yards, height, use, nonconforming uses, special uses, off-street spaces and accessory buildings; neither lot coverage nor impervious coverage appears anywhere in Parts 1-8. Every coverage field in this table is a not_specified sentinel stating that. PART 6'S VISIBILITY CLAUSES ARE NOT YARD STANDARDS: Section 6.101.C (corner-lot visibility) and Section 6.101.D (interior-lot visibility) regulate sight lines, not setbacks, and are not coded as corner or side yards. Section 6.102.B's corner-lot rule ties a corner lot's side-street yard to the depth of the adjacent lot's front yard (and to 15 ft where the area to the rear is undeveloped); it is a derived width, not a flat number, and no flat R corner figure is coded beyond Section 6.101.A.1(b)'s 15 ft side-street yard for R dwellings. P-299 OT-2 (2026-09-17): this table's 28 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- Zoneomics' mirror of the same codified ordinance, after the official host returned HTTP 403 to a plain-HTTP attempt. The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
   "districts": [
     {
       "district_name": "R-1 Single Family Residential District",
@@ -18,45 +18,45 @@
         "front_ft": {
           "section_number": "6.101.A.1(a)",
           "quote": "R-1 and R-2 districts. 1. Dwellings shall have: (a) Minimum front yard of 35 feet measured from the property line.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.101.A.1(c)",
           "quote": "R-1 and R-2 districts. 1. Dwellings shall have: (c) Minimum rear yard of at least 25 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.101.A.1(b)",
           "quote": "R-1 and R-2 districts. 1. Dwellings shall have: (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.101.A.1(b)",
           "quote": "R-1 and R-2 districts. 1. Dwellings shall have: (b) Minimum side yard of five feet with a minimum separation between main buildings to be not less than 20 feet. On a corner lot there shall be a yard along the side street of not less than 15 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "5.101.A.1",
           "quote": "Buildings shall not exceed the following height limits: A. R-1 and R-2, districts. 1. Two stories or 35 feet in R District to include accessory buildings.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.101.A",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.101.A",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -75,45 +75,45 @@
         "front_ft": {
           "section_number": "6.101.B.1",
           "quote": "C-1, C-2, and M districts. 1. Except as provided in sections 6.102 and 6.103 [sic], no structure or use in the C-1 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 5 feet each; and a rear yard of not less than 25 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.101.B.1",
           "quote": "C-1, C-2, and M districts. 1. ... For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 5 feet each; and a rear yard of not less than 25 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.101.B.1",
           "quote": "C-1, C-2, and M districts. 1. ... For all permitted uses: A front yard of not less than 25 feet; two side yards of not less than 5 feet each; and a rear yard of not less than 25 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.102.C",
           "quote": "On corner lots in all commercial and industrial districts that rear upon an R district, a 10-foot yard must be provided along the side street side. -- 10 ft is the ordinance's only commercial/industrial corner figure and it is conditioned on the lot rearing upon an R district; Section 6.101 itself states no corner figures for the C-1, C-2 and M districts.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "5.101.B.1",
           "quote": "B. C-1 district. 1. Any building may be erected to a height of 35 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.101.B.1",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.101.B.1",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -132,45 +132,45 @@
         "front_ft": {
           "section_number": "6.101.B.2",
           "quote": "C-1, C-2, and M districts. 2. Except as provided in sections 6.102 and 6.103 [sic], no structure or use in the C-2 district shall be erected, altered or maintained unless the following yards are provided: For all permitted uses: A front yard of not less than 25 feet, no side or rear yard minimums shall be required. -- 0 is coded for side and rear below because the ordinance says no minimum is required: a real standard, not a gap.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.101.B.2",
           "quote": "C-1, C-2, and M districts. 2. ... For all permitted uses: A front yard of not less than 25 feet, no side or rear yard minimums shall be required. -- 0 is coded for 'no rear yard required' (a real standard), not as a gap. Section 6.101.B.2 does not state a 'no minimum' in those words for the front yard: it requires 25 ft front.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.101.B.2",
           "quote": "C-1, C-2, and M districts. 2. ... For all permitted uses: A front yard of not less than 25 feet, no side or rear yard minimums shall be required. -- 0 is coded for 'no side yard required' (a real standard), not as a gap.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.102.C",
           "quote": "On corner lots in all commercial and industrial districts that rear upon an R district, a 10-foot yard must be provided along the side street side. -- 10 ft is the ordinance's only commercial/industrial corner figure and it is conditioned on the lot rearing upon an R district; Section 6.101 itself states no corner figures for the C-1, C-2 and M districts.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "5.101.C.1",
           "quote": "C. C-2 [district]. 1. Any building may be erected to a height of 50 feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.101.B.2",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.101.B.2",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -189,45 +189,45 @@
         "front_ft": {
           "section_number": "6.101.B.3",
           "quote": "C-1, C-2, and M districts. 3. Except as provided in sections 6.102 and 6.103 [sic], there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap; the R-district-adjacency condition quoted here is a real additional requirement and is not collapsed into the 0.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.101.B.3",
           "quote": "C-1, C-2, and M districts. 3. ... there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.101.B.3",
           "quote": "C-1, C-2, and M districts. 3. ... there shall be no minimum yard requirements in the M district, except that where a lot abuts a lot in an R district the side or rear yard required in that R district must be provided along the boundary line. -- 0 is coded for 'no yard required' (a real standard), not as a gap.",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.102.C",
           "quote": "On corner lots in all commercial and industrial districts that rear upon an R district, a 10-foot yard must be provided along the side street side. -- 10 ft is the ordinance's only commercial/industrial corner figure and it is conditioned on the lot rearing upon an R district; Section 6.101 itself states no corner figures for the C-1, C-2 and M districts.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "5.101.D.1",
           "quote": "D. M districts. 1. Any building may be erected to a height of 70 feet provided that the building is set back at least one foot for every foot exceeding 35 feet. -- 70 ft is coded as the stated maximum; the 1:1 setback trade above 35 ft is a real additional condition and is quoted, not collapsed into the number.",
-          "confidence": 0.8,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.101.B.3",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.101.B.3",
           "quote": "The Beverly Hills zoning ordinance (Ordinance 040412, adopted 4/12/04, as codified in Exhibit 14A to Chapter 14 of the City Code) contains no lot-coverage and no impervious-coverage standard for this district. Its Parts are: 1 Districts, 2 Use of Land or Premises, 3 Nonconforming Uses, 4 Special Uses, 5 Height Regulations, 6 Yards, 7 Off-Street Spaces, 8 Accessory Uses and Buildings. A read of Parts 1-8 returns no coverage figure of any kind.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }

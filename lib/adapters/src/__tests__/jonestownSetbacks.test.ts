@@ -4,14 +4,19 @@
  * Sec. 3.1.1 charts (Ordinance 2025-O-650 adopted 1/9/2025), read through
  * eCode360's PRINT endpoint -- the ordinary article page renders no body text
  * or tables. No code-section atom corpus exists for this jurisdiction, so
- * every value is primary-source-verified rather than asserted/human-verified.
+ * every value is transcription-read (P-299: a copy of the instrument) rather
+ * than asserted/human-verified.
  * End-to-end proof: run the real acceptance gate against the table with an
  * empty atom corpus and confirm zero blocks, not just that the JSON parses.
  */
 
 import { describe, expect, it } from "vitest";
 import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/index.js";
-import { runSetbackGate, type GatedSetbackTable } from "../local/setbacks/gate.js";
+import {
+  runSetbackGate,
+  TRANSCRIPTION_READ,
+  type GatedSetbackTable,
+} from "../local/setbacks/gate.js";
 
 describe("jonestown-tx", () => {
   it("routes and carries all 11 codified districts", () => {
@@ -33,14 +38,14 @@ describe("jonestown-tx", () => {
     expect(report.gated).toBe(true);
   });
 
-  it("every value claims only primary-source-verified (no atom corpus exists)", () => {
+  it("every value makes no atom claim (transcription-read since P-299; no atom corpus exists)", () => {
     const table = getSetbackTable("jonestown-tx")!;
     for (const d of table.districts) {
       for (const [field, entry] of Object.entries(d.provenance ?? {})) {
         expect(
           (entry as { verification_state: string }).verification_state,
           `${d.district_name}.${field}`,
-        ).toBe("primary-source-verified");
+        ).toBe(TRANSCRIPTION_READ);
       }
     }
   });
