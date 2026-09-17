@@ -72,6 +72,7 @@ import {
   resolveAuthoritativeSetbacks,
   type AuthoritativeSetbackResolution,
 } from "../lib/buildableEnvelope/authoritativeSetbackSource";
+import { getSetbackTableForZoning } from "@workspace/adapters";
 import { districtCodeHasExactRow } from "../lib/buildableEnvelope/districtMapping";
 import { plannedDevelopmentSetbackRefusalFor } from "../lib/buildableEnvelope/plannedDevelopmentSetback";
 import {
