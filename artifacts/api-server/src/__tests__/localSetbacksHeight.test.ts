@@ -65,6 +65,7 @@ describe("P-299 — GET /api/local/setbacks/round-rock-tx (real table, real rout
     const districts = res.body.districts as {
       district_name: string;
       max_height_ft: number | null;
+      max_height_ft_not_specified: boolean;
     }[];
     expect(districts.length).toBeGreaterThan(0);
 
@@ -72,22 +73,42 @@ describe("P-299 — GET /api/local/setbacks/round-rock-tx (real table, real rout
     expect(sentinel.map((d) => d.district_name)).toEqual([]);
 
     // Round Rock states the commercial/industrial heights in STORIES, so those
-    // rows must arrive as null...
+    // rows must arrive as null, and the response must SAY WHY...
     const sf2 = districts.find((d) => d.district_name.startsWith("SF-2"));
     expect(sf2).toBeDefined();
     expect(sf2!.max_height_ft).toBeNull();
+    expect(sf2!.max_height_ft_not_specified).toBe(true);
 
     // ...while a district that DOES state feet keeps its number (MU-1 = 48 ft),
     // so this test cannot pass by nulling everything.
     const mu1 = districts.find((d) => d.district_name.startsWith("MU-1"));
     expect(mu1).toBeDefined();
     expect(mu1!.max_height_ft).toBe(48);
+    expect(mu1!.max_height_ft_not_specified).toBe(false);
+  });
+
+  it("carries the reason with the absence: null <=> not_specified, on every row", async () => {
+    const res = await request(app()).get("/api/local/setbacks/round-rock-tx");
+    const districts = res.body.districts as {
+      district_name: string;
+      max_height_ft: number | null;
+      max_height_ft_not_specified: boolean;
+    }[];
+    // Every null says why it is null, and every served number says it is not an
+    // absence — i.e. the flag is never a bare decoration (P-299).
+    const mismatched = districts
+      .filter((d) => (d.max_height_ft === null) !== d.max_height_ft_not_specified)
+      .map((d) => d.district_name);
+    expect(mismatched).toEqual([]);
+    expect(districts.some((d) => d.max_height_ft === null)).toBe(true);
   });
 
   it("a null height is still a present key on the wire (the FE decodes a shape, not a sparse row)", async () => {
     const res = await request(app()).get("/api/local/setbacks/round-rock-tx");
     const row = (res.body.districts as Record<string, unknown>[])[0]!;
     expect(Object.keys(row)).toContain("max_height_ft");
+    expect(Object.keys(row)).toContain("max_height_ft_not_specified");
     expect(row["max_height_ft"]).toBeNull();
+    expect(row["max_height_ft_not_specified"]).toBe(true);
   });
 });

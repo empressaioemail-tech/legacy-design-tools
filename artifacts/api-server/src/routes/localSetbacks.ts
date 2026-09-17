@@ -89,6 +89,7 @@ router.get(
         side_ft: d.side_ft,
         side_corner_ft: d.side_corner_ft,
         max_height_ft: heightIsAbsent(d) ? null : d.max_height_ft,
+        max_height_ft_not_specified: heightIsAbsent(d),
         max_lot_coverage_pct: d.max_lot_coverage_pct,
         max_impervious_pct: d.max_impervious_pct,
         citation_url: d.citation_url,
