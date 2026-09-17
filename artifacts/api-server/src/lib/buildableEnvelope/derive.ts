@@ -62,8 +62,18 @@ export interface BuildableEnvelopeProps {
   districtNote: string;
   /** Areas (square feet). */
   parcelAreaSqFt: number;
-  buildableAreaSqFt: number;
-  buildableAreaPct: number;
+  /**
+   * P-304 (2026-09-17). The buildable-area figure and percent are OMITTED
+   * whenever no ground-truth VERIFIED buildable-envelope atom backs them
+   * (A-180; `_decisions/2026-09-11_ruling_b_reversed_polygon_only.md`): the
+   * modelled polygon still draws, the figure does not. Optional on purpose, so
+   * a consumer reads the key's ABSENCE as the withheld state and never as a
+   * zero or as "nothing here" — `withholdUnverifiedAreaFigure`
+   * (`reconcileAtomEnvelope.ts`) is the one writer of that absence, and
+   * `isEnvelopeAtomVerified` is the one predicate that decides it.
+   */
+  buildableAreaSqFt?: number;
+  buildableAreaPct?: number;
   /** Dimensional caps that feed downstream ADU/addition sizing. */
   maxLotCoveragePct: number | null;
   /**

@@ -148,7 +148,9 @@ export function reconcileWithAtomEnvelope(
   ) {
     const atomArea = atomOutcome.areaSqFt;
     const alreadyAgrees =
-      !derived.empty && Math.round(props.buildableAreaSqFt) === Math.round(atomArea);
+      !derived.empty &&
+      typeof props.buildableAreaSqFt === "number" &&
+      Math.round(props.buildableAreaSqFt) === Math.round(atomArea);
     if (alreadyAgrees) return derived;
 
     // P-249 (A-180): an UNVERIFIED atom's area is exactly as unfounded as its
@@ -282,4 +284,81 @@ export function reconcileWithAtomEnvelope(
   // Unknown/pending kind (e.g. "provisional-front-edge" carries no area) —
   // the atom has no usable number to reconcile against; keep the live result.
   return derived;
+}
+
+/**
+ * P-304 (2026-09-17) — WITHHOLD THE AREA FIGURE WITHOUT A VERIFIED ATOM.
+ *
+ * A-180 (`_decisions/2026-09-11_ruling_b_reversed_polygon_only.md`): only a
+ * ground-truth VERIFIED envelope atom entitles a caller to a buildable-area
+ * figure. A polygon modelled from the setback table on record (no verified
+ * atom) may still DRAW — the reader can see the shape the instruments imply —
+ * but the figure must not be printed, because it is not measured. The figure
+ * is legitimate business information that the parcel owner / a licensed
+ * caller is entitled to obtain elsewhere; it is not something an anonymous
+ * reader of a public map is entitled to print as a fact.
+ *
+ * The predicate is P-249's own: `isEnvelopeAtomVerified`, one definition for
+ * both modules, so "verified" can never mean two things.
+ *
+ * Withholding is ABSENCE, not zero, and never a fake number:
+ *   - the two keys are DELETED from the properties (a consumer that reads
+ *     them gets `undefined`, which is what downstream already treats as
+ *     "no figure available": the PE wire mapper `?? null`, the map card's
+ *     `num()`, `live-envelope-augment`'s "no atom area" branch);
+ *   - a zero would be read as a MEASURED result ("this lot can't be built on")
+ *     — a different, false claim, so a withheld figure never becomes a zero;
+ *   - no stand-in polygon area is substituted: the atom's own area is still
+ *     not quoted (P-249's stance), and re-deriving one from our own ring on
+ *     the way out would be the same unfounded figure wearing a new label;
+ *   - the geometry is untouched, so the draw is unaffected;
+ *   - `disclosure` names the withholding (the honest-partial slot the draw
+ *     block already carries for declined envelopes), so a reader is told WHY
+ *     the figure is missing rather than left to guess.
+ *
+ * Idempotent: an already-withheld (or atom-zero) payload has both keys absent
+ * and comes back unchanged, so calling it twice can never delete a figure that
+ * a verified atom put there.
+ */
+export const AREA_FIGURE_WITHHELD_DISCLOSURE =
+  "Buildable area withheld — this parcel's buildable-envelope outcome has no " +
+  "ground-truth verified atom (depth-warm promoted) backing it. The envelope " +
+  "outline is modelled from the setback table on record; the area figure stays " +
+  "withheld until a verified atom backs it.";
+
+export function withholdUnverifiedAreaFigure(
+  derived: BuildableEnvelopeResult,
+  atomPromotion?: EnvelopeAtomPromotion | null,
+): BuildableEnvelopeResult {
+  if (isEnvelopeAtomVerified(atomPromotion)) return derived;
+
+  const feature = derived.geojson.features[0];
+  if (!feature) return derived;
+
+  const props = feature.properties;
+  const carriesFigure =
+    props.buildableAreaSqFt !== undefined || props.buildableAreaPct !== undefined;
+  if (!carriesFigure) return derived;
+
+  const {
+    buildableAreaSqFt: _withheldSqFt,
+    buildableAreaPct: _withheldPct,
+    ...rest
+  } = props;
+
+  // An empty result's disclosure is the decline reason for the RING (e.g. our
+  // own geometry gates) — that is a different fact and it keeps its words. A
+  // drawn envelope gets the withholding disclosure, replacing the mild
+  // "approximate" caveat, which understated the situation.
+  const withheldProps: BuildableEnvelopeProps = derived.empty
+    ? rest
+    : { ...rest, disclosure: AREA_FIGURE_WITHHELD_DISCLOSURE };
+
+  return {
+    ...derived,
+    geojson: {
+      type: "FeatureCollection",
+      features: [{ ...feature, properties: withheldProps }],
+    },
+  };
 }
