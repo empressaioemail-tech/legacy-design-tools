@@ -413,6 +413,77 @@ describe("P-299 — the gate over every table this repo ships", () => {
     expect(bad).toEqual([]);
   });
 
+  /**
+   * The same guard the corpus package carries: these vendored files' `P-299 OT-1`
+   * notes state the flag-clearing basis PER ROW, because the rows do not share
+   * one (6 quotes state the figure the instrument tabulates; 34 quotes name the
+   * column without restating the number, and those rest on the OPS-21-R1
+   * instrument's REAL_VALUE_FLAGGED classification). Vending a copy of that note
+   * means vending the claim, so the claim is checked here too — including on the
+   * day a value is edited and its quote is not.
+   */
+  it("the vendored OT-1 notes state their basis per row, and the split they state is the one the quotes support", () => {
+    const listAfter = (note: string, marker: string): string[] => {
+      const open = note.indexOf(marker);
+      if (open < 0) return [];
+      const start = note.indexOf("(", open + marker.length);
+      if (start < 0) return [];
+      let depth = 0;
+      for (let i = start; i < note.length; i++) {
+        if (note[i] === "(") depth++;
+        else if (note[i] === ")" && --depth === 0) {
+          return note
+            .slice(start + 1, i)
+            .split(";")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      }
+      throw new Error(`unterminated list after ${marker}`);
+    };
+    const says = (quote: string, value: number) =>
+      new RegExp(`(^|[^0-9.])${String(value).replace(".", "\\.")}([^0-9]|$)`).test(quote);
+    const nameOf = (item: string) => item.replace(/\s*\(keeps [^)]*\)$/, "");
+    const valueOf = (item: string) => Number(/\(keeps ([0-9.]+)\)/.exec(item)?.[1]);
+
+    const offenders: string[] = [];
+    let quoteBasis = 0;
+    let instrumentBasis = 0;
+    for (const [key, table] of tables) {
+      const note = table.note ?? "";
+      if (!/P-299 OT-1/.test(note)) continue;
+      for (const [list, marker, isQuoted] of [
+        [listAfter(note, "the row's own quote states the feet figure"), "quote", true],
+        [listAfter(note, "the discriminator the ruling names"), "instrument", false],
+      ] as const) {
+        for (const item of list) {
+          const d = table.districts.find((x) => x.district_name === nameOf(item));
+          if (!d) {
+            offenders.push(`${key}: note names a district this table does not have: ${item}`);
+            continue;
+          }
+          if (isQuoted) quoteBasis++;
+          else instrumentBasis++;
+          const statesIt = says(heightSlot(d)?.quote ?? "", valueOf(item));
+          if (isQuoted && !statesIt) {
+            offenders.push(`${key}/${nameOf(item)}: note says the QUOTE states ${valueOf(item)}, it does not`);
+          }
+          if (!isQuoted && statesIt) {
+            offenders.push(
+              `${key}/${nameOf(item)}: note says the quote does NOT state ${valueOf(item)}, it does — this row belongs in the quoted list`,
+            );
+          }
+          if (heightSlot(d)?.not_specified === true) {
+            offenders.push(`${key}/${nameOf(item)}: note says the flag was cleared, the row is still flagged`);
+          }
+        }
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([]);
+    expect(quoteBasis).toBeGreaterThan(0);
+    expect(instrumentBasis).toBeGreaterThan(0);
+  });
+
   it("every value's verification_state is one of the four states the checker knows (no fifth state, no stale spelling)", () => {
     const bad: string[] = [];
     const known = new Set<string>(VERIFICATION_STATES);
