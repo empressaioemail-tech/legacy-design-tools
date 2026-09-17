@@ -612,3 +612,69 @@ jobs:
             exit 1
           fi
           echo "ci-cortex-daily-limit-50000: clean"
+
+  p279-tagged-revision-env-predicate:
+    name: P-279 tagged-revision env predicate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P-279 predicate over the shipped fixture set
+        # P-279. A tagged revision cannot outlive an auth or secret variable the
+        # SERVING revision carries. Finding fa9addb4 removed the instance; this
+        # row builds the class control.
+        #
+        # This job is the OFFLINE half (no cloud access, no credentials): the same
+        # predicate that gates the deploy workflows, run over checked-in fixtures —
+        # a passing service, a failing one, four refusal shapes, and an executed
+        # reverted-predicate falsifier proving the check is not syntax-only.
+        #
+        # The LIVE half runs in cloud-run-deploy.yml and
+        # cloud-run-deploy-smartsite-mcp.yml, after the canary deploy and again
+        # after the traffic shift, where the exit code fails the job. What is here
+        # keeps the RULE from rotting; it does not watch a deploy.
+        #
+        # Exit codes stay distinguishable and 2 (REFUSE) FAILS this job: a check
+        # that could not read what it needs and reads as green is the defect class
+        # this exists for (DEV_PROCESS 2.0/2.3).
+        run: |
+          set +e
+          node scripts/check-tagged-revision-env.mjs --selftest
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "p279-tagged-revision-env-predicate: RESULT=clean" ;;
+            1) echo "p279-tagged-revision-env-predicate: RESULT=violation (the shipped fixture set did not pass)"; exit 1 ;;
+            2) echo "p279-tagged-revision-env-predicate: RESULT=did-not-run (REFUSE)"; exit 1 ;;
+            *) echo "p279-tagged-revision-env-predicate: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac
+
+  p279-tagged-revision-env-divergence:
+    name: P-279 canonical divergence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P-279 canonical divergence byte-compare
+        # DEV_PROCESS 2.4. scripts/check-tagged-revision-env.mjs here and
+        # tools/check-tagged-revision-env.mjs in hauska-engine are byte-identical on
+        # purpose. Two implementations of one rule drift into two rules; this
+        # compares them and REFUSES (never passes) on any byte difference, or when
+        # the canonical copy cannot be read at all.
+        #
+        # EXPECTED RED UNTIL THE ENGINE PR MERGES. canonicalRef is the hauska-engine
+        # main branch and this file does not exist there until that PR lands, so the
+        # first failure reads CANONICAL_UNREADABLE with the URL. A commit-SHA pin was
+        # rejected deliberately: a squash-merge can make a branch commit unreachable,
+        # which would read as a broken gate rather than as drift, and a SHA pin would
+        # need re-pinning by hand on every canonical edit.
+        run: |
+          set +e
+          node scripts/check-tagged-revision-env.mjs --check-divergence
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "p279-canonical-divergence: RESULT=clean" ;;
+            2) echo "p279-canonical-divergence: RESULT=refused (the two copies differ, or the canonical copy could not be read - see the message above; this is NOT a pass)"; exit 1 ;;
+            *) echo "p279-canonical-divergence: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac

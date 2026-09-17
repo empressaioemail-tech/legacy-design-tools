@@ -23,6 +23,49 @@ below and `doc_repo/90_runbooks/cloud_run_canary_deploy.md`.
 
 ---
 
+## Post-deploy credential check (P-279) — tagged revisions
+
+Every `deploy-canary` and every `shift-traffic` dispatch runs
+`scripts/check-tagged-revision-env.mjs` against the service it just touched (the
+`Tagged-revision credential check (P-279)` steps in
+[`cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml) and
+[`cloud-run-deploy-smartsite-mcp.yml`](../.github/workflows/cloud-run-deploy-smartsite-mcp.yml)).
+It FAILS the job when a traffic tag points at a revision that is missing an auth
+or secret variable the SERVING revision carries, and it names the tag, the
+revision and the missing variable names.
+
+Exit codes: `0` pass · `1` FAIL · `2` REFUSE. A REFUSE — the service or its
+revisions could not be read — fails the job too. A check that cannot read what it
+needs must never read as green.
+
+It runs **twice on purpose**: at canary time the OLD revision is still serving, so
+a credential ADDED by the new revision is invisible to the comparison until traffic
+shifts. The shift is where this class is created, so the shift is where it is read.
+
+It mutates nothing. Removing or repointing a tag is an operator decision.
+
+Run it by hand for any covered service (read-only, no writes):
+
+```bash
+node scripts/check-tagged-revision-env.mjs \
+  --project legacy-design-tools-prod --region us-central1 --service cortex-api
+
+node scripts/check-tagged-revision-env.mjs \
+  --project legacy-design-tools-prod --region us-central1 --service smartsite-mcp
+```
+
+Measured 2026-09-17 in `legacy-design-tools-prod`: `cortex-api` carried 15 failing
+tags (17 tags on old revisions) and `smartsite-mcp` 30. The check names them; it
+does not remove them.
+
+The file is a byte-identical copy of `hauska-engine`'s canonical
+`tools/check-tagged-revision-env.mjs`. The `P-279 canonical divergence` job in
+[`pr-checks.yml`](../.github/workflows/pr-checks.yml) refuses when the two diverge,
+and `P-279 tagged-revision env predicate` runs the offline fixture set. Change both
+copies together.
+
+---
+
 ## GCP-side prerequisites
 
 Run once, before the first deploy. Replace `<PROJECT_NUMBER>` with the actual

@@ -283,6 +283,42 @@ jobs:
           echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic — see job log above):"
           echo "  https://canary---${HOST}"
 
+      # P-279 post-deploy credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY HERE: the deploy is what creates the new revision, and the tag list is what a deploy
+      # leaves lying around. This first run catches the tags that were already stale
+      # before this deploy; the post-shift run below catches the ones this deploy creates.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. Exit codes
+      # 0 pass / 1 FAIL / 2 REFUSE, and REFUSE fails this step too: a check that could
+      # not read what it needs must never read as green. It mutates nothing — removing
+      # or repointing a tag is an operator decision.
+      - name: Tagged-revision credential check (P-279)
+        run: |
+          set +e
+          node scripts/check-tagged-revision-env.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "p279-tagged-revision-env: RESULT=clean" ;;
+            1)
+              echo "p279-tagged-revision-env: RESULT=violation - a tag points at a revision missing a credential the serving revision carries (named above)"
+              echo "p279-tagged-revision-env: removing or repointing a tag is an operator decision; this check mutates nothing"
+              exit 1
+              ;;
+            2) echo "p279-tagged-revision-env: RESULT=did-not-run (REFUSE - the service or its revisions could not be read; this is NOT a pass)"; exit 1 ;;
+            *) echo "p279-tagged-revision-env: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac
+
   # ────────────────────────────────────────────────────────────────────
   # Phase 2 — operator-triggered deploy lifecycle jobs.
   # ────────────────────────────────────────────────────────────────────
@@ -424,6 +460,43 @@ jobs:
             echo "::error::Production /api/healthz returned HTTP ${STATUS} after traffic shift — investigate before declaring the shift done"
             exit 1
           fi
+
+      # P-279 post-shift credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY AFTER THE SHIFT, SECOND RUN: at canary time the OLD revision is still serving, so a credential ADDED by
+      # this deploy is invisible to the comparison. The serving revision changes at the
+      # shift, which is the moment the comparison becomes complete — and the moment
+      # the stale tags become provably stale.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. Exit codes
+      # 0 pass / 1 FAIL / 2 REFUSE, and REFUSE fails this step too: a check that could
+      # not read what it needs must never read as green. It mutates nothing — removing
+      # or repointing a tag is an operator decision.
+      - name: Tagged-revision credential check (P-279) [after traffic shift]
+        run: |
+          set +e
+          node scripts/check-tagged-revision-env.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "p279-tagged-revision-env: RESULT=clean" ;;
+            1)
+              echo "p279-tagged-revision-env: RESULT=violation - a tag points at a revision missing a credential the serving revision carries (named above)"
+              echo "p279-tagged-revision-env: removing or repointing a tag is an operator decision; this check mutates nothing"
+              exit 1
+              ;;
+            2) echo "p279-tagged-revision-env: RESULT=did-not-run (REFUSE - the service or its revisions could not be read; this is NOT a pass)"; exit 1 ;;
+            *) echo "p279-tagged-revision-env: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac
 
   rollback:
     name: Roll traffic back to a prior revision
