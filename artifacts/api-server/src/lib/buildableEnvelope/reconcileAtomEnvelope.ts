@@ -30,6 +30,49 @@ export interface AtomBuildableEnvelopeOutcome {
   reason?: string;
 }
 
+/**
+ * P-249 (2026-09-16) — the verification signal, named correctly.
+ *
+ * The atom field is `depthWarmPromotion`; the value `"depth-warm-promoted-v1"`
+ * means the envelope passed ground-truth (depth-warm) verification. There is NO
+ * `depthWarmPromoted` field on the atom — hauska-map writes a flag by that name
+ * into its own output and nothing reads it (A-184). Four predicates read this
+ * one fact across three repos; this is LDT's leg (the others: hauska-map's
+ * `isDepthWarmPromoted`, `isMachineVerifyDiagnostic` below, and doc_repo's
+ * `scripts/envelope-draw-gap.mjs`), and all four answer to the shared fixture
+ * set in `__fixtures__/envelope-verification.json`.
+ */
+export const DEPTH_WARM_PROMOTION_MARKER = "depth-warm-promoted-v1";
+
+/** The two wire fields the verification predicate reads, in precedence order. */
+export interface EnvelopeAtomPromotion {
+  depthWarmPromotion?: string | null;
+  sourceCitation?: string | null;
+}
+
+/**
+ * Is this buildable-envelope atom ground-truth VERIFIED?
+ *
+ * Precedence, stated once:
+ *   1. `depthWarmPromotion === "depth-warm-promoted-v1"` — exact match, the
+ *      marker the engine writes when it promotes a depth-warm envelope.
+ *   2. ONLY when the marker is absent, the `sourceCitation` fallback: a
+ *      citation string containing `depth-warm-verified`. Same fallback and same
+ *      order as hauska-map's `isDepthWarmPromoted`, so the two cannot disagree.
+ * Anything else — no fields, a reason-only zero, a version-shifted marker
+ * (`...-v2`), a near-miss citation (`depth-warm-verify`) — is NOT verified.
+ * Absent promotion fields therefore read as unverified, which is the
+ * conservative direction for every caller below.
+ */
+export function isEnvelopeAtomVerified(
+  atom: EnvelopeAtomPromotion | null | undefined,
+): boolean {
+  if (!atom || typeof atom !== "object") return false;
+  if (atom.depthWarmPromotion === DEPTH_WARM_PROMOTION_MARKER) return true;
+  const citation = atom.sourceCitation;
+  return typeof citation === "string" && citation.includes("depth-warm-verified");
+}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -48,7 +91,7 @@ function round1(n: number): number {
  * that feed this same field) and match how `honest-decline-promote.ts`
  * actually assembles the string: `verifyReasons.slice(0, 3).join("; ")`.
  */
-function isMachineVerifyDiagnostic(reason: string): boolean {
+export function isMachineVerifyDiagnostic(reason: string): boolean {
   if (reason.includes("; ")) return true;
   if (/\b(edge|road)\s+\S+:/i.test(reason)) return true;
   if (/\d+\.\d{4,}/.test(reason)) return true;
@@ -69,10 +112,24 @@ function withoutEmptyFields(
  * Returns `derived` unchanged (same reference) when there is nothing to
  * reconcile, so callers can cheaply detect "did reconciliation change
  * anything" via reference equality.
+ *
+ * P-249 (2026-09-16): reconciliation is now gated on VERIFICATION, not merely
+ * on the atom having an outcome. An envelope atom that never passed depth-warm
+ * ground-truth promotion — 490,185 of them sit in the six counties, mostly
+ * July breadth-bake records meaning "unzoned" (208,868), "not onboarded"
+ * (153,775) or a reason-less zero (123,706) — has nothing trustworthy to
+ * correct a live derivation WITH, exactly like the mechanical-verify
+ * diagnostic P-214 already treated that way. So it no longer empties a good
+ * live envelope (the polygon) and no longer substitutes its own area for the
+ * live one (the figure): operator ruling A-180 allows a buildable-area figure
+ * only when a VERIFIED atom backs it, and the 2026-09-11 R-2 ruling reversed
+ * Ruling B for the polygon only — draw it wherever a district and a setback
+ * table exist, and let the area wait. A VERIFIED zero still wins.
  */
 export function reconcileWithAtomEnvelope(
   derived: BuildableEnvelopeResult,
   atomOutcome: AtomBuildableEnvelopeOutcome | null | undefined,
+  atomPromotion?: EnvelopeAtomPromotion | null,
 ): BuildableEnvelopeResult {
   if (!atomOutcome || typeof atomOutcome.kind !== "string") return derived;
   const feature = derived.geojson.features[0];
@@ -93,6 +150,15 @@ export function reconcileWithAtomEnvelope(
     const alreadyAgrees =
       !derived.empty && Math.round(props.buildableAreaSqFt) === Math.round(atomArea);
     if (alreadyAgrees) return derived;
+
+    // P-249 (A-180): an UNVERIFIED atom's area is exactly as unfounded as its
+    // zero. It does not replace the live derivation's own figure — the served
+    // number, when one is served, stays the local labelEdges+derive one with
+    // its own disclosure, and the atom's figure is never quoted ("Buildable
+    // area from the property atom chain … 5027 sq ft" was the live Pflugerville
+    // symptom on an atom that had not passed ground-truth verification).
+    const verified = isEnvelopeAtomVerified(atomPromotion);
+    if (!verified) return derived;
 
     const keepsGeometry = !derived.empty && feature.geometry !== null;
     const parcelAreaSqFt = props.parcelAreaSqFt;
@@ -156,6 +222,29 @@ export function reconcileWithAtomEnvelope(
     // treat it the same as the pending/unknown-kind case below and keep the
     // live result rather than clobbering a good envelope with a false zero.
     if (isDiagnostic && !derived.empty) return derived;
+
+    // P-249: the same reasoning now covers every UNVERIFIED atom, not only the
+    // mechanical-verify diagnostic. A `no-buildable-area` outcome that never
+    // passed depth-warm promotion is a shape-only computation (no confirmed
+    // road-frontage edge labeling); a ring can mislabel GIS-artifact vertices
+    // as `side` and collapse a long narrow lot to a false zero — confirmed live
+    // on 48209:97658 (P-216). It may not empty a live envelope that has a
+    // district and a setback table, whatever its reason text says.
+    //
+    // Precedence, stated once: the DIAGNOSTIC branch is checked first and keeps
+    // its P-214 behavior for verified and unverified atoms alike (a raw
+    // mechanical-verify string never reaches a customer string, and when the
+    // live pass has nothing to fall back on either, the sanitized
+    // `validation-failed` decline below is what gets served — a named failure,
+    // never a silent empty). The verification gate then applies to every other
+    // reason: a reason-less zero, "unzoned", "not onboarded", or a
+    // human-authored engine sentence.
+    //
+    // Scope note, so this cannot silently over-reach: what this branch keeps is
+    // OUR live pass's own finding (its own reason, its own geometry gates) or
+    // the named decline above — it never fabricates an envelope.
+    const verified = isEnvelopeAtomVerified(atomPromotion);
+    if (!isDiagnostic && !verified) return derived;
 
     const emptyKind: InsetEmptyKind = isDiagnostic
       ? "validation-failed"

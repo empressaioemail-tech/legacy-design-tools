@@ -134,6 +134,13 @@ export function composeBuildableEnvelopeDerivation(args: {
   const derived = reconcileWithAtomEnvelope(
     rawDerived,
     atomChain?.buildableEnvelope?.outcome ?? null,
+    // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
+    // state, so the wire's promotion fields travel with the outcome. Absent
+    // fields read as unverified (see isEnvelopeAtomVerified).
+    {
+      depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
+      sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
+    },
   );
   const atomReconciled = derived !== rawDerived;
 

@@ -28,6 +28,7 @@ import { labelEdges } from "./edgeLabeling";
 import { mapDistrict } from "./districtMapping";
 import { deriveBuildableEnvelope } from "./derive";
 import { reconcileWithAtomEnvelope } from "./reconcileAtomEnvelope";
+import { DEPTH_WARM_PROMOTION_MARKER } from "./reconcileAtomEnvelope";
 import { composeBuildableEnvelopeDerivation } from "./composeBuildableEnvelopeDerivation";
 
 const LNG0 = -97.31;
@@ -136,12 +137,17 @@ describe("composeBuildableEnvelopeDerivation (P-153 Step A extraction)", () => {
     expect(derivedExpected.approximate).toBe(false);
   });
 
-  it("marks derivePath atom-reconciled and folds the atom's own area in when an atom buildable-area outcome disagrees with the derived one", () => {
+  it("marks derivePath atom-reconciled and folds the atom's own area in when a VERIFIED atom buildable-area outcome disagrees with the derived one", () => {
     const ring = rectRing();
     const labeling = labelEdges({ ring, road: roadSouthOf() })!;
     const district = mapDistrict(TABLE, "R-MD")!;
     const atomChain = {
-      buildableEnvelope: { outcome: { kind: "buildable", areaSqFt: 99_999 } },
+      buildableEnvelope: {
+        // P-249: reconciliation is gated on verification, so the atom that
+        // carries the disputed number must be a promoted one.
+        depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER,
+        outcome: { kind: "buildable", areaSqFt: 99_999 },
+      },
     } as unknown as Parameters<typeof composeBuildableEnvelopeDerivation>[0]["atomChain"];
 
     const result = composeBuildableEnvelopeDerivation({
@@ -160,6 +166,40 @@ describe("composeBuildableEnvelopeDerivation (P-153 Step A extraction)", () => {
     expect(result.derived.geojson.features[0]?.properties.buildableAreaSqFt).toBe(99_999);
     expect(result.honesty.coverage.reason).toContain(
       "Buildable area reconciled against the property atom chain",
+    );
+  });
+
+  it("P-249: an UNVERIFIED atom's disagreeing number changes nothing and is not marked reconciled", () => {
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(TABLE, "R-MD")!;
+    const atomChain = {
+      buildableEnvelope: { outcome: { kind: "buildable", areaSqFt: 99_999 } },
+    } as unknown as Parameters<typeof composeBuildableEnvelopeDerivation>[0]["atomChain"];
+
+    const args = {
+      ring,
+      table: TABLE,
+      district,
+      labeling,
+      spineZoning: null,
+      resolvedSourceKind: "codified-ordinance" as const,
+      resolvedSourceLabel: "Test, TX",
+      resolvedEffectiveDate: "1970-01-01",
+    };
+
+    const withAtom = composeBuildableEnvelopeDerivation({ ...args, atomChain });
+    const withoutAtom = composeBuildableEnvelopeDerivation({ ...args, atomChain: null });
+
+    // The atom is carried on the wire and read, but an unverified number is not
+    // a finding this route may fold in (A-180) — so the served derivation is
+    // identical to the one with no atom at all, and the path does not claim a
+    // reconciliation that did not happen.
+    expect(withAtom.derived).toEqual(withoutAtom.derived);
+    expect(withAtom.derivePath).toBe("labelEdges+derive");
+    expect(withAtom.wireStatus).toBe(withoutAtom.wireStatus);
+    expect(withAtom.honesty.coverage.reason).not.toContain(
+      "reconciled against the property atom chain",
     );
   });
 });

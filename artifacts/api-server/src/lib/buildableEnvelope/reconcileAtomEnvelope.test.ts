@@ -11,7 +11,11 @@ import { feetToMeters, insetPerEdge, type Ring } from "./geometry";
 import { labelEdges } from "./edgeLabeling";
 import { mapDistrict } from "./districtMapping";
 import { deriveBuildableEnvelope } from "./derive";
-import { reconcileWithAtomEnvelope } from "./reconcileAtomEnvelope";
+import {
+  DEPTH_WARM_PROMOTION_MARKER,
+  isEnvelopeAtomVerified,
+  reconcileWithAtomEnvelope,
+} from "./reconcileAtomEnvelope";
 
 // Partial mock so the validation-failed fixture can force a gate rejection
 // (unreachable with honest inputs); every other test runs the real insetPerEdge.
@@ -120,11 +124,15 @@ describe("reconcileWithAtomEnvelope", () => {
     );
   });
 
-  it("overrides a disagreeing buildable area with the atom's number, keeping the drawn geometry", () => {
+  it("overrides a disagreeing buildable area with a VERIFIED atom's number, keeping the drawn geometry", () => {
     const derived = buildableFixture();
     const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt;
     const atomArea = localArea + 1_500; // demonstrated defect: two disagreeing numbers
-    const res = reconcileWithAtomEnvelope(derived, { kind: "buildable", areaSqFt: atomArea });
+    const res = reconcileWithAtomEnvelope(
+      derived,
+      { kind: "buildable", areaSqFt: atomArea },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
 
     expect(res).not.toBe(derived);
     expect(res.empty).toBe(false);
@@ -143,12 +151,16 @@ describe("reconcileWithAtomEnvelope", () => {
     );
   });
 
-  it("serves the atom's buildable area without a drawn shape when local geometry produced none", () => {
+  it("serves a VERIFIED atom's buildable area without a drawn shape when local geometry produced none", () => {
     const derived = consumedFixture();
     expect(derived.empty).toBe(true);
     expect(derived.geojson.features[0]!.geometry).toBeNull();
 
-    const res = reconcileWithAtomEnvelope(derived, { kind: "buildable", areaSqFt: 4_200 });
+    const res = reconcileWithAtomEnvelope(
+      derived,
+      { kind: "buildable", areaSqFt: 4_200 },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
 
     expect(res.empty).toBe(false);
     expect(res.geojson.features[0]!.geometry).toBeNull();
@@ -158,12 +170,16 @@ describe("reconcileWithAtomEnvelope", () => {
     );
   });
 
-  it("overrides a disagreeing local buildable result to the atom's no-buildable-area finding", () => {
+  it("overrides a disagreeing local buildable result to a VERIFIED atom's no-buildable-area finding", () => {
     const derived = buildableFixture();
-    const res = reconcileWithAtomEnvelope(derived, {
-      kind: "no-buildable-area",
-      reason: "Setbacks consume the lot per engine calculation.",
-    });
+    const res = reconcileWithAtomEnvelope(
+      derived,
+      {
+        kind: "no-buildable-area",
+        reason: "Setbacks consume the lot per engine calculation.",
+      },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
 
     expect(res.empty).toBe(true);
     expect(res.emptyKind).toBe("consumed");
@@ -290,14 +306,110 @@ describe("reconcileWithAtomEnvelope", () => {
 
     it("still serves a genuine, human-authored engine reason unchanged (falsifier: must not over-fire)", () => {
       const derived = buildableFixture();
-      const res = reconcileWithAtomEnvelope(derived, {
-        kind: "no-buildable-area",
-        reason: "Setbacks consume the lot per engine calculation.",
-      });
+      const res = reconcileWithAtomEnvelope(
+        derived,
+        {
+          kind: "no-buildable-area",
+          reason: "Setbacks consume the lot per engine calculation.",
+        },
+        { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+      );
       expect(res.emptyKind).toBe("consumed");
       expect(res.geojson.features[0]!.properties.emptyReason).toMatch(
         /engine calculation/i,
       );
+    });
+  });
+
+  describe("P-249: an UNVERIFIED no-buildable-area atom may not empty a live envelope", () => {
+    // The atom's own reason text decides NOTHING here — the reason-less zero
+    // (the common shape), "unzoned", and a human-authored engine sentence all
+    // take the same path, because all of them are shape-only computations by
+    // an atom that never passed depth-warm promotion.
+    for (const reason of [
+      null,
+      "unzoned",
+      "Setbacks consume the lot per engine calculation.",
+      "edge 1: R32 35.02831192164916ft != expected 5ft for role side",
+    ] as const) {
+      it(`keeps the live-derived envelope for reason ${JSON.stringify(reason)}`, () => {
+        const derived = buildableFixture();
+        expect(derived.empty).toBe(false);
+
+        const res = reconcileWithAtomEnvelope(derived, {
+          kind: "no-buildable-area",
+          ...(reason == null ? {} : { reason }),
+        });
+
+        expect(res).toBe(derived);
+        expect(res.empty).toBe(false);
+        // The live pass's own numbers survive untouched.
+        expect(res.geojson.features[0]!.properties.buildableAreaSqFt).toBeGreaterThan(0);
+      });
+
+      it(`keeps the live-derived envelope when the promotion is declared as not promoted (${JSON.stringify(reason)})`, () => {
+        const derived = buildableFixture();
+        const res = reconcileWithAtomEnvelope(
+          derived,
+          { kind: "no-buildable-area", ...(reason == null ? {} : { reason }) },
+          { depthWarmPromotion: null, sourceCitation: null },
+        );
+        expect(res).toBe(derived);
+      });
+    }
+
+    it("still lets a VERIFIED zero out (the verified atom is authoritative, not advisory)", () => {
+      const res = reconcileWithAtomEnvelope(
+        buildableFixture(),
+        { kind: "no-buildable-area", reason: "unzoned" },
+        { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+      );
+      expect(res.empty).toBe(true);
+      expect(res.emptyKind).toBe("consumed");
+      expect(res.geojson.features[0]!.geometry).toBeNull();
+    });
+
+    it("withholds an unverified BUILDABLE figure too — an unverified number is no more load-bearing than an unverified zero", () => {
+      const derived = buildableFixture();
+      const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt;
+      const res = reconcileWithAtomEnvelope(derived, {
+        kind: "buildable",
+        areaSqFt: localArea + 1_500,
+      });
+      expect(res).toBe(derived);
+      expect(res.geojson.features[0]!.properties.buildableAreaSqFt).toBe(localArea);
+    });
+
+    it("reconciles nothing when the verification fields are absent from the wire", () => {
+      // Fail-closed: an older wire with no promotion fields reads as unverified.
+      const derived = buildableFixture();
+      const res = reconcileWithAtomEnvelope(
+        derived,
+        { kind: "buildable", areaSqFt: 1 },
+        { depthWarmPromotion: undefined, sourceCitation: undefined },
+      );
+      expect(res).toBe(derived);
+    });
+
+    it("verification predicate: promotion marker, source citation, or neither", () => {
+      expect(isEnvelopeAtomVerified({ depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER })).toBe(true);
+      // EXACT match, deliberately — no trimming, no case folding. The shared
+      // fixture's `near-miss-marker-token` case says the same thing from the
+      // other side: a lookalike spelling is NOT verification.
+      expect(isEnvelopeAtomVerified({ depthWarmPromotion: "depth-warm-promoted-v2" })).toBe(false);
+      expect(isEnvelopeAtomVerified({ depthWarmPromotion: " depth-warm-promoted-v1 " })).toBe(false);
+      expect(isEnvelopeAtomVerified({ sourceCitation: "county assessor 2026-08-30" })).toBe(false);
+      expect(
+        isEnvelopeAtomVerified({ sourceCitation: "cert/depth-warm-verified/2026-09-02" }),
+      ).toBe(true);
+      expect(isEnvelopeAtomVerified({ sourceCitation: "cert/depth-warm-verify/2026-09-02" })).toBe(
+        false,
+      );
+      expect(isEnvelopeAtomVerified({ depthWarmPromotion: "warm" })).toBe(false);
+      expect(isEnvelopeAtomVerified({ depthWarmPromotion: "" })).toBe(false);
+      expect(isEnvelopeAtomVerified({ sourceCitation: "" })).toBe(false);
+      expect(isEnvelopeAtomVerified(null)).toBe(false);
+      expect(isEnvelopeAtomVerified(undefined)).toBe(false);
     });
   });
 });

@@ -30,6 +30,23 @@ export type PropertyAtomChainWire = {
       axes?: { assertedConfidence?: { estimate?: number } };
     } | null;
     atomDid?: string | null;
+    /**
+     * P-249 (2026-09-16). The verification signal, named correctly: the atom
+     * field is `depthWarmPromotion` (value `"depth-warm-promoted-v1"` means
+     * ground-truth verified). There is NO `depthWarmPromoted` field on the
+     * atom — hauska-map merely writes a flag by that name into its own output,
+     * which nothing reads (A-184). This wire type carried neither field until
+     * P-249, so LDT could not tell a verified envelope atom from a shape-only
+     * breadth-bake record and treated both as authoritative.
+     */
+    depthWarmPromotion?: string | null;
+    /**
+     * P-249: the citation fallback. Some promoted atoms carry no marker but a
+     * `sourceCitation` naming depth-warm verification; the predicate in
+     * `reconcileAtomEnvelope.ts` reads this only when the marker is absent
+     * (precedence stated there and in the divergence fixture).
+     */
+    sourceCitation?: string | null;
   } | null;
   codeSections?: Array<{
     atomDid?: string | null;
