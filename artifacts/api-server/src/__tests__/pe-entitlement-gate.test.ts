@@ -253,13 +253,30 @@ describe("PE entitlement gate", () => {
     expect(floodSection).toBeDefined();
     expect(floodSection.data).toBeNull();
     expect(floodSection.refusal.state).toBe("refused");
-    expect(floodSection.refusal.code).toBe("unrecognised-producer");
+    /**
+     * P-297 (2026-09-16, operator ruling A-193) CHANGED WHICH REFUSAL THIS IS.
+     * This assertion used to require code "unrecognised-producer" -- the guard
+     * that refuses to cite a RETIRED instrument on the baked/atom path. 48055
+     * is slated for `flood`, so the rail is no longer served from that path at
+     * all: it is served from the parcel's own cell, and this suite configures
+     * no parcel-record store, so the ruled answer is a declared refusal naming
+     * the unreadable store. The retired citation still never appears (asserted
+     * above) and the section still carries a legible refusal rather than going
+     * silently blank, which is what this test exists for.
+     */
+    expect(floodSection.refusal.code).toBe("factory-store-not-configured");
+    expect(String(floodSection.refusal.reason)).toMatch(/retrieval|store|configured/i);
 
     const envelopeSection = res.body.brief.sections.find(
       (section: { id: string }) => section.id === "setbacks-envelope",
     );
     expect(envelopeSection.data).toBeNull();
-    expect(envelopeSection.refusal.code).toBe("baked-envelope-not-served");
+    // Same P-297 substitution as the flood section above: `setbackFrontFt` is
+    // slated in 48055, so the rail is served from the parcel's own cell rather
+    // than from the baked envelope, and with no parcel-record store configured
+    // in this suite the declared refusal names that. The envelope is still
+    // stripped from the wire and still refused, never silently blank.
+    expect(envelopeSection.refusal.code).toBe("parcel-record-store-not-configured");
 
     // Disclosure may be empty when envelope is stripped; brief still 200 cited.
     expect(Array.isArray(res.body.brief.disclosure)).toBe(true);

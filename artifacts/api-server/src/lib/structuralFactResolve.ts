@@ -12,6 +12,12 @@ import {
 } from "./verdictLayerServe";
 import { absenceClassificationForEntityType } from "@workspace/instrument-registry";
 import { normalizeCadPropId } from "./parcelNodeId";
+import {
+  isParcelRecordRefusal,
+  type CadRollParcelRecordRefusal,
+  type LivingAreaSqftFromParcelRecord,
+  type YearBuiltFromParcelRecord,
+} from "./cadRollFactFromParcelRecord";
 
 export const STRUCTURAL_FACT_SOURCE = "structural-fact" as const;
 
@@ -42,10 +48,21 @@ export type StructuralFactRead = StructuralFactPresent | StructuralFactAbsent;
  * value into the legacy object's OTHER fields (taxYear, tier, sourceVintage,
  * entityType), never a whole-object swap.
  *
- * Disclosed limitation: if the legacy read is itself `state: "absent"` (no
- * cad_property row, or lookup failed) while a rail resolves to "record"
- * with a real parcel_record value, this function does NOT synthesize a new
- * "present" object -- doing so would require fabricating taxYear/tier
+ * P-269/P-297 (operator ruling A-193): `overlay` is only non-null when that
+ * rail is in the slate, and a DECLARED REFUSAL from the store is now served
+ * as a declared refusal of the whole structural read -- a `verdict:
+ * "refused"` LayerAbsenceWire, naming the rail and carrying the cell's own
+ * reason -- instead of being passed off as "no overlay, keep the legacy
+ * value". A structural present object cannot express "this one field is
+ * refused" (its fields are `number | null`, and `null` there means an
+ * absence), so the honest shape is the object-level refusal the layer wire
+ * already provides. Being spuriously `present` with one baked field is the
+ * alternative, and it is exactly what the ruling forbids.
+ *
+ * Disclosed limitation (unchanged from before this card): if the legacy read
+ * is itself `state: "absent"` (no cad_property row, or lookup failed) while a
+ * rail has a real parcel_record value, this function does NOT synthesize a
+ * new "present" object -- doing so would require fabricating taxYear/tier
  * fields parcel_record does not carry. It returns the legacy absence
  * unchanged in that case. Named explicitly in this card's own close rather
  * than silently accepted; the common case (a present legacy row with one
@@ -54,22 +71,64 @@ export type StructuralFactRead = StructuralFactPresent | StructuralFactAbsent;
 export function structuralFactWithParcelRecordOverlay(
   fact: StructuralFactRead,
   overlay: {
-    livingAreaSqft: { status: "populated"; value: number } | { status: "absent-in-record" } | null;
-    yearBuilt: { v: number; source: string; vintage: string | null } | null;
+    livingAreaSqft: LivingAreaSqftFromParcelRecord;
+    yearBuilt: YearBuiltFromParcelRecord;
   },
 ): StructuralFactRead {
+  const livingRefusal = isParcelRecordRefusal(overlay.livingAreaSqft)
+    ? overlay.livingAreaSqft
+    : null;
+  const yearRefusal = isParcelRecordRefusal(overlay.yearBuilt) ? overlay.yearBuilt : null;
+  const refusal = livingRefusal ?? yearRefusal;
+  if (refusal) {
+    const rails = [
+      livingRefusal ? "livingAreaSqft" : null,
+      yearRefusal ? "yearBuilt" : null,
+    ].filter((rail): rail is string => rail != null);
+    return structuralFactRefusedFromParcelRecord(refusal, rails);
+  }
   if (!fact || typeof fact !== "object" || !("state" in fact) || fact.state !== "present") {
     return fact;
   }
   const next: StructuralFactPresent = { ...fact };
-  if (overlay.livingAreaSqft) {
-    next.livingAreaSqft =
-      overlay.livingAreaSqft.status === "populated" ? overlay.livingAreaSqft.value : null;
+  const living = overlay.livingAreaSqft;
+  if (living && !isParcelRecordRefusal(living)) {
+    next.livingAreaSqft = living.status === "populated" ? living.value : null;
   }
-  if (overlay.yearBuilt) {
-    next.yearBuilt = overlay.yearBuilt.v;
+  const year = overlay.yearBuilt;
+  if (year && !isParcelRecordRefusal(year)) {
+    next.yearBuilt = year.v;
   }
   return next;
+}
+
+/**
+ * The declared-refusal structural read P-269 serves instead of a baked value
+ * on a slated rail. Same shape family as every other refusal on this serve
+ * path: a LayerAbsenceWire with `verdict: "refused"`, so
+ * `structuralFactToLivingAreaWire` below needs no new branch and the
+ * customer gets the store's own reason instead of a number nobody stands
+ * behind.
+ */
+export function structuralFactRefusedFromParcelRecord(
+  refusal: CadRollParcelRecordRefusal,
+  railKeys: ReadonlyArray<string>,
+  asOf: string = new Date().toISOString(),
+): StructuralFactAbsent {
+  const classification = absenceClassificationForEntityType("cad-parcel-roll");
+  const rails = railKeys.length > 0 ? railKeys.join(",") : "cadRoll";
+  return {
+    status: "absent",
+    verdict: "refused",
+    authority: "parcel_record",
+    scopeSearched: `parcel_record_cell@${rails}`,
+    asOf,
+    basis: `${refusal.reason} (parcel_record refused the ${rails} cell: ${refusal.code}.)`,
+    ...classification,
+    entityType: "cad_property",
+    provenanceClass: classification.provenanceClass ?? "Record",
+    source: STRUCTURAL_FACT_SOURCE,
+  };
 }
 
 function propIdFromParcelNodeId(parcelNodeId: string): string | null {

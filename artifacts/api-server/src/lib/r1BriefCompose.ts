@@ -30,6 +30,7 @@ import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 import type { LandUseFactRead } from "./landUseFactRead";
+import { isSlatedForCellServe } from "./cellServeRule";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -338,10 +339,12 @@ export function summarizeParcelRecordFloodZoneExposure(
 /**
  * Parcel-record is the preferred flood source when it has earned a
  * determination (value or absent-verified) -- the reconciled point-on-surface
- * rule the old atoms/bake path does not have (parcelRecordFactRead.ts).
- * "unaccounted" (nothing has looked yet) and "refused" fall through to the
- * existing atoms-based path in composeFloodBriefSection, never silently
- * treated as an absence.
+ * rule the old atoms/bake path does not have (parcelRecordFactRead.ts). This
+ * function serves only those two states; every other state is decided in
+ * composeFloodBriefSection, which asks the slate question first (P-297/A-193):
+ * on a slated pair the cell is the answer, so "unaccounted" (nothing has
+ * looked yet) and "refused" are a declared refusal with the cell's reason and
+ * never the atoms path.
  */
 function composeFloodBriefSectionFromParcelRecord(
   fact: ParcelRecordFloodValue | ParcelRecordFloodAbsentVerified,
@@ -403,17 +406,72 @@ function withCitationPosture(
   };
 }
 
+/**
+ * The slate question for the flood rail, asked of a `parcel_record` read's own
+ * place key (`<county_fips>:<prop_id>`, the store's own key grammar).
+ *
+ * The county is the only thing needed: `isSlatedForCellServe` is the same
+ * one-rule function every `*ServeCutover.ts` wrapper asks, so this depth
+ * cannot drift from the facets depth about which pairs the slate covers. A
+ * read with no usable key answers `false` -- see the caller for why that keeps
+ * its pre-cutover path rather than fabricating a refusal.
+ */
+function isSlatedForCellServeOnFlood(
+  placeKey: string | null | undefined,
+): boolean {
+  const countyFips = /^(\d{5}):/.exec((placeKey ?? "").trim())?.[1];
+  return countyFips !== undefined && isSlatedForCellServe(countyFips, "flood");
+}
+
 function composeFloodBriefSection(
   tier2: unknown,
   floodHazardFact?: FloodHazardFactRead,
   parcelRecordFloodFact?: ParcelRecordFloodRead,
 ): BriefSectionParts {
-  if (
-    parcelRecordFloodFact &&
-    (parcelRecordFloodFact.state === "value" ||
-      parcelRecordFloodFact.state === "absent-verified")
-  ) {
-    return composeFloodBriefSectionFromParcelRecord(parcelRecordFloodFact);
+  if (parcelRecordFloodFact) {
+    if (
+      parcelRecordFloodFact.state === "value" ||
+      parcelRecordFloodFact.state === "absent-verified"
+    ) {
+      return composeFloodBriefSectionFromParcelRecord(parcelRecordFloodFact);
+    }
+    // P-297 / A-193. Pre-ruling this dropped every other state through to the
+    // atoms-based path below ("never silently treated as an absence"): a
+    // not-applicable cell lost its earned absence to a stale atom, and a
+    // refused/unaccounted cell lost its reason to the bake. On a slated rail
+    // the cell is the answer -- not-applicable is the stated absence, and
+    // refused/unaccounted is a declared refusal with the cell's reason.
+    //
+    // The slate question is asked HERE, from the read's own place_key, and
+    // not left to the caller: unlike zoning and setbacks (whose wrappers only
+    // ever return a fact for a slated pair), flood's parcel_record read
+    // (parcelRecordFactRead.loadParcelRecordFloodFact, P-152) is ungated, so
+    // it carries a refusal or an absence for UNSLATED counties too -- and on
+    // an unslated pair the pre-cutover atoms path is still the answer (P-297:
+    // an unslated pair is untouched, byte-identical). A read that could not
+    // place itself (`place_key: null`, i.e. an unparseable node id) cannot
+    // answer the slate question at all, so it too keeps the old fall-through.
+    if (isSlatedForCellServeOnFlood(parcelRecordFloodFact.placeKey)) {
+      if (parcelRecordFloodFact.state === "not-applicable") {
+        return {
+          data: parcelRecordFloodFact,
+          citations: [],
+          asOf: null,
+          disposition: "absent",
+          zoneExposureSummary: null,
+        };
+      }
+      return {
+        data: null,
+        refusal: parcelRecordFloodFact,
+        citations: [],
+        asOf: null,
+        disposition: "refused",
+        ...(parcelRecordFloodFact.state === "refused"
+          ? { reason: parcelRecordFloodFact.reason }
+          : {}),
+      };
+    }
   }
   if (floodHazardFact) {
     if (floodHazardFact.state === "present") {
@@ -600,7 +658,22 @@ function composeSetbacksEnvelopeBriefSection(
   bakedAt?: string | null,
   parcelRecordSetbacksFact?: SetbacksFactRead | null,
 ): BriefSectionParts {
-  if (parcelRecordSetbacksFact && parcelRecordSetbacksFact.state !== "refused") {
+  if (parcelRecordSetbacksFact) {
+    // P-297 / A-193: a refused setbacks cell is a declared refusal with the
+    // cell's reason, never the bake-derived envelope section. Pre-ruling this
+    // fell through (the same "never regress a parcel" caution the zoning
+    // section above used to apply). Mirrors smartSiteStub.ts's
+    // railStateFromSetbacksFact at the other depth.
+    if (parcelRecordSetbacksFact.state === "refused") {
+      return {
+        data: null,
+        refusal: parcelRecordSetbacksFact,
+        citations: [],
+        asOf: null,
+        disposition: "refused",
+        reason: parcelRecordSetbacksFact.reason,
+      };
+    }
     return composeSetbacksBriefSectionFromParcelRecord(parcelRecordSetbacksFact, bakedAt ?? null);
   }
   const disposition = envelopeDisposition(envelope, envelopeBriefRefusal);
@@ -744,12 +817,27 @@ export function buildR1Brief(
   const zoningSection =
     parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused"
       ? composeZoningBriefSectionFromParcelRecord(parcelRecordZoningFact, bakedAt)
-      : withCitationPosture({
-          data: root.zoning ?? null,
-          citations: urlsFrom(root.zoning),
-          asOf: asOfFrom(root.zoning) ?? bakedAt,
-          disposition: zoningDisposition(root.zoning),
-        });
+      : parcelRecordZoningFact
+        ? // P-297 / A-193. Pre-ruling a refused zoning cell fell through to the
+          // bake-derived section ("never regress a parcel that currently has a
+          // real answer"). On a slated rail that fall-through is the defect:
+          // the cell is the answer, and a refusal is a declared refusal with
+          // the cell's reason -- the bake is never served for it. This mirrors
+          // smartSiteStub.ts's railStateFromZoningFact at the other depth.
+          {
+            data: null,
+            refusal: parcelRecordZoningFact,
+            citations: [],
+            asOf: null,
+            disposition: "refused" as const,
+            reason: parcelRecordZoningFact.reason,
+          }
+        : withCitationPosture({
+            data: root.zoning ?? null,
+            citations: urlsFrom(root.zoning),
+            asOf: asOfFrom(root.zoning) ?? bakedAt,
+            disposition: zoningDisposition(root.zoning),
+          });
   const envelopeSection = composeSetbacksEnvelopeBriefSection(
     envelope,
     options?.envelopeBriefRefusal,

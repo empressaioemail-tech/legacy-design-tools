@@ -79,16 +79,20 @@ import {
   resetOwnerFactAtomQueryableForTests,
   setOwnerFactAtomQueryableForTests,
 } from "../lib/ownerFactRead";
-import { memoryParcelGateVerdicts } from "../lib/parcelGateVerdictRead";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
 } from "../lib/parcelRecordCellRead";
+// P-297: flood routes through parcelRecordFactRead.ts, which keeps its OWN
+// injected-queryable seam (same function names, deliberately a separate
+// module-level variable). Alias them so a test can set one without clearing
+// the other.
 import {
-  resetValueHistoryVerdictStoreForTests,
-  setValueHistoryVerdictStoreForTests,
-} from "../lib/valueHistoryFactServeCutover";
+  memoryParcelRecordFlood,
+  resetParcelRecordQueryableForTests as resetParcelRecordFloodQueryableForTests,
+  setParcelRecordQueryableForTests as setParcelRecordFloodQueryableForTests,
+} from "../lib/parcelRecordFactRead";
 import {
   SETBACK_FRONT_FT_RAIL_KEY,
   SETBACK_SIDE_FT_RAIL_KEY,
@@ -96,18 +100,10 @@ import {
   SETBACK_CORNER_FT_RAIL_KEY,
 } from "../lib/setbacksFactFromParcelRecord";
 import {
-  resetSetbacksVerdictStoreForTests,
-  setSetbacksVerdictStoreForTests,
-} from "../lib/setbacksFactServeCutover";
-import {
   ZONING_DISTRICT_RAIL_KEY,
   ZONING_JURISDICTION_KEY_RAIL_KEY,
   ZONING_PROVENANCE_RAIL_KEY,
 } from "../lib/zoningFactFromParcelRecord";
-import {
-  resetZoningVerdictStoreForTests,
-  setZoningVerdictStoreForTests,
-} from "../lib/zoningFactServeCutover";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -818,6 +814,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   beforeEach(async () => {
+    // P-297: the serve decision for a slated rail is its own cell, so the cell
+    // seam is now part of every case in this file. Reset it here (and in
+    // afterEach) so a cell fixture seeded by one test cannot decide another's.
+    resetParcelRecordQueryableForTests();
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     setLandUseFactAtomQueryableForTests(memoryLandUseFactAtoms([]));
     setSpecialDistrictFactAtomQueryableForTests(
@@ -861,6 +861,8 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   afterEach(async () => {
+    resetParcelRecordQueryableForTests();
+    resetParcelRecordFloodQueryableForTests();
     resetFloodHazardAtomQueryableForTests();
     resetLandUseFactAtomQueryableForTests();
     resetSpecialDistrictFactAtomQueryableForTests();
@@ -909,7 +911,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
-  it("serves incorporated cityLimitsFact when the bake point sits in a fixture city", async () => {
+  it("P-297: a slated cityLimits rail is NOT decided by the containment index -- with no readable cell store it declares a refusal", async () => {
     setCityLimitsIndexForTests({
       tablePopulated: true,
       entries: buildCityBoundaryIndex([
@@ -936,14 +938,40 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    expect(res.body.cityLimitsFact.status).toBe("incorporated");
-    expect(res.body.cityLimitsFact.cityName).toBe("Bastrop");
-    expect(res.body.cityLimitsFact.geoId).toBe("4805820");
+    /**
+     * P-297 (2026-09-16, operator ruling A-193) SUPERSEDES THIS EXPECTATION.
+     * 48055 is slated for `cityLimits`, so the parcel's own cell is the served
+     * answer; city-limits containment is only the UNSLATED path (the card F
+     * block below exercises it on Anderson 48001). This suite configures no
+     * parcel-record store, so the ruled answer is a declared refusal naming the
+     * unreadable store -- typed `unmeasured` on this rail because
+     * CityLimitsFactWire has no refusal variant, which is the disclosed
+     * lossiness `cityLimitsFactFromParcelRecord` documents. The Bastrop polygon
+     * seeded above is deliberately still here: the point is that the served
+     * answer does NOT come from it.
+     */
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
     expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
-    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+    expect(res.body.cityLimitsFact.basis).toMatch(
+      /parcel_record cityLimits refused \((store-not-configured|retrieval[^)]*)\)/,
+    );
   });
 
-  it("serves unincorporated + etj unresolved when the bake point misses every city", async () => {
+  it("P-297: a slated cityLimits rail serves the parcel's OWN cell (absent-verified unincorporated), not the containment index", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: BAKED_NODE_ID,
+            railKey: "cityLimits",
+            cellState: {
+              kind: "absent-verified",
+              basis: { disposition: "unincorporated", source: "bastrop_county_tx" },
+            },
+          },
+        ],
+      }),
+    );
     setCityLimitsIndexForTests({
       tablePopulated: true,
       entries: buildCityBoundaryIndex([
@@ -970,8 +998,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
-    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    // `source` is "tx_city_boundary" on BOTH paths (it is the producer token,
+    // CITY_LIMITS_FACT_SOURCE), so `basis` is what discriminates: it must be
+    // this parcel's cell, and the Austin polygon seeded above must not appear.
+    expect(res.body.cityLimitsFact.basis).toContain("parcel_record cityLimits");
     expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
@@ -984,7 +1014,22 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   // point. Before this card all three cases served `not-applicable` from the
   // null situsCity; the first and third assertions failed on that code.
   // -----------------------------------------------------------------------
-  const UNSTAMPED_TRAVIS_NODE_ID = "48453:493738";
+  /**
+   * P-297 (2026-09-16, operator ruling A-193) RE-POINTED THIS FIXTURE'S COUNTY.
+   * It was Travis `48453:493738`, which the code-owned slate lists for BOTH
+   * `cityLimits` and `zoningDistrict`: on a slated rail the parcel's own cell
+   * is the answer, so this block's whole subject -- the containment
+   * determination and the zoning verdict derived from it -- would no longer be
+   * the served answer for those parcels (the cell path is, and this suite
+   * configures no parcel-record store). The containment path is not gone: it
+   * is what an UNSLATED (county, rail) pair still serves, so this fixture is
+   * an unslated county (Anderson, 48001 -- the same non-program county the
+   * building-footprint tests below already use) and every assertion in the
+   * block keeps its original meaning. The slated-county counterpart of the
+   * same rule is asserted in the tests above ("serves incorporated
+   * cityLimitsFact ..."), which now see the cell path.
+   */
+  const UNSTAMPED_TRAVIS_NODE_ID = "48001:493738";
   const unstampedConformantPayload = {
     shapeSource: "conformant-v1",
     baked: true,
@@ -994,8 +1039,8 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     facetSchemaVersion: "node-facets-tier1-conformant-v1",
     tier: 1,
     parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID,
-    countyFips: "48453",
-    countyName: "Travis",
+    countyFips: "48001",
+    countyName: "Anderson",
     baseFacts: {
       apn: "493738",
       situsAddress: "4707 SHOALWOOD AVE",
@@ -1081,7 +1126,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.facets.zoning.verdict).toBe("not-applicable");
     expect(res.body.facets.zoning.authority).toBe("none");
     expect(res.body.facets.zoning.basis).toContain("tx_city_boundary");
-    expect(res.body.facets.zoning.basis).toContain("county 48453 unincorporated territory is unzoned");
+    expect(res.body.facets.zoning.basis).toContain("county 48001 unincorporated territory is unzoned");
     expect(res.body.facets.zoning.derivation.source).toBe("tx_city_boundary");
     expect(res.body.facets.zoning.basis).not.toContain("shape predicate");
     // Land use (atom-miss here) receives the containment-derived not-applicable.
@@ -1115,8 +1160,8 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.facets.zoning.basis).toBe("no usable parcel query point; city limits are unmeasured");
   });
 
-  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
-    // No atom fixture: the atoms path must name the miss, not copy the snapshot.
+  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded (P-297: the cell refuses it, not the atom reader)", async () => {
+    // No cell store and no atom fixture: neither path may copy the snapshot.
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     // The seeded Tier-2 row is a genuine in-SFHA "AE" determination — the exact
     // shape that was live on this anonymous route before SS-W16. The endpoint
@@ -1146,14 +1191,20 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain("FLOODWAY");
     expect(wire).not.toContain("512.4");
 
-    // Atom miss is named, never a silent null.
+    // Atom miss is named, never a silent null. P-297: flood is slated in 48055,
+    // so this rail no longer reaches the atom reader at all -- the parcel's own
+    // cell decides, and with no readable parcel_record store that is a declared
+    // refusal naming the store. Either way the SNAPSHOT value is not served.
     expect(res.body.floodHazardFact).not.toBeNull();
     expect(res.body.floodHazardFact.state).toBe("refused");
-    expect(res.body.floodHazardFact.code).toBe("atom-miss");
+    expect(res.body.floodHazardFact.code).toBe(
+      "parcel-record-store-not-configured",
+    );
     expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.reason).toMatch(/parcel_record flood/);
     expect(res.body.floodHazardFact.tried).toEqual([
       BAKED_NODE_ID,
-      `${BAKED_NODE_ID}.00000000`,
+      BAKED_NODE_ID,
     ]);
 
     // Land-use-fact miss is named too. Cad-roll bake stays on retiredStore.
@@ -1242,26 +1293,31 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("serves a fixture flood-hazard-fact while still refusing the snapshot bake", async () => {
-    // Divergence: snapshot is AE/FLOODWAY/512.4, atom is AO with no those tokens.
-    // If this test passed while serving the snapshot, AO would be missing and
-    // FLOODWAY would still be on the wire.
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([
+  it("P-297: serves the parcel's OWN flood cell (AO) while still refusing the snapshot bake", async () => {
+    // Divergence: the snapshot bake is AE/FLOODWAY/512.4, this parcel's cell is
+    // AO with none of those tokens. If this test passed while serving the bake,
+    // AO would be missing and FLOODWAY would still be on the wire.
+    //
+    // Pre-P-297 this test seeded a flood-hazard-fact ATOM and the county verdict
+    // (unconfigured) let it through. flood is slated in 48055, so by ruling
+    // A-193 the atom reader is no longer reached on this rail at all: the cell
+    // is the answer. The atom fixture is gone deliberately -- keeping it would
+    // assert nothing.
+    setParcelRecordFloodQueryableForTests(
+      memoryParcelRecordFlood([
         {
-          entityId: `${BAKED_NODE_ID}.00000000`,
-          body: {
-            entityType: "flood-hazard-fact",
-            atomDid: "fhfact_fedcba9876543210",
-            parcelNodeId: `${BAKED_NODE_ID}.00000000`,
-            sourceTier: "fema-nfhl",
-            inSpecialFloodHazardArea: true,
-            floodZone: "AO",
-            zoneSubtype: null,
-            baseFloodElevation: null,
-            sourceAdapter: "fema-nfhl-bulk-v1",
+          placeKey: BAKED_NODE_ID,
+          cellState: {
+            kind: "value",
+            source: "tx_fema_nfhl_flood_zone",
+            vintage: "NFHL_48_20260101",
+          },
+          payload: {
+            zone: "AO",
+            floodway: false,
+            bfe: null,
+            method: "polygon-intersect",
             sourceVintage: "NFHL_48_20260101",
-            evaluatedAt: "2026-08-11T23:13:43.774Z",
           },
         },
       ]),
@@ -1278,10 +1334,11 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
     expect(res.body.floodHazardFact.floodZone).toBe("AO");
     expect(res.body.floodHazardFact.inSpecialFloodHazardArea).toBe(true);
-    expect(res.body.floodHazardFact.boundAs).toBe(`${BAKED_NODE_ID}.00000000`);
+    expect(res.body.floodHazardFact.boundAs).toBe(BAKED_NODE_ID);
+    expect(res.body.floodHazardFact.sourceAdapter).toBe("parcel_record");
     expect(res.body.floodHazardFact.tried).toEqual([
       BAKED_NODE_ID,
-      `${BAKED_NODE_ID}.00000000`,
+      BAKED_NODE_ID,
     ]);
 
     const wire = JSON.stringify(res.body);
@@ -1292,8 +1349,15 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain('"AE"');
   });
 
-  it("gold parcel 48021:34137 dual-grammar bind yields the fixture atom", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's flood rail keeps the atom path -- 48001:34137 dual-grammar bind yields the fixture atom", async () => {
+    // P-297: the atom reader is the UNSLATED path. This test used to run on
+    // Bastrop's gold parcel 48021:34137, but flood is slated in 48021, so by the
+    // ruling that parcel no longer reads the atom at all (the slated path is
+    // covered by floodHazardFactServeCutover.test.ts and by the cell test
+    // above). Re-pointed to Anderson 48001, which is absent from
+    // PARCEL_RECORD_SLATE on every rail, so the dual-grammar atom bind it was
+    // written to cover stays covered.
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1302,10 +1366,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-gold",
+      contentHash: "test-hash-gold-48001",
     });
     setFloodHazardAtomQueryableForTests(
       memoryFloodHazardAtoms([
@@ -1510,8 +1574,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("gold parcel 48021:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
+    // P-297: specialDistricts is slated in 48021, so the Bastrop gold parcel no
+    // longer reads this atom; re-pointed to unslated Anderson 48001 so the
+    // `:sd:outside` typed-absence bind stays covered on the path that keeps it
+    // (the slated path is covered by specialDistrictFactServeCutover.test.ts).
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1520,10 +1588,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-gold-sd-outside",
+      contentHash: "test-hash-48001-sd-outside",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1536,7 +1604,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
             absence: {
               kind: "outside-tceq-source-boundaries",
               reason:
-                "Parcel geometry does not intersect any polygon in tx_special_district for county 48021.",
+                "Parcel geometry does not intersect any polygon in tx_special_district for county 48001.",
             },
             evaluatedAt: "2026-08-12T21:33:03.719Z",
           },
@@ -1561,8 +1629,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("Bastrop present substitute 48021:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
-    const parcel = "48021:102817";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
+    // P-297: re-pointed off slated 48021 (see the two tests above).
+    const parcel = "48001:102817";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(parcel),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1571,10 +1640,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: parcel,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-bastrop-sd",
+      contentHash: "test-hash-48001-sd",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1607,9 +1676,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("padded gold prefix 48021:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
-    const parcel = "48021:102817";
-    const parcelPadded = "48021:102817.00000000";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
+    // P-297: re-pointed off slated 48021 (see the tests above).
+    const parcel = "48001:102817";
+    const parcelPadded = "48001:102817.00000000";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(parcel),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1618,10 +1688,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: parcel,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-bastrop-sd-padded",
+      contentHash: "test-hash-48001-sd-padded",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1870,8 +1940,11 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain("t4permit");
   });
 
-  it("gold 48021:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's wells rail keeps the atom path -- 48001:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
+    // P-297: wells is slated in 48021, so this assertion moved to unslated
+    // Anderson 48001. The slated path (the parcel's own cell, and a refusal
+    // when there is none) is covered by wellFactServeCutover.test.ts.
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1880,14 +1953,14 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
         baseFacts: {
           ...bakedPayload.baseFacts,
           API: "GIS-MUST-NOT-LEAK",
         },
       },
-      contentHash: "test-hash-well-gold",
+      contentHash: "test-hash-well-48001",
     });
     setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
     const res = await request(getApp()).get(
@@ -2706,6 +2779,31 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   // that path is a SECOND, independent, previously-ungated source for
   // these fields — gating only the overlay would miss it.
   // -------------------------------------------------------------------
+  /**
+   * P-297 (2026-09-16, operator ruling A-193): 48021 is slated for the four
+   * dollar rails, so `facets.baseFacts.cadRoll` is the parcel's OWN cell, not
+   * this fixture's baked snapshot. Deliberately different numbers from the
+   * snapshot (which says 397260/80000/317260): the assertions below can then
+   * only be satisfied by the cell, which is the point of the ruling.
+   */
+  function seedCadRollGoldCells(gold: string): void {
+    const cell = (railKey: string, value: number) => ({
+      placeKey: gold,
+      railKey,
+      cellState: { kind: "value", value, source: "cad_property", vintage: "2025" },
+    });
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          cell("marketValue", 411_000),
+          cell("assessedValue", 411_000),
+          cell("landValue", 88_000),
+          cell("improvementValue", 323_000),
+        ],
+      }),
+    );
+  }
+
   async function seedCadRollGoldSnapshot(gold: string, contentHash: string) {
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
@@ -2830,6 +2928,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       source: "stripe",
     });
     await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock");
+    seedCadRollGoldCells(gold);
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,
@@ -2839,11 +2938,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
+    // P-297: the granted caller reads the parcel's own cell's numbers.
     expect(res.body.facets.baseFacts.cadRoll.landValue).toMatchObject({
-      v: 80000,
+      v: 88000,
     });
     expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
-      v: 397260,
+      v: 411000,
     });
   });
 
@@ -2880,6 +2980,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     const userId = "user_cadroll_studio";
     await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
     await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-studio");
+    seedCadRollGoldCells(gold);
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,
@@ -2890,10 +2991,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
     const cadRoll = res.body.facets.baseFacts.cadRoll;
-    expect(cadRoll.marketValue).toMatchObject({ v: 397260, source: "cad_property" });
-    expect(cadRoll.assessedValue).toMatchObject({ v: 397260 });
-    expect(cadRoll.landValue).toMatchObject({ v: 80000 });
-    expect(cadRoll.improvementValue).toMatchObject({ v: 317260 });
+    // P-297: the values are the parcel's own cells' (the snapshot says
+    // 397260/80000/317260, none of which may be served for a slated rail).
+    expect(cadRoll.marketValue).toMatchObject({ v: 411000, source: "cad_property" });
+    expect(cadRoll.assessedValue).toMatchObject({ v: 411000 });
+    expect(cadRoll.landValue).toMatchObject({ v: 88000 });
+    expect(cadRoll.improvementValue).toMatchObject({ v: 323000 });
   });
 
   it("Team GET also serves the real CAD dollar values (Team === Studio for this gate)", async () => {
@@ -2901,6 +3004,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     const userId = "user_cadroll_team";
     await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "team" });
     await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-team");
+    seedCadRollGoldCells(gold);
     const token = mintSessionToken({
       audience: "user",
       tenantId: DEFAULT_TENANT_ID,
@@ -2911,7 +3015,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       .set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
-      v: 397260,
+      v: 411000,
     });
   });
 
@@ -2954,18 +3058,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
         },
         contentHash: `test-hash-valuehistory-${placeKey}`,
       });
-      setValueHistoryVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: "valueHistory",
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-16T00:00:00Z",
-            runId: "test-p246",
-          },
-        ]),
-      );
+      // P-297: no verdict store is injected here any more. The rail is slated
+      // for 48021 in code, and the parcel's own cell below is the whole
+      // decision -- the county verdict no longer gates this route.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -2996,7 +3091,6 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     }
 
     afterEach(() => {
-      resetValueHistoryVerdictStoreForTests();
       resetParcelRecordQueryableForTests();
     });
 
@@ -3136,6 +3230,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
 // / loadZoningFactForServe loaders the research/brief path already uses
 // (setbacksFactServeCutover.ts / zoningFactServeCutover.ts), never a second
 // implementation.
+//
+// P-297 (2026-09-16, operator ruling A-193) then changed which of the two
+// answers a SLATED rail is allowed to serve: the test below that used to
+// assert "with no live cell, the stale bake still wins" now asserts the
+// declared refusal, and the D6 "unslated" leg runs on a county that is
+// actually absent from PARCEL_RECORD_SLATE.
 // -----------------------------------------------------------------------
 
 describe.skipIf(!hasDb)(
@@ -3190,26 +3290,14 @@ describe.skipIf(!hasDb)(
     });
 
     afterEach(async () => {
-      resetZoningVerdictStoreForTests();
-      resetSetbacksVerdictStoreForTests();
       resetParcelRecordQueryableForTests();
       if (!ctx.schema) return;
       await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
     });
 
-    it("D6: a gate-passing county now serves REAL setback numbers this route never showed before", async () => {
-      setSetbacksVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: SETBACK_FRONT_FT_RAIL_KEY,
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-07T00:00:00Z",
-            runId: "test",
-          },
-        ]),
-      );
+    it("D6: a SLATED county now serves REAL setback numbers this route never showed before", async () => {
+      // P-297: the slate alone cuts this rail over for 48021 -- the parcel's
+      // own cells below are the decision, and the county verdict is not read.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -3249,28 +3337,43 @@ describe.skipIf(!hasDb)(
       expect(res.body.facets.envelope).toBeNull();
     });
 
-    it("D6: an unslated county's setbacksFact is null and facets.envelope stays the pre-existing permanent null (no regression)", async () => {
+    it("D6: an UNSLATED county's setbacksFact is null and facets.envelope stays the pre-existing permanent null (no regression)", async () => {
+      // P-297: "uns slated" is a fact about the (county, rail) PAIR, not about
+      // the route. 48021:103387 -- the node this block was originally written
+      // on -- has setbackFrontFt in PARCEL_RECORD_SLATE, so it is the SLATED
+      // case (previous test). The unslated path this test is named for needs a
+      // county absent from the slate on that rail: Anderson 48001 is absent
+      // from PARCEL_RECORD_SLATE entirely, and this is the ruling's other half
+      // -- an unslated rail keeps its current path, byte-identical.
+      const UNSLATED_NODE_ID = "48001:103387";
+      await dbMod.db.insert(placeLayerSnapshots).values({
+        placeKey: placeKeyForNode(UNSLATED_NODE_ID),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: "30.11000",
+        lngRounded: "-97.32000",
+        payloadJson: {
+          ...ledgerBakedPayload,
+          parcelNodeId: UNSLATED_NODE_ID,
+          countyFips: "48001",
+          countyName: "Anderson",
+          zoning: { ...ledgerBakedPayload.zoning, jurisdictionKey: "anderson_city_tx_legacy" },
+        },
+        contentHash: "test-hash-ledger-node-48001",
+      });
       const res = await request(getApp()).get(
-        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+        `/api/brokerage/v1/place/node/${encodeURIComponent(UNSLATED_NODE_ID)}/facets`,
       );
       expect(res.status).toBe(200);
       expect(res.body.setbacksFact).toBeNull();
       expect(res.body.facets.envelope).toBeNull();
+      // And no cell was even consulted: the unslated rail never reached
+      // parcel_record, so no refusal can be produced from one.
+      expect(JSON.stringify(res.body.setbacksFact)).not.toContain("parcel_record");
     });
 
-    it("D5: a gate-passing live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
-      setZoningVerdictStoreForTests(
-        memoryParcelGateVerdicts([
-          {
-            countyFips: "48021",
-            railKey: ZONING_DISTRICT_RAIL_KEY,
-            verdict: "pass",
-            unaccountedCount: 0,
-            evaluatedAt: "2026-09-07T00:00:00Z",
-            runId: "test",
-          },
-        ]),
-      );
+    it("D5: a SLATED live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
+      // P-297: the slate alone cuts this rail over for 48021; the cells below
+      // are the decision. The county verdict is not read on this path.
       setParcelRecordQueryableForTests(
         memoryParcelRecordStore({
           cells: [
@@ -3303,12 +3406,34 @@ describe.skipIf(!hasDb)(
       expect(res.body.facets.facetCoverage.zoning).toBe(true);
     });
 
-    it("D5: with no gate-passing ledger fact, the baked stamp still wins (unchanged, no regression)", async () => {
+    it("P-297 D5: with NO live zoning cell on a slated rail, the STALE baked stamp is NOT served -- the rail declares a refusal with the cell's reason", async () => {
+      // PRE-RULING (audit finding D5, 2026-09-07) this test asserted the baked
+      // "SF-STALE-BAKE" stamp won whenever the ledger had nothing to say. That
+      // is exactly the fall-back-to-bake A-193 names as the defect: 48021's
+      // zoningDistrict pair is in PARCEL_RECORD_SLATE, so the parcel's own cell
+      // is the answer, and with no readable cell the answer is a declared
+      // refusal -- never the July bake. The test now pins the refusal, and the
+      // stale district must not appear anywhere in the served zoning wire.
       const res = await request(getApp()).get(
         `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
       );
       expect(res.status).toBe(200);
-      expect(res.body.facets.zoning.district).toBe("SF-STALE-BAKE");
+      expect(res.body.facets.zoning.state).toBe("refused");
+      expect(res.body.facets.zoning.code).toBe(
+        "parcel-record-store-not-configured",
+      );
+      expect(res.body.facets.zoning.reason).toMatch(/parcel_record/);
+      expect(res.body.facets.zoning.district).toBeUndefined();
+      expect(JSON.stringify(res.body.facets.zoning)).not.toContain(
+        "SF-STALE-BAKE",
+      );
+      // The rail did not earn a zoning determination, and says so.
+      expect(res.body.facets.facetCoverage.zoning).toBe(false);
+      // The source twin follows the rail rather than the bake.
+      expect(res.body.facets.provenance.zoningSource.verdict).toBe("refused");
+      expect(res.body.facets.provenance.zoningSource.code).toBe(
+        "parcel-record-store-not-configured",
+      );
     });
   },
 );

@@ -31,6 +31,11 @@ import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import { placeKeyForNode } from "../routes/brokerageNodeFacets";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
+import {
+  memoryParcelRecordStore,
+  resetParcelRecordQueryableForTests,
+  setParcelRecordQueryableForTests,
+} from "../lib/parcelRecordCellRead";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
@@ -137,6 +142,11 @@ async function chatCountFor(userId: string, parcelNodeId: string) {
 }
 
 beforeEach(async () => {
+  // P-297 (2026-09-16, operator ruling A-193): the serve decision for the
+  // CAD dollar rails no longer reads a county verdict at all, so a suite that
+  // wants to see a VALUE has to hand the route the parcel's own cells. Reset
+  // here so no cell fixture leaks between tests, and seed per test.
+  resetParcelRecordQueryableForTests();
   // A real recognized key, so brokerageAuth's keys-configured gate passes for
   // the peSessionHeaders (session-JWT) tests in this file — unrelated to the
   // one test below that exercises the now-retired extension_public branch.
@@ -807,6 +817,42 @@ describe("free counter atomicity", () => {
  * a batch request cannot leak one parcel's grant onto another.
  */
 describe("research/brief CAD dollar rails co-gate with owner info via Property Unlock (OPS-16 A-103 item 5 / A-104)", () => {
+  /**
+   * P-297 (2026-09-16, operator ruling A-193): 48055 is slated for the dollar
+   * rails, so what `research/brief` serves under `onRecord.cadRoll` is the
+   * parcel's OWN cell -- never this fixture's baked snapshot, which exists
+   * only to give the route a parcel to assemble. Before the ruling the
+   * snapshot's numbers were the served answer here. Values match the
+   * snapshot's own so the assertions below read the same numbers, but they now
+   * come from the cell and can only have come from the cell: the seeded
+   * numbers (275000/66000) appear nowhere in the baked snapshot. That is the
+   * point of the change, not an incidental detail.
+   */
+  function seedCadRollCells(parcelNodeId: string): void {
+    // The cell store's place key is `${countyFips}:${propId}` -- the node id
+    // itself, NOT `placeKeyForNode`'s `node:`-prefixed snapshot key.
+    const placeKey = parcelNodeId;
+    const dollar = (railKey: string, value: number) => ({
+      placeKey,
+      railKey,
+      cellState: { kind: "value", value, source: "cad_property", vintage: "2025" },
+    });
+    // Deliberately NOT the snapshot's numbers: 275000/66000 exist nowhere in
+    // the baked fixture, so a served 275000 can only have come from the cell.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          dollar("marketValue", 275000),
+          dollar("assessedValue", 275000),
+          dollar("landValue", 66000),
+          dollar("improvementValue", 209000),
+          dollar("livingAreaSqft", 1800),
+          dollar("yearBuilt", 1994),
+        ],
+      }),
+    );
+  }
+
   async function seedBriefSnapshot(parcelNodeId: string, contentHash: string) {
     await db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(parcelNodeId),
@@ -844,6 +890,7 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
 
   it("PARCEL (the unlocked one) GRANTS the CAD dollar fields to USER_UNLOCKED via onRecord", async () => {
     await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-unlocked-parcel");
+    seedCadRollCells(PARCEL);
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -851,13 +898,16 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
       USER_UNLOCKED,
     );
     expect(res.status).toBe(200);
+    // P-297: these two numbers exist ONLY in the seeded cells, so serving them
+    // proves the parcel's own cell is the answer, not the baked snapshot
+    // (whose fixture says 250000/60000).
     expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
       state: "present",
-      v: 250000,
+      v: 275000,
     });
     expect(res.body.onRecord.cadRoll.landValue).toMatchObject({
       state: "present",
-      v: 60000,
+      v: 66000,
     });
   });
 
@@ -894,6 +944,9 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
     });
     await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-batch-parcel");
     await seedBriefSnapshot(OTHER_PARCEL, "test-hash-brief-cadroll-batch-other-parcel");
+    // Only PARCEL has cells; OTHER_PARCEL is gated before its overlay would be
+    // served at all, which is exactly what the two assertions below separate.
+    seedCadRollCells(PARCEL);
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -909,7 +962,7 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
     );
     expect(forParcel.onRecord.cadRoll.marketValue).toMatchObject({
       state: "present",
-      v: 250000,
+      v: 275000,
     });
     expect(forOtherParcel.onRecord.cadRoll.marketValue).toEqual({
       state: "refused",
@@ -952,6 +1005,7 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
       subscriptionTier: "studio",
     });
     await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-studio");
+    seedCadRollCells(PARCEL);
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -961,7 +1015,7 @@ describe("research/brief CAD dollar rails co-gate with owner info via Property U
     expect(res.status).toBe(200);
     expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
       state: "present",
-      v: 250000,
+      v: 275000,
     });
   });
 });

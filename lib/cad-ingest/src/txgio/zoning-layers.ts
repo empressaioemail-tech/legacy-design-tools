@@ -19,11 +19,19 @@
  * Single-Family" -> leading token "RS"; Georgetown's zoning GIS `ZONE`
  * field is "RS". So the RAW `ZONE` value stamped verbatim -> normalized
  * "RS" -> exact-matches the "RS ..." setback row. Verified live
- * 2026-07-20 for all 12 setback districts (RE/RL/RS/TF/TH/MF-1/MF-2/
- * CN/C-1/C-3/OF/IN); the 5 GIS-only codes (AG/BP/MH/MU-DT/PF) have no
- * setback row and correctly hit the conservative fallback (AG and MU are
- * deliberately excluded from the setback table as form-based /
- * no-simple-setback districts). DO NOT transform the code before
+ * 2026-07-20 for the rows that existed then (RE/RS/TF/TH/MF-1/MF-2/
+ * CN/C-1/C-3/OF/IN); the 5 GIS-only codes (AG/BP/MH/MU-DT/PF) had no
+ * setback row at that time and correctly hit the conservative fallback.
+ * CORRECTED 2026-09-16 (P-258 lane-c): that verification list named RL as
+ * covered, which was never true — Georgetown's single-family rows are
+ * RE/RT/RS/RM and no row's leading token normalizes to "RL", so an
+ * "RL"-stamped parcel correctly falls back. The rewrite's Section 4.02
+ * Equivalency Table maps previous-UDC "RL Residential Low Density" onto
+ * current-UDC "RT Residential Traditional", so RL land is covered only
+ * through its successor's row. AG/MH/PF/MU-DT are now rowed (adopted
+ * 2026-08-11, effective 2026-11-01 rewrite vintage, so they are NOT in
+ * force on 2026-09-16); BP and RL remain genuine gaps. See
+ * georgetown-tx.json's note for both. DO NOT transform the code before
  * stamping — the leading-token contract does the alignment.
  *
  * The stamp is county-scoped (it updates `txgio_parcel` rows for one
@@ -178,11 +186,17 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // non-alphanumeric) verified against live GIS codes where a table exists.
   // ---------------------------------------------------------------------------
 
-  // Buda (Hays). Setback table EXISTS (buda-tx.json, R-1..R-5/R-MH/AG/B-1).
-  // GIS `Zoning_Category` codes "R1"/"B1"/"AG" normalize to "R1"/"B1"/"AG" and
-  // match setback tokens "R-1"/"B-1"/"AG" (hyphens stripped by normalizeCode);
-  // "R2-C"/"R3/R4" prefix-map to R-2/R-3. F1..F5/HI/LI/PD are form-based /
-  // commercial with no setback row -> conservative fallback (honest).
+  // Buda (Hays). Setback table EXISTS (buda-tx.json: R-1..R-5, R-MH, AG,
+  // B-1, plus B-2/B-3/LI/HI added by P-258 lane-c 2026-09-16 from UDC
+  // Subsection 2.07.02). GIS `Zoning_Category` codes "R1"/"B1"/"AG"
+  // normalize to "R1"/"B1"/"AG" and match setback tokens "R-1"/"B-1"/"AG"
+  // (hyphens stripped by normalizeCode); "R2-C"/"R3/R4" prefix-map to R-2/R-3.
+  // KNOWN ALIGNMENT DEFECT (recorded, not fixed here): the compound code
+  // "B2/R5" normalizes to "B2R5" and PREFIX-matches the B-2 row at 0.7, so the
+  // R-5 half of the parcel's code is silently ignored. F1..F5/F3H/F4H/F5H stay
+  // form-based (Form Based Code Subsection 2.08, keyed by building type and
+  // street type) with no setback row -> conservative fallback (honest), and the
+  // east-side "B-5" family has no setback row either.
   "buda-tx": {
     cityKey: "buda-tx",
     cityName: "Buda",
@@ -192,12 +206,15 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "Zoning_Category",
     descriptionField: "Zoning_Description",
   },
-  // Kyle (Hays). Setback table EXISTS (kyle-tx.json, R-1-1/R-1-2/R-1-3/R-2/
-  // R-3-1/R-3-2). GIS `Z_Code` carries those exact tokens verbatim -> exact
-  // match. Was token-gated in a prior recon; the public path is this
-  // utility.arcgis.com/usrsvcs proxy layer, which resolves WITHOUT a token
-  // (verified live 2026-07-21). Remaining GIS codes (A/C-2/CBD-*/MXD/PUD/...)
-  // have no setback row -> conservative fallback.
+  // Kyle (Hays). Setback table EXISTS (kyle-tx.json: R-1-1/R-1-2/R-1-3/R-2/
+  // R-3-1/R-3-2 plus A, R-3-3, CBD-2, W, CM, HS and NC added by P-258 lane-c
+  // 2026-09-16 from Ch. 53 §53-33 Charts 1-3 and §53-662). GIS `Z_Code`
+  // carries those exact tokens verbatim -> exact match. Was token-gated in a
+  // prior recon; the public path is this utility.arcgis.com/usrsvcs proxy
+  // layer, which resolves WITHOUT a token (verified live 2026-07-21).
+  // Remaining GIS codes with NO row, all declining honestly: C-1, C-2, CC,
+  // M-3, OI, MXD, HI, PUD, A-DA, CBD-1 (its standards are by base use),
+  // R-1-T (deferred to Division 5) and R-1-C (deferred to Division 6).
   "kyle-tx": {
     cityKey: "kyle-tx",
     cityName: "Kyle",
@@ -207,9 +224,15 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "Z_Code",
     descriptionField: "Description",
   },
-  // San Marcos (Hays). The cited table maps direct ZONECODE rows SF-6,
-  // SF-4.5, and ND-3. Other stamped codes remain explicit table-note gaps
-  // until their district/building-type standards are independently resolved.
+  // San Marcos (Hays). P-258 lane-c (2026-09-16) lifted this table from 8
+  // rows to 27: the direct ZONECODE rows are now SF-6, SF-4.5, ND-3, ND-3.2,
+  // ND-3.5, ND-4, N-CM, SF-R, MH, FD, MU, CC, GC, NC, OP, CD-2/CD-2.5/CD-3/
+  // CD-4/CD-5/CD-5D, CM, BP, HC, LI, HI (all quoted from the adopted-redline
+  // Development Code, ORD-2026-08). Still NO row: the Chapter 9 LEGACY codes
+  // (D, TH, AR, DR, MR, MF-12/MF-18/MF-24, VMU, PH-ZL) — the adopted-redline
+  // PDF read this pass stops before Chapter 9 — and CD-1, whose own section
+  // (4.4.3.1) states impervious cover and density but no building-setback
+  // block at all. Those decline honestly; see san-marcos-tx.json's note.
   "san-marcos-tx": {
     cityKey: "san-marcos-tx",
     cityName: "San Marcos",
@@ -219,8 +242,15 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "ZONECODE",
     descriptionField: "ZONINGDISTRICT",
   },
-  // Cedar Park (Williamson). Cited table maps DR/SR/SU/MF/NB/LB/PO; UR and
-  // other live codes remain explicit table-note gaps.
+  // Cedar Park (Williamson). Cited table maps DR/SR/SU/MF/NB/LB/PO plus UR,
+  // added by P-258 lane-c (2026-09-16) as a DOCUMENTED CONSERVATIVE ENVELOPE
+  // (front 25 / interior side 15 / street side 25 / rear 20 / height 35) with
+  // the front-entry-vs-rear-entry and street-class alternatives quoted in the
+  // row's provenance -- the GIS "UR" token cannot distinguish them. Still
+  // explicit table-note gaps: GB, LI, HC, HI, H, PS, OG, OR, MU, PD. TC is NOT
+  // rowed on purpose: the Town Center Code (Art. 11.02 Div. 2 + Regulating
+  // Plan) requires no setbacks in Town Center Area 1 and its only table is
+  // keyed by lot type.
   "cedar-park-tx": {
     cityKey: "cedar-park-tx",
     cityName: "Cedar Park",
@@ -257,8 +287,11 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     descriptionField: "ZONING",
   },
   // Pflugerville (Travis). GIS `ZOINING_TY` (source field-name typo, kept
-  // verbatim) maps cited rows SF-S/SF-R/MF-20. GB1/GB2/LI/O remain explicit
-  // table-note gaps pending non-residential dimensional extraction.
+  // verbatim) maps cited rows SF-S/SF-R/MF-20 plus the corridor rows CL3/CL4/
+  // CL5 added by P-258 lane-c 2026-09-16 (Sec. 4.4 / Table 4.4.4, corridor
+  // text last amended by Ord. #1623-24-04-23). GB1/GB2/LI/O/R/CI/NS/PF/GI/
+  // SF-E remain explicit table-note gaps pending the Sec. 4.2.4 conventional-
+  // district table extraction.
   "pflugerville-tx": {
     cityKey: "pflugerville-tx",
     cityName: "Pflugerville",

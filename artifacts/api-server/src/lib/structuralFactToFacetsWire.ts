@@ -5,6 +5,7 @@
 import type { LayerAbsenceWire } from "./verdictLayerServe";
 import type { StructuralFactAbsent, StructuralFactPresent, StructuralFactRead } from "./structuralFactResolve";
 import type { LivingAreaSqftFromParcelRecord } from "./cadRollFactFromParcelRecord";
+import { isParcelRecordRefusal } from "./cadRollFactFromParcelRecord";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import { gateBakedCadRollRecord } from "./cadRollValue";
 
@@ -27,26 +28,52 @@ export function structuralFactToLivingAreaWire(
 }
 
 /**
- * PARCEL-B-SLATE2: when the allowlist resolved livingAreaSqft to "record"
- * for this county, `overlay` carries the parcel_record-sourced value (or
- * `null` if the cell itself does not resolve to a usable value -- keep
- * legacy in that case too, fail closed). `null` also covers "not cut over
- * at all" (the overlay resolver itself returns null for that case) -- there
- * is deliberately no way to distinguish the two from this function's own
- * inputs; the caller's allowlist resolution is the single source of truth
- * for which case applies, and either way the correct fallback is identical:
- * keep computing from the legacy structuralFact exactly as before.
+ * PARCEL-B-SLATE2, extended by P-269/P-297 (operator ruling A-193).
+ *
+ * `overlay` is the parcel_record-sourced answer for the livingAreaSqft rail,
+ * and it is only non-`null` when that rail is in the slate (the wrapper
+ * decides that; this function sees no verdict and needs none):
+ *
+ *   - `{status:"populated"}` -> the live square footage, with its own source;
+ *   - a declared refusal -> a `LayerAbsenceWire` with `verdict: "refused"`,
+ *     carrying the cell's own reason. THIS IS THE P-269 CHANGE: before it, a
+ *     refused cell arrived here as `null`, which this function read as "keep
+ *     computing from the legacy structuralFact" -- so a parked parcel's
+ *     square footage came off the bake while the store was saying, in so many
+ *     words, that it had no answer. A slated rail never serves the baked
+ *     value, and `refused` is already one of `LayerAbsenceVerdict`'s four
+ *     canonical states, so this is the repo's existing refusal shape rather
+ *     than a new absence state;
+ *   - `{status:"absent-in-record"}` -> the legacy absence wire is still kept,
+ *     because only it carries the authority/scopeSearched/basis fields the
+ *     wire contract requires. Disclosed: the served absence is therefore
+ *     attributed to the cad-roll read rather than to parcel_record's own cell
+ *     -- an absence whose PROVENANCE is stale, never a value whose
+ *     provenance is;
+ *   - `null` -> not slated; the pre-cutover path, exactly as before.
  */
 export function structuralFactToLivingAreaWireWithOverlay(
   fact: StructuralFactRead,
   overlay: LivingAreaSqftFromParcelRecord,
 ): LivingAreaSqftLayerWire | null {
   if (!overlay) return structuralFactToLivingAreaWire(fact);
+  if (isParcelRecordRefusal(overlay)) {
+    return {
+      status: "absent",
+      verdict: "refused",
+      authority: "parcel_record",
+      scopeSearched: "parcel_record_cell@livingAreaSqft",
+      asOf: new Date().toISOString(),
+      basis: `${overlay.reason} (parcel_record refused this cell: ${overlay.code}.)`,
+      provenanceClass: "Record",
+      subjectKind: "extensional",
+      chainAnchoring: "contemporaneous",
+      serveLayer: "structuralFact",
+    };
+  }
   if (overlay.status === "populated") return { status: "populated", value: overlay.value };
-  // "absent-in-record": still need SOME LayerAbsenceWire shape for the wire.
-  // The legacy absence shape (authority/scopeSearched/basis/etc.) is the
-  // correct one to keep -- parcel_record's own cell absence does not carry
-  // those fields, and the wire contract requires them.
+  // "absent-in-record": see this function's doc for the disclosed provenance
+  // limitation on the absence wire.
   return structuralFactToLivingAreaWire(fact);
 }
 
@@ -165,17 +192,26 @@ export function zoningSourceMirror(
     };
   }
 
-  // 4. The cell is a parcel_record ZoningFactRefusal for the rail's OWN
-  //    engine-level refusal ({state:"refused", code:"parcel-record-engine-
-  //    refused", reason}) -- the Factory looked and declined, with a real,
-  //    specific reason (P-124 CTX-MIRROR). Mirror verbatim, same as branch 2:
-  //    the twin cannot assert either way when the rail itself would not.
-  //    Every OTHER refusal code (unaccounted, invalid-parcel-node-id,
-  //    parcel-record-cell-miss, malformed-cell, store-not-configured) never
-  //    reaches here -- attachVerdictLayersToFacets keeps out.zoning on the
-  //    city-limits fallback for those, unchanged.
-  if (rec.state === "refused" && rec.code === "parcel-record-engine-refused") {
-    return { ...rec, mirrors: "zoning" };
+  // 4. The cell is a parcel_record ZoningFactRefusal ({state:"refused", code,
+  //    reason}) -- the rail's own cell declined to answer. Mirror it verbatim,
+  //    same as branch 2: the twin cannot assert either way when the rail
+  //    itself would not, and inventing a source citation for a cell that
+  //    refused would be exactly the substitution this mirror exists to stop.
+  //
+  //    P-297 / A-193 BROADENED THIS BRANCH. It used to fire only for
+  //    code==="parcel-record-engine-refused" (P-124 CTX-MIRROR); every other
+  //    refusal code was kept off this path because attachVerdictLayersToFacets
+  //    left out.zoning on the city-limits/bake fallback for them. That
+  //    fallback is the defect the ruling names -- on a slated rail a refusal
+  //    is a declared refusal with the cell's reason, and the legacy or baked
+  //    value is never the answer -- so the rail now carries every refusal
+  //    code and the twin follows all of them.
+  if (rec.state === "refused") {
+    // `verdict: "refused"` is synthesised from the cell's own `state` so that a
+    // consumer reading the twin's `.verdict` sees the same verdict the rail
+    // reached (the four-state vocabulary's refusal word); `reason`/`code` are
+    // carried through verbatim from the spread.
+    return { ...rec, verdict: "refused", mirrors: "zoning" };
   }
 
   return undefined;
@@ -226,7 +262,7 @@ export function attachVerdictLayersToFacets(
     out.livingAreaSqft = livingWire;
   }
 
-  if (parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused") {
+  if (parcelRecordZoningFact) {
     if (parcelRecordZoningFact.state === "present") {
       out.zoning = {
         district: parcelRecordZoningFact.district,
@@ -236,24 +272,18 @@ export function attachVerdictLayersToFacets(
       cov.zoning = true;
     } else {
       // absent-verified / not-applicable -- same "data: fact" choice
-      // composeZoningBriefSectionFromParcelRecord makes for its absent branch.
+      // composeZoningBriefSectionFromParcelRecord makes for its absent branch
+      // -- and, since P-297 / A-193, the refused/unaccounted cell too. Pre-
+      // ruling only `parcel-record-engine-refused` was projected here (P-124
+      // CTX-MIRROR) and every other refusal code fell through to the
+      // city-limits/bake deduction below, which is the fall-back-to-bake the
+      // ruling names as the defect: on a slated rail the cell is the answer,
+      // and a refusal is a declared refusal with the cell's reason. The
+      // legacy deduction now serves only the case where no record fact
+      // exists at all (an unslated rail), which is the branch below.
       out.zoning = parcelRecordZoningFact;
       cov.zoning = false;
     }
-  } else if (
-    parcelRecordZoningFact?.state === "refused" &&
-    parcelRecordZoningFact.code === "parcel-record-engine-refused"
-  ) {
-    // P-124 CTX-MIRROR: the zoningDistrict rail's own cell is kind=refused --
-    // the Factory engine looked and deliberately declined (e.g. "no
-    // tx_zoning_district_staging base layer exists for Mustang Ridge yet").
-    // That is an earned state with a real, specific reason, not a plumbing
-    // failure -- project it exactly like the absent branch above, never the
-    // generic city-limits fallback. Every OTHER refusal code (unaccounted,
-    // invalid-parcel-node-id, parcel-record-cell-miss, malformed-cell,
-    // store-not-configured) is left on the fallback below, unchanged.
-    out.zoning = parcelRecordZoningFact;
-    cov.zoning = false;
   } else if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
     out.zoning = zoningVerdict;
     cov.zoning = false;
@@ -279,11 +309,19 @@ export function attachVerdictLayersToFacets(
 /**
  * PARCEL-B-SLATE2: overlay the four dollar rails and yearBuilt onto the
  * baked snapshot's own baseFacts.cadRoll.* / baseFacts.yearBuilt, where the
- * allowlist resolved that rail to "record". A rail whose overlay is `null`
- * (not slated, verdict refused/excluded, or the cell itself did not
- * resolve) keeps whatever the bake already wrote -- untouched, not merged
- * field-by-field within cadRoll itself (a baked cadRoll object is already
- * whole; only the specific overlaid keys move).
+ * slate (NOT the county verdict, since P-297) cut that rail over. A rail
+ * whose overlay is `null` (not slated, or the parcel has no live answer and
+ * its pre-cutover path is the answer) keeps whatever the bake already wrote
+ * -- untouched, not merged field-by-field within cadRoll itself (a baked
+ * cadRoll object is already whole; only the specific overlaid keys move).
+ *
+ * P-269/P-297: an overlay value may now also be a DECLARED REFUSAL
+ * (`{state:"refused", code, reason}` -- the fourth `state` on the same family
+ * as CadRollValueWire's three). It is `!= null`, so it is merged onto the
+ * baked key like any other served answer, and the customer sees "we could not
+ * serve this field, and here is why" instead of the stale baked number. The
+ * pre-P-269 adapter handed this function `null` for a refused cell, which
+ * meant the bake's number was served as if it were live.
  */
 export function attachCadRollOverlaysToFacets(
   facets: Record<string, unknown>,

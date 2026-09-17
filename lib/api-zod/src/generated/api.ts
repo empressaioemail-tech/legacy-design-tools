@@ -3871,7 +3871,17 @@ export const GetLocalSetbackTableResponse = zod
           rear_ft: zod.number(),
           side_ft: zod.number(),
           side_corner_ft: zod.number(),
-          max_height_ft: zod.number(),
+          max_height_ft: zod
+            .number()
+            .nullable()
+            .describe(
+              'Feet, or null when the code states no feet-based height for this\ndistrict (P-299). The corpus\'s canonical stated-absence sentinel is\n999 and means \"read the provenance flag\" — never \"999 feet\" — so the\nroute resolves a flagged (or bare-sentinel) height to null instead of\nputting the placeholder on the wire. A null here is NOT \"unlimited\":\nthe district\'s height is stated in another unit (e.g. stories) or is\nconditional; the table\'s own `note` records which.\n',
+            ),
+          max_height_ft_not_specified: zod
+            .boolean()
+            .describe(
+              "Why `max_height_ft` is null, said in the corpus's own vocabulary\n(P-299): true when the row's `provenance.max_height_ft.not_specified`\nflag is set, or when the raw field carries the canonical 999 sentinel\nwith no flag; false when a real feet value is served. A bare null\nwould be an absence with its reason dropped, which is the failure\nthis field exists to prevent. Additive: a consumer that ignores it\nsees exactly the null it saw before.\n",
+            ),
           max_lot_coverage_pct: zod.number(),
           max_impervious_pct: zod.number(),
           citation_url: zod.string(),

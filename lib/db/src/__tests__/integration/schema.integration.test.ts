@@ -382,6 +382,18 @@ describe("lib/db schema integration", () => {
         // `tx_city_boundary` and before `tx_parcel_tile_cache` (`_county` <
         // `_fema` < `_parcel`) per `ORDER BY tablename`.
         "tx_county_boundary",
+        // feat/p241-etj-acquisition (0102) — per-publisher extraterritorial-
+        // jurisdiction rings. ETJ has no statewide layer: each municipality
+        // publishes its own, acquired one publisher at a time. Sorts after
+        // `tx_county_boundary` and before `tx_etj_source` (`_boundary` <
+        // `_source`), both before `tx_fema_nfhl_flood_zone` (`_etj` < `_fema`)
+        // per `ORDER BY tablename`.
+        "tx_etj_boundary",
+        // feat/p241-etj-acquisition (0102) — one row per ENUMERATED city,
+        // including the publishers that expose city limits and no ETJ layer.
+        // This table is what keeps "checked, the ETJ does not reach here" apart
+        // from "there is no source to check".
+        "tx_etj_source",
         // feat/fema-nfhl-statewide-layer (0071) — statewide FEMA NFHL flood-
         // hazard polygons from NFHL_48 bulk FileGDB S_FLD_HAZ_AR. Sorts after
         // `tx_county_boundary` and before `tx_parcel_tile_cache` (`_fema` <

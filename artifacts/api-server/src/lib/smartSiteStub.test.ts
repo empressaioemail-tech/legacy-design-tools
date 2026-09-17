@@ -473,13 +473,25 @@ describe("OPS-16 A-096/A-097/A-098: zoning + setbacks not-applicable fix", () =>
     expect(stub.zoning).toBe("present");
   });
 
-  it("REGRESSION GUARD: a refused record fact falls through to the legacy bake computation, never regressing a parcel that already has a real bake-derived zoning value", () => {
+  /**
+   * P-297 / A-193. INVERTED, NOT DELETED: this guard used to assert the
+   * opposite ("a refused record fact falls through to the legacy bake
+   * computation, never regressing a parcel that already has a real
+   * bake-derived zoning value"). The ruling forbids that fall-through on a
+   * slated rail -- "a refused or unaccounted cell is served as a declared
+   * refusal with the cell's reason ... the legacy or baked value is never the
+   * answer for a slated rail" -- so the stub must report the refusal even
+   * though the bake has a real district for this parcel. The bake-derived
+   * computation still serves the no-fact-at-all case, asserted immediately
+   * below.
+   */
+  it("P-297: a refused record fact reports REFUSED, even though the bake carries a real zoning value for the parcel", () => {
     const stub = composeSmartSiteStub({
       parcelNodeId: "48021:1",
       facets: { zoning: { district: "C-1" } },
       parcelRecordZoningFact: zoningRefused,
     });
-    expect(stub.zoning).toBe("present");
+    expect(stub.zoning).toBe("refused");
   });
 
   it("REGRESSION GUARD: every existing call shape (no parcelRecordZoningFact/parcelRecordSetbacksFact at all) is byte-identical to before this card -- the new params are additive and optional", () => {

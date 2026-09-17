@@ -1,130 +1,142 @@
 /**
- * The serve-layer integration point for valueHistory (F-01, PARCEL-B-SLATE1
- * template, serve/prod cutover). All six program counties are slated
- * (parcel-value-history.mjs ingested all six, PARCEL-VALUE-HISTORY closed
- * 2026-09-02) -- unlike agValuation/maxImperviousCoverPct, there is no
- * writer-side county exclusion here, so this suite tests the verdict-gating
- * behavior rather than an out-of-scope-county case.
+ * valueHistoryFactServeCutover.ts — P-297 (operator ruling A-193, OPS-24 law 7): the serve switch
+ * is the code-owned SLATE, and what a parcel shows comes from ITS OWN cell.
  *
- * Two load-bearing assertions:
- *   - Any pair not resolved to 'record' (no verdict row, a refuse/excluded
- *     verdict, a store failure, a malformed id) resolves to the typed
- *     not-cut-over refusal.
- *   - A slated pair with a real PASS verdict genuinely reaches the
- *     parcel_record adapter.
+ * Rail note: valueHistory has no legacy reader; its fallback is a not-cut-over refusal.
+ *
+ * THIS FILE REPLACES the pre-P-297 suite, which pinned the old contract
+ * ("only a PASS verdict reaches the record; refuse / excluded / no verdict /
+ * store failure / no store all fall back to the legacy value"). Those
+ * assertions encoded the exact defect the ruling names -- one unaccounted cell
+ * anywhere in a slated county turning every parcel in it back to the bake --
+ * so they are deleted rather than kept passing. The adapter's own answer
+ * shapes are covered by <rail>FactFromParcelRecord.test.ts; what this file
+ * covers is the SWITCH, per the dispatch's falsifiers 1, 2 and 4.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  memoryParcelGateVerdicts,
-  memoryParcelGateVerdictsThatFails,
-} from "./parcelGateVerdictRead";
+import { loadValueHistoryFactForServe } from "./valueHistoryFactServeCutover";
 import {
   memoryParcelRecordStore,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
+  type ParcelRecordQueryable,
 } from "./parcelRecordCellRead";
-import {
-  loadValueHistoryFactForServe,
-  resetValueHistoryVerdictStoreForTests,
-  setValueHistoryVerdictStoreForTests,
-} from "./valueHistoryFactServeCutover";
+import { isSlatedForCellServe } from "./cellServeRule";
+import { notCutOverValueHistoryFact } from "./valueHistoryFactRead";
 
-const GOLD = "48021:34137"; // Bastrop -- slated for valueHistory.
+const RAIL_KEY = "valueHistory";
+const SLATED = "48021:34137";
+const UNSLATED = "48103:100";
+
+/** Counts every parcel_record query. Any call at all from an unslated pair is a defect. */
+function countingStore(): { store: ParcelRecordQueryable; calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    store: {
+      async query() {
+        calls += 1;
+        return { rows: [] };
+      },
+    } as ParcelRecordQueryable,
+  };
+}
 
 afterEach(() => {
-  resetValueHistoryVerdictStoreForTests();
   resetParcelRecordQueryableForTests();
 });
 
-describe("loadValueHistoryFactForServe — every slated pair still fails closed without a passing verdict", () => {
-  it("a malformed parcelNodeId resolves to not-cut-over without touching the verdict store", async () => {
+describe("valueHistoryFactServeCutover — the slate is the switch", () => {
+  it("the slate says what this suite assumes about its two counties", () => {
+    expect(isSlatedForCellServe("48021", RAIL_KEY)).toBe(true);
+    expect(isSlatedForCellServe("48103", RAIL_KEY)).toBe(false);
+  });
+
+  it("an UNSLATED pair never touches parcel_record — it runs the pre-cutover path, unchanged, with zero I/O", async () => {
+    const withoutStore = await loadValueHistoryFactForServe(UNSLATED);
+    const counter = countingStore();
+    setParcelRecordQueryableForTests(counter.store);
+    const withStore = await loadValueHistoryFactForServe(UNSLATED);
+    expect(counter.calls()).toBe(0);
+    expect(withStore).toEqual(withoutStore);
+  });
+
+  it("FALSIFIER 2: an unaccounted cell on a SLATED pair is a declared refusal carrying the cell's reason, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [{ placeKey: SLATED, railKey: RAIL_KEY, cellState: { kind: "unaccounted" } }],
+      }),
+    );
+    const served = await loadValueHistoryFactForServe(SLATED);
+    const preCutover = notCutOverValueHistoryFact(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-unaccounted");
+    expect(wire).toContain("has not yet examined this rail");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("an engine-refused cell on a SLATED pair is a declared refusal carrying the engine's own words", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "refused", reason: "no source covers this parcel" },
+          },
+        ],
+      }),
+    );
+    const served = await loadValueHistoryFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-engine-refused");
+    expect(wire).toContain("no source covers this parcel");
+  });
+
+  it("FALSIFIER 1: a 48021 parcel whose own cell is earned is served that cell even though the county's verdict may read refuse", async () => {
+    // No verdict store is injected anywhere in this file, and the wrapper has no
+    // verdict seam left to inject one into: the verdict cannot reach this decision.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: { kind: "absent-verified", basis: { method: "sweep", finding: "swept, none found" } },
+          },
+        ],
+      }),
+    );
+    const served = await loadValueHistoryFactForServe(SLATED);
+    expect(served?.state).toBe("absent");
+  });
+
+  it("a SLATED pair whose cell row does not exist is a declared refusal naming the missing row", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
+    const served = await loadValueHistoryFactForServe(SLATED);
+    const wire = JSON.stringify(served);
+    expect(served?.state).toBe("refused");
+    expect(wire).toContain("parcel-record-cell-miss");
+  });
+
+  it("an unreadable/unconfigured store on a SLATED pair is a declared refusal, never the pre-cutover answer", async () => {
+    setParcelRecordQueryableForTests(null);
+    const served = await loadValueHistoryFactForServe(SLATED);
+    const preCutover = notCutOverValueHistoryFact(SLATED);
+    expect(served?.state).toBe("refused");
+    expect(JSON.stringify(served)).toContain("parcel-record-store-not-configured");
+    expect(served).not.toEqual(preCutover);
+  });
+
+  it("a malformed parcelNodeId keeps the pre-cutover path's own answer (no place_key is guessed)", async () => {
+    setParcelRecordQueryableForTests(memoryParcelRecordStore({ cells: [] }));
     const malformed = "not-a-valid-id";
-    const result = await loadValueHistoryFactForServe(malformed);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-    expect(result.entityId).toBe(malformed);
-  });
-
-  it("no verdict row on a slated county (the real, current live state -- no gate evaluation has run for this rail yet) falls back to not-cut-over", async () => {
-    setValueHistoryVerdictStoreForTests(memoryParcelGateVerdicts([]));
-    const result = await loadValueHistoryFactForServe(GOLD);
-    expect(result).toEqual({
-      state: "refused",
-      code: "not-cut-over",
-      source: "value-history-fact",
-      entityId: GOLD,
-      reason:
-        "valueHistory has no legacy serve path -- it is served only from parcel_record, and only once this (county, rail) pair is slated with a passing gate verdict. Not there yet for this parcel.",
-    });
-  });
-
-  it("a REFUSE verdict on a slated county falls back to not-cut-over -- attempted but refused, not record", async () => {
-    setValueHistoryVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "valueHistory", verdict: "refuse", unaccountedCount: 9, evaluatedAt: "2026-09-04T00:00:00Z", runId: "test" },
-      ]),
-    );
-    const result = await loadValueHistoryFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-
-  it("a store failure on a slated county fails closed to not-cut-over, not a thrown error", async () => {
-    setValueHistoryVerdictStoreForTests(memoryParcelGateVerdictsThatFails());
-    const result = await loadValueHistoryFactForServe(GOLD);
-    expect(result.state).toBe("refused");
-    if (result.state !== "refused") throw new Error("unreachable");
-    expect(result.code).toBe("not-cut-over");
-  });
-});
-
-describe("loadValueHistoryFactForServe — a real PASS verdict genuinely reaches the parcel_record adapter", () => {
-  it("Bastrop", async () => {
-    setValueHistoryVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48021", railKey: "valueHistory", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-04T00:00:00Z", runId: "test" },
-      ]),
-    );
-    setParcelRecordQueryableForTests(
-      memoryParcelRecordStore({
-        cells: [
-          { placeKey: GOLD, railKey: "valueHistory", cellState: { kind: "value", disposition: "rows", rowCount: 1, source: "cad_property", vintage: "2025" } },
-        ],
-        companionRows: [
-          { placeKey: GOLD, railKey: "valueHistory", rowIndex: 0, payload: { taxYear: 2025, marketValue: "404630", assessedValue: "404630", landValue: "85000", improvementValue: "319630", viaCrosswalk: false }, source: "cad_property", vintage: "2025" },
-        ],
-      }),
-    );
-    const result = await loadValueHistoryFactForServe(GOLD);
-    expect(result.state).toBe("present");
-    if (result.state !== "present") throw new Error("unreachable");
-    expect(result.entries[0].taxYear).toBe(2025);
-    expect(result.entries[0].marketValue).toBe(404630);
-  });
-
-  it("Williamson, via the R1B crosswalk (viaCrosswalk=true)", async () => {
-    const williamsonParcel = "48491:R125831";
-    setValueHistoryVerdictStoreForTests(
-      memoryParcelGateVerdicts([
-        { countyFips: "48491", railKey: "valueHistory", verdict: "pass", unaccountedCount: 0, evaluatedAt: "2026-09-04T00:00:00Z", runId: "test" },
-      ]),
-    );
-    setParcelRecordQueryableForTests(
-      memoryParcelRecordStore({
-        cells: [
-          { placeKey: williamsonParcel, railKey: "valueHistory", cellState: { kind: "value", disposition: "rows", rowCount: 1, source: "cad_property", vintage: "2026" } },
-        ],
-        companionRows: [
-          { placeKey: williamsonParcel, railKey: "valueHistory", rowIndex: 0, payload: { taxYear: 2026, marketValue: "500000", assessedValue: "500000", landValue: "100000", improvementValue: "400000", viaCrosswalk: true }, source: "cad_property", vintage: "2026" },
-        ],
-      }),
-    );
-    const result = await loadValueHistoryFactForServe(williamsonParcel);
-    expect(result.state).toBe("present");
-    if (result.state !== "present") throw new Error("unreachable");
-    expect(result.entries[0].viaCrosswalk).toBe(true);
+    const viaWrapper = await loadValueHistoryFactForServe(malformed);
+    resetParcelRecordQueryableForTests();
+    const withoutStore = await loadValueHistoryFactForServe(malformed);
+    expect(viaWrapper).toEqual(withoutStore);
   });
 });

@@ -24,9 +24,9 @@ import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/ind
 import { runSetbackGate, type GatedSetbackTable } from "../local/setbacks/gate.js";
 
 describe("georgetown-tx (post-merge)", () => {
-  it("carries all 13 districts: 9 preserved (current code) + 4 replaced (rewrite)", () => {
+  it("carries all 17 districts: 9 preserved (current code) + 4 replaced (rewrite) + 4 added by P-258 lane-c", () => {
     const table = getSetbackTable("georgetown-tx")!;
-    expect(table.districts).toHaveLength(13);
+    expect(table.districts).toHaveLength(17);
     const names = table.districts.map((d) => d.district_name);
     for (const preserved of ["TF Two-Family", "TH Townhouse", "MF-1 Low Density Multifamily", "MF-2 High Density Multifamily", "CN Neighborhood Commercial", "C-1 Local Commercial", "C-3 General Commercial", "OF Office", "IN Industrial"]) {
       expect(names).toContain(preserved);
@@ -38,6 +38,14 @@ describe("georgetown-tx (post-merge)", () => {
     expect(names).not.toContain("RE Residential Estate");
     expect(names).not.toContain("RL Residential Low Density");
     expect(names).not.toContain("RS Residential Single-Family");
+    // P-258 lane-c (2026-09-16) added the four adopted-rewrite districts the
+    // GIS layer stamps but the table had no rows for. See the file's note for
+    // the RL finding (RL is a SUPERSEDED pre-rewrite code whose land is covered
+    // only through its successor RT's row -- it is still not rowed).
+    for (const added of ["AG Agriculture District", "MH Manufactured Housing District", "PF Public Facilities District", "MU-DT Mixed-Use Downtown District"]) {
+      expect(names).toContain(added);
+    }
+    expect(names).not.toContain("RL Residential Low Density District");
   });
 
   it("routes RS to the new rewrite district, not the old one", () => {
@@ -88,9 +96,9 @@ describe("georgetown-tx (post-merge)", () => {
 });
 
 describe("san-marcos-tx (post-relabel)", () => {
-  it("carries the same 8 districts as before, same numeric values", () => {
+  it("carries the same 8 pilot districts plus P-258 lane-c's 19, same numeric values", () => {
     const table = getSetbackTableForZoning("san-marcos-tx", "SF-6")!;
-    expect(table.districts).toHaveLength(8);
+    expect(table.districts).toHaveLength(27);
     const sf6 = table.districts.find((d) => d.district_name.startsWith("SF-6"))!;
     expect(sf6.front_ft).toBe(25);
   });
