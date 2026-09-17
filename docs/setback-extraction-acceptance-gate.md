@@ -96,17 +96,46 @@ quote mismatch reach `human-verified`.
 
 ### Rule G6 — confidence / verification state present (blocking)
 
-Every value's provenance must carry a `verification_state` of `asserted` or
-`human-verified` and a `confidence` in [0, 1]. This is the commitment-#1
-confidence signal. `asserted` means "extracted with a citation, not yet
-eyeballed by a human"; `human-verified` means a reviewer confirmed the value
-against the quoted text. A table may serve with `asserted` values, but any
-value that failed G3 (sanity) or G5 (quote) must not carry `human-verified`
-until the flag is resolved.
+Every value's provenance must carry a `verification_state` in
+{`asserted`, `human-verified`, `primary-source-verified`, `transcription-read`}
+and a `confidence` in [0, 1]. This is the commitment-#1 confidence signal.
+`asserted` means "extracted with a citation, not yet eyeballed by a human";
+`human-verified` means a reviewer confirmed the value against the quoted text;
+`primary-source-verified` means the value was read off the instrument's own
+text but has no ingested code-section atom to resolve against; and
+`transcription-read` (P-299, 2026-09-17) means the value was read out of a
+**copy** of the instrument — a third-party mirror, a browser render, or a
+transcription — which is the same read quality but a different, weaker channel.
+A table may serve with `asserted` values, but any value that failed G3 (sanity)
+or G5 (quote) must not carry `human-verified` until the flag is resolved.
+
+### Rule G7 — the not_specified sentinel for max_height_ft (blocking, P-299)
+
+`max_height_ft` has exactly one stated-absence sentinel: **999**. A row flagged
+`not_specified: true` must carry it. Two tables in this corpus previously used
+two different sentinels (100 in one, 999 in the other) for the identical honest
+gap: a correct reader ignores the number when the flag is set, but a reader that
+drops the flag gets a different wrong answer per table — and 100 ft is a
+physically plausible height where 999 is not.
+
+### Rule G8 — the sentinel must never appear unflagged (blocking, P-299)
+
+999 sitting on a row **without** `not_specified: true` is the shape that leaks:
+any consumer that trusts the number reads it as a 999-foot building limit. This
+was not hypothetical — LDT's own envelope draw carried it straight onto the
+props (`buildableEnvelope/derive.ts`) and displayed "max height 999 ft". G7
+fixes one direction (a flagged value must be 999); G8 fixes the other.
+
+### Rule G9 — transcription-read carries a confidence ceiling (blocking, P-299)
+
+A `transcription-read` value may not claim more than **0.75** confidence. The
+state exists so the corpus stops overclaiming its provenance; letting a
+relabelled value keep its direct-read confidence (0.85–0.9) would just move the
+overclaim from the label into the number.
 
 ## Pass / fail semantics
 
-- **BLOCK** — any G1, G2, G4, G6 failure, or a G5 failure on a
+- **BLOCK** — any G1, G2, G4, G6, G7, G8 or G9 failure, or a G5 failure on a
   `human-verified` value. A table with any BLOCK result must not ship; the
   offending values route to human review.
 - **FLAG** — any G3 out-of-band value, or a G5 quote mismatch on an `asserted`
@@ -124,10 +153,18 @@ asserted-with-flag tables through for human review.
 ## Schema (extends the served table, does not break it)
 
 The served wire shape (`LocalSetbackTable` / `LocalSetbackDistrict`) is
-unchanged: the route at `artifacts/api-server/src/routes/localSetbacks.ts`
-still projects the flat `{ district_name, front_ft, ..., citation_url }` rows
-the Site Context FE decodes. The gate reads an **optional** `provenance` block
-added per district that the serving route ignores:
+unchanged **except for one field, changed deliberately by P-299**:
+`max_height_ft` is now `number | null`, and `null` means "the code states no
+feet-based height for this district" (stated in stories, conditional, or
+silent). The route at `artifacts/api-server/src/routes/localSetbacks.ts`
+projects the flat `{ district_name, front_ft, ..., citation_url }` rows the Site
+Context FE decodes, and resolves the corpus's 999 sentinel to `null` rather
+than putting the placeholder on the wire. `null` is **not** "unlimited". The
+openapi spec (`lib/api-spec/openapi.yaml`) and the generated clients carry the
+nullable type.
+
+The gate reads an **optional** `provenance` block added per district that the
+serving route ignores:
 
 ```jsonc
 {

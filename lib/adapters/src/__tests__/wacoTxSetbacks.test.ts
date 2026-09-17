@@ -7,7 +7,7 @@
  * (R-3A..R-3E, O-1..O-3, C-1..C-5, M-1..M-3) from Code of Ordinances
  * Chapter 28 Article IV Divisions 7-22, and left the five pre-existing rows
  * untouched. As with Belton/Seguin/Cibolo, no code-section atom corpus
- * exists for waco_tx, so every value is `primary-source-verified` and the
+ * exists for waco_tx, so every value makes no atom claim and the
  * real proof is running the actual acceptance gate against the table with
  * an empty atom corpus -- not just that the JSON parses.
  */
@@ -17,6 +17,7 @@ import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/ind
 import {
   SETBACK_NUMERIC_FIELDS,
   runSetbackGate,
+  TRANSCRIPTION_READ,
   type GatedSetbackTable,
 } from "../local/setbacks/gate.js";
 
@@ -75,7 +76,7 @@ describe("waco-tx", () => {
     }
   });
 
-  it("gives every added value a full provenance entry, primary-source-verified", () => {
+  it("gives every added value a full provenance entry, transcription-read (P-299: read through a copy)", () => {
     for (const code of Object.keys(ADDED)) {
       const prov = row(code).provenance!;
       expect(prov, code).toBeTruthy();
@@ -87,7 +88,7 @@ describe("waco-tx", () => {
         expect(p!.quote.length, `${code}/${field}`).toBeGreaterThan(0);
         expect(p!.confidence, `${code}/${field}`).toBeGreaterThan(0);
         expect(p!.confidence, `${code}/${field}`).toBeLessThanOrEqual(1);
-        expect(p!.verification_state, `${code}/${field}`).toBe("primary-source-verified");
+        expect(p!.verification_state, `${code}/${field}`).toBe(TRANSCRIPTION_READ);
       }
     }
   });

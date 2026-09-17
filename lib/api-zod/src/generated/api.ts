@@ -3871,7 +3871,7 @@ export const GetLocalSetbackTableResponse = zod
           rear_ft: zod.number(),
           side_ft: zod.number(),
           side_corner_ft: zod.number(),
-          max_height_ft: zod.number(),
+          max_height_ft: zod.number().nullable(),
           max_lot_coverage_pct: zod.number(),
           max_impervious_pct: zod.number(),
           citation_url: zod.string(),

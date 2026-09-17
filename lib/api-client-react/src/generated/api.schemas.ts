@@ -1266,7 +1266,8 @@ export interface LocalSetbackDistrict {
   rear_ft: number;
   side_ft: number;
   side_corner_ft: number;
-  max_height_ft: number;
+  /** Feet, or null when the code states no feet-based height (P-299). */
+  max_height_ft: number | null;
   max_lot_coverage_pct: number;
   max_impervious_pct: number;
   citation_url: string;

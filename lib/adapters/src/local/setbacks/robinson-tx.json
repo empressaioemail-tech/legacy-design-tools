@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "robinson-tx",
   "jurisdictionDisplayName": "City of Robinson, TX",
-  "note": "Robinson, TX -- the 'Height and Area Regulations' table for each of the 14 Euclidean base districts, read from Article 6 (ZONING DISTRICTS) of the City of Robinson Zoning Ordinance. ROUTE: the ordinance text was read as rendered HTML on Zoneomics (citation_url; the site splits the ordinance one article per page, and .../robinson-TX/chapter_6 is Article 6), which reproduces each district's Height and Area Regulations table cell-for-cell including the ord.-number currency line under each table. Robinson's own official code is published on Municode at library.municode.com/tx/robinson/codes/code_of_ordinances; a plain fetch of the Municode ordinance pages returns a JavaScript shell with no server-rendered ordinance text, so Municode could NOT be read this pass and is NOT the source of any value in this table. The Zoneomics route is therefore a hard-to-reproduce-without-a-browser route in the sense that the reading step was a rendered page, but it is a live, fetchable, stable URL -- not a dead mirror. CROSS-CHECK: the same district tables appear with the same figures in City of Robinson agenda packets published on the city's own site -- 2020-06-30 (SF-3), 2020-12-22 (SF-2), 2023-06-22 (SF-1 plus an AG/RE comparison table) -- each at robinsontexas.org/AgendaCenter/ViewFile/Agenda/... Those are independently fetchable and independently reproduce the SF-1, SF-2 and SF-3 rows coded here; the remaining 11 rows rest on the Article 6 read alone. VINTAGE: every table carries 'Ord. No. 2022-019, Sec. 1(Exh. A), 7-5-22' as its adoption line, and the ten districts that Ord. 2024-023 touched (AG, RE, SF-1, SF-2, SF-3, 2F, PH, MF-1, MF-2, MH) carry 'Ord. No. 2024-023, Sec. N, 9-3-24' as their currency line. So the dimensional standards coded here are current through Ordinance 2024-023, adopted 2024-09-03, read at source (not inferred). R/O, C-1, C-2 and I carry the 2022-019 line only. OMITTED: PDD (Planned Development District, Section 3.4) -- Section 3.4.4 says the development requirements for each PDD 'shall be set forth in the amending ordinance granting that PDD district', so PDD has no district table and is a per-ordinance shape rather than a missing standard (recorded as out-of-scope-pud in the lane fragment). NON-SCALAR / CONDITIONAL VALUES FLAGGED not_specified: (1) AG and RE state building coverage as '50% for rear half of lot', which is not a percent-of-lot-area figure -- coded 50 with not_specified true and the cell quoted verbatim. (2) PH's side yard is an asymmetric alternative ('5 ft. minimum; or one side 8 in. minimum / other side 10 ft. minimum') -- coded 5 with not_specified true. (3) PH's front yard is two different numbers by element ('20 ft. garage; 15 ft. living area minimum') -- coded 15 (the living-area figure) with not_specified true. (4) AG/RE, R/O, C-1, C-2 and I state no impervious-coverage figure at all -- coded 100 with not_specified true. (5) R/O, C-1, C-2 and I state height as a front-setback-line figure with a trade-up ('40 ft at front setback line ... one additional foot of height per foot of additional setback, not to exceed 60 ft'), so max_height_ft is coded at the binding base and the trade-up is preserved verbatim in the quote at reduced confidence; I's 45/90/170 ft graduated envelope is handled the same way. Single-side vs combined-side: SF-1 and SF-2 state a single-side minimum plus a combined-both-sides minimum ('10 ft. min. one side & 15 ft. min. total both sides'). The single-side figure is coded as side_ft and the full clause is quoted, per the same convention as belton-tx.json's conditional-exception handling.",
+  "note": "Robinson, TX -- the 'Height and Area Regulations' table for each of the 14 Euclidean base districts, read from Article 6 (ZONING DISTRICTS) of the City of Robinson Zoning Ordinance. ROUTE: the ordinance text was read as rendered HTML on Zoneomics (citation_url; the site splits the ordinance one article per page, and .../robinson-TX/chapter_6 is Article 6), which reproduces each district's Height and Area Regulations table cell-for-cell including the ord.-number currency line under each table. Robinson's own official code is published on Municode at library.municode.com/tx/robinson/codes/code_of_ordinances; a plain fetch of the Municode ordinance pages returns a JavaScript shell with no server-rendered ordinance text, so Municode could NOT be read this pass and is NOT the source of any value in this table. The Zoneomics route is therefore a hard-to-reproduce-without-a-browser route in the sense that the reading step was a rendered page, but it is a live, fetchable, stable URL -- not a dead mirror. CROSS-CHECK: the same district tables appear with the same figures in City of Robinson agenda packets published on the city's own site -- 2020-06-30 (SF-3), 2020-12-22 (SF-2), 2023-06-22 (SF-1 plus an AG/RE comparison table) -- each at robinsontexas.org/AgendaCenter/ViewFile/Agenda/... Those are independently fetchable and independently reproduce the SF-1, SF-2 and SF-3 rows coded here; the remaining 11 rows rest on the Article 6 read alone. VINTAGE: every table carries 'Ord. No. 2022-019, Sec. 1(Exh. A), 7-5-22' as its adoption line, and the ten districts that Ord. 2024-023 touched (AG, RE, SF-1, SF-2, SF-3, 2F, PH, MF-1, MF-2, MH) carry 'Ord. No. 2024-023, Sec. N, 9-3-24' as their currency line. So the dimensional standards coded here are current through Ordinance 2024-023, adopted 2024-09-03, read at source (not inferred). R/O, C-1, C-2 and I carry the 2022-019 line only. OMITTED: PDD (Planned Development District, Section 3.4) -- Section 3.4.4 says the development requirements for each PDD 'shall be set forth in the amending ordinance granting that PDD district', so PDD has no district table and is a per-ordinance shape rather than a missing standard (recorded as out-of-scope-pud in the lane fragment). NON-SCALAR / CONDITIONAL VALUES FLAGGED not_specified: (1) AG and RE state building coverage as '50% for rear half of lot', which is not a percent-of-lot-area figure -- coded 50 with not_specified true and the cell quoted verbatim. (2) PH's side yard is an asymmetric alternative ('5 ft. minimum; or one side 8 in. minimum / other side 10 ft. minimum') -- coded 5 with not_specified true. (3) PH's front yard is two different numbers by element ('20 ft. garage; 15 ft. living area minimum') -- coded 15 (the living-area figure) with not_specified true. (4) AG/RE, R/O, C-1, C-2 and I state no impervious-coverage figure at all -- coded 100 with not_specified true. (5) R/O, C-1, C-2 and I state height as a front-setback-line figure with a trade-up ('40 ft at front setback line ... one additional foot of height per foot of additional setback, not to exceed 60 ft'), so max_height_ft is coded at the binding base and the trade-up is preserved verbatim in the quote at reduced confidence; I's 45/90/170 ft graduated envelope is handled the same way. Single-side vs combined-side: SF-1 and SF-2 state a single-side minimum plus a combined-both-sides minimum ('10 ft. min. one side & 15 ft. min. total both sides'). The single-side figure is coded as side_ft and the full clause is quoted, per the same convention as belton-tx.json's conditional-exception handling. P-299 OT-2 (2026-09-17): this table's 98 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- rendered HTML on Zoneomics, a live third-party mirror of the city's ordinance. The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
   "districts": [
     {
       "district_name": "AG Agricultural District",
@@ -18,45 +18,45 @@
         "front_ft": {
           "section_number": "6.4.3",
           "quote": "Front Yard | 50 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.4.3",
           "quote": "Rear Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.4.3",
           "quote": "Interior Lot | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.4.3",
           "quote": "Street Side | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.4.3",
           "quote": "Max. Height | 35 ft for primary residences. Not to exceed 45 ft for agricultural structures as long as the structure is 100 ft from primary residential structure.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.4.3",
           "quote": "Building Coverage Max. | 50% for rear half of lot",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.4.3",
           "quote": "The AG Height and Area Regulations table states no impervious-coverage figure; its coverage row reads only 'Building Coverage Max. | 50% for rear half of lot'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -75,45 +75,45 @@
         "front_ft": {
           "section_number": "6.5.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.5.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.5.3",
           "quote": "Interior Lot | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.5.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.5.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.5.3",
           "quote": "Building Coverage Max. | 50% for rear half of lot",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "6.5.3",
           "quote": "The RE Height and Area Regulations table states no impervious-coverage figure; its coverage row reads only 'Building Coverage Max. | 50% for rear half of lot'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -132,44 +132,44 @@
         "front_ft": {
           "section_number": "6.6.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.6.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.6.3",
           "quote": "Interior Lot | 10 ft. min. one side & 15 ft. min. total both sides",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.6.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.6.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.6.3",
           "quote": "Building Coverage | 50% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.6.3",
           "quote": "Impervious Coverage | 60% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -187,44 +187,44 @@
         "front_ft": {
           "section_number": "6.7.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.7.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.7.3",
           "quote": "Interior Lot | 5 ft. min. one side & 15 ft. min. total both sides",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.7.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.7.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.7.3",
           "quote": "Building Coverage | 50% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.7.3",
           "quote": "Impervious Coverage | 60% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -242,44 +242,44 @@
         "front_ft": {
           "section_number": "6.8.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.8.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.8.3",
           "quote": "Interior Lot | 5 ft. min.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.8.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.8.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.8.3",
           "quote": "Building Coverage | 50% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.8.3",
           "quote": "Impervious Coverage | 60% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -297,44 +297,44 @@
         "front_ft": {
           "section_number": "6.9.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.9.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.9.3",
           "quote": "Interior Lot | 8 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.9.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.9.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.9.3",
           "quote": "Building Coverage | 50% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.9.3",
           "quote": "Impervious Coverage | 70% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -353,45 +353,45 @@
           "section_number": "6.10.3",
           "quote": "Front Yard | 20 ft. garage; 15 ft. living area minimum -- the ordinance states two different front-yard figures by building element; 15 (living area) is coded and neither number is a single flat front setback.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "rear_ft": {
           "section_number": "6.10.3",
           "quote": "Rear Yard | 12 ft. minimum; Adjacent to alley | 20 ft. minimum",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.10.3",
           "quote": "Side Yards | 5 ft. minimum; or One Side | 8 in. minimum; Other Side | 10 ft. minimum -- an asymmetric zero-lot-line alternative, not a single flat side setback; 5 is coded as the stated base figure.",
           "confidence": 0.65,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "side_corner_ft": {
           "section_number": "6.10.3",
           "quote": "Street Side Yards | 10 ft minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.10.3",
           "quote": "Max. Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.10.3",
           "quote": "Building Coverage | 55% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.10.3",
           "quote": "Impervious Coverage | 75% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -409,44 +409,44 @@
         "front_ft": {
           "section_number": "6.11.3",
           "quote": "Front Yard | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.11.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.11.3",
           "quote": "Interior Lot | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.11.3",
           "quote": "Street Side | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.11.3",
           "quote": "Max. Height | Not to exceed 65 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.11.3",
           "quote": "Building Coverage | 50% of lot area maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.11.3",
           "quote": "Impervious Coverage | 70% of lot area maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -464,44 +464,44 @@
         "front_ft": {
           "section_number": "6.12.3",
           "quote": "Front Yard | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.12.3",
           "quote": "Rear Yard | 10 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.12.3",
           "quote": "Interior Lot | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.12.3",
           "quote": "Street Side | 20 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.12.3",
           "quote": "Max. Height | Not to exceed 65 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.12.3",
           "quote": "Building Coverage | 50% of lot area maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.12.3",
           "quote": "Impervious Coverage | 70% of lot area maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -519,44 +519,44 @@
         "front_ft": {
           "section_number": "6.13.3",
           "quote": "Front Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.13.3",
           "quote": "Rear Yard | 25 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.13.3",
           "quote": "Interior Lot | 8 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.13.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.13.3",
           "quote": "Maximum Height | Not to exceed 35 ft.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.13.3",
           "quote": "Building Coverage | 50% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.13.3",
           "quote": "Impervious Coverage | 70% of lot area max.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         }
       }
     },
@@ -574,44 +574,44 @@
         "front_ft": {
           "section_number": "6.14.3",
           "quote": "Front Yard | 25 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.14.3",
           "quote": "Rear Yard | 10 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.14.3",
           "quote": "Interior Side | 5 ft. minimum",
-          "confidence": 0.8,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.14.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.14.3",
           "quote": "Maximum Height | 35' at front setback line. Additional height permitted according to Sec. 6.14.4 -- Section 6.14.4 allows one additional foot of height per foot of additional setback beyond the required front setback, capped at 60 ft total. 35 is the binding base figure; the trade-up is real and is not a flat maximum.",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.14.3",
           "quote": "Building Coverage | 50% maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.14.3",
           "quote": "The R/O Height and Area Regulations table states no impervious-coverage figure at all -- its coverage row reads only 'Building Coverage | 50% maximum'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -630,44 +630,44 @@
         "front_ft": {
           "section_number": "6.15.3",
           "quote": "Front Yard | 25 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.15.3",
           "quote": "Rear Yard | 25 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.15.3",
           "quote": "Side Yard | 0 ft. min. to Nonresidential Use; 15 ft. min. to Residential Use -- 0 to a nonresidential neighbour is coded as the base; the 15 ft residential-adjacency figure is a real additional condition, quoted here and not collapsed into the single number.",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.15.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.15.3",
           "quote": "Maximum Height | 40' at front setback line. Additional height permitted according to Sec. 6.15.4 -- Section 6.15.4 allows one additional foot of height per foot of additional setback beyond the required front setback, capped at 60 ft total. 40 is the binding base figure.",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.15.3",
           "quote": "Building Coverage | 50% maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.15.3",
           "quote": "The C-1 Height and Area Regulations table states no impervious-coverage figure at all -- its coverage row reads only 'Building Coverage | 50% maximum'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -686,44 +686,44 @@
         "front_ft": {
           "section_number": "6.16.3",
           "quote": "Front Yard | 25 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.16.3",
           "quote": "Rear Yard | 10 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.16.3",
           "quote": "Interior Side | 0 ft. minimum -- no interior side yard is required in C-2.",
-          "confidence": 0.8,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.16.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.16.3",
           "quote": "Maximum Height | 40' at front setback line. Additional height permitted according to Sec. 6.16.4 -- Section 6.16.4 allows one additional foot of height per foot of additional setback beyond the required front setback, capped at 60 ft total. 40 is the binding base figure.",
           "confidence": 0.75,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.16.3",
           "quote": "Building Coverage | 60% maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.16.3",
           "quote": "The C-2 Height and Area Regulations table states no impervious-coverage figure at all -- its coverage row reads only 'Building Coverage | 60% maximum'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -742,44 +742,44 @@
         "front_ft": {
           "section_number": "6.17.3",
           "quote": "Front Yard | 25 feet minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "6.17.3",
           "quote": "Rear Yard | 0 feet minimum -- no rear yard is required in I.",
-          "confidence": 0.8,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "6.17.3",
           "quote": "Interior Side | 0 ft. minimum -- no interior side yard is required in I.",
-          "confidence": 0.8,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "6.17.3",
           "quote": "Street Side | 15 ft. minimum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "6.17.4",
           "quote": "Section 6.17.4 (Maximum building height): Forty-five feet of building height is permitted within the first 100 feet from the property line of nearest residential uses; and may increase one additional foot of height for each additional foot of setback to a height of 90 feet; except that one-third of a building's footprint may be up to 170 feet in height when located at least 300 feet from the property line of nearest residential uses. This is a graduated envelope, not a flat maximum; 45 ft (the near-residential base) is coded.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "6.17.3",
           "quote": "Building Coverage | 80% maximum",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_impervious_pct": {
           "section_number": "6.17.3",
           "quote": "The I Height and Area Regulations table states no impervious-coverage figure at all -- its coverage row reads only 'Building Coverage | 80% maximum'.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }

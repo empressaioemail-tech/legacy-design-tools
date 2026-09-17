@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "jurisdictionKey": "bellmead-tx",
   "jurisdictionDisplayName": "City of Bellmead, TX",
-  "note": "Bellmead, TX -- the five Euclidean base districts whose ordinance sections state a numeric yard block, read from the Bellmead Zoning Ordinance (the separate numbered ordinance printed as Sections I-XXIII, not the base Code of Ordinances chapters). ROUTE: Bellmead publishes this zoning ordinance on its site as a list of Municode nodeIds; library.municode.com/tx/bellmead is the official home but a plain fetch of the Municode ordinance pages returns a JavaScript shell with no server-rendered text, so Municode could NOT be read on this pass and is NOT the source of any value here. The text was read instead on Zoneomics (.../bellmead-TX/chapter_N, one page per ordinance section number: chapter_4 = Section IV districts, chapter_5 = Section V R-1, chapter_6 = Section V.1 R-1A, chapter_7 = Section V.2 parking, chapter_8 = Section VI R-2, chapter_9 = Section VII B-1, chapter_10 = Section VIII B-2, chapter_11 = Section IX I), which reproduces the ordinance text including each section's codification-history line. That is a rendered-page read of a live third-party mirror of the city's own ordinance; the mirror is live and fetchable, not a dead or stale document, but it is a mirror and not the city's Municode product. VINTAGE: Section V (R-1) carries the codification history '(Ord. of 9-10-63, Sec. 1; Ord. No. 2001-001, Sec. 1, 1-8-02; Ord. No. 2013-002 (5-14-13), Sec. 1, 5-14-13; Ord. No. 2025-005, Sec. 2, 6-10-2025)', so the R-1 dimensional block is current through Ordinance 2025-005, adopted 6-10-2025, and the ordinance itself dates to 9-10-1963 -- both read at source. The equivalent history lines for Sections VI, VII, VIII and IX were not captured verbatim in this pass, so no per-section amendment date is asserted for those four rows; the text quoted for them is the text the mirror serves today. OMITTED: R-1A (Section V.1). Section V.1 states use regulations only -- it lists permitted uses ('any use permitted in the R-1 District' plus duplex and two-family dwellings) and a carport restriction, and contains no height, yard, lot-area or coverage subsection at all. The section defers to nothing. Rather than interpolate R-1's numbers into R-1A, that district is left out with the gap recorded here (the same omit-rather-than-invent handling cibolo-tx.json uses for its SF-5/SF-6). USE-KEYED YARDS, NOT DISTRICT-KEYED: B-1, B-2 and I do not state one yard block per district. B-1 and B-2 give R-2-permitted uses the R-2 yard rules and give their own additional (commercial) uses different ones; I gives R-2-permitted uses the B-2 front yard and requires no front/side/rear yard of its other uses. This table codes the NON-RESIDENTIAL / 'other uses' branch as the district's base number, because that is the branch that governs the use class the district exists to serve, and quotes the use-keyed clause verbatim in every such field at reduced confidence. Anyone reading these rows for a residential use inside a B-1/B-2/I district must use the R-2 row instead. PROPORTIONAL STANDARDS: R-2's side yard is 'not less than ten (10) percent of the width of the lot, but such side yard need not exceed five (5) feet and shall not be less than four (4) feet', and its rear yard is 'at least twenty-five (25) percent of the depth of the lot but such depth need not be more than twenty-five (25) feet'. Neither is a scalar. Both are coded at the stated floor/cap figure with not_specified true and the full proportional clause quoted, following the batch-2 method (a proportion is not a scalar and must not be coded as if it were). NO COVERAGE STANDARD EXISTS in this ordinance -- not lot coverage and not impervious cover -- for any of the five districts coded here; every coverage field is a not_specified sentinel with that search result stated. R-1 is the only district in the whole ordinance with a lot-area/width rule (7,700 sq ft and 70 ft average width, Section V(D)), and that is not one of the seven coded fields.",
+  "note": "Bellmead, TX -- the five Euclidean base districts whose ordinance sections state a numeric yard block, read from the Bellmead Zoning Ordinance (the separate numbered ordinance printed as Sections I-XXIII, not the base Code of Ordinances chapters). ROUTE: Bellmead publishes this zoning ordinance on its site as a list of Municode nodeIds; library.municode.com/tx/bellmead is the official home but a plain fetch of the Municode ordinance pages returns a JavaScript shell with no server-rendered text, so Municode could NOT be read on this pass and is NOT the source of any value here. The text was read instead on Zoneomics (.../bellmead-TX/chapter_N, one page per ordinance section number: chapter_4 = Section IV districts, chapter_5 = Section V R-1, chapter_6 = Section V.1 R-1A, chapter_7 = Section V.2 parking, chapter_8 = Section VI R-2, chapter_9 = Section VII B-1, chapter_10 = Section VIII B-2, chapter_11 = Section IX I), which reproduces the ordinance text including each section's codification-history line. That is a rendered-page read of a live third-party mirror of the city's own ordinance; the mirror is live and fetchable, not a dead or stale document, but it is a mirror and not the city's Municode product. VINTAGE: Section V (R-1) carries the codification history '(Ord. of 9-10-63, Sec. 1; Ord. No. 2001-001, Sec. 1, 1-8-02; Ord. No. 2013-002 (5-14-13), Sec. 1, 5-14-13; Ord. No. 2025-005, Sec. 2, 6-10-2025)', so the R-1 dimensional block is current through Ordinance 2025-005, adopted 6-10-2025, and the ordinance itself dates to 9-10-1963 -- both read at source. The equivalent history lines for Sections VI, VII, VIII and IX were not captured verbatim in this pass, so no per-section amendment date is asserted for those four rows; the text quoted for them is the text the mirror serves today. OMITTED: R-1A (Section V.1). Section V.1 states use regulations only -- it lists permitted uses ('any use permitted in the R-1 District' plus duplex and two-family dwellings) and a carport restriction, and contains no height, yard, lot-area or coverage subsection at all. The section defers to nothing. Rather than interpolate R-1's numbers into R-1A, that district is left out with the gap recorded here (the same omit-rather-than-invent handling cibolo-tx.json uses for its SF-5/SF-6). USE-KEYED YARDS, NOT DISTRICT-KEYED: B-1, B-2 and I do not state one yard block per district. B-1 and B-2 give R-2-permitted uses the R-2 yard rules and give their own additional (commercial) uses different ones; I gives R-2-permitted uses the B-2 front yard and requires no front/side/rear yard of its other uses. This table codes the NON-RESIDENTIAL / 'other uses' branch as the district's base number, because that is the branch that governs the use class the district exists to serve, and quotes the use-keyed clause verbatim in every such field at reduced confidence. Anyone reading these rows for a residential use inside a B-1/B-2/I district must use the R-2 row instead. PROPORTIONAL STANDARDS: R-2's side yard is 'not less than ten (10) percent of the width of the lot, but such side yard need not exceed five (5) feet and shall not be less than four (4) feet', and its rear yard is 'at least twenty-five (25) percent of the depth of the lot but such depth need not be more than twenty-five (25) feet'. Neither is a scalar. Both are coded at the stated floor/cap figure with not_specified true and the full proportional clause quoted, following the batch-2 method (a proportion is not a scalar and must not be coded as if it were). NO COVERAGE STANDARD EXISTS in this ordinance -- not lot coverage and not impervious cover -- for any of the five districts coded here; every coverage field is a not_specified sentinel with that search result stated. R-1 is the only district in the whole ordinance with a lot-area/width rule (7,700 sq ft and 70 ft average width, Section V(D)), and that is not one of the seven coded fields. P-299 OT-2 (2026-09-17): this table's 35 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- rendered-page read on Zoneomics, a live third-party mirror of the city's own ordinance (the official Municode pages return a JavaScript shell to fetch). The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
   "districts": [
     {
       "district_name": "R-1 One Family Dwelling District",
@@ -18,46 +18,46 @@
         "front_ft": {
           "section_number": "V(C)(1)",
           "quote": "Front yard. The minimum front yard setback shall be twenty-five feet (25').",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "V(C)(3)",
           "quote": "Rear yard. The minimum rear yard setback shall be thirty feet (30').",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "V(C)(2)",
           "quote": "Side yards. The minimum side yard setback shall be five feet (5').",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "V(C)",
           "quote": "Section V(C) states front, side and rear yards only and no separate corner-lot or street-side side yard figure.",
           "confidence": 0.65,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_height_ft": {
           "section_number": "V(B)",
           "quote": "Height regulations: No building shall exceed two and one-half (2 1/2) stories or thirty-five (35) feet in height except as provided in Section XI hereof. -- 35 ft is stated directly; the stories figure is not a conversion.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "V",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "V",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -76,48 +76,48 @@
         "front_ft": {
           "section_number": "VI(C)(1)",
           "quote": "Yard regulations: [Front yard.] There shall be a front yard along the front line of the lot. The minimum depth of such front yard shall be twenty-five (25) feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "VI(C)(3)",
           "quote": "Rear yard. The depth of the rear yard shall be at least twenty-five (25) percent of the depth of the lot but such depth need not be more than twenty-five (25) feet. -- a proportion with a cap, not a scalar; 25 (the stated cap) is coded and flagged, do not read it as a flat 25 ft rear yard.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "side_ft": {
           "section_number": "VI(C)(2)",
           "quote": "Side yards. There shall be a side yard on each side of a building of not less than ten (10) percent of the width of the lot, but such side yard need not exceed five (5) feet and shall not be less than four (4) feet. -- a proportion with a ceiling and a floor, not a scalar; 4 (the stated floor) is coded and flagged, the ceiling being 5 ft and the general rule being 10% of lot width.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "side_corner_ft": {
           "section_number": "VI(C)",
           "quote": "Section VI(C) states front, side and rear yards only and no separate corner-lot or street-side side yard figure.",
           "confidence": 0.65,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_height_ft": {
           "section_number": "VI(B)",
           "quote": "Height regulations: No building shall exceed two and one-half (2 1/2) stories or thirty-five (35) feet in height.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "VI",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "VI",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -136,45 +136,45 @@
         "front_ft": {
           "section_number": "VII(C)(1)",
           "quote": "Front yard. There shall be a front yard along front line of the lot. The minimum depth of such front yard shall be twenty (20) feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "VII(C)(3)",
           "quote": "Rear yard. For uses permitted in the 'R-2' District, the rear yard shall be the same as in the 'R-2' District. For all other uses, a rear yard is not required except when it abuts upon an 'R-1' or 'B-2' District, in which case, there shall be a rear yard of not less than ten (10) feet. -- 0 is coded for the 'not required' branch that governs this district's own additional (commercial) uses; the 10 ft R-1/B-2-adjacency condition is real and is not collapsed into the 0. For R-2-permitted uses inside B-1, the R-2 row governs instead.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "VII(C)(2)",
           "quote": "Side yards. For uses permitted in the 'R-2' District, the side yard regulations for that district shall apply. For additional uses permitted in the 'B-1' District, no side yards are required except that on a corner lot the side yard on a street shall be twenty (20) feet. Where a lot is used for any of the commercial purposes permitted in this district and abutting on the side of a lot in an 'R-1' or 'R-2' District, there shall be a side yard of not less than five (5) feet. -- 0 is coded for the 'no side yards are required' branch; the 20 ft corner and 5 ft residential-abutment conditions are real and are quoted, not collapsed.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "VII(C)(2)",
           "quote": "For additional uses permitted in the 'B-1' District, no side yards are required except that on a corner lot the side yard on a street shall be twenty (20) feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_height_ft": {
           "section_number": "VII(B)",
           "quote": "Height regulations: No building shall exceed two and one-half (2 1/2) stories or thirty-five (35) feet in height.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "VII",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "VII",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -193,46 +193,46 @@
         "front_ft": {
           "section_number": "VIII(C)(1)",
           "quote": "Front yard. For uses permitted in the 'R-2' District, the front yard requirements for the 'R-2' District shall apply, and for other uses permitted in this district a front yard of twenty (20) feet in depth is required.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "VIII(C)(3)",
           "quote": "Rear yard. For uses permitted in the 'R-2' District, the 'R-2' District regulations shall apply. There are no rear yard regulations for other uses. -- 0 is coded for the 'no rear yard regulations' branch that governs this district's own additional (commercial) uses.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "VIII(C)(2)",
           "quote": "Side yards. For uses permitted in the 'R-2' District, the side yard requirements for the 'R-2' District shall apply. For other uses no side yards are required. -- 0 is coded for the 'no side yards required' branch.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "VIII(C)",
           "quote": "Section VIII(C) gives B-2's other uses a front yard of 20 ft and no side or rear yards, and states no separate corner-lot or street-side side yard figure of its own.",
           "confidence": 0.65,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_height_ft": {
           "section_number": "VIII(B)",
           "quote": "Height regulations: No building shall exceed six (6) stories or seventy-five (75) feet in height.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "VIII",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "VIII",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }
@@ -252,45 +252,45 @@
           "section_number": "IX(C)(1)",
           "quote": "Front yard. For uses permitted in the 'R-2' District, the front yard requirement for the 'B-2' District shall apply. For other uses there is no front yard requirement. -- 0 is coded for the 'no front yard requirement' branch; for R-2-permitted uses inside I the B-2 front yard governs instead.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "rear_ft": {
           "section_number": "IX(C)(3)",
           "quote": "Rear yard. For uses permitted in the 'R-2' District, the rear yard requirement for the 'R-2' District shall apply. For other uses, there is no rear yard requirement. -- 0 is coded for the 'no rear yard requirement' branch.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_ft": {
           "section_number": "IX(C)(2)",
           "quote": "Side yard[s]. For uses permitted in the 'R-2' District, the side yard requirements for the 'R-2' District shall apply. For other uses, there are no side yards required. -- 0 is coded for the 'no side yards required' branch.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified"
+          "verification_state": "transcription-read"
         },
         "side_corner_ft": {
           "section_number": "IX(C)",
           "quote": "Section IX(C) states no yards for I's other uses and states no separate corner-lot or street-side side yard figure.",
           "confidence": 0.65,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_height_ft": {
           "section_number": "IX(B)",
           "quote": "Height regulations: No building shall exceed a height of six (6) stories or seventy-five (75) feet.",
-          "confidence": 0.9,
-          "verification_state": "primary-source-verified"
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
         },
         "max_lot_coverage_pct": {
           "section_number": "IX",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         },
         "max_impervious_pct": {
           "section_number": "IX",
           "quote": "Bellmead's zoning ordinance (Sections I-XXII of the appendix to the Code of Ordinances, as read) contains no impervious-coverage standard at all, and no lot-coverage percentage either: its district sections regulate height, yards and (for R-1) lot area/width only.",
           "confidence": 0.7,
-          "verification_state": "primary-source-verified",
+          "verification_state": "transcription-read",
           "not_specified": true
         }
       }

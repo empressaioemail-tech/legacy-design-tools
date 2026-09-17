@@ -8,6 +8,18 @@
  * identical (no B3 value merge required).
  *
  * Locked SHA256 (UTF-8, LF newlines, no BOM):
+ *   9ed2ba806ab7d8f707712f042c8e435b8f5ec445c15d7204f88f05c0a7f02fa5
+ *
+ * P-299 OT-1 (2026-09-17) moved the lock. The six Place Type rows carried
+ * max_height_ft 100 with provenance not_specified: true (the B3 code states
+ * height in stories); 100 is not the canonical stated-absence sentinel, so the
+ * value became 999 and each table note gained the OT-1 block. That edit is the
+ * same in hauska-setback-corpus, and both files still hash to the value above.
+ * The mirror test in hauska-engine locks the ENGINE's copy of this file, which
+ * this lane did not touch: the engine lock must move in the change that syncs
+ * the corpus release (reported as a leave-behind, not silently ignored).
+ *
+ * Previous lock (pre-P-299):
  *   d54844cd3711579323ceeb96481ade63f1967437a36adeac1c74140ad720cc3c
  *
  * Mirror test: hauska-engine/packages/adapters/src/__tests__/bastropCityTxSetbackHashLock.test.ts
@@ -20,7 +32,7 @@ import { describe, expect, it } from "vitest";
 
 /** Canonical SHA256 of bastrop-city-tx.json (LF). Keep in sync with engine lock. */
 export const BASTROP_CITY_TX_SETBACK_SHA256 =
-  "d54844cd3711579323ceeb96481ade63f1967437a36adeac1c74140ad720cc3c";
+  "9ed2ba806ab7d8f707712f042c8e435b8f5ec445c15d7204f88f05c0a7f02fa5";
 
 const TABLE_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
