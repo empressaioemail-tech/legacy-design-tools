@@ -16,6 +16,23 @@
  * `zoning_jurisdiction` is the ZONING_LAYERS cityKey of the layer being
  * stamped (PIP membership is authoritative for multi-city counties).
  *
+ * Every parcel lands in exactly ONE of four buckets (P-259), and the four sum
+ * to `parcelsRead` — a parcel cannot be silently dropped, and no bucket can
+ * grow by shrinking another:
+ *   parcelsMatched            a resolved BASE district was written
+ *   parcelsPlannedDevelopment a PUD/PDD/PD/PC value, written RAW so A-164's
+ *                             PUD message fires on it
+ *   parcelsUnrecognised       a published value with no base district in this
+ *                             city's vocabulary, written RAW (the router has a
+ *                             named decline path for a code it cannot resolve;
+ *                             NULL would assert "no zoning on record") and
+ *                             listed in `unrecognisedHistogram`
+ *   parcelsUnmatched          no zoning polygon holds the representative point
+ *                             (outside the city, or an un-zoned pocket)
+ * The split between the last two is the point: "outside the city" and "in a
+ * district this vocabulary does not carry" are different facts, and only the
+ * second is work owed.
+ *
  * Write path: progressive flush every ZONING_STAMP_BATCH_SIZE matches so a
  * long county run cannot lose the stamp if the process dies mid-PIP.
  *
@@ -27,6 +44,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txgioParcel } from "@workspace/db/schema";
 import type { GeoJsonGeometry } from "./geo";
+import type { BaseCodeKind } from "./zoning-base-code";
 import { stampParcelZoning, type ZoningPolygon } from "./zoning-stamp";
 
 /**
@@ -43,13 +61,47 @@ export type ZoningStampDb = Pick<
 export interface ZoningStampSummary {
   /** Distinct parcels (feature_index values) read for the county. */
   parcelsRead: number;
-  /** Parcels whose centroid matched a zoning polygon. */
+  /** Parcels whose representative point matched a stampable zoning polygon. */
   parcelsMatched: number;
-  /** Parcels left NULL (centroid in no zoning polygon). */
+  /** Parcels left NULL (representative point in no zoning polygon). */
   parcelsUnmatched: number;
+  /**
+   * Parcels whose polygon published a value with no base district in this
+   * city's vocabulary (P-259). The published value is stamped VERBATIM — never
+   * a truncated prefix — and the parcel is counted here rather than in
+   * `parcelsMatched` so a base-district count is never inflated by it.
+   * `unrecognisedHistogram` lists every such value with its parcel count.
+   */
+  parcelsUnrecognised: number;
+  /**
+   * Parcels stamped with a PLANNED-DEVELOPMENT value (PUD/PDD/PD/PC), stamped
+   * RAW so A-164's "your setbacks come from your PUD ordinance" message fires.
+   * Counted apart from `parcelsMatched` so a base-district count is never
+   * inflated by parcels whose setbacks are not in the table's gift.
+   */
+  parcelsPlannedDevelopment: number;
   /** Distinct district codes stamped, with counts (for the audit log). */
   codeHistogram: Record<string, number>;
-  /** Total txgio_parcel ROWS updated (>= parcelsMatched; per-cell dupes). */
+  /**
+   * Published values that could not be resolved to a base district, with the
+   * number of parcels in each (P-259). Every value is listed, never sampled —
+   * this is the acquisition worklist the row exists to produce.
+   */
+  unrecognisedHistogram: Record<string, number>;
+  /**
+   * Overlay/combining suffixes seen on stamped parcels, with counts (P-259).
+   * Counted for RESOLVED base districts only: those are the values where the
+   * parser can prove which tokens are the base and which are the suffix. A
+   * planned-development or unrecognised value is stamped raw without its tokens
+   * being classified, so counting those as overlays would report the district
+   * inside "I-SF-2" as an overlay.
+   */
+  overlayHistogram: Record<string, number>;
+  /**
+   * Total txgio_parcel ROWS updated (>= parcelsMatched; per-cell dupes).
+   * Every STAMPED parcel counts here — matched, planned-development and
+   * unrecognised alike — since all three write a code.
+   */
   rowsUpdated: number;
   /**
    * Scoped runs only (`propIds` supplied): size of the requested prop-id
@@ -76,11 +128,27 @@ export interface ZoningStampSummary {
    */
   noZoningPolygonHit?: string[];
   /**
+   * Scoped runs only: requested prop ids whose parcel landed in a polygon
+   * whose published value carries no base district (P-259). A subset of the
+   * resolved parcels, disjoint from `noZoningPolygonHit` — the parcel IS in a
+   * zoning polygon, the vocabulary just does not carry it.
+   */
+  unrecognisedPropIds?: string[];
+  /**
    * Scoped runs only: one row per resolved parcel with its PIP outcome —
    * the per-parcel would-stamp table (dry-run) or applied table (live).
-   * `district` is null when the centroid matched no zoning polygon.
+   * `district` is null when nothing is stamped, and `kind` says why:
+   * `none` (no zoning polygon), `unrecognised` (published value has no base in
+   * this city's vocabulary), `base`, or `planned-development` (stamped raw).
+   * `publishedCode` is the value the layer published for that polygon.
    */
-  perParcel?: { propId: string; featureIndex: number; district: string | null }[];
+  perParcel?: {
+    propId: string;
+    featureIndex: number;
+    district: string | null;
+    kind: BaseCodeKind | "none";
+    publishedCode?: string | null;
+  }[];
 }
 
 interface DistinctParcelRow {
@@ -210,13 +278,21 @@ export async function stampCountyZoning(opts: {
     parcelsRead: 0,
     parcelsMatched: 0,
     parcelsUnmatched: 0,
+    parcelsUnrecognised: 0,
+    parcelsPlannedDevelopment: 0,
     codeHistogram: {},
+    unrecognisedHistogram: {},
+    overlayHistogram: {},
     rowsUpdated: 0,
   };
 
   const noZoningPolygonHit: string[] = [];
+  const unrecognisedPropIds: string[] = [];
   const foundPropIds = new Set<string>();
-  const perParcel: { propId: string; featureIndex: number; district: string | null }[] = [];
+  const perParcel: NonNullable<ZoningStampSummary["perParcel"]> = [];
+  const bump = (hist: Record<string, number>, key: string): void => {
+    hist[key] = (hist[key] ?? 0) + 1;
+  };
 
   // PIP loop: collect matched pairs and flush in batches as we go so a
   // long county run (Bexar ~700k parcels / ~400k matches) cannot lose the
@@ -230,18 +306,69 @@ export async function stampCountyZoning(opts: {
     if (scoped && p.propId) foundPropIds.add(p.propId);
     const hit = stampParcelZoning(index, p.geometry as GeoJsonGeometry);
     if (!hit) {
+      // No zoning polygon holds the parcel's representative point: outside the
+      // city, or an un-zoned pocket. Honest null, never a guessed district.
       summary.parcelsUnmatched += 1;
       if (scoped && p.propId) {
         noZoningPolygonHit.push(p.propId);
-        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: null });
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: null,
+          kind: "none",
+        });
       }
-    } else {
-      summary.parcelsMatched += 1;
-      summary.codeHistogram[hit.code] =
-        (summary.codeHistogram[hit.code] ?? 0) + 1;
+    } else if (hit.parse?.kind === "unrecognised") {
+      // In a polygon whose published value carries no base district in this
+      // city's vocabulary (Austin: the interim I-* family, the overlay families
+      // TOD/NBG/ERC/TND/UNZ, anything else the table does not name). The
+      // PUBLISHED value is written verbatim — it is a real fact about the
+      // parcel, and the router has a designed path for a code it cannot resolve
+      // (mapDistrict returns null -> the callers decline with a named reason)
+      // whereas dropping it to NULL would assert "no zoning on record", which is
+      // false. What is never written is a TRUNCATED prefix: for
+      // "CS-1-MU-..." that would be CS, a different district with a different
+      // row. Counted apart so a base-district count is never inflated.
+      summary.parcelsUnrecognised += 1;
+      bump(summary.unrecognisedHistogram, hit.code);
       matches.push({ featureIndex: p.featureIndex, code: hit.code });
       if (scoped && p.propId) {
-        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: hit.code });
+        unrecognisedPropIds.push(p.propId);
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: hit.code,
+          kind: "unrecognised",
+          publishedCode: hit.code,
+        });
+      }
+      if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
+        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+        matches.length = 0;
+      }
+    } else {
+      const kind = hit.parse?.kind ?? "base";
+      if (kind === "planned-development") summary.parcelsPlannedDevelopment += 1;
+      else summary.parcelsMatched += 1;
+      bump(summary.codeHistogram, hit.code);
+      // Overlays only for a RESOLVED base: with kind "base" the parser has
+      // proven which tokens are the base and which are the suffix. A
+      // planned-development value's tokens are not classified (the stamp
+      // writes it raw), so they are left out rather than reported as overlays.
+      if (kind === "base") {
+        for (const overlay of hit.parse?.overlays ?? []) {
+          bump(summary.overlayHistogram, overlay);
+        }
+      }
+      matches.push({ featureIndex: p.featureIndex, code: hit.code });
+      if (scoped && p.propId) {
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: hit.code,
+          kind,
+          publishedCode: hit.parse?.raw ?? hit.code,
+        });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
         rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
@@ -265,6 +392,7 @@ export async function stampCountyZoning(opts: {
       (id) => !foundPropIds.has(id),
     );
     summary.noZoningPolygonHit = noZoningPolygonHit;
+    summary.unrecognisedPropIds = unrecognisedPropIds;
     summary.perParcel = perParcel;
   }
 

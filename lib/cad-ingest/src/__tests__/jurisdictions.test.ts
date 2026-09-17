@@ -55,6 +55,11 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "buda-tx",
       "kyle-tx",
       "san-marcos-tx",
+      // P-259 (2026-09-17): Austin's Hays-county layer. The registry declares
+      // "austin-tx-hays" after the four Hays cities, so it lands last — same
+      // cityKey as the Travis/Williamson entries, so a HALF of Austin inside
+      // Hays county stamps as austin-tx, not as a county-less stub.
+      "austin-tx",
     ]);
 
     // Setback tables: Dripping Springs, Buda, Kyle have real tables; San
@@ -68,7 +73,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.setbackTables?.[0]).toBe(ds);
   });
 
-  it("Williamson (48491): orion CAD + open-fetch bulk + seven city zoning layers + their setbacks", () => {
+  it("Williamson (48491): orion CAD + open-fetch bulk + eight city zoning layers + their setbacks", () => {
     const j = getJurisdictionConfig("48491");
     if (!j) throw new Error("expected Williamson");
 
@@ -77,7 +82,9 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.bulkSource).toBe(CAD_BULK_SOURCES["48491"]);
 
     // Georgetown, Round Rock, Leander, Hutto, Cedar Park, Taylor, Liberty
-    // Hill all target 48491 — in registry declaration order.
+    // Hill all target 48491 — in registry declaration order. P-259
+    // (2026-09-17) appends Austin's Williamson-county entry, which is the
+    // last declared.
     const expectedCities = Object.values(ZONING_LAYERS).filter(
       (z) => z.countyFips === "48491",
     );
@@ -90,6 +97,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "cedar-park-tx",
       "taylor-tx",
       "liberty-hill-tx",
+      "austin-tx",
     ]);
 
     // Cedar Park's GIS-mappable districts carry ordinance-backed dimensions.
@@ -111,6 +119,8 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       getSetbackTable("cedar-park-tx"),
       getSetbackTable("taylor-tx"),
       getSetbackTable("liberty-hill-tx"),
+      // P-259: Austin is the eighth city on this county view.
+      getSetbackTable("austin-tx"),
     ]);
     const cedarPark = getSetbackTable("cedar-park-tx");
     expect(cedarPark?.districts).toHaveLength(17);

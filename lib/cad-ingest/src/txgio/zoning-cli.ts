@@ -52,9 +52,88 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { ZONING_LAYERS, resolveZoningLayer } from "./zoning-layers";
-import { fetchZoningFeatures } from "./zoning-service";
+import {
+  fetchZoningFeatures,
+  type RawZoningFeature,
+  type ZoningLayerMeta,
+} from "./zoning-service";
 import { buildZoningIndex } from "./zoning-stamp";
 import { stampCountyZoning } from "./zoning-stamp-db";
+
+/**
+ * Layer-level audit of the base-code parse (P-259). Pure, over the fetched
+ * features, so it can be asserted in a test: how many published values resolved
+ * to a base district, how many are planned development, and — listed in full,
+ * never sampled — every value that resolved to neither.
+ */
+export interface LayerParseAudit {
+  features: number;
+  /** Features whose code field published nothing (dropped from the index). */
+  noCode: number;
+  distinctValues: number;
+  base: number;
+  plannedDevelopment: number;
+  unrecognised: number;
+  baseHistogram: Record<string, number>;
+  unrecognisedHistogram: Record<string, number>;
+  overlayHistogram: Record<string, number>;
+}
+
+export function layerParseAudit(features: RawZoningFeature[]): LayerParseAudit {
+  const audit: LayerParseAudit = {
+    features: features.length,
+    noCode: 0,
+    distinctValues: 0,
+    base: 0,
+    plannedDevelopment: 0,
+    unrecognised: 0,
+    baseHistogram: {},
+    unrecognisedHistogram: {},
+    overlayHistogram: {},
+  };
+  const bump = (h: Record<string, number>, k: string): void => {
+    h[k] = (h[k] ?? 0) + 1;
+  };
+  for (const f of features) {
+    if (f.code === null) {
+      // Published nothing (or a configured nullDistrictCode): dropped from the
+      // index, so a parcel inside such a polygon lands in the "no polygon"
+      // bucket. Counted here so the ambiguity is sized in the log rather than
+      // hidden by it.
+      audit.noCode += 1;
+      continue;
+    }
+    if (f.parse === undefined) continue;
+    if (f.parse.kind === "base") {
+      audit.base += 1;
+      bump(audit.baseHistogram, f.code);
+      // Overlays are counted ONLY here. For a resolved base the parser can
+      // prove which tokens are the base and which are the suffix; for a
+      // planned-development or unrecognised value the whole published value is
+      // stamped raw and its tokens are not classified, so counting them as
+      // "overlays" would report the district inside "I-SF-2" (or the PUD in
+      // "PUD-NP") as an overlay token. Left out, not guessed.
+      for (const overlay of f.parse.overlays) bump(audit.overlayHistogram, overlay);
+    } else if (f.parse.kind === "planned-development") {
+      audit.plannedDevelopment += 1;
+      bump(audit.baseHistogram, f.code);
+    } else {
+      audit.unrecognised += 1;
+      bump(audit.unrecognisedHistogram, f.parse.raw.trim());
+    }
+  }
+  audit.distinctValues =
+    Object.keys(audit.baseHistogram).length +
+    Object.keys(audit.unrecognisedHistogram).length;
+  return audit;
+}
+
+/** Rows of `hist`, descending by count (ties by key) — stable output for logs. */
+function sortedHist(hist: Record<string, number>): [string, number][] {
+  return Object.entries(hist).sort((a, b) =>
+    b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0]),
+  );
+}
 
 /**
  * Normalize a raw prop id (leading zeros stripped from an all-digit id,
@@ -113,6 +192,62 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+/**
+ * Print what the layer says about itself. The projection is READ AT SOURCE
+ * (never assumed): if the host did not answer `?f=json`, say so explicitly
+ * rather than print a frame nobody verified. `outSR=4326` is requested on
+ * every page and the response frame is checked before any PIP.
+ */
+function logLayerMeta(meta: ZoningLayerMeta): void {
+  if (meta.unavailable) {
+    log(
+      "layer metadata: UNAVAILABLE (the host did not answer ?f=json) — source " +
+        "spatial reference and vintage are NOT read; every page is still " +
+        "requested outSR=4326 and its returned frame is verified",
+    );
+    return;
+  }
+  log(`layer metadata: ${meta.name ?? "(unnamed)"} (read at source)`);
+  log(
+    `  source spatial reference: wkid ${meta.sourceWkid ?? "(none published)"}` +
+      (meta.sourceLatestWkid !== null ? ` (latestWkid ${meta.sourceLatestWkid})` : "") +
+      " — every page is requested outSR=4326 and the returned frame is verified",
+  );
+  log(
+    `  layer vintage (editingInfo.lastEditDate): ${meta.lastEditDate ?? "(not published)"}`,
+  );
+  log(`  maxRecordCount: ${meta.maxRecordCount ?? "(not published)"}`);
+}
+
+/** The base-code parse audit, printed before any PIP so the layer is understood first. */
+function logParseAudit(audit: LayerParseAudit): void {
+  log("---- layer base-code audit (P-259) ----");
+  log(`features fetched:       ${audit.features}`);
+  log(
+    `  no published code:     ${audit.noCode} (dropped from the index — never a district)`,
+  );
+  log(
+    `resolved to a base:     ${audit.base} features, ${sortedHist(audit.baseHistogram).length} distinct codes`,
+  );
+  log(
+    `planned development:    ${audit.plannedDevelopment} features (stamped raw — A-164 PUD message)`,
+  );
+  log(
+    `UNRECOGNISED:           ${audit.unrecognised} features, ` +
+      `${sortedHist(audit.unrecognisedHistogram).length} distinct published values ` +
+      "(stamped verbatim — never a truncated prefix)",
+  );
+  for (const [code, n] of sortedHist(audit.unrecognisedHistogram)) {
+    log(`    ${code.padEnd(24)} ${n}`);
+  }
+  const overlays = sortedHist(audit.overlayHistogram);
+  log(
+    `overlays carried:       ${overlays.length} distinct tokens (` +
+      overlays.map(([t, n]) => `${t} ${n}`).join(", ") +
+      ")",
+  );
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2).filter((a) => a !== "--");
   const { values } = parseArgs({
@@ -131,7 +266,7 @@ async function main(): Promise<void> {
     for (const c of Object.values(ZONING_LAYERS)) {
       log(
         `  ${c.cityKey.padEnd(16)} county=${c.countyFips} ` +
-          `field=${c.codeField} ${c.layerUrl}`,
+          `field=${c.codeField}${c.baseCodeParse ? " +base-code-parse" : ""} ${c.layerUrl}`,
       );
     }
     log(`total: ${Object.keys(ZONING_LAYERS).length}`);
@@ -191,8 +326,10 @@ async function main(): Promise<void> {
   log("fetching zoning polygons...");
   const raw = await fetchZoningFeatures({
     cfg,
+    onMeta: logLayerMeta,
     onPage: ({ total }) => log(`  fetched ${total} zoning features...`),
   });
+  const audit = layerParseAudit(raw);
   const index = buildZoningIndex(raw);
   log(`zoning polygons indexed: ${index.length} (of ${raw.length} fetched)`);
   if (index.length === 0) {
@@ -204,7 +341,8 @@ async function main(): Promise<void> {
   // Distinct district codes present in the layer (the audit surface for the
   // ZONE -> setback-district alignment).
   const codesInLayer = [...new Set(index.map((p) => p.code))].sort();
-  log(`district codes in layer: ${codesInLayer.join(", ")}`);
+  log(`codes in the index: ${codesInLayer.join(", ")}`);
+  if (cfg.baseCodeParse) logParseAudit(audit);
 
   // 2. Stamp the county's parcels.
   if (dryRun && !databaseUrl) {
@@ -241,12 +379,42 @@ async function main(): Promise<void> {
   log(`county:           ${cfg.countyFips}`);
   log(`zoning polygons:  ${index.length}`);
   log(`parcels read:     ${summary.parcelsRead}`);
-  log(`parcels matched:  ${summary.parcelsMatched}`);
-  log(`parcels null:     ${summary.parcelsUnmatched} (centroid in no zoning polygon)`);
+  log(`parcels matched:  ${summary.parcelsMatched} (base district stamped)`);
+  log(
+    `planned dev:      ${summary.parcelsPlannedDevelopment} (stamped raw — A-164 PUD message)`,
+  );
+  log(
+    `unrecognised:     ${summary.parcelsUnrecognised} (published value stamped verbatim, no base resolved)`,
+  );
+  log(
+    `parcels null:     ${summary.parcelsUnmatched} ` +
+      "(representative point in no zoning polygon carrying a published code: " +
+      "outside the city, an un-zoned pocket, or one of the layer's empty-code polygons)",
+  );
+  log(
+    `buckets sum:      ${
+      summary.parcelsMatched +
+      summary.parcelsPlannedDevelopment +
+      summary.parcelsUnrecognised +
+      summary.parcelsUnmatched
+    } (must equal parcels read; a parcel is in exactly one bucket)`,
+  );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
-  const hist = Object.entries(summary.codeHistogram).sort((a, b) => b[1] - a[1]);
+  const hist = sortedHist(summary.codeHistogram);
   log(`district histogram (${hist.length} codes):`);
   for (const [code, n] of hist) log(`  ${code.padEnd(8)} ${n}`);
+  const unrec = sortedHist(summary.unrecognisedHistogram);
+  if (unrec.length > 0) {
+    log(`unrecognised values (${unrec.length} distinct, every one listed):`);
+    for (const [code, n] of unrec) log(`  ${code.padEnd(24)} ${n}`);
+  }
+  const overlays = sortedHist(summary.overlayHistogram);
+  if (overlays.length > 0) {
+    log(
+      `overlays on stamped parcels (${overlays.length} tokens): ` +
+        overlays.map(([t, n]) => `${t} ${n}`).join(", "),
+    );
+  }
   log(`duration:         ${seconds}s`);
 
   if (propIds !== undefined) {
@@ -262,12 +430,24 @@ async function main(): Promise<void> {
     if (summary.noZoningPolygonHit && summary.noZoningPolygonHit.length > 0) {
       log(`  ids: ${summary.noZoningPolygonHit.join(", ")}`);
     }
+    log(
+      `unrecognisedInPolygon: ${summary.unrecognisedPropIds?.length ?? 0} (published value stamped verbatim, no base resolved)`,
+    );
+    if (summary.unrecognisedPropIds && summary.unrecognisedPropIds.length > 0) {
+      log(`  ids: ${summary.unrecognisedPropIds.join(", ")}`);
+    }
     if (summary.perParcel && summary.perParcel.length > 0) {
       log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
-      log(`  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} district`);
+      log(
+        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} district`,
+      );
       for (const row of summary.perParcel) {
         log(
-          `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ${row.district ?? "(none)"}`,
+          `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ` +
+            `${row.kind.padEnd(20)} ${row.district ?? "(none)"}` +
+            (row.publishedCode && row.publishedCode !== row.district
+              ? `   [published: ${row.publishedCode}]`
+              : ""),
         );
       }
     }
