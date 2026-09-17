@@ -14,6 +14,7 @@ import type { Express } from "express";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { ctx } from "./test-context";
 import { feetToMeters } from "../lib/buildableEnvelope/geometry";
+import { DEPTH_WARM_PROMOTION_MARKER } from "../lib/buildableEnvelope/reconcileAtomEnvelope";
 
 const SERVICE_TOKEN = "test-service-token-be";
 const BROKERAGE_KEY = "brokerage-test-key-be";
@@ -800,5 +801,99 @@ describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", ()
       district: "R-MD",
     });
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-304 (2026-09-17) — "area figure no longer reaches anonymous callers".
+//
+// This route is on the anonymous browse allowlist (hauska-map
+// `apps/property-explorer/api/spine.ts`), so whatever lands in
+// `payload.geojson.features[].properties` reaches an anonymous reader. A-180
+// entitles only a ground-truth VERIFIED (depth-warm promoted) envelope atom to
+// a buildable-area figure: the polygon keeps drawing, the two area properties
+// are withheld as ABSENCE — never as 0, never as the unverified number.
+//
+// The dispatch's own pair, asserted at the WIRE (the served JSON), not just at
+// the composition:
+//   (a) an UNVERIFIED parcel serves no area figure;
+//   (b) a verified-atom fixture serves the figure it is entitled to.
+// ---------------------------------------------------------------------------
+describe("POST /place/buildable-envelope — P-304 area figure withholding", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  // The same parcel fixture the R3 block above uses (Bastrop R-MD, GIS-stamped
+  // parcel_node_id): the one configuration in which the atom chain is fetched
+  // at all, so the entitlement decision is actually exercised rather than
+  // vacuously satisfied by a missing chain.
+  beforeEach(() => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48021:33512";
+  });
+
+  const ADDRESS = "1209 Main St, Bastrop, TX 78602";
+
+  it("(a) anonymous POST to an UNVERIFIED parcel: no area figure, geometry still drawn, disclosure says why", async () => {
+    fetchPropertyAtomChainMock.mockResolvedValue({
+      zoningFact: { district: "R-MD" },
+      setbackRule: { front: 25, side: 5, rear: 10, districtCode: "R-MD" },
+      buildableEnvelope: {
+        // A number the atom asserts, but NO promotion marker and NO
+        // depth-warm citation -> unverified (isEnvelopeAtomVerified).
+        outcome: { kind: "buildable", areaSqFt: 7_777 },
+        readContract: { axes: { assertedConfidence: { estimate: 0.62 } } },
+      },
+    });
+
+    const res = await postWith({ address: ADDRESS });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    const p = res.body.payload.geojson.features[0].properties as Record<string, unknown>;
+
+    // THE FINDING, restated at the wire: neither figure reaches the caller...
+    expect("buildableAreaSqFt" in p).toBe(false);
+    expect("buildableAreaPct" in p).toBe(false);
+    // ...not as a zero, and not as the atom's own unverified number.
+    expect(p.buildableAreaSqFt).toBeUndefined();
+    expect(JSON.stringify(p)).not.toContain("7777");
+
+    // The polygon is untouched — withholding a figure is not withholding the
+    // draw (the dispatch's "polygon may still draw, figure must not").
+    expect(res.body.payload.geojson.features[0].geometry).not.toBeNull();
+    expect(res.body.payload.approximate).toBe(false);
+
+    // A reader is told WHY the figure is missing, not left to guess.
+    expect(String(p.disclosure)).toContain("withheld");
+
+    // The LOT area is a measured (county appraisal) figure, not the modelled
+    // one, and is not withdrawn with it.
+    expect(typeof p.parcelAreaSqFt).toBe("number");
+  });
+
+  it("(b) verified-atom fixture: the entitled figure IS served (the change withholds only from the unentitled)", async () => {
+    fetchPropertyAtomChainMock.mockResolvedValue({
+      zoningFact: { district: "R-MD" },
+      setbackRule: { front: 25, side: 5, rear: 10, districtCode: "R-MD" },
+      buildableEnvelope: {
+        depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER,
+        outcome: { kind: "buildable", areaSqFt: 7_777 },
+        readContract: { axes: { assertedConfidence: { estimate: 0.9 } } },
+      },
+    });
+
+    const res = await postWith({ address: ADDRESS });
+
+    expect(res.status).toBe(200);
+    expect(res.body.derivePath).toBe("labelEdges+derive+atom-reconciled");
+    const p = res.body.payload.geojson.features[0].properties as Record<string, unknown>;
+    expect(p.buildableAreaSqFt).toBe(7_777);
+    expect(p.buildableAreaPct as number).toBeGreaterThan(0);
+    expect(String(p.disclosure ?? "")).not.toContain("withheld");
   });
 });

@@ -880,7 +880,7 @@ describe("falsifier: envelopeRingToLocalFeet preserves area (map/MCP polygon par
       twiceArea += x1 * y2 - x2 * y1;
     }
     const shoelaceAreaFt2 = Math.abs(twiceArea) / 2;
-    const officialAreaFt2 = derived.geojson.features[0]!.properties.buildableAreaSqFt;
+    const officialAreaFt2 = derived.geojson.features[0]!.properties.buildableAreaSqFt!;
     const relativeDiff = Math.abs(shoelaceAreaFt2 - officialAreaFt2) / officialAreaFt2;
     expect(relativeDiff).toBeLessThan(0.01);
   });

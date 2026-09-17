@@ -126,7 +126,7 @@ describe("reconcileWithAtomEnvelope", () => {
 
   it("overrides a disagreeing buildable area with a VERIFIED atom's number, keeping the drawn geometry", () => {
     const derived = buildableFixture();
-    const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt;
+    const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt!;
     const atomArea = localArea + 1_500; // demonstrated defect: two disagreeing numbers
     const res = reconcileWithAtomEnvelope(
       derived,
@@ -371,7 +371,7 @@ describe("reconcileWithAtomEnvelope", () => {
 
     it("withholds an unverified BUILDABLE figure too — an unverified number is no more load-bearing than an unverified zero", () => {
       const derived = buildableFixture();
-      const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt;
+      const localArea = derived.geojson.features[0]!.properties.buildableAreaSqFt!;
       const res = reconcileWithAtomEnvelope(derived, {
         kind: "buildable",
         areaSqFt: localArea + 1_500,
