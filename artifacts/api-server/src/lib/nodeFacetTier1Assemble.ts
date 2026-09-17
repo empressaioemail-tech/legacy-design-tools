@@ -323,10 +323,73 @@ export interface Tier1AssemblyInput {
     situsCity: string;
     countyFips: string;
   }) => void;
+  /**
+   * P-273. A stamped `zoning_jurisdiction` with no entry in `ZONING_LAYERS`.
+   * Passed straight through to `resolveZoningJurisdiction`; without it the
+   * registry check there reported nothing to anyone.
+   */
+  onUnregisteredZoningStamp?: (info: {
+    cityKey: string;
+    countyFips: string;
+  }) => void;
 }
 
 const str = (v: string | null | undefined): string | null =>
   typeof v === "string" && v.trim() ? v.trim() : null;
+
+/**
+ * P-273. DOES `baseFacts` CARRY ANYTHING THAT WAS ACTUALLY READ?
+ *
+ * The declaration above says a true `facetCoverage` flag "means the facet
+ * resolved to real content; a false means honest absence (no fabrication)".
+ * This flag did not implement that. It read
+ *
+ *     baseFacts.apn != null || baseFacts.situsAddress != null
+ *
+ * and `apn` is `parcelNodeId.split(":")[1]` (conformant bake, `const apn`).
+ * You cannot look a parcel up without its id, so `apn` is non-null for every
+ * parcel that exists and the flag was true whether or not a single field was
+ * read from any record. It could not fail. Two populations that were
+ * indistinguishable under it: a parcel whose CAD facts all joined, and a
+ * parcel whose declared-vintage `cad_property` row does not exist. Thrall
+ * `48491:R007189` is the second -- `lookup-failed` on living area, no
+ * `cad_property` row at declared vintage -- and it reported `baseFacts: true`.
+ *
+ * So the predicate is now over the leaves that only have a value because
+ * something was read, and the two keys that are present BY CONSTRUCTION are
+ * named and excluded on purpose:
+ *
+ *   apn        <= `parcelNodeId.split(":")[1]`             (the node's own id)
+ *   situsState <= `situsStateFromCountyFips(countyFips)`   (the FIPS registry)
+ *
+ * Everything else here is a read: the claim's situs, the declared-vintage CAD
+ * roll row, the parcel-join ring. `cadRoll` is an OBJECT that always exists
+ * (`{marketValue, assessedValue, landValue, improvementValue, livingAreaSqft}`,
+ * all nullable), so testing `cadRoll != null` would have been the same defect
+ * one level down; it is tested field by field.
+ *
+ * Not tested: `acreage` from a ring is a measurement of the parcel's own
+ * geometry rather than a record read, but a ring only exists if the parcel
+ * join produced one, so it is evidence of a read and stays in.
+ */
+function baseFactsCarryReadContent(baseFacts: BaseFacts): boolean {
+  if (baseFacts.situsAddress != null) return true;
+  if (baseFacts.situsCity != null) return true;
+  if (baseFacts.situsZip != null) return true;
+  if (baseFacts.landUse != null) return true;
+  if (baseFacts.acreage != null) return true;
+  if (baseFacts.yearBuilt != null) return true;
+  if (baseFacts.legalDescription != null) return true;
+  if (baseFacts.exemptionCodes != null) return true;
+  const roll = baseFacts.cadRoll;
+  return (
+    roll.marketValue != null ||
+    roll.assessedValue != null ||
+    roll.landValue != null ||
+    roll.improvementValue != null ||
+    roll.livingAreaSqft != null
+  );
+}
 
 /**
  * Assemble a Tier-1 payload from resolved inputs. Pure. This is the tail of
@@ -367,7 +430,10 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
       situsCity: baseFacts.situsCity,
       countyFips,
     },
-    { onSitusFallback: input.onSitusFallback },
+    {
+      onSitusFallback: input.onSitusFallback,
+      onUnregisteredStamp: input.onUnregisteredZoningStamp,
+    },
   );
   const jurisdictionFacetKey = resolvedCityKey
     ? resolvedCityKey.replace(/-/g, "_")
@@ -411,7 +477,10 @@ export function assembleTier1Payload(input: Tier1AssemblyInput): Tier1FacetPaylo
     : null;
 
   const facetCoverage = {
-    baseFacts: baseFacts.apn != null || baseFacts.situsAddress != null,
+    // P-273: was `baseFacts.apn != null || baseFacts.situsAddress != null`, and
+    // `apn` exists for every parcel by construction -- see
+    // `baseFactsCarryReadContent` above.
+    baseFacts: baseFactsCarryReadContent(baseFacts),
     landUse: input.landUse != null,
     acreage: acreage != null,
     zoning: zoning != null,

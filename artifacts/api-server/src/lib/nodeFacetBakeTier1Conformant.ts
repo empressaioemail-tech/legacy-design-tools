@@ -1140,6 +1140,16 @@ export interface ConformantTier1BuildInput {
     situsCity: string;
     countyFips: string;
   }) => void;
+  /**
+   * P-273. A stamped `zoning_jurisdiction` with no `ZONING_LAYERS` entry.
+   * Mirrors `onSitusFallback`: the registry check in
+   * `resolveZoningJurisdiction` reports through here, so a run can count the
+   * parcels whose PIP stamp this build cannot route.
+   */
+  onUnregisteredZoningStamp?: (info: {
+    cityKey: string;
+    countyFips: string;
+  }) => void;
 }
 
 /**
@@ -1411,6 +1421,7 @@ export function buildConformantTier1Payload(
     parcelVintage: claim.taxYear != null ? String(claim.taxYear) : null,
     nowIso,
     onSitusFallback: input.onSitusFallback,
+    onUnregisteredZoningStamp: input.onUnregisteredZoningStamp,
   });
 
   const table = input.parcelJoin.table;

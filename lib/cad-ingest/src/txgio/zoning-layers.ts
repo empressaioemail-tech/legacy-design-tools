@@ -789,6 +789,30 @@ export interface ZoningJurisdictionParcel {
  * `situs_city` is a FALLBACK tiebreaker only (rare overlapping-layer or
  * pre-migration rows). When used, the caller's `onSitusFallback` may log.
  * Returns hyphen cityKey form matching ZONING_LAYERS / setback tables.
+ *
+ * P-273. THE REGISTRY CHECK USED TO VALIDATE NOTHING:
+ *
+ *     if (stamped && ZONING_LAYERS[stamped]) return stamped;
+ *     if (stamped) return stamped; // unknown-but-stamped key still wins over guess
+ *
+ * Both branches returned the same expression, so whenever `stamped` was
+ * truthy one of them fired and the `ZONING_LAYERS[stamped]` test constrained
+ * nothing. It read as a registry validation and was not one: a stamped key
+ * nothing registered (a city whose layer was retired, a typo'd stamp, a
+ * pre-registry row) was indistinguishable from one this build can route.
+ *
+ * The "unknown-but-stamped wins over guess" rule itself is RIGHT and is kept:
+ * the stamp is point-in-polygon evidence that the parcel is in that city, and
+ * dropping it to null would throw the evidence away and hand the parcel to
+ * the situs guess. What was missing was the DISCLOSURE the registry check was
+ * supposed to make. It is now made through `onUnregisteredStamp`, so the two
+ * cases are tellable apart by the caller:
+ *
+ *   registered       -> return the key, no callback
+ *   NOT registered   -> return the key, callback fires with the reason
+ *
+ * Verify by violation: `nowhere-tx` must fire the callback and `austin-tx`
+ * (registered) must not.
  */
 export function resolveZoningJurisdiction(
   parcel: ZoningJurisdictionParcel,
@@ -798,13 +822,31 @@ export function resolveZoningJurisdiction(
       situsCity: string;
       countyFips: string;
     }) => void;
+    /**
+     * P-273. A stamped `zoning_jurisdiction` that `ZONING_LAYERS` does not
+     * carry. The key is still returned (see above) — this reports the fact so
+     * a run can count it instead of silently routing the parcel to no table.
+     */
+    onUnregisteredStamp?: (info: {
+      cityKey: string;
+      countyFips: string;
+    }) => void;
   },
 ): string | null {
   const stamped = typeof parcel.zoningJurisdiction === "string"
     ? parcel.zoningJurisdiction.trim().toLowerCase().replace(/_/g, "-")
     : "";
   if (stamped && ZONING_LAYERS[stamped]) return stamped;
-  if (stamped) return stamped; // unknown-but-stamped key still wins over guess
+  if (stamped) {
+    // P-273: the registry test above decides WHETHER this is reported. Before
+    // this, nothing downstream could tell this case from a registered stamp.
+    opts?.onUnregisteredStamp?.({
+      cityKey: stamped,
+      countyFips:
+        typeof parcel.countyFips === "string" ? parcel.countyFips.trim() : "",
+    });
+    return stamped; // unknown-but-stamped key still wins over guess
+  }
 
   const situs = typeof parcel.situsCity === "string"
     ? parcel.situsCity.trim()
