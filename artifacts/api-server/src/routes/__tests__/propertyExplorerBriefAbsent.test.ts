@@ -94,29 +94,43 @@ vi.mock("../../lib/verdictLayerServe", () => ({
   countyFipsFromParcelNodeId: (id: string) => id.split(":")[0] ?? null,
 }));
 
-vi.mock("../../lib/floodHazardFactRead", () => ({
+vi.mock("../../lib/floodHazardFactRead", async (importOriginal) => ({
+  // P-297 (2026-09-16, operator ruling A-193): a slated rail now serves the
+  // parcel's OWN cell, so the brief path reaches
+  // `floodHazardFactFromParcelRecord`, which imports this module's
+  // `FLOOD_HAZARD_FACT_SOURCE` constant. A mock that stubs ONLY the atom
+  // reader is a partial mock of a hand-picked subset, and the missing export
+  // threw out of the handler as a 500 rather than any served answer. Keep the
+  // real module surface and stub only the read this suite wants stubbed.
+  ...(await importOriginal<typeof import("../../lib/floodHazardFactRead")>()),
   loadFloodHazardFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/boundaryEdgeFactRead", () => ({
+vi.mock("../../lib/boundaryEdgeFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/boundaryEdgeFactRead")>()),
   loadBoundaryEdgeFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/pipelineFactRead", () => ({
+vi.mock("../../lib/pipelineFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/pipelineFactRead")>()),
   loadPipelineFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/wellFactRead", () => ({
+vi.mock("../../lib/wellFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/wellFactRead")>()),
   loadWellFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/structuralFactRead", () => ({
+vi.mock("../../lib/structuralFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/structuralFactRead")>()),
   loadStructuralFactAtom: vi.fn(async () => null),
 }));
-vi.mock("../../lib/specialDistrictFactRead", () => ({
+vi.mock("../../lib/specialDistrictFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/specialDistrictFactRead")>()),
   loadSpecialDistrictFactAtom: vi.fn(async () => null),
 }));
 // OPS-16 A-103 item 6 / A-104: assembleNodeBriefBody now also reads building
 // footprint (a direct atom read, no serve-cutover wrapper -- same category as
 // pipeline/boundary above, so it needs the same explicit mock rather than
 // relying on the allowlist short-circuit the cutover-wrapped facts below get).
-vi.mock("../../lib/buildingFootprintFactRead", () => ({
+vi.mock("../../lib/buildingFootprintFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/buildingFootprintFactRead")>()),
   loadBuildingFootprintFactAtom: vi.fn(async () => null),
 }));
 

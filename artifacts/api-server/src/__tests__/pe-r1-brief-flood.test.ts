@@ -336,6 +336,15 @@ describe("F2 flood prose is withheld while the citation is degraded", () => {
  * (floodHazardFact) is the fallback, never silently dropped. No "drainage"
  * rail exists in parcel_record -- the drainage section is untouched by any
  * of this and is covered by its own describe block below.
+ *
+ * P-297 / A-193 AMENDS THE FALLBACK'S SCOPE. This read is ungated -- it is not
+ * a `*ServeCutover.ts` wrapper, so it can carry a cell for a county whose
+ * flood rail is not slated -- and "earned a determination" is now read
+ * through the slate: on a SLATED pair the cell is the answer for every state
+ * (an unaccounted or refused cell is a declared refusal, not a licence to
+ * serve the atom), while an unslated pair keeps this exact pre-ruling
+ * behaviour. The slate question is asked from the read's own place_key in
+ * `composeFloodBriefSection` (r1BriefCompose.ts).
  */
 describe("parcel_record flood preferred over the atoms path when earned", () => {
   const parcelRecordValue: ParcelRecordFloodRead = {
@@ -411,7 +420,13 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     expect(flood?.data).toEqual(absentVerified);
   });
 
-  it("unaccounted falls through to the atoms path -- nothing has looked yet in parcel_record is not a reason to drop the existing determination (falsifier: this must not silently win over a real atoms present)", () => {
+  it("P-297: a SLATED county's unaccounted flood cell is a declared refusal with its reason -- the atoms present is NOT served", () => {
+    // INVERTED, NOT DELETED (operator ruling A-193). This test used to pin the
+    // opposite: "nothing has looked yet in parcel_record is not a reason to
+    // drop the existing determination". On a slated rail that fall-through IS
+    // the defect -- 48021 (Bastrop) is slated for flood, so the parcel's own
+    // cell is the answer, and an unaccounted cell is a declared refusal about
+    // this rail rather than a licence to serve the stale atom.
     const unaccounted: ParcelRecordFloodRead = {
       state: "unaccounted",
       source: "parcel_record",
@@ -423,10 +438,56 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
       { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: unaccounted },
     );
     const flood = brief.sections.find((section) => section.id === "flood");
-    expect(flood?.data).toEqual(atomPresentFixture);
+    expect(flood?.disposition).toBe("refused");
+    expect(flood?.refusal).toEqual(unaccounted);
+    expect(flood?.data).toBeNull();
+    expect(flood?.data).not.toEqual(atomPresentFixture);
   });
 
-  it("a parcel_record refusal falls through to the atoms path -- a store-not-configured or cell-miss on the new source must not blank out a working old one", () => {
+  it("P-297: a SLATED county's refused flood cell is a declared refusal carrying the store's own reason", () => {
+    const refused: ParcelRecordFloodRead = {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: "parcel_record",
+      placeKey: "48021:34137",
+      reason: "RETRIEVAL_API_KEY not configured.",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: refused },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("refused");
+    expect(flood?.refusal).toEqual(refused);
+    expect(flood?.reason).toBe("RETRIEVAL_API_KEY not configured.");
+    expect(flood?.data).toBeNull();
+  });
+
+  it("P-297: an UNSLATED county's unaccounted flood cell keeps the atoms path -- the slate does not cover the pair", () => {
+    // 48001 (Anderson) is not on PARCEL_RECORD_SLATE for flood. An unslated
+    // pair is untouched by P-297, so the ungated Consumer-C read cannot claim
+    // the rail here: the atom keeps the determination it already had.
+    const unaccounted: ParcelRecordFloodRead = {
+      state: "unaccounted",
+      source: "parcel_record",
+      placeKey: "48001:34137",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: unaccounted },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+    expect(flood?.disposition).not.toBe("refused");
+  });
+
+  it("a flood refusal with NO place_key keeps the atoms path -- a read that cannot place itself cannot answer the slate question", () => {
+    // `place_key: null` is the read's own unplaceable case (an unparseable
+    // node id). It cannot say which county it is in, so it is not evidence the
+    // rail is slated, and P-297's unslated branch stands: the working old
+    // source is not blanked out by a read that never identified a parcel.
     const refused: ParcelRecordFloodRead = {
       state: "refused",
       code: "factory-store-not-configured",

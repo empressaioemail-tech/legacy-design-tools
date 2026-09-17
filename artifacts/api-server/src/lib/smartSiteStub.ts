@@ -120,38 +120,39 @@ export function railStateFromRead(read: RailReadInput): SmartSiteRailState {
 
 /**
  * OPS-16 A-096/A-097/A-098: parcel_record's own zoning determination, when
- * genuinely reachable (non-null only when (county, zoningDistrict) is
- * slated and gate-passing -- see zoningFactServeCutover.ts), takes priority
- * over the bake-derived zoningDisposition -- present maps to "present",
+ * the rail reaches the parcel_record path (P-297 / A-193: the SLATE decides
+ * that, and it is (county, zoningDistrict) on the slate), takes priority over
+ * the bake-derived zoningDisposition -- present maps to "present",
  * absent-verified/not-applicable (the only two absence kinds
  * ParcelRecordCellAbsent carries) both map to "absent-verified" (this app's
- * one vocabulary token for a verified/positive absence -- the fix this
- * whole card exists to ship). A "refused" record fact falls through to the
- * legacy bake-derived computation, exactly like r1BriefCompose's own
- * composeZoningBriefSectionFromParcelRecord -- the same "never regress a
- * parcel with a real answer" caution, kept consistent across both depths
- * (D2: the stub is a projection of the node).
+ * one vocabulary token for a verified/positive absence).
+ *
+ * P-297 / A-193 REVERSES THE REFUSAL BRANCH HERE. Until this card, a
+ * `refused` record fact fell through to the legacy bake-derived computation
+ * ("never regress a parcel with a real answer"). On a slated rail that
+ * fall-through IS the defect the ruling names: a refused or unaccounted cell
+ * is a declared refusal with the cell's reason, and the legacy or baked value
+ * is never the answer. The bake-derived computation now serves only the case
+ * this function is not called for at all (no record fact), and the caller
+ * keeps that branch. r1BriefCompose.ts's own zoning section is flipped to
+ * match, so the two depths cannot disagree (D2/D3: the stub is a projection
+ * of the node).
  */
-function railStateFromZoningFact(
-  fact: ZoningFactRead,
-  legacyZoning: unknown,
-): SmartSiteRailState {
+function railStateFromZoningFact(fact: ZoningFactRead): SmartSiteRailState {
   if (fact.state === "present") return "present";
   if (fact.state === "absent") return "absent-verified";
-  return railStateFromSectionDisposition(zoningDisposition(legacyZoning));
+  return "refused";
 }
 
-/** Setbacks' own mirror of railStateFromZoningFact -- see that function's doc for the shared reasoning. */
-function railStateFromSetbacksFact(
-  fact: SetbacksFactRead,
-  legacyEnvelope: unknown,
-  envelopeBriefRefusal: { state?: string } | null | undefined,
-): SmartSiteRailState {
+/**
+ * Setbacks' own mirror of railStateFromZoningFact -- see that function's doc
+ * for the shared reasoning, including the P-297/A-193 reversal of the refusal
+ * branch.
+ */
+function railStateFromSetbacksFact(fact: SetbacksFactRead): SmartSiteRailState {
   if (fact.state === "present") return "present";
   if (fact.state === "absent") return "absent-verified";
-  return railStateFromSectionDisposition(
-    envelopeDisposition(legacyEnvelope, envelopeBriefRefusal),
-  );
+  return "refused";
 }
 
 export function composeSmartSiteStub(input: {
@@ -191,7 +192,7 @@ export function composeSmartSiteStub(input: {
     url: `${SMARTSITE_PARCEL_URL_PREFIX}${input.parcelNodeId}`,
     situs: situs.situs,
     zoning: input.parcelRecordZoningFact
-      ? railStateFromZoningFact(input.parcelRecordZoningFact, root.zoning)
+      ? railStateFromZoningFact(input.parcelRecordZoningFact)
       : railStateFromSectionDisposition(zoningDisposition(root.zoning)),
     landUse: railStateFromSectionDisposition(
       landUseDisposition(baseFacts.landUse),
@@ -199,11 +200,7 @@ export function composeSmartSiteStub(input: {
     flood,
     drainage,
     envelope: input.parcelRecordSetbacksFact
-      ? railStateFromSetbacksFact(
-          input.parcelRecordSetbacksFact,
-          root.envelope,
-          input.envelopeBriefRefusal,
-        )
+      ? railStateFromSetbacksFact(input.parcelRecordSetbacksFact)
       : railStateFromSectionDisposition(
           envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
         ),

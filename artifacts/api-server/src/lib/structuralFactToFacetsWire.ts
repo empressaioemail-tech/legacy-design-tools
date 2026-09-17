@@ -192,17 +192,26 @@ export function zoningSourceMirror(
     };
   }
 
-  // 4. The cell is a parcel_record ZoningFactRefusal for the rail's OWN
-  //    engine-level refusal ({state:"refused", code:"parcel-record-engine-
-  //    refused", reason}) -- the Factory looked and declined, with a real,
-  //    specific reason (P-124 CTX-MIRROR). Mirror verbatim, same as branch 2:
-  //    the twin cannot assert either way when the rail itself would not.
-  //    Every OTHER refusal code (unaccounted, invalid-parcel-node-id,
-  //    parcel-record-cell-miss, malformed-cell, store-not-configured) never
-  //    reaches here -- attachVerdictLayersToFacets keeps out.zoning on the
-  //    city-limits fallback for those, unchanged.
-  if (rec.state === "refused" && rec.code === "parcel-record-engine-refused") {
-    return { ...rec, mirrors: "zoning" };
+  // 4. The cell is a parcel_record ZoningFactRefusal ({state:"refused", code,
+  //    reason}) -- the rail's own cell declined to answer. Mirror it verbatim,
+  //    same as branch 2: the twin cannot assert either way when the rail
+  //    itself would not, and inventing a source citation for a cell that
+  //    refused would be exactly the substitution this mirror exists to stop.
+  //
+  //    P-297 / A-193 BROADENED THIS BRANCH. It used to fire only for
+  //    code==="parcel-record-engine-refused" (P-124 CTX-MIRROR); every other
+  //    refusal code was kept off this path because attachVerdictLayersToFacets
+  //    left out.zoning on the city-limits/bake fallback for them. That
+  //    fallback is the defect the ruling names -- on a slated rail a refusal
+  //    is a declared refusal with the cell's reason, and the legacy or baked
+  //    value is never the answer -- so the rail now carries every refusal
+  //    code and the twin follows all of them.
+  if (rec.state === "refused") {
+    // `verdict: "refused"` is synthesised from the cell's own `state` so that a
+    // consumer reading the twin's `.verdict` sees the same verdict the rail
+    // reached (the four-state vocabulary's refusal word); `reason`/`code` are
+    // carried through verbatim from the spread.
+    return { ...rec, verdict: "refused", mirrors: "zoning" };
   }
 
   return undefined;
@@ -253,7 +262,7 @@ export function attachVerdictLayersToFacets(
     out.livingAreaSqft = livingWire;
   }
 
-  if (parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused") {
+  if (parcelRecordZoningFact) {
     if (parcelRecordZoningFact.state === "present") {
       out.zoning = {
         district: parcelRecordZoningFact.district,
@@ -263,24 +272,18 @@ export function attachVerdictLayersToFacets(
       cov.zoning = true;
     } else {
       // absent-verified / not-applicable -- same "data: fact" choice
-      // composeZoningBriefSectionFromParcelRecord makes for its absent branch.
+      // composeZoningBriefSectionFromParcelRecord makes for its absent branch
+      // -- and, since P-297 / A-193, the refused/unaccounted cell too. Pre-
+      // ruling only `parcel-record-engine-refused` was projected here (P-124
+      // CTX-MIRROR) and every other refusal code fell through to the
+      // city-limits/bake deduction below, which is the fall-back-to-bake the
+      // ruling names as the defect: on a slated rail the cell is the answer,
+      // and a refusal is a declared refusal with the cell's reason. The
+      // legacy deduction now serves only the case where no record fact
+      // exists at all (an unslated rail), which is the branch below.
       out.zoning = parcelRecordZoningFact;
       cov.zoning = false;
     }
-  } else if (
-    parcelRecordZoningFact?.state === "refused" &&
-    parcelRecordZoningFact.code === "parcel-record-engine-refused"
-  ) {
-    // P-124 CTX-MIRROR: the zoningDistrict rail's own cell is kind=refused --
-    // the Factory engine looked and deliberately declined (e.g. "no
-    // tx_zoning_district_staging base layer exists for Mustang Ridge yet").
-    // That is an earned state with a real, specific reason, not a plumbing
-    // failure -- project it exactly like the absent branch above, never the
-    // generic city-limits fallback. Every OTHER refusal code (unaccounted,
-    // invalid-parcel-node-id, parcel-record-cell-miss, malformed-cell,
-    // store-not-configured) is left on the fallback below, unchanged.
-    out.zoning = parcelRecordZoningFact;
-    cov.zoning = false;
   } else if (zoningVerdict && !bakedZoningHasDistrict(out.zoning)) {
     out.zoning = zoningVerdict;
     cov.zoning = false;
