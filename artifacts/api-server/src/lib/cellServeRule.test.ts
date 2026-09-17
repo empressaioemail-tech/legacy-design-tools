@@ -79,9 +79,14 @@ type FixtureRow = {
 
 function loadFixture(): {
   _ruleId: string;
+  pinnedRowNames: string[];
   rows: FixtureRow[];
 } {
-  return JSON.parse(readFileSync(FIXTURE_URL, "utf8")) as { _ruleId: string; rows: FixtureRow[] };
+  return JSON.parse(readFileSync(FIXTURE_URL, "utf8")) as {
+    _ruleId: string;
+    pinnedRowNames: string[];
+    rows: FixtureRow[];
+  };
 }
 
 function cellForRow(row: FixtureRow): ParcelRecordCellRead | null {
@@ -128,9 +133,13 @@ describe("the shared fixture (__fixtures__/cell-serve-rule.json)", () => {
   });
 
   it("still carries exactly the pinned rows -- an added row is fine, a removed or renamed one is not", () => {
-    const { rows } = loadFixture();
+    const { pinnedRowNames, rows } = loadFixture();
     const names = rows.map((r) => r.name);
-    for (const pinned of PINNED_ROW_NAMES) {
+    // The FILE's own pinned list and this test's list are the same list, so the
+    // contract the engine lane copies cannot drift from the one enforced here.
+    expect(pinnedRowNames).toEqual(PINNED_ROW_NAMES);
+    expect(pinnedRowNames.length).toBeGreaterThan(0);
+    for (const pinned of pinnedRowNames) {
       expect(names, `fixture row "${pinned}" is missing`).toContain(pinned);
     }
     expect(new Set(names).size).toBe(names.length);

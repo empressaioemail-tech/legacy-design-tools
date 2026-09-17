@@ -18,6 +18,20 @@
     "A `value` cell whose payload does not coerce into the rail's own domain (a negative dollar, a zero livingAreaSqft) is a declared refusal, but the coercion rule is per-rail, so it is asserted in each rail adapter's own test (P-269 does it for the dollar and structural rails in cadRollFactFromParcelRecord.test.ts). This file cannot express it without inventing a rail.",
     "Transport failure (retrieval service unreachable, no credential). The LDT reader turns it into a refused cell carrying code `store-not-configured`, which this file already covers through the refusal rows; the transport-level row is repo-local and lives in cellServeRule.test.ts, because the engine does not read a cell over the same transport."
   ],
+  "pinnedRowNames": [
+    "unslated-value-cell-keeps-the-current-path",
+    "unslated-no-cell-keeps-the-current-path",
+    "slated-value-cell-is-served-as-its-value",
+    "slated-verified-zero-is-served-as-zero-not-as-an-absence",
+    "slated-value-cell-with-companion-rows-is-still-a-value",
+    "slated-absent-verified-is-served-as-the-stated-absence",
+    "slated-not-applicable-is-a-stated-absence-not-a-refusal",
+    "slated-refused-cell-is-a-declared-refusal-carrying-the-engines-own-reason",
+    "slated-unaccounted-cell-is-a-declared-refusal-never-a-legacy-value",
+    "slated-malformed-cell-is-a-declared-refusal-not-a-guess",
+    "slated-no-cell-at-all-is-a-declared-refusal-naming-the-missing-row"
+  ],
+  "_pinnedRowNamesWhy": "The rows a COPY of this file may not quietly drop. Adding a row is fine and expected (a reader may add one to document a state it discovered); removing or renaming one is how a fixture stops being a contract. cellServeRule.test.ts asserts this list equals its own PINNED_ROW_NAMES and that every name in it is present in rows, so the file and the test cannot drift apart.",
   "rows": [
     {
       "name": "unslated-value-cell-keeps-the-current-path",
