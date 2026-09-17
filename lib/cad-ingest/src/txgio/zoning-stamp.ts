@@ -60,6 +60,14 @@ export interface ZoningPolygon {
    *    different district with its own row). The polygon is kept in the index
    *    so a parcel inside it is not miscounted as "outside the city", and the
    *    stamp summary counts it in `parcelsUnrecognised`.
+   *
+   * `parse.interim` (P-259b) is carried unchanged and is what the writer reads
+   * to set `txgio_parcel.zoning_district_interim` — a declared interim qualifier
+   * (`I-<base>`) means the base district's standards apply by ordinance while
+   * the zoning itself is interim. It is TRUE for a resolved interim base AND for
+   * an interim value that resolved to nothing, so an unresolved `I-XYZ` is
+   * disclosed as interim rather than folded into the generic unrecognised set.
+   * It never changes `code`: "I-SF-2-NP" still stamps SF-2, exactly its base.
    * Absent for every other layer, where the published code IS the district.
    */
   parse?: BaseCodeParse;
@@ -241,6 +249,24 @@ export function zoningCodeAtPoint(
     }
   }
   return null;
+}
+
+/**
+ * True when the matched zoning polygon's published value carried a DECLARED
+ * interim qualifier (P-259b) — Austin's `I-<base>` family. The stamped district
+ * is the base district, which is what the ordinance gives it; the extra fact is
+ * that the zoning is INTERIM (granted on annexation until permanent zoning is
+ * established), which is not the same as stably-zoned `SF-2` and is disclosed
+ * separately on the parcel row rather than in `zoning_district`.
+ *
+ * Reads `parse.interim` and nothing else, so it is true for an interim value
+ * that resolved to a base, an interim planned-development value, and an
+ * unresolved interim value alike.
+ */
+export function isInterimDistrict(
+  hit: { parse?: BaseCodeParse } | null | undefined,
+): boolean {
+  return hit?.parse?.interim === true;
 }
 
 /**

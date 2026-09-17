@@ -36,14 +36,49 @@
  *
  * WHAT IS NOT A MATCH. When no known base prefixes the value at a separator
  * boundary the result is `unrecognised` and `base` stays null — a shorter
- * token is never claimed as the district. Austin's interim districts
- * (`I-SF-2`, `I-RR`, `I-PUD`, …) and the overlay families the layer publishes
- * as bare values (TOD, NBG, ERC, TND, UNZ) are the live cases. The stamp then
- * writes the PUBLISHED VALUE verbatim, never a truncation: `I-SF-2` must never
- * resolve to `SF`, and `SF-4A` must never resolve to `SF-4` (which is not even
- * a row) by cutting the suffix off. `parcelsUnrecognised` +
+ * token is never claimed as the district. The overlay families the layer
+ * publishes as bare values (TOD, NBG, ERC, TND, UNZ) and Austin's unrowed
+ * `SF-4` are the live cases. The stamp then writes the PUBLISHED VALUE
+ * verbatim, never a truncation: `SF-4A` must never resolve to `SF-4` (which is
+ * not even a row) by cutting the suffix off, and an unresolved value must never
+ * resolve to a token inside it. `parcelsUnrecognised` +
  * `unrecognisedHistogram` are how that bucket is reported, so the gap is a
  * worklist rather than a silence.
+ *
+ * INTERIM DISTRICTS (P-259b, operator ruling 2026-09-17). Austin publishes an
+ * INTERIM family with a leading `I-` qualifier — 14 live values, 1,229 polygons
+ * (`I-SF-2` 662, `I-RR` 321, `I-SF-4A` 220, `I-LA` 12, `I-SF-3` 3, `I-GR` 2,
+ * `I-MF-3` 2, `I-AV` 1, `I-MF-2` 1, `I-PUD` 1, `I-RR-NP` 1, `I-SF-1` 1,
+ * `I-SF-2-NP` 1, `I-SF-6` 1). An interim designation is granted on annexation
+ * until permanent zoning is established, and the ordinance gives `I-SF-2` the
+ * SF-2 standards (City of Austin C2O-2009-017; the city's 2016
+ * development-standards table gives I-SF-2 front 25 / side 5 / rear 10, the
+ * shipped `austin-tx.json` SF-2 row exactly). Leaving the family unrecognised
+ * turns parcels the previous reading SERVED into district-misses — a false
+ * absence, the defect class this program hunts.
+ *
+ * THE INTERIM RULE. A config MAY declare `interimQualifiers` (Austin:
+ * `['I']`). When the value resolves to nothing directly, a declared qualifier
+ * heading it at a separator boundary is STRIPPED and the SAME rule runs on the
+ * remainder — longest known base first, then planned development, then
+ * unrecognised:
+ *
+ *   "I-SF-2-NP" -> base SF-2   overlays ["NP"]   interim true
+ *   "I-RR-NP"   -> base RR     overlays ["NP"]   interim true
+ *   "I-PUD"     -> planned development           interim true
+ *   "I-SF-4A"   -> base SF-4A  overlays []       interim true
+ *
+ * A qualifier followed by nothing (`I`, `I-`) or by a remainder that matches no
+ * base (`I-XYZ`) stays `unrecognised` with a reason naming the qualifier — the
+ * rule never invents a district and never truncates. `interim: true` is set
+ * whenever a declared qualifier was recognised, so an unresolved interim value
+ * is still disclosed as interim rather than silently folded into the generic
+ * unrecognised set.
+ *
+ * ORDER. The direct resolution is attempted on the WHOLE value first: a city
+ * that really rows a district whose code begins with a declared qualifier wins
+ * over the strip. With `interimQualifiers` absent or empty this parser behaves
+ * exactly as it did before the rule existed, field for field.
  *
  * OVERLAYS ARE CARRIED, NOT DISCARDED. Combining districts and overlays are
  * returned in `overlays` verbatim, so a later ruling can use them (Austin's
@@ -86,6 +121,18 @@ export interface BaseCodeParse {
   additionalBases: string[];
   /** `/`-parts carrying no known base, verbatim — never dropped, never guessed. */
   unmatchedParts: string[];
+  /**
+   * True when a DECLARED interim qualifier was recognised on this value (P-259b).
+   * The published value is `I-<base>`: interim zoning granted on annexation until
+   * permanent zoning is established, and the ordinance reads it as its base. Set
+   * on every outcome once a given qualifier is recognised — a resolved interim
+   * district (`kind: "base"`), an interim planned-development value (`I-PUD`),
+   * and an interim value that resolves to nothing (`I-XYZ`, still `unrecognised`)
+   * — so "was this value interim" is answerable without re-parsing. `false` for
+   * every value with no declared qualifier, and for every layer that configures
+   * none.
+   */
+  interim: boolean;
   /** Why this outcome — for the stamp's audit log and the unrecognised listing. */
   reason: string;
 }
@@ -126,6 +173,21 @@ export interface BaseCodeParseConfig {
    * can be copied from the census's literal (`…$/i`) without paraphrase.
    */
   plannedDevelopmentFlags?: string;
+  /**
+   * OPTIONAL. Leading qualifier tokens that mark an INTERIM district (P-259b,
+   * operator ruling 2026-09-17). Austin's layer publishes its interim family as
+   * `I-<base>` (`I-SF-2`, `I-RR-NP`, `I-PUD`, …), where the interim designation
+   * carries the base district's standards by ordinance, so the value reads as
+   * its base with the interim fact disclosed ({@link BaseCodeParse.interim}).
+   *
+   * Matched as the value's leading token, case-insensitively and normalized the
+   * same way the vocabulary is, and ONLY when it ends at a separator boundary
+   * (`-`, `/` or whitespace) or ends the value. The remainder is then resolved
+   * by the same longest-match rule. Absent/empty for every layer that publishes
+   * no interim family — and absent means this parser behaves exactly as it did
+   * before the rule existed.
+   */
+  interimQualifiers?: readonly string[];
   /** Default `longest-match`. See {@link BaseMatchMode}. */
   matchMode?: BaseMatchMode;
 }
@@ -203,44 +265,61 @@ function matchBase(
 }
 
 /**
- * Parse one published zoning value into its base district plus the suffix
- * tokens carried alongside it. Pure and total: every input yields a result,
- * and no result is a truncated guess.
+ * The leading declared interim qualifier of `value`, if one heads it, with the
+ * remainder after it (P-259b).
+ *
+ * The qualifier is the value's leading token — everything up to the first
+ * separator (or the whole value) — compared normalized and case-insensitively
+ * against `qualifiers`. It must END at a separator boundary or at the end of
+ * the value: `W/LO` is not an interim `W`, and `R&D` is not an interim `R`.
+ *
+ * Returns `{ qualifier, rest }` where `rest` has the separators between the
+ * qualifier and the district stripped; `rest` is `""` when the qualifier is
+ * followed by nothing (the caller reports that as unrecognised, never as a
+ * district). Returns null when no declared qualifier heads the value.
  */
-export function parseBaseCode(
-  raw: string,
-  cfg: BaseCodeParseConfig,
-): BaseCodeParse {
-  const value = raw.trim();
-  const mode = cfg.matchMode ?? "longest-match";
-  const vocabulary = new Map<string, string>();
-  for (const code of cfg.knownBaseCodes) {
-    const norm = normalizeBaseCode(code);
-    if (norm.length > 0 && !vocabulary.has(norm)) vocabulary.set(norm, code);
+export function splitInterimQualifier(
+  value: string,
+  qualifiers: readonly string[] | undefined,
+): { qualifier: string; rest: string } | null {
+  if (!qualifiers || qualifiers.length === 0) return null;
+  const declared = new Set<string>();
+  for (const q of qualifiers) {
+    const norm = normalizeBaseCode(q);
+    if (norm.length > 0) declared.add(norm);
   }
-  if (value.length === 0) {
-    return {
-      kind: "unrecognised",
-      raw,
-      base: null,
-      overlays: [],
-      additionalBases: [],
-      unmatchedParts: [],
-      reason: "empty published value — the layer records no district for this polygon",
-    };
-  }
+  if (declared.size === 0) return null;
 
+  let end = 0;
+  while (end < value.length && !isBaseCodeSeparator(value[end]!)) end += 1;
+  if (end === 0) return null;
+  const head = value.slice(0, end).trim();
+  if (!declared.has(normalizeBaseCode(head))) return null;
+
+  let start = end;
+  while (start < value.length && isBaseCodeSeparator(value[start]!)) start += 1;
+  return { qualifier: head, rest: value.slice(start).trim() };
+}
+
+/** A resolution of one value, before the published `raw` and `interim` are attached. */
+type Resolution = Omit<BaseCodeParse, "raw" | "interim">;
+
+/**
+ * Resolve one value against the vocabulary, the planned-development pattern and
+ * the longest-match rule. `value` is already trimmed and non-empty.
+ */
+function resolveValue(
+  value: string,
+  vocabulary: Map<string, string>,
+  mode: BaseMatchMode,
+  plannedDevelopment: RegExp | null,
+): Resolution {
   const match = matchBase(value, vocabulary, mode);
   if (!match) {
-    const pd =
-      cfg.plannedDevelopmentPattern !== undefined
-        ? new RegExp(cfg.plannedDevelopmentPattern, cfg.plannedDevelopmentFlags)
-        : null;
-    if (pd && pd.test(value)) {
+    if (plannedDevelopment && plannedDevelopment.test(value)) {
       const t = tokens(value);
       return {
         kind: "planned-development",
-        raw,
         base: null,
         overlays: t.slice(1),
         additionalBases: [],
@@ -254,7 +333,6 @@ export function parseBaseCode(
     const prefixes = baseCodePrefixes(value);
     return {
       kind: "unrecognised",
-      raw,
       base: null,
       overlays: tokens(value),
       additionalBases: [],
@@ -302,11 +380,90 @@ export function parseBaseCode(
 
   return {
     kind: "base",
-    raw,
     base: match.canonical,
     overlays,
     additionalBases,
     unmatchedParts,
     reason: `longest known base district is ${match.canonical} (${suffix})`,
+  };
+}
+
+/**
+ * Parse one published zoning value into its base district plus the suffix
+ * tokens carried alongside it. Pure and total: every input yields a result,
+ * no result is a truncated guess, and a declared interim qualifier is disclosed
+ * rather than silently stripped.
+ *
+ * ORDER. The whole value is resolved directly first; only when that yields
+ * `unrecognised` is a declared leading interim qualifier stripped and the same
+ * rule run on the remainder (see the file header). With `interimQualifiers`
+ * absent this is exactly the pre-P-259b parser.
+ */
+export function parseBaseCode(
+  raw: string,
+  cfg: BaseCodeParseConfig,
+): BaseCodeParse {
+  const value = raw.trim();
+  const mode = cfg.matchMode ?? "longest-match";
+  const vocabulary = new Map<string, string>();
+  for (const code of cfg.knownBaseCodes) {
+    const norm = normalizeBaseCode(code);
+    if (norm.length > 0 && !vocabulary.has(norm)) vocabulary.set(norm, code);
+  }
+  if (value.length === 0) {
+    return {
+      kind: "unrecognised",
+      raw,
+      base: null,
+      overlays: [],
+      additionalBases: [],
+      unmatchedParts: [],
+      interim: false,
+      reason: "empty published value — the layer records no district for this polygon",
+    };
+  }
+
+  const plannedDevelopment =
+    cfg.plannedDevelopmentPattern !== undefined
+      ? new RegExp(cfg.plannedDevelopmentPattern, cfg.plannedDevelopmentFlags)
+      : null;
+
+  const direct = resolveValue(value, vocabulary, mode, plannedDevelopment);
+  if (direct.kind !== "unrecognised") {
+    return { raw, interim: false, ...direct };
+  }
+
+  const split = splitInterimQualifier(value, cfg.interimQualifiers);
+  if (!split) {
+    return { raw, interim: false, ...direct };
+  }
+
+  if (split.rest.length === 0) {
+    return {
+      kind: "unrecognised",
+      raw,
+      base: null,
+      overlays: [],
+      additionalBases: [],
+      unmatchedParts: [],
+      interim: true,
+      reason:
+        `declared interim qualifier ${JSON.stringify(split.qualifier)} in ` +
+        `${JSON.stringify(value)} is followed by no district — there is nothing to ` +
+        "read as a base, so the value is left unrecognised rather than reduced to " +
+        "the qualifier alone",
+    };
+  }
+
+  const inner = resolveValue(split.rest, vocabulary, mode, plannedDevelopment);
+  const provenance =
+    `${inner.reason} — read from the published value ${JSON.stringify(value)} ` +
+    `with the declared interim qualifier ${JSON.stringify(split.qualifier)} ` +
+    "stripped and the interim fact disclosed";
+  return {
+    ...inner,
+    raw,
+    interim: true,
+    reason: inner.kind === "unrecognised" ? provenance : `interim: ${provenance}`,
   };
 }

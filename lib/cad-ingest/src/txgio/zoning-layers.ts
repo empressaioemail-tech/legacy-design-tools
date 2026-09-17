@@ -205,11 +205,30 @@ export const AUSTIN_BASE_CODES = [
  * polygons over 5 values, and no value anywhere in the layer starts with
  * `PD`, `PDD` or `PC`. `LI-PUD` (3 polygons) is NOT PD-shaped by this
  * start-anchored formula: it stamps LI with PUD carried as an overlay, and
- * `I-PUD` (1) is interim, so it stays unrecognised. That is deliberate — see
- * the ORDER note in zoning-base-code.ts.
+ * `I-PUD` (1) is interim, so it reads as planned development under
+ * {@link AUSTIN_INTERIM_QUALIFIERS}. That is deliberate — see the ORDER note
+ * in zoning-base-code.ts.
  */
 export const PLANNED_DEVELOPMENT_PATTERN = "^(PUD|PDD|PD|PC|P-?U-?D)([\\s-].*)?$";
 export const PLANNED_DEVELOPMENT_FLAGS = "i";
+
+/**
+ * Austin's INTERIM qualifier (P-259b, operator ruling 2026-09-17). The layer
+ * publishes an interim family as `I-<base>` over 14 live values / 1,229
+ * polygons: `I-SF-2` (662), `I-RR` (321), `I-SF-4A` (220), `I-LA` (12),
+ * `I-SF-3` (3), `I-GR` (2), `I-MF-3` (2), and 1 each of `I-AV`, `I-MF-2`,
+ * `I-PUD`, `I-RR-NP`, `I-SF-1`, `I-SF-2-NP`, `I-SF-6`.
+ *
+ * A designation granted on annexation until permanent zoning is established,
+ * which carries its base district's standards by ordinance — so the value reads
+ * as its base with the interim fact disclosed, never as a district of its own
+ * and never as a truncation. Source: City of Austin ordinances (C2O-2009-017
+ * for the `I-SF-2` reading); the city's 2016 development-standards table gives
+ * I-SF-2 front 25 / side 5 / rear 10, which is the shipped `austin-tx.json`
+ * SF-2 row. Only `I` is declared: the layer publishes no other interim family,
+ * and an undeclared qualifier leaves the value unrecognised as before.
+ */
+export const AUSTIN_INTERIM_QUALIFIERS = ["I"] as const;
 
 /**
  * Registry keyed by city. Georgetown is the first (and only wired) city;
@@ -463,6 +482,7 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       knownBaseCodes: AUSTIN_BASE_CODES,
       plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
       plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
     },
   },
   "austin-tx-williamson": {
@@ -477,6 +497,7 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       knownBaseCodes: AUSTIN_BASE_CODES,
       plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
       plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
     },
   },
   "austin-tx-hays": {
@@ -491,6 +512,7 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       knownBaseCodes: AUSTIN_BASE_CODES,
       plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
       plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
     },
   },
   // Bastrop city (Bastrop). B3 Place Types are REPEALED (Ord. 2026-06 /

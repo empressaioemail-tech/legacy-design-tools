@@ -18,14 +18,26 @@
  *     [--limit=N] [--dry-run] [--prop-ids-file=<path>]
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- --list
  *
- * DATABASE_URL must point at the target Postgres unless --dry-run. The new
- * `zoning_district` column must exist on the deployment DB (migration 0059)
- * or every UPDATE no-ops silently — apply the migration first.
+ * DATABASE_URL must point at the target Postgres unless --dry-run. The
+ * `zoning_district` column (migration 0059) and `zoning_district_interim`
+ * (migration 0103) must exist on the deployment DB or the stamp FAILS CLOSED —
+ * the batched UPDATE names both columns, so Postgres rejects the unknown one
+ * and the first batch aborts with zero rows written. It does not no-op
+ * silently. Apply both migrations first.
  *
- * Additive + idempotent + exit-bounded: only `zoning_district` is written,
- * a re-run recomputes and overwrites in place, and the run fetches the
- * zoning layer + stamps + prints a summary, then exits (0 on success, 1 on
- * fatal error or an empty zoning layer).
+ * Additive + idempotent + exit-bounded: only the two zoning columns are
+ * written, a re-run recomputes and overwrites in place, and the run fetches
+ * the zoning layer + stamps + prints a summary, then exits (0 on success, 1
+ * on fatal error or an empty zoning layer).
+ *
+ * FEATURES AND ACCOUNTS (P-259b). `parcels read` counts FEATURES
+ * (`DISTINCT ON feature_index`). A feature carrying no CAD account
+ * (`prop_id` '0', empty or NULL) is SKIPPED — it writes no row and is never
+ * PIPed — and the summary prints, on every leg, the feature count, the
+ * account-bearing feature count, the distinct real-account count, and the
+ * skipped count by reason. In Travis 423,540 of 828,773 features carry
+ * `prop_id '0'`, so a feature count reported as an account count would be
+ * wrong by that much; both are named instead.
  *
  * `--prop-ids-file=<path>` (scoped mode): restricts the parcel READ (and
  * therefore the UPDATE, which only ever targets rows produced by that
@@ -37,9 +49,9 @@
  * deduped before use. WITHOUT this flag the CLI is byte-identical to the
  * whole-county path other cities depend on — this flag only ever narrows.
  * The resolved summary reports listSize / matched / stamped /
- * notFoundInParcelStore / noZoningPolygonHit, every count named, so a
- * mismatch between the requested list and what's actually in the store is
- * visible before (dry-run) or after (live) any write.
+ * notFoundInParcelStore / skippedNoAccount / noZoningPolygonHit, every count
+ * named, so a mismatch between the requested list and what's actually in the
+ * store is visible before (dry-run) or after (live) any write.
  *
  * Egress: the zoning fetch is a plain HTTPS GET to the city's ArcGIS host.
  * Some public ArcGIS TLS setups have an unreachable OCSP/CRL endpoint from
@@ -74,6 +86,16 @@ export interface LayerParseAudit {
   base: number;
   plannedDevelopment: number;
   unrecognised: number;
+  /**
+   * Of `base`, the features whose published value carried a declared interim
+   * qualifier (P-259b) — Austin's `I-<base>`, read as its base. A SUBSET of
+   * `base`, never added to it.
+   */
+  interimBase: number;
+  /** Of `plannedDevelopment`, the features whose value was interim (`I-PUD`). */
+  interimPlannedDevelopment: number;
+  /** Interim published values with their feature counts (`I-SF-2` -> n, …). */
+  interimValueHistogram: Record<string, number>;
   baseHistogram: Record<string, number>;
   unrecognisedHistogram: Record<string, number>;
   overlayHistogram: Record<string, number>;
@@ -87,6 +109,9 @@ export function layerParseAudit(features: RawZoningFeature[]): LayerParseAudit {
     base: 0,
     plannedDevelopment: 0,
     unrecognised: 0,
+    interimBase: 0,
+    interimPlannedDevelopment: 0,
+    interimValueHistogram: {},
     baseHistogram: {},
     unrecognisedHistogram: {},
     overlayHistogram: {},
@@ -107,17 +132,30 @@ export function layerParseAudit(features: RawZoningFeature[]): LayerParseAudit {
     if (f.parse.kind === "base") {
       audit.base += 1;
       bump(audit.baseHistogram, f.code);
+      if (f.parse.interim) {
+        audit.interimBase += 1;
+        bump(audit.interimValueHistogram, f.parse.raw.trim());
+      }
       // Overlays are counted ONLY here. For a resolved base the parser can
       // prove which tokens are the base and which are the suffix; for a
       // planned-development or unrecognised value the whole published value is
       // stamped raw and its tokens are not classified, so counting them as
-      // "overlays" would report the district inside "I-SF-2" (or the PUD in
-      // "PUD-NP") as an overlay token. Left out, not guessed.
+      // "overlays" would report a token inside "UNZ-NP" (or the PUD in
+      // "PUD-NP") as an overlay token. Left out, not guessed. An INTERIM value
+      // IS classified (the qualifier is stripped by the same rule), so "I-SF-2-NP"
+      // contributes its NP here and SF-2 to `baseHistogram` — the point of the rule.
       for (const overlay of f.parse.overlays) bump(audit.overlayHistogram, overlay);
     } else if (f.parse.kind === "planned-development") {
       audit.plannedDevelopment += 1;
       bump(audit.baseHistogram, f.code);
+      if (f.parse.interim) {
+        audit.interimPlannedDevelopment += 1;
+        bump(audit.interimValueHistogram, f.parse.raw.trim());
+      }
     } else {
+      // Includes an interim value whose qualifier was recognised but whose
+      // remainder matched no base (`I-XYZ`): disclosed as interim, still
+      // unrecognised, still stamped verbatim.
       audit.unrecognised += 1;
       bump(audit.unrecognisedHistogram, f.parse.raw.trim());
     }
@@ -230,8 +268,23 @@ function logParseAudit(audit: LayerParseAudit): void {
     `resolved to a base:     ${audit.base} features, ${sortedHist(audit.baseHistogram).length} distinct codes`,
   );
   log(
+    `  of which interim:     ${audit.interimBase} features (declared interim qualifier read as its base district, P-259b)`,
+  );
+  log(
     `planned development:    ${audit.plannedDevelopment} features (stamped raw — A-164 PUD message)`,
   );
+  if (audit.interimPlannedDevelopment > 0) {
+    log(
+      `  of which interim:     ${audit.interimPlannedDevelopment} features (I-PUD family)`,
+    );
+  }
+  const interimValues = sortedHist(audit.interimValueHistogram);
+  if (interimValues.length > 0) {
+    log(
+      `interim values read:    ${interimValues.length} distinct published values → ` +
+        interimValues.map(([v, n]) => `${v} ${n}`).join(", "),
+    );
+  }
   log(
     `UNRECOGNISED:           ${audit.unrecognised} features, ` +
       `${sortedHist(audit.unrecognisedHistogram).length} distinct published values ` +
@@ -266,7 +319,11 @@ async function main(): Promise<void> {
     for (const c of Object.values(ZONING_LAYERS)) {
       log(
         `  ${c.cityKey.padEnd(16)} county=${c.countyFips} ` +
-          `field=${c.codeField}${c.baseCodeParse ? " +base-code-parse" : ""} ${c.layerUrl}`,
+          `field=${c.codeField}${c.baseCodeParse ? " +base-code-parse" : ""}` +
+          (c.baseCodeParse?.interimQualifiers?.length
+            ? ` interim=${c.baseCodeParse.interimQualifiers.join("/")}`
+            : "") +
+          ` ${c.layerUrl}`,
       );
     }
     log(`total: ${Object.keys(ZONING_LAYERS).length}`);
@@ -378,11 +435,35 @@ async function main(): Promise<void> {
   log(`city:             ${cfg.cityKey} (${cfg.cityName})`);
   log(`county:           ${cfg.countyFips}`);
   log(`zoning polygons:  ${index.length}`);
-  log(`parcels read:     ${summary.parcelsRead}`);
+  // Features AND accounts, named separately on every leg (P-259b): the CLI's
+  // denominator is FEATURES (`DISTINCT ON feature_index`), and in Travis
+  // 423,540 of 828,773 features carry `prop_id '0'`. A figure never travels
+  // without its denomination.
+  log(`features read:    ${summary.parcelsRead} (DISTINCT feature_index)`);
+  log(
+    `accounts read:    ${summary.accountsRead} (distinct real prop_id)`,
+  );
+  log(
+    `account-bearing:  ${summary.accountBearingFeatures} features carried a real prop_id`,
+  );
+  log(
+    `skipped:          ${summary.parcelsSkippedNoAccount} features carried NO CAD account ` +
+      `(wrote no row, never PIPed; ${sortedHist(summary.skippedNoAccountByReason)
+        .map(([r, n]) => `${r} ${n}`)
+        .join(", ")})`,
+  );
   log(`parcels matched:  ${summary.parcelsMatched} (base district stamped)`);
+  log(
+    `  of which interim: ${summary.parcelsInterim} (declared interim qualifier read as its base district, P-259b)`,
+  );
   log(
     `planned dev:      ${summary.parcelsPlannedDevelopment} (stamped raw — A-164 PUD message)`,
   );
+  if (summary.parcelsInterimPlannedDevelopment > 0) {
+    log(
+      `  of which interim: ${summary.parcelsInterimPlannedDevelopment} (I-PUD family)`,
+    );
+  }
   log(
     `unrecognised:     ${summary.parcelsUnrecognised} (published value stamped verbatim, no base resolved)`,
   );
@@ -396,10 +477,27 @@ async function main(): Promise<void> {
       summary.parcelsMatched +
       summary.parcelsPlannedDevelopment +
       summary.parcelsUnrecognised +
-      summary.parcelsUnmatched
-    } (must equal parcels read; a parcel is in exactly one bucket)`,
+      summary.parcelsUnmatched +
+      summary.parcelsSkippedNoAccount
+    } (must equal features read; a feature is in exactly one of matched / planned dev / ` +
+      "unrecognised / null / skipped-no-account)",
   );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
+  const interimVals = sortedHist(summary.interimValueHistogram);
+  if (interimVals.length > 0) {
+    log(
+      `interim values stamped (${interimVals.length} distinct, every one listed):`,
+    );
+    for (const [value, n] of interimVals) {
+      log(`  ${value.padEnd(24)} ${n}`);
+    }
+    log(
+      `  read as (interim base histogram): ` +
+        sortedHist(summary.interimBaseHistogram)
+          .map(([base, n]) => `${base} ${n}`)
+          .join(", "),
+    );
+  }
   const hist = sortedHist(summary.codeHistogram);
   log(`district histogram (${hist.length} codes):`);
   for (const [code, n] of hist) log(`  ${code.padEnd(8)} ${n}`);
@@ -422,9 +520,21 @@ async function main(): Promise<void> {
     log(`listSize:              ${summary.listSize}`);
     log(`matched (in store):    ${summary.matched}`);
     log(`stamped:               ${dryRun ? "0 (dry-run)" : summary.parcelsMatched}`);
+    log(
+      `  of which interim:    ${summary.parcelsInterim} (declared interim qualifier read as its base district)`,
+    );
     log(`notFoundInParcelStore: ${summary.notFoundInParcelStore?.length ?? 0}`);
     if (summary.notFoundInParcelStore && summary.notFoundInParcelStore.length > 0) {
       log(`  ids: ${summary.notFoundInParcelStore.join(", ")}`);
+    }
+    log(
+      `skippedNoAccount:      ${summary.skippedNoAccountPropIds?.length ?? 0} (no CAD account — wrote no row, never PIPed)`,
+    );
+    if (
+      summary.skippedNoAccountPropIds &&
+      summary.skippedNoAccountPropIds.length > 0
+    ) {
+      log(`  ids: ${summary.skippedNoAccountPropIds.join(", ")}`);
     }
     log(`noZoningPolygonHit:    ${summary.noZoningPolygonHit?.length ?? 0}`);
     if (summary.noZoningPolygonHit && summary.noZoningPolygonHit.length > 0) {
@@ -439,12 +549,12 @@ async function main(): Promise<void> {
     if (summary.perParcel && summary.perParcel.length > 0) {
       log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
       log(
-        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} district`,
+        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} district`,
       );
       for (const row of summary.perParcel) {
         log(
           `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ` +
-            `${row.kind.padEnd(20)} ${row.district ?? "(none)"}` +
+            `${row.kind.padEnd(20)} ${(row.interim === undefined ? "-" : String(row.interim)).padEnd(8)} ${row.district ?? "(none)"}` +
             (row.publishedCode && row.publishedCode !== row.district
               ? `   [published: ${row.publishedCode}]`
               : ""),

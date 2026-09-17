@@ -201,7 +201,9 @@ export function reduceZoningFeature(
   // `ZoningPolygon.parse`), and the polygon stays in the PIP index so a parcel
   // inside it is not miscounted as "outside the city". `planned-development`
   // keeps the raw value too, which is what makes A-164's PUD message fire on it
-  // exactly as it did before this parser existed.
+  // exactly as it did before this parser existed. An INTERIM value
+  // (`parse.interim`, P-259b) resolves to its base district and carries the flag
+  // on the parse; the flag, not this function, decides what the stamp writes.
   const parse = parseBaseCode(code, cfg.baseCodeParse);
   return {
     code: parse.kind === "base" ? (parse.base ?? code) : code,

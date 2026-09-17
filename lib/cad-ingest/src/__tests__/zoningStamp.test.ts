@@ -27,6 +27,7 @@ import {
 } from "../txgio/zoning-stamp";
 import {
   chunkPairs,
+  noAccountReason,
   stampCountyZoning,
   ZONING_STAMP_BATCH_SIZE,
   type ZoningStampDb,
@@ -538,6 +539,8 @@ interface FakeParcelRow {
   geometry: GeoJsonGeometry;
   zoningDistrict: string | null;
   zoningJurisdiction: string | null;
+  /** P-259b disclosure column on the stamped row. */
+  zoningDistrictInterim?: boolean | null;
   /** CAD prop id, text column — undefined/omitted in older fixtures. */
   propId?: string | null;
 }
@@ -550,10 +553,11 @@ interface FakeParcelRow {
  * UPDATE — by compiling the drizzle SQL and reading bound params back out —
  * so a scoped-mode test proves the actual `AND prop_id = ANY(...)` SQL
  * shape is applied, not just that the function returns the right JS shape.
- * `execute` compiles the batched-UPDATE SQL, pulls the (feature_index,
- * code) pairs + the county param back out of the compiled params, and applies
- * them to EVERY matching physical row — the real Postgres join behavior — so
- * the returned `rowCount` sums per-cell dupes exactly as prod would.
+ * `execute` compiles the batched-UPDATE SQL, pulls the (feature_index, code,
+ * jurisdiction, interim) tuples + the county param back out of the compiled
+ * params, and applies them to EVERY matching physical row — the real Postgres
+ * join behavior — so the returned `rowCount` sums per-cell dupes exactly as
+ * prod would.
  */
 interface FakeDb {
   db: ZoningStampDb;
@@ -620,18 +624,20 @@ function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
     execute(query: SQL) {
       calls += 1;
       const { params } = dialect.sqlToQuery(query);
-      // Template param order: VALUES triples (featureIndex, code, jurisdiction)
-      // then the trailing county_fips param.
+      // Template param order: VALUES quadruples
+      // (featureIndex, code, jurisdiction, interim) then the trailing
+      // county_fips param.
       const county = params[params.length - 1] as string;
-      const tripleParams = params.slice(0, params.length - 1);
+      const tupleParams = params.slice(0, params.length - 1);
       const stampByFeature = new Map<
         number,
-        { code: string; jurisdiction: string }
+        { code: string; jurisdiction: string; interim: boolean }
       >();
-      for (let i = 0; i < tripleParams.length; i += 3) {
-        stampByFeature.set(Number(tripleParams[i]), {
-          code: String(tripleParams[i + 1]),
-          jurisdiction: String(tripleParams[i + 2]),
+      for (let i = 0; i < tupleParams.length; i += 4) {
+        stampByFeature.set(Number(tupleParams[i]), {
+          code: String(tupleParams[i + 1]),
+          jurisdiction: String(tupleParams[i + 2]),
+          interim: tupleParams[i + 3] === true,
         });
       }
       let rowCount = 0;
@@ -641,6 +647,7 @@ function makeFakeDb(rows: FakeParcelRow[]): FakeDb {
         if (stamp === undefined) continue;
         r.zoningDistrict = stamp.code;
         r.zoningJurisdiction = stamp.jurisdiction;
+        r.zoningDistrictInterim = stamp.interim;
         rowCount += 1;
       }
       return Promise.resolve({ rowCount });
@@ -677,8 +684,9 @@ describe("chunkPairs", () => {
   });
 
   it("keeps the batch cap under pg's bound-param ceiling", () => {
-    // 3 params/triple + 1 shared county param must stay < 65535.
-    expect(ZONING_STAMP_BATCH_SIZE * 3 + 1).toBeLessThan(65535);
+    // 4 params/tuple (feature_index, code, jurisdiction, interim) + 1 shared
+    // county param must stay < 65535.
+    expect(ZONING_STAMP_BATCH_SIZE * 4 + 1).toBeLessThan(65535);
   });
 });
 
@@ -703,6 +711,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: 10,
         tileKey: "c1",
+        propId: "10010",
         geometry: rsGeom,
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -711,6 +720,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: 10,
         tileKey: "c2",
+        propId: "10010",
         geometry: rsGeom,
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -719,6 +729,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: 10,
         tileKey: "c3",
+        propId: "10010",
         geometry: rsGeom,
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -728,6 +739,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: 11,
         tileKey: "c1",
+        propId: "10011",
         geometry: mfGeom,
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -737,6 +749,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: 12,
         tileKey: "c9",
+        propId: "10012",
         geometry: outGeom,
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -842,6 +855,7 @@ describe("stampCountyZoning (batched write)", () => {
         countyFips: COUNTY,
         featureIndex: i,
         tileKey: "c1",
+        propId: String(20000 + i),
         geometry: parcelSquare(cx, cy, 0.00001),
         zoningDistrict: null,
         zoningJurisdiction: null,
@@ -1100,5 +1114,293 @@ describe("stampCountyZoning (propIds scoped mode)", () => {
     expect(summary.notFoundInParcelStore).toBeUndefined();
     expect(summary.noZoningPolygonHit).toBeUndefined();
     expect(summary.perParcel).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-259b: the no-account skip and the interim disclosure
+// ---------------------------------------------------------------------------
+
+describe("noAccountReason (the account gate's classifier)", () => {
+  it("classifies the three no-account shapes the ruling names", () => {
+    expect(noAccountReason("0")).toBe("zero");
+    expect(noAccountReason(" 0 ")).toBe("zero"); // trimmed: still the sentinel
+    expect(noAccountReason("")).toBe("empty");
+    expect(noAccountReason("   ")).toBe("empty");
+    expect(noAccountReason(null)).toBe("null");
+    expect(noAccountReason(undefined)).toBe("null");
+  });
+
+  it("treats every other value as a real account (never over-excludes)", () => {
+    expect(noAccountReason("1")).toBeNull();
+    expect(noAccountReason("31001")).toBeNull();
+    expect(noAccountReason("01101")).toBeNull(); // leading zeros are an id, not emptiness
+    expect(noAccountReason("0.0")).toBeNull();
+    expect(noAccountReason("R-580706")).toBeNull();
+  });
+});
+
+describe("stampCountyZoning (no CAD account → no row, P-259b)", () => {
+  const index = buildZoningIndex([
+    squareFeature("RS", -97.72, 30.715, 0.01),
+    squareFeature("MF-2", -97.70, 30.715, 0.01),
+  ]);
+  const COUNTY = "48453";
+
+  /** One feature, one cell, with a chosen prop_id shape and PIP outcome. */
+  function row(
+    featureIndex: number,
+    propId: string | null | undefined,
+    geometry: GeoJsonGeometry,
+  ): FakeParcelRow {
+    return {
+      countyFips: COUNTY,
+      featureIndex,
+      tileKey: "c1",
+      propId,
+      geometry,
+      zoningDistrict: null,
+      zoningJurisdiction: null,
+      zoningDistrictInterim: null,
+    };
+  }
+
+  const rsGeom = parcelSquare(-97.715, 30.72);
+  const mfGeom = parcelSquare(-97.695, 30.72);
+  const outGeom = parcelSquare(-97.5, 30.5);
+
+  function seedMixed(): FakeParcelRow[] {
+    return [
+      row(20, "0", rsGeom), // sentinel -> skipped
+      row(21, "31001", mfGeom), // real account -> written
+      row(22, "   ", rsGeom), // blank -> skipped
+      row(23, null, rsGeom), // missing -> skipped
+      row(24, "31002", outGeom), // real account, no polygon -> null
+    ];
+  }
+
+  it("a prop_id '0' / blank / null feature writes nothing and is counted by reason; a real account still writes", async () => {
+    const fake = makeFakeDb(seedMixed());
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+    });
+
+    // The skip, by reason, every reason named.
+    expect(summary.parcelsSkippedNoAccount).toBe(3);
+    expect(summary.skippedNoAccountByReason).toEqual({
+      zero: 1,
+      empty: 1,
+      null: 1,
+    });
+
+    // The real account still writes — the skip does not leak.
+    const written = fake.rows.find((r) => r.featureIndex === 21)!;
+    expect(written.zoningDistrict).toBe("MF-2");
+    expect(written.zoningJurisdiction).toBe("austin-tx");
+    expect(written.zoningDistrictInterim).toBe(false);
+
+    // The no-account features are untouched on EVERY zoning column, including
+    // the disclosure column — not stamped, not even with a false.
+    for (const fi of [20, 22, 23]) {
+      const r = fake.rows.find((x) => x.featureIndex === fi)!;
+      expect(r.zoningDistrict).toBeNull();
+      expect(r.zoningJurisdiction).toBeNull();
+      expect(r.zoningDistrictInterim).toBeNull();
+    }
+  });
+
+  it("keeps the five-way invariant account for account (nothing silently dropped)", async () => {
+    const fake = makeFakeDb(seedMixed());
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+    });
+
+    expect(summary.parcelsRead).toBe(5);
+    expect(summary.parcelsSkippedNoAccount).toBe(3);
+    expect(summary.accountBearingFeatures).toBe(2);
+    expect(summary.accountsRead).toBe(2); // 31001 + 31002
+    expect(summary.parcelsMatched).toBe(1); // MF-2
+    expect(summary.parcelsUnmatched).toBe(1); // the outside one
+    expect(summary.parcelsUnrecognised).toBe(0);
+    expect(summary.parcelsPlannedDevelopment).toBe(0);
+
+    // The invariant, computed from the printed numbers.
+    expect(
+      summary.parcelsMatched +
+        summary.parcelsPlannedDevelopment +
+        summary.parcelsUnrecognised +
+        summary.parcelsUnmatched +
+        summary.parcelsSkippedNoAccount,
+    ).toBe(summary.parcelsRead);
+    expect(summary.accountBearingFeatures).toBe(
+      summary.parcelsRead - summary.parcelsSkippedNoAccount,
+    );
+  });
+
+  it("counts DISTINCT accounts, not features (per-cell dupes share one account)", async () => {
+    // One feature across three grid cells: three ROWS, one feature, one account.
+    const fake = makeFakeDb([
+      row(30, "31003", mfGeom),
+      { ...row(30, "31003", mfGeom), tileKey: "c2" },
+      { ...row(30, "31003", mfGeom), tileKey: "c3" },
+    ]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+    });
+    expect(summary.parcelsRead).toBe(1);
+    expect(summary.accountBearingFeatures).toBe(1);
+    expect(summary.accountsRead).toBe(1);
+    expect(summary.rowsUpdated).toBe(3); // per-cell dupes
+  });
+
+  it("scoped mode reports a no-account request by name, not as a resolved or missing id", async () => {
+    const fake = makeFakeDb([
+      row(40, "0", rsGeom),
+      row(41, "31004", mfGeom),
+    ]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+      propIds: new Set(["0", "31004", "99999"]),
+      dryRun: true,
+    });
+
+    expect(summary.skippedNoAccountPropIds).toEqual(["0"]);
+    // `matched` keeps its original meaning: both ids resolved to a row (the
+    // no-account one included), so it still equals `parcelsRead`. The skip is
+    // the separate fact that one of them produced no district.
+    expect(summary.matched).toBe(2);
+    expect(summary.parcelsRead).toBe(2);
+    expect(summary.notFoundInParcelStore).toEqual(["99999"]);
+    // The per-parcel table names the skip rather than dropping the row.
+    const skipped = summary.perParcel!.find((r) => r.propId === "0")!;
+    expect(skipped.kind).toBe("skipped-no-account");
+    expect(skipped.district).toBeNull();
+    expect(skipped.interim).toBeUndefined(); // nothing stamped -> no disclosure
+  });
+});
+
+describe("stampCountyZoning (interim disclosure through the write, P-259b)", () => {
+  // The REAL Austin layer config and the REAL reduce/parse path — the index
+  // these tests stamp against is built exactly as the CLI builds it.
+  const AUSTIN = resolveZoningLayer("austin-tx")!;
+  const COUNTY = "48453";
+
+  function austinFeature(ztype: string, west: number, south: number) {
+    return reduceZoningFeature(
+      {
+        type: "Feature",
+        properties: { ZONING_ZTYPE: ztype, ZONING_BASE: ztype },
+        geometry: squareFeature(ztype, west, south, 0.01).geometry,
+      },
+      AUSTIN,
+    );
+  }
+
+  const index = buildZoningIndex([
+    austinFeature("I-SF-2-NP", -97.75, 30.25), // interim -> base SF-2 + NP
+    austinFeature("SF-3-HD-NP", -97.73, 30.25), // not interim -> SF-3
+    austinFeature("I-PUD", -97.71, 30.25), // interim planned development
+    austinFeature("TOD", -97.69, 30.25), // unrecognised, not interim
+  ]);
+
+  function seed(): FakeParcelRow[] {
+    const at = (west: number): FakeParcelRow => ({
+      countyFips: COUNTY,
+      featureIndex: 0,
+      tileKey: "c1",
+      propId: "0",
+      geometry: parcelSquare(west, 30.255),
+      zoningDistrict: null,
+      zoningJurisdiction: null,
+      zoningDistrictInterim: null,
+    });
+    return [
+      { ...at(-97.745), featureIndex: 50, propId: "50050" },
+      { ...at(-97.725), featureIndex: 51, propId: "50051" },
+      { ...at(-97.705), featureIndex: 52, propId: "50052" },
+      { ...at(-97.685), featureIndex: 53, propId: "50053" },
+    ];
+  }
+
+  it("stamps I-SF-2-NP as SF-2 with interim true, and writes the disclosure on every stamped row", async () => {
+    const fake = makeFakeDb(seed());
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+    });
+
+    // The row: base district + the interim fact.
+    const interimRow = fake.rows.find((r) => r.featureIndex === 50)!;
+    expect(interimRow.zoningDistrict).toBe("SF-2");
+    expect(interimRow.zoningDistrictInterim).toBe(true);
+
+    // A non-interim district is an EXPLICIT false, never NULL (NULL would mean
+    // "nothing stamped here").
+    const stableRow = fake.rows.find((r) => r.featureIndex === 51)!;
+    expect(stableRow.zoningDistrict).toBe("SF-3");
+    expect(stableRow.zoningDistrictInterim).toBe(false);
+
+    // I-PUD takes the planned-development route and is still interim.
+    const pudRow = fake.rows.find((r) => r.featureIndex === 52)!;
+    expect(pudRow.zoningDistrict).toBe("I-PUD");
+    expect(pudRow.zoningDistrictInterim).toBe(true);
+
+    // An unrecognised non-interim value is stamped verbatim with false.
+    const todRow = fake.rows.find((r) => r.featureIndex === 53)!;
+    expect(todRow.zoningDistrict).toBe("TOD");
+    expect(todRow.zoningDistrictInterim).toBe(false);
+
+    // Counted as SUBSETS of the buckets they landed in, never added to them.
+    expect(summary.parcelsMatched).toBe(2); // SF-2 + SF-3
+    expect(summary.parcelsPlannedDevelopment).toBe(1); // I-PUD
+    expect(summary.parcelsUnrecognised).toBe(1); // TOD
+    expect(summary.parcelsInterim).toBe(1);
+    expect(summary.parcelsInterimPlannedDevelopment).toBe(1);
+    expect(summary.interimBaseHistogram).toEqual({ "SF-2": 1 });
+    expect(summary.interimValueHistogram).toEqual({
+      "I-SF-2-NP": 1,
+      "I-PUD": 1,
+    });
+    // Overlays from an interim value DO count (the qualifier was classified).
+    expect(summary.overlayHistogram).toEqual({ NP: 2, HD: 1 });
+  });
+
+  it("dry-run still discloses the interim fact in the per-parcel table, with zero writes", async () => {
+    const fake = makeFakeDb(seed());
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: "austin-tx",
+      index,
+      propIds: new Set(["50050", "50051"]),
+      dryRun: true,
+    });
+    expect(fake.executeCalls).toBe(0);
+    const byProp = new Map(summary.perParcel!.map((r) => [r.propId, r]));
+    expect(byProp.get("50050")).toMatchObject({
+      district: "SF-2",
+      kind: "base",
+      publishedCode: "I-SF-2-NP",
+      interim: true,
+    });
+    expect(byProp.get("50051")).toMatchObject({
+      district: "SF-3",
+      kind: "base",
+      interim: false,
+    });
   });
 });
