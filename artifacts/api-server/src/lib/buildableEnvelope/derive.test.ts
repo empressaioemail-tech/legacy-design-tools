@@ -252,3 +252,92 @@ describe("deriveBuildableEnvelope — road-class setback default retirement (F-1
     );
   });
 });
+
+/**
+ * P-299 — a height the code does not state must not reach the props as the
+ * corpus's 999 stated-absence sentinel.
+ *
+ * Real row under test: Round Rock's own table (Round Rock states its
+ * commercial/industrial heights in STORIES), flagged `not_specified: true`.
+ * Before this change `maxHeightFt` was copied straight off the row, so the
+ * envelope props — and every consumer sizing an ADU or an addition against them
+ * — read 999 as a 999-foot limit.
+ */
+describe("P-299 — a flagged height is ABSENT, never 999", () => {
+  const P299_TABLE: SetbackTable = {
+    jurisdictionKey: "round-rock-tx",
+    jurisdictionDisplayName: "City of Round Rock, TX",
+    districts: [
+      {
+        district_name: "SF-2 Single-Family Residential 2 (Conventional)",
+        front_ft: 25,
+        rear_ft: 20,
+        side_ft: 5,
+        side_corner_ft: 15,
+        max_height_ft: 999,
+        max_lot_coverage_pct: 40,
+        max_impervious_pct: 55,
+        citation_url: "https://library.municode.com/tx/round_rock",
+        provenance: {
+          max_height_ft: {
+            section_number: "Sec. 2-36",
+            quote: "C-1 Standard = '5 stories' — stories only, no feet figure.",
+            confidence: 0.7,
+            verification_state: "transcription-read",
+            not_specified: true,
+          },
+        },
+      },
+      {
+        district_name: "MU-1 Mixed-Use Historic Commercial Core District",
+        front_ft: 0,
+        rear_ft: 10,
+        side_ft: 0,
+        side_corner_ft: 10,
+        max_height_ft: 48,
+        max_lot_coverage_pct: 60,
+        max_impervious_pct: 80,
+        citation_url: "https://library.municode.com/tx/round_rock",
+      },
+    ],
+  } as unknown as SetbackTable;
+
+  function deriveDistrict(code: string) {
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const district = mapDistrict(P299_TABLE, code)!;
+    const res = deriveBuildableEnvelope({ ring, table: P299_TABLE, district, labeling });
+    return res.geojson.features[0]!.properties;
+  }
+
+  it("FALSIFIER 3: the SF-2 flagged height arrives as null, not 999, and the envelope JSON carries no 999 anywhere", () => {
+    const props = deriveDistrict("SF-2");
+    expect(props.maxHeightFt).toBeNull();
+    expect(props.setbacks.not_specified?.max_height).toBe(true);
+    expect(JSON.stringify(props)).not.toContain("999");
+    expect(props.disclosure).toMatch(/states no feet-based maximum height/i);
+  });
+
+  it("a real feet height is untouched (the fix cannot pass by nulling every height)", () => {
+    const props = deriveDistrict("MU-1");
+    expect(props.maxHeightFt).toBe(48);
+    expect(props.setbacks.not_specified?.max_height).toBeUndefined();
+  });
+
+  it("a bare 999 with no flag is treated as absent too — this reader fails closed on the value as well as the flag", () => {
+    const bare: SetbackTable = {
+      ...P299_TABLE,
+      districts: [{ ...P299_TABLE.districts[0]!, provenance: undefined, max_height_ft: 999 }],
+    };
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const props = deriveBuildableEnvelope({
+      ring,
+      table: bare,
+      district: mapDistrict(bare, "SF-2")!,
+      labeling,
+    }).geojson.features[0]!.properties;
+    expect(props.maxHeightFt).toBeNull();
+    expect(props.setbacks.not_specified?.max_height).toBe(true);
+  });
+});

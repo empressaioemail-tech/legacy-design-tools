@@ -1,0 +1,684 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "luling-tx",
+  "jurisdictionDisplayName": "City of Luling, TX",
+  "effectiveDate": "2013-03-14",
+  "note": "City of Luling, Caldwell County, TX. INSTRUMENT: Code of Ordinances, Appendix B - Zoning, as currently published on Municode Library. Editor's note at the head of Appendix B reads: \"Ord. No. 2013-O-04, adopted March 14, 2013, repealed former App. B, §§ 1.0-10.015, and enacted a new App. B as set out herein. Former App. B pertained to the same subject matter and derived from Ord. No. 2010-O-11, adopted Oct. 14, 2010.\" effectiveDate is that adoption date, read at source. VINTAGE CAVEAT: the Municode supplement level could not be read at source -- Luling's Municode route is a JavaScript SPA that returns only the app shell to a plain fetch (verified again 2026-09-16: both /codes/code_of_ordinances and the nodeId route return the SPA bootstrap with no ordinance text), so the currency statement Municode normally prints on the landing page was not readable. The Appendix B text coded here is the version Municode currently publishes; treat the 2013-03-14 date as the adoption of the enacted text, not as proof that no later amendment exists. ROUTE (cite the route, not only the URL): the Appendix B text was read from a full-text render of the Municode chapter (6,305 lines captured to a local render artifact during this lane's research), not from a plain HTTP fetch of the citation_url. A plain fetch of the citation_url returns the SPA shell and NO ordinance text -- confirmed on 2026-09-16. Anyone reproducing these quotes must render the Municode page in a browser (or use Municode's own print/download action) first. MODELING. (1) Two sources inside the same ordinance are used: (a) the codified summary 'Table 1' at the head of Appendix B, quoted as the raw table row, and (b) the district regulation sections 3.01-3.13 ('Appendix B, Sec. 3.0x'), quoted as the operative clause. Where they agree the section clause is coded. (2) Where a district states a base value plus a conditional exception (e.g. C-2's rear yard being 0 generally but 25 ft where the lot adjoins a residential district), the GENERAL case is coded and the exception is preserved verbatim in that field's quote. (3) Heights: Luling states height as 'stories or feet' ('No building shall exceed two and one-half (2-1/2) stories or thirty-five (35) feet'), so unlike the Belton/Taylor convention no stories-to-feet conversion problem exists here and the real feet figure is coded. (4) Lot coverage: for A-OS, R-1, RLD, RMD, MH, C-1, C-2, C-3, D and I the coverage clause itself reads 'including impervious surfaces' / 'all impervious surface areas', so max_impervious_pct is coded at the same figure as max_lot_coverage_pct with the same clause quoted -- the ordinance does not state a separate impervious cap distinct from lot coverage. (5) Corner lots: Luling's corner-side provisions are inconsistent across districts -- R-1, RLD and MH state a corner-side yard ONLY for accessory buildings (15 ft back-to-back / 25 ft otherwise) and are silent for the dwelling, so side_corner_ft is coded not_specified there (value mirrors the district's interior side yard) rather than asserting the accessory figure for the dwelling; RMD and RHD DO state the corner side yard for dwellings (10 ft back-to-back / 15 ft otherwise) and 15 ft (the general case) is coded; C-1, C-2, C-3 state 25 ft from an intersecting street. CONFLICTS FOUND AND FLAGGED, NOT SILENTLY RESOLVED. (a) C-3: Table 1 reads Front 50' / Rear 10' / Side 25' while Sec. 3.09(E) reads front 50 ft, side 10 ft, rear 25 ft -- an apparent column transposition between the summary table and the operative section. The section text is coded; where the two disagree the more restrictive of the pair is also the section value in both fields here. (b) MH lot coverage: Table 1 codes MH at 40% while Sec. 3.06(F)(1) states 55% (the same clause RLD carries at 55%, which Table 1 also reports as 55% for RLD). 40% (the more restrictive figure, and the one the ordinance's own summary table states for this district) is coded at reduced confidence 0.6 with both readings preserved in the quote -- flagged for planner review. (c) RHD lot coverage: Table 1 defers ('See Section 3.05 F') and Sec. 3.05(F) contains no lot-coverage cap at all -- its subsections are a per-unit lot-area schedule and a 30% minimum livability open space. max_lot_coverage_pct is coded not_specified rather than inferred. COVERAGE OF THE LIVE GIS VOCABULARY. Luling parcels in the P-255 census carry these district stamps: R-1 (1777), C-2 (225), RLD (221), MH (151), C-3 (104), PD-LADERA (99), P & I (97), RMD (71), C-1 (61), I (42), A-OS (31), EX-AG (6), RHD (2), plus 11 unstamped. All 12 Euclidean districts in Appendix B are coded here (A-OS, R-1, RLD, RMD, RHD, MH, C-1, C-2, C-3, D, I, P&I) -- D has no parcels in the census but is defined in force, so a row exists rather than a future false absence. NOT CODED: PD-LADERA (99 parcels) is a Planned Development district whose standards are set by its own ordinance, not by a district schedule -- routes to the PUD refusal; H is the Historic Overlay District (Sec. 3.12), an overlay on a base district with no independent dimensional schedule, and Table 1 marks every H column 'Reserve'; EX-AG (6 parcels) is NOT a district anywhere in the in-force Appendix B (the district list in Sec. 3.0 and Table 1 do not contain it) -- it is a retired or out-of-city stamp and is neither coded nor guessed at; P&I is coded with every dimensional field not_specified because the ordinance genuinely reserves them (see that row's quotes). SENTINELS: not_specified fields carry 100, the Belton/ldt fan-out convention for a non-binding sentinel, EXCEPT max_height_ft, which carries 999 because the corpus acceptance gate makes 999 the canonical max_height_ft sentinel and BLOCKS on any other value (rule G7, gate.ts:70 and gate.ts:312). No value in this table is a converted or interpolated number. P-299 OT-2 (2026-09-17): this table's 84 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- a browser render of the Municode page (a plain fetch of the citation_url returns the SPA shell and no ordinance text). The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
+  "districts": [
+    {
+      "district_name": "A-OS Agricultural-Open Space District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.01(E)(1)(a): \"The minimum depth of the front yard setback line for Residential Dwelling shall be twenty-five (25) feet.\" 150 ft applies to agricultural buildings (barns, animal pens), not dwellings.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.01(E)(3)(a): \"The minimum depth of the rear yard setback line for Residential Dwelling shall be twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.01(E)(2)(a): \"The minimum depth of the side yard setback line for Residential Dwelling shall be ten (10) feet.\" 25 ft (abutting another agricultural tract) / 150 ft (abutting Residential District) apply to agricultural buildings, not dwellings.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "App. B Table 1 row: \"| A-OS | 6,000 sq. ft. per D. U. 2 acres for Ag | 60' for D. U. | 100' for D. U. | 25' for D. U. 150' for Ag Bldg | 25' for D. U. 150' for Ag Bldg | 10' for D. U. | 35' | 55% |\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.01(D): \"Height regulations. No building shall exceed thirty-five (35) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.02(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" (coded for A-OS from Table 1's 55% column: \"| A-OS | 6,000 sq. ft. per D. U. 2 acres for Ag | 60' for D. U. | 100' for D. U. | 25' for D. U. 150' for Ag Bldg | 25' for D. U. 150' for Ag Bldg | 10' for D. U. | 35' | 55% |\")",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.01",
+          "quote": "Sec. 3.02(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap. (Table 1 A-OS row: \"| A-OS | 6,000 sq. ft. per D. U. 2 acres for Ag | 60' for D. U. | 100' for D. U. | 25' for D. U. 150' for Ag Bldg | 25' for D. U. 150' for Ag Bldg | 10' for D. U. | 35' | 55% |\")",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 55,
+      "max_impervious_pct": 55
+    },
+    {
+      "district_name": "R-1 Single-Family Residential District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "App. B Table 1 row: \"| R-1 | 6,000 sq. ft. per D. U. | 60' for D. U. | 100' for D. U. | 25' per D. U. | 25' for D. U. | 6' for D. U. | 2½ Stories or 35' | 55% |\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "App. B Table 1 row: \"| R-1 | 6,000 sq. ft. per D. U. | 60' for D. U. | 100' for D. U. | 25' per D. U. | 25' for D. U. | 6' for D. U. | 2½ Stories or 35' | 55% |\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "App. B Table 1 row: \"| R-1 | 6,000 sq. ft. per D. U. | 60' for D. U. | 100' for D. U. | 25' per D. U. | 25' for D. U. | 6' for D. U. | 2½ Stories or 35' | 55% |\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "Sec. 3.02(E)(2)(d): \"For accessory buildings located on corner lots there shall be a side yard from the intersecting street of not less than fifteen (15) feet in case such lot is back to back with another corner lot, and twenty-five (25) feet in every other case. The interior side yard of a corner lot shall be the same as for dwellings and accessory buildings on an interior lot.\" The district states NO corner-side yard for the dwelling itself; the code is silent, so nothing is asserted here.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "Sec. 3.02(C): \"No building shall exceed two and one-half (2½) stories or thirty-five (35) feet in height.\" 35 ft is the ordinance's own feet figure, not a conversion.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "Sec. 3.02(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.02",
+          "quote": "Sec. 3.02(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 6,
+      "side_corner_ft": 6,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 55,
+      "max_impervious_pct": 55
+    },
+    {
+      "district_name": "RLD Single-Family and Duplex Dwelling District (low density)",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(D)(1)(a): \"The minimum depth of the front yard setback shall be twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "App. B Table 1 row: \"| RLD | 6,000 sq. ft. per D. U. | 60' for D. U. | 100' for D. U. | 25' per D. U. | 25' for D. U. | 6' for D. U. | 2½ Stories or 35' | 55% |\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(D)(2)(a): \"For dwelling located on interior lots there shall be a side yard setback on each side of the main building of not less than six (6) feet for dwellings of one (1) story, and of not less than seven and one-half (7½) feet for dwellings more than one (1) story.\" 6 ft (one-story) coded as the base; the 7-1/2 ft figure is the real condition for dwellings over one story.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(D)(2)(d): \"For accessory buildings located on corner lots there shall be a side yard from the intersecting street of not less than fifteen (15) feet in case such lot is back to back with another corner lot, and twenty-five (25) feet in every other case.\" As in R-1, this clause names accessory buildings only; the ordinance states no corner-side yard for the dwelling, so nothing is asserted.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(C): \"No building shall exceed two and one-half (2½) stories or thirty-five (35) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.03",
+          "quote": "Sec. 3.03(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 6,
+      "side_corner_ft": 6,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 55,
+      "max_impervious_pct": 55
+    },
+    {
+      "district_name": "RMD Single-Family, Two-Family, and Multi-Family Dwelling District (medium density)",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.04(D)(1)(a): \"The minimum depth of the front yard shall be fifteen (15) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.04(D)(3)(a): \"There shall be a rear yard for a main building of not less than ten (10) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.04(D)(2)(a): \"For dwellings located on interior lots there shall be a side yard on each side of the main building of not less than five (5) feet for dwellings of one (1) story, and not less than seven and one-half (7½) feet for dwellings of more than one (1) story.\" 5 ft coded as the base.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.04(D)(2)(c): \"For dwelling and accessory buildings located on corner lots there shall be a side yard setback from the intersecting street of not less ten (10) feet in case such lot is back to back with another lot, and fifteen (15) feet in every other case.\" 15 ft (the general, non-back-to-back case) is coded; 10 ft applies only where the lot is back to back with another corner lot.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.04(C)(1): \"No building shall exceed two (2) standard stories or thirty-five (35) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": ".",
+          "quote": "S",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.04",
+          "quote": "Sec. 3.02(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 15,
+      "rear_ft": 10,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 55,
+      "max_impervious_pct": 55
+    },
+    {
+      "district_name": "RHD Multi-Family Dwelling District (high density)",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05(D)(1)(a): \"There shall be a front yard having a minimum depth of not less than twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05(D)(3)(a): \"There shall be a rear yard for a main building of not less than fifteen (15) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05(D)(2)(a): \"For dwellings located on interior lots there shall be a side yard on each side of the main building of not less than five (5) feet for dwellings of one (1) story, and not less than seven and one-half (7½) feet for dwellings of more than one (1) story.\" 5 ft coded as the base.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05(D)(2)(c): \"For dwelling and accessory buildings located on corner lots there shall be a side yard setback from the intersecting street of not less ten (10) feet in case such lot is back to back with another lot, and fifteen (15) feet in every other case.\" 15 ft (the general case) is coded.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05(C): \"No buildings shall exceed three and one-half (3½) stories or forty (40) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Table 1 RHD row defers with \"See Section 3.05 F\" -- and Sec. 3.05(F) (Lot regulations / \"Lot coverage\") contains NO coverage percentage at all: its subsections are a per-unit lot-area schedule (efficiency 1,000 sf, 1-bedroom 1,400 sf, 2-bedroom 2,300 sf) and a \"Livability open space\" minimum of 30% of gross land area. The ordinance states no numeric lot-coverage cap for RHD, so none is asserted.",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.05",
+          "quote": "Sec. 3.05 contains no impervious-cover standard distinct from lot coverage; RHD also states no lot-coverage cap (see max_lot_coverage_pct). Not specified.",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "MH Manufactured Home Dwelling District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(D)(1)(a): \"The minimum depth of the front yard setback shall be twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(D)(3)(a): \"The minimum depth of the rear yard setback line shall be twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(D)(2)(a): \"For dwelling located on interior lots there shall be a side yard setback on each side of the main building of not less than six (6) feet for dwellings of one (1) story, and of not less than seven and one-half (7½) feet for dwellings more than one (1) story.\" 6 ft coded as the base.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(D)(2)(d): \"For accessory buildings located on corner lots there shall be a side yard from the intersecting street of not less than fifteen (15) feet in case such lot is back to back with another corner lot, and twenty-five (25) feet in every other case.\" Accessory buildings only; the ordinance states no corner-side yard for the dwelling itself, so nothing is asserted.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(C): \"No building shall exceed two (2) stories or thirty-five (35) feet in height,\" plus \"Manufactured homes shall not be allowed to exceed original designed height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "CONFLICT, FLAGGED NOT RESOLVED: Table 1 codes MH at 40% (\"| MH | 6,000 sq. ft. per D. U. | 60' for D. U. | 100' for D. U. | 25' per D. U. | 25' for D. U. | 6' for D. U. | 2½ Stories or 35' | 40% |\") while Sec. 3.06(F)(1) states 55% (\"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\"). The more restrictive figure (40%) is coded and the ordinance's own summary-table figure is quoted in full; the operative clause is the 55% one. Confirm against the ordinance before relying on either.",
+          "confidence": 0.6,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.06",
+          "quote": "Sec. 3.06(F)(1): \"Main building, accessory buildings, and all impervious surface areas shall not cover more than fifty-five (55) percent of lot area.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap. NOTE: this is the operative clause figure (55%), which conflicts with Table 1's 40% for this district -- see max_lot_coverage_pct.",
+          "confidence": 0.65,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 6,
+      "side_corner_ft": 6,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 55
+    },
+    {
+      "district_name": "C-1 Neighborhood Shopping District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(E)(1)(a): \"All buildings shall set back from the street right-of-way line to provide a front yard having not less than twenty-five (25) feet in depth.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(E)(3)(b): \"Minimum rear yard shall be twenty (20) feet.\" Sec. 3.07(E)(3)(a) adds 25 ft where the rear adjoins a residential district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(E)(2)(c): \"Minimum-interior -- There shall be a side yard setback of not less ten (10) feet.\" Sec. 3.07(E)(2)(d) states an exterior (25 ft) figure and Sec. 3.07(E)(2)(a) states 25 ft where the side adjoins a residential district; Table 1 defers to Sec. 3.07(E)(2) rather than stating a number in the side column.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(E)(2)(b): \"There shall be a side yard setback from an intersecting street of not less than twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(D)(1): \"No building shall exceed two and one-half (2½) stories or thirty (30) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(F)(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.07",
+          "quote": "Sec. 3.07(F)(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "C-2 General Commercial District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Sec. 3.08(E)(1)(c): \"All buildings shall set back from the street right-of-way line to provide a front yard having not less than twenty-five (25) feet in depth.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Table 1 codes C-2 rear at 0': \"| C-2 | By Approved Plan | 60' | 100' | 25' | 0' | 0' | 2½ Stories or 30' | 50% |\". Sec. 3.08(E)(3)(a) states: \"The rear of a lot adjoining a residential district there shall be a rear yard of not less than twenty-five (25) feet, same as the requirements for a side yard.\" 0 is the general-case base with no numeric cap; 25 ft is a real conditional exception where the rear adjoins a residential district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Table 1 codes C-2 side at 0': \"| C-2 | By Approved Plan | 60' | 100' | 25' | 0' | 0' | 2½ Stories or 30' | 50% |\". Sec. 3.08(E)(2)(a) states: \"On the side of a lot adjoining a residential district there shall be a side yard of not less than ten (10) feet.\" 0 is the general-case base; 10 ft is a real conditional exception on a side adjoining a residential district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Sec. 3.08(E)(2)(a): \"There shall be a side yard setback from an intersecting street of not less than twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Sec. 3.08(D)(1): \"No building shall exceed two and one-half (2½) stories or thirty (30) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Sec. 3.08(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.08",
+          "quote": "Sec. 3.08(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 25,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "C-3 Highway Commercial District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "Sec. 3.09(E)(1)(a): \"All buildings shall be setback from the street right-of-way line to provide a front yard having not less than fifty (50) feet in depth.\" Table 1 agrees (Front 50').",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "CONFLICT, FLAGGED NOT RESOLVED: Sec. 3.09(E)(3)(a) states \"On the rear yard of a lot there shall be a rear yard of not less than twenty-five (25) feet,\" while Table 1 codes C-3 rear at 10' (\"| C-3 | 3,000 sq. ft. | 30' | 100' | 50' | 10' | 25' | 3½ Stories or 40' | 50% |\") and side at 25' -- an apparent transposition between the summary table's Rear and Side columns. The operative section figure (25 ft, also the more restrictive) is coded.",
+          "confidence": 0.65,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "CONFLICT, FLAGGED NOT RESOLVED: Sec. 3.09(E)(2)(a) states \"On the side of a lot there shall be a side yard of not less than ten (10) feet,\" while Table 1 codes C-3 side at 25' (\"| C-3 | 3,000 sq. ft. | 30' | 100' | 50' | 10' | 25' | 3½ Stories or 40' | 50% |\"). The operative section figure (10 ft, also the more restrictive) is coded.",
+          "confidence": 0.65,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "Sec. 3.09(E)(2)(a): \"There shall be a side yard setback from an intersecting street of not less than twenty-five (25) feet.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "Sec. 3.09(D)(1): \"No building shall exceed three and one-half (3½) stories or forty (40) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "Sec. 3.09(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.09",
+          "quote": "Sec. 3.09(G)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 50,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 25,
+      "max_height_ft": 40,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "D Downtown District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(E)(3): \"There are no specific front, side, or rear yard requirements for uses in this district.\" Sec. 3.10(E)(3)(a) adds: \"All buildings should set back a distance of not less than twenty-five (25) feet from the lot line that adjoins a residential district.\" 0 is the district's general case (no required yard); the 25 ft residential-adjacency figure is a real conditional requirement.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(E)(3) (same clause): \"There are no specific front, side, or rear yard requirements for uses in this district.\" 0 codes \"no specific requirement\"; the 25 ft residential-adjacency condition applies here too.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(E)(3) (same clause): \"There are no specific front, side, or rear yard requirements for uses in this district.\" 0 codes \"no specific requirement\"; the 25 ft residential-adjacency condition applies here too.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(E)(3) states no separate corner-lot / intersecting-street side yard for the D district (\"There are no specific front, side, or rear yard requirements for uses in this district\"); Table 1 leaves the D row's Front/Rear/Side columns blank. Nothing is asserted.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(D)(1): \"No building shall exceed three and one-half (3½) stories or thirty-five (35) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(G): \"Lot coverage. For each main building and secondary building including impervious surfaces of the lot should not exceed ninety-five (95) percent.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.10",
+          "quote": "Sec. 3.10(G): \"Lot coverage. For each main building and secondary building including impervious surfaces of the lot should not exceed ninety-five (95) percent.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 0,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 95,
+      "max_impervious_pct": 95
+    },
+    {
+      "district_name": "I General Industrial District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(D)(1)(a): \"There is no specific front yard requirements for uses in this district.\" Sec. 3.11(D)(1)(b) adds: \"All buildings shall set back a distance of not less than twenty-five (25) feet from the front lot line that adjoins a residential district.\" 0 codes \"no specific requirement\".",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(D)(3): \"Where a building is to be serviced from the rear there shall be provided an alley, service court, rear yard or combination thereof of not less than thirty (30) feet in width ... In all other cases no rear yard is required; provided, however, all buildings shall set back a distance of not less than twenty-five (25) feet from the rear lot line that adjoins a residential district.\" 0 codes the \"no rear yard is required\" general case; 30 ft (rear-serviced buildings) and 25 ft (residential-adjacent) are real conditions.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(D)(2)(a): \"There is no specific side yard requirements for uses in this district.\" Sec. 3.11(D)(2)(b) adds 25 ft from a side lot line adjoining a residential district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(D)(2)(a) states no separate corner-lot / intersecting-street side yard (\"There is no specific side yard requirements for uses in this district\"); Table 1 defers to Sec. 3.11(D)(2) rather than stating a number. Nothing is asserted.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(C): \"Height regulations. No building shall exceed thirty-five (35) feet in height.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(F)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.11",
+          "quote": "Sec. 3.11(F)(1): \"For each main building and secondary building including impervious surfaces of the lot shall not exceed fifty (50) percent, unless designed retention drainage, as approved by city engineer or designee, is provided.\" The same clause is the only impervious-surface standard in the district -- Luling states no separate impervious cap.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      },
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 0,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "P&I Public and Institutional District",
+      "citation_url": "https://library.municode.com/tx/luling/codes/code_of_ordinances",
+      "provenance": {
+        "front_ft": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\" Table 1 codes every P&I column \"Reserve\".",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "App. B Sec. 3.13",
+          "quote": "Sec. 3.13(C)(1) \"Reserved.\" and Sec. 3.13(D)(1) \"Reserved.\"; Sec. 3.13(B) states: \"Height, yard, lot, and parking regulations will be determined by the Planning and Zoning Commission and recommended to the City Council on a case by case basis taking into consideration the location of the proposed public and institutional land use and the surrounding land uses.\"",
+          "confidence": 0.6,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    }
+  ]
+}

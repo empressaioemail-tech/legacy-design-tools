@@ -1,0 +1,531 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "woodway-tx",
+  "jurisdictionDisplayName": "City of Woodway, TX",
+  "note": "Woodway, TX -- the nine districts for which the Zoning Ordinance (Appendix A to the Woodway Code of Ordinances) states a numeric dimensional block, read from Parts Two through Five of that ordinance. ROUTE: Woodway's official publication is on Municode at library.municode.com/tx/woodway/codes/code_of_ordinances (Appendix A, ZONING). Municode returns a JavaScript shell with no server-rendered ordinance text to a plain fetch on this pass, so Municode could NOT be read and is NOT the source of any value in this table. The text was read instead as rendered ordinance pages on Zoneomics at .../woodway-TX/chapter_N, where chapter_N is Part N of Appendix A: chapter_2 = Part Two (districts and use), chapter_3 = Part Three (height), chapter_4 = Part Four (yards), chapter_5 = Part Five (lot areas and widths), chapter_6 = Part Six (off-street parking). That is a live, fetchable third-party mirror of the city's ordinance, not a dead document, but it is a mirror: the authoritative Municode route was tried and failed, and every quote below is from the mirror. VINTAGE: no single adoption or effective date for Appendix A is stated on the route read, so none is asserted here. What the text does carry is a per-section amendment stamp, read at source, and the sections coded here carry these: Section 3.101 'Amended 2-25-85; 2-14-05; 4-25-05'; Section 3.102 'Amended 10-21-74, 5-22-95, 7-10-06, 10-6-08'; Section 3.103 'Amended 12-27-04'; Section 3.104 'Added 7-10-06'; Section 4.101 'Amended 2-25-85, 5-6-91, 7-10-06'; Section 4.202 and Section 4.102 'Amended 7-10-06'; Section 2.105 'Added 4-25-05'; Section 2.109 'Added 4-13-03; Amended 7-10-06'. The latest amendment stamp encountered anywhere in the parts read is 12-5-2016 (Section 2.107, M-P), which bounds the vintage of the document read but is not a statement that the sections coded here were amended then. OMITTED AND WHY: (1) R-MH Manufactured Homes District -- Section 2.101B ('Added 2-25-85; Amended 7-10-06; Amended 8-6-12') states one thing and one thing only: permitted land use is 'HUD-code manufactured home parks as provided in Chapter 9 of the Code of Ordinances of the City of Woodway, Texas.' It states no yard, height, area or coverage standard, and Part Four's yard section does not list R-MH among the districts to which yards are provided. Those standards live in Chapter 9 of the Code of Ordinances, which is outside the zoning ordinance read here, so no row is invented for R-MH. (2) PUD Planned Unit Development District -- Section 2.508 provides that 'Yard, setback, lot size, and frontage requirements, may be waived for all residential property for the Planned Unit Development provided that the spirit and intent of this Ordinance are complied with in the total development plan, as determined by the Planning and Zoning Commission', so a single Euclidean row would misrepresent it; its nonresidential lots take 'the most restrictive requirements set forth for these uses' elsewhere in the ordinance. PART FOUR'S STRUCTURE: the yard section is not a district-by-district table. Section 4.101 states yards for R-1/R-D/R-2/R-P (dwellings) and for churches, public buildings and institutions in those districts; Section 4.102 states that P-C, M and M-P have no minimum yard requirements; the corner-lot and adjacency rules for all districts live in Section 4.202 (R, P-C, M) and Section 4.203 (P-C, M-P, M where a lot rears upon an R district). The O-P and LR-P districts were added by later ordinances and carry their dimensional figures in their own use sections (Section 2.105 and Section 2.109), not in Part Four -- which is why those two rows cite chapter_2. NON-SCALAR CELLS FLAGGED not_specified rather than flattened: (1) the R-district rear yard is 'at least thirty (30) per cent of the depth of the lot' capped at 40 ft with a 25-ft floor and a conditional encroachment -- a proportion, coded at the stated floor and flagged; (2) the R-district corner side yard is 15 ft except on separate tracts under 75 ft wide, where 20% of lot width applies so long as buildable width stays at least 30 ft -- coded at the general 15 ft with the alternative quoted; (3) O-P's 80% figure is building AND paving coverage ('Building and paving may not cover more than eighty (80) per cent of the lot surface area'), which is not a building-footprint cap, so max_lot_coverage_pct is flagged there rather than read as one. Heights are coded at the binding base figure where the ordinance also allows a council-approved increase (R districts 45 ft with 60 ft on council approval; P-C 35 ft with 45 ft; M and M-P 70 ft with 80 ft), and the trade-up is preserved verbatim in the quote at reduced confidence. LR-P: the district is in neither Section 4.101 nor Section 4.102, and Section 2.109 states no front, side or rear yard standard of its own. Its only dimensional figures are a 45-ft building setback tied to the front-yard parking rule and a 30-ft landscaped buffer to residential property. Its yard fields are therefore not_specified rather than 0, because the ordinance does not say 'no yard required' for LR-P the way it does for P-C, M and M-P. P-299 OT-2 (2026-09-17): this table's 63 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- Zoneomics, a live third-party mirror; the authoritative Municode route was tried and failed with a JavaScript shell. The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
+  "districts": [
+    {
+      "district_name": "R-1 Single Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.101.A.1",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.101.A.3",
+          "quote": "R-1, R-D, R-2, R-P Districts: A. Dwellings shall have: 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line. Provided, however, that the principal structure located on the lot may extend into the required rear yard area under the following criteria: (a) The width of that portion of the residence extending into the 30%/40 foot rear yard area may not, itself, exceed fifty (50) per cent of the width of the principle residential structure when both are measured at their widest point; (b) In no event shall the rear yard be less than twenty-five (25) feet in depth at any point measured from the rear property line. -- The rear yard is a proportion of lot depth with a cap and a floor plus a conditional encroachment, not a scalar; 25 (the stated floor) is coded and flagged, do not read it as a flat 25 ft rear yard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "4.101.A.2",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the R Districts, there shall be a yard along the side-street side of such tract of at least fifteen (15) feet, except that, in the case of separate tracts which are less than seventy-five (75) feet in width, only twenty (20) per cent of the width of the lot need be provided for such yard, so long as the buildable width of a corner lot shall never be less than thirty (30) feet. -- 15 ft is the general rule; the 20%-of-width alternative applies only to narrow separate tracts and is quoted here, not collapsed into the single number.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.101.A",
+          "quote": "R-1, R-D, R-2 and R-P Districts: (Amended 2-25-85; 2-14-05; 4-25-05) A. For detached single dwellings the maximum height shall not exceed forty-five (45) feet or two and one-half (2 1/2) stories except as provided below. B. The maximum height may be increased to sixty (60) feet upon approval of the City Council after review and recommendation of the Planning and Zoning Commission and public hearings... -- 45 ft is the binding base; the 60-ft council-approved increase is real and is in the quote, not averaged in.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-D Duplex Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.101.A.1",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.101.A.3",
+          "quote": "R-1, R-D, R-2, R-P Districts: A. Dwellings shall have: 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line. Provided, however, that the principal structure located on the lot may extend into the required rear yard area under the following criteria: (a) The width of that portion of the residence extending into the 30%/40 foot rear yard area may not, itself, exceed fifty (50) per cent of the width of the principle residential structure when both are measured at their widest point; (b) In no event shall the rear yard be less than twenty-five (25) feet in depth at any point measured from the rear property line. -- The rear yard is a proportion of lot depth with a cap and a floor plus a conditional encroachment, not a scalar; 25 (the stated floor) is coded and flagged, do not read it as a flat 25 ft rear yard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "4.101.A.2",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the R Districts, there shall be a yard along the side-street side of such tract of at least fifteen (15) feet, except that, in the case of separate tracts which are less than seventy-five (75) feet in width, only twenty (20) per cent of the width of the lot need be provided for such yard, so long as the buildable width of a corner lot shall never be less than thirty (30) feet. -- 15 ft is the general rule; the 20%-of-width alternative applies only to narrow separate tracts and is quoted here, not collapsed into the single number.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.101.A",
+          "quote": "R-1, R-D, R-2 and R-P Districts: A. For detached single dwellings the maximum height shall not exceed forty-five (45) feet or two and one-half (2 1/2) stories except as provided below.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-2 Multi-Family Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.101.A.1",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.101.A.3",
+          "quote": "R-1, R-D, R-2, R-P Districts: A. Dwellings shall have: 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line. Provided, however, that the principal structure located on the lot may extend into the required rear yard area under the following criteria: (a) The width of that portion of the residence extending into the 30%/40 foot rear yard area may not, itself, exceed fifty (50) per cent of the width of the principle residential structure when both are measured at their widest point; (b) In no event shall the rear yard be less than twenty-five (25) feet in depth at any point measured from the rear property line. -- The rear yard is a proportion of lot depth with a cap and a floor plus a conditional encroachment, not a scalar; 25 (the stated floor) is coded and flagged, do not read it as a flat 25 ft rear yard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "4.101.A.2",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the R Districts, there shall be a yard along the side-street side of such tract of at least fifteen (15) feet, except that, in the case of separate tracts which are less than seventy-five (75) feet in width, only twenty (20) per cent of the width of the lot need be provided for such yard, so long as the buildable width of a corner lot shall never be less than thirty (30) feet. -- 15 ft is the general rule; the 20%-of-width alternative applies only to narrow separate tracts and is quoted here, not collapsed into the single number.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.101.A",
+          "quote": "R-1, R-D, R-2 and R-P Districts: A. For detached single dwellings the maximum height shall not exceed forty-five (45) feet or two and one-half (2 1/2) stories except as provided below.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "R-P Planned Residential District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.101.A.1",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.101.A.3",
+          "quote": "R-1, R-D, R-2, R-P Districts: A. Dwellings shall have: 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line. Provided, however, that the principal structure located on the lot may extend into the required rear yard area under the following criteria: (a) The width of that portion of the residence extending into the 30%/40 foot rear yard area may not, itself, exceed fifty (50) per cent of the width of the principle residential structure when both are measured at their widest point; (b) In no event shall the rear yard be less than twenty-five (25) feet in depth at any point measured from the rear property line. -- The rear yard is a proportion of lot depth with a cap and a floor plus a conditional encroachment, not a scalar; 25 (the stated floor) is coded and flagged, do not read it as a flat 25 ft rear yard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "4.101.A.2",
+          "quote": "R-1, R-D, R-2, R-P Districts: (Amended 2-25-85, 5-6-91, 7-10-06) A. Dwellings shall have: 1. Minimum front yard of twenty-five (25) feet measured from the property line. 2. Minimum side yard of ten (10) feet measured from the property line. 3. A minimum rear yard of at least thirty (30) per cent of the depth of the lot but shall not be required to exceed forty (40) feet in depth at any point when measured from the rear property line.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the R Districts, there shall be a yard along the side-street side of such tract of at least fifteen (15) feet, except that, in the case of separate tracts which are less than seventy-five (75) feet in width, only twenty (20) per cent of the width of the lot need be provided for such yard, so long as the buildable width of a corner lot shall never be less than thirty (30) feet. -- 15 ft is the general rule; the 20%-of-width alternative applies only to narrow separate tracts and is quoted here, not collapsed into the single number.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.101.A",
+          "quote": "R-1, R-D, R-2 and R-P Districts: A. For detached single dwellings the maximum height shall not exceed forty-five (45) feet or two and one-half (2 1/2) stories except as provided below.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "4.101",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "P-C Planned Commercial District",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 5,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the P-C and M Districts, there shall be a yard along the side-street side of such tract of at least five (5) feet.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.102.A",
+          "quote": "P-C and O-P Districts: (Amended 10-21-74, 5-22-95, 7-10-06, 10-6-08) A. Two and one-half (2 1/2) stories or thirty-five (35) feet in a P-C or O-P District; or B. Three and one-half (3 1/2) stories or forty-five (45) feet in a P-C or O-P District upon approval of the City Council... or C. Six (6) stories and seventy (70) feet in a P-C District which is located within the Building Height Overlay District... -- 35 ft is the binding base figure by right; the 45-ft and 70-ft figures require council approval or an overlay location and are quoted, not averaged in.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.102",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.102",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "O-P Planned Office-Park District",
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_2",
+      "provenance": {
+        "front_ft": {
+          "section_number": "2.105",
+          "quote": "2.105: In the O-P Planned Office-Park District: (Added 4-25-05) ... The development plan must provide a minimum of twenty-five (25) foot front and rear setbacks and ten (10) foot side setbacks. Side yards adjacent to residential uses must comply with the greenbelt requirements in F., below.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "2.105",
+          "quote": "2.105: In the O-P Planned Office-Park District: (Added 4-25-05) ... The development plan must provide a minimum of twenty-five (25) foot front and rear setbacks and ten (10) foot side setbacks.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "2.105",
+          "quote": "2.105: In the O-P Planned Office-Park District: (Added 4-25-05) ... The development plan must provide a minimum of twenty-five (25) foot front and rear setbacks and ten (10) foot side setbacks. Side yards adjacent to residential uses must comply with the greenbelt requirements in F., below.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "2.105",
+          "quote": "Section 2.105 (O-P) states front, rear and side setbacks and a 25-ft landscaped greenbelt where lots abut residential areas, and states no separate corner-lot or street-side side yard figure. (Section 4.202's five-foot corner rule names P-C and M, not O-P.)",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "2.105",
+          "quote": "2.105: In the O-P Planned Office-Park District: (Added 4-25-05) ... Buildings shall not exceed thirty-five (35) feet in height unless approved by the City Council, after review and recommendation of the Planning and Zoning Commission and public hearings before the Planning and Zoning Commission and the City Council... The City Council may not approve a building height greater than forty-five (45) feet. -- 35 ft is the by-right figure; 45 ft is the absolute council-approved ceiling and is quoted, not coded.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "2.105",
+          "quote": "Section 2.105 (O-P) states 'Building and paving may not cover more than eighty (80) per cent of the lot surface area.' That is a building-PLUS-PAVING coverage ceiling, not a building-footprint cap, so it is coded at 80 with not_specified set rather than being read as max_lot_coverage_pct.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "2.105",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "M Industrial District",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 5,
+      "max_height_ft": 70,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.202",
+          "quote": "On corner lots in the P-C and M Districts, there shall be a yard along the side-street side of such tract of at least five (5) feet.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.103",
+          "quote": "M-P and M Districts: (Amended 12-27-04) Any building may be erected to a height of seventy (70) feet provided that the building is setback at least one (1) foot for every foot of height exceeding thirty-five (35) feet and provided that the building height does not exceed the seventy (70) foot height restriction from any point where it is measured...; or Upon approval of the City Council... a building may be erected to a height of eighty (80) feet provided that the building is set back at least one (1) foot for every foot of height exceeding thirty-five (35) feet... -- 70 ft is the stated by-right maximum; the 1:1 setback trade above 35 ft and the 80-ft council-approved alternative are real additional conditions and are quoted, not collapsed into the number.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.103",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.103",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "M-P Planned Industrial District",
+      "front_ft": 0,
+      "rear_ft": 0,
+      "side_ft": 0,
+      "side_corner_ft": 100,
+      "max_height_ft": 70,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_4",
+      "provenance": {
+        "front_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "4.102",
+          "quote": "4.102: P-C, M, and M-P Districts: Except as provided in Section 4.2 and at the discretion of the Planning and Zoning Commission there are no minimum yard requirements for P-C, M Districts, or M-P Districts. (Amended 7-10-06) -- 0 is coded for 'no yard required', which is a real standard, not a gap; the Planning and Zoning Commission's discretion and the Section 4.2 adjacency and corner rules are real additional conditions and are quoted where they govern.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "4.203",
+          "quote": "On corner lots in the P-C, M-P and M Districts that rear upon the R District, a ten-foot yard must be provided along the side-street side. -- Section 4.202's five-foot corner rule names P-C and M only, so M-P has no unconditional corner side-yard figure; its only corner rule is this 10-ft requirement conditioned on the lot rearing upon an R district. No figure is coded as a flat M-P corner yard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "3.103",
+          "quote": "M-P and M Districts: (Amended 12-27-04) Any building may be erected to a height of seventy (70) feet provided that the building is setback at least one (1) foot for every foot of height exceeding thirty-five (35) feet...; or Upon approval of the City Council... a building may be erected to a height of eighty (80) feet... -- 70 ft is the stated by-right maximum; the 1:1 setback trade and the 80-ft alternative are quoted.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.103",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.103",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "LR-P Planned Local Retail District",
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100,
+      "citation_url": "https://www.zoneomics.com/code/woodway-TX/chapter_2",
+      "provenance": {
+        "front_ft": {
+          "section_number": "2.109",
+          "quote": "Article 3 Section 2.109 (LR-P Planned Local Retail District) states no front, side or rear yard standard of its own: its dimensional content is 'In a LR-P Zoning District, a 30-foot-wide, landscaped buffer zone will be required between the LR-P Zoning area and residential properties' and 'no parking spaces may be provided in the front yard, unless the building is set back at least forty-five (45) feet from the street right-of-way'. Part Four (Section 4.101 and Section 4.102) does not list the LR-P district at all, and LR-P is not among the districts Section 4.102 says have no minimum yards. No front-yard figure is coded.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "rear_ft": {
+          "section_number": "2.109",
+          "quote": "Article 3 Section 2.109 (LR-P) states no rear yard standard. Part Four Section 4.101 (R-1, R-D, R-2, R-P) and Section 4.102 (P-C, M, M-P) do not list LR-P. No rear-yard figure is coded.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "2.109",
+          "quote": "Article 3 Section 2.109 (LR-P) states no side yard standard, and Part Four does not list the LR-P district. No side-yard figure is coded.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "2.109",
+          "quote": "Article 3 Section 2.109 (LR-P) states no corner-lot or street-side yard standard, and Part Four's corner rules (Sections 4.202 and 4.203) name the R, P-C, M and M-P districts only. No corner figure is coded.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_height_ft": {
+          "section_number": "3.104",
+          "quote": "LR-P District: (Added 7-10-06) Any building may be erected to a height of two and one-half (2 1/2) stories or thirty-five (35) feet.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.104",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.104",
+          "quote": "No lot-coverage or impervious-coverage standard exists in the Woodway Zoning Ordinance for this district. Part Four regulates yards, Part Three height and Part Five minimum lot areas and widths; a full-text read of Parts 2-6 returns coverage figures in only two places, neither of them a district lot-coverage cap: Section 2.105 (O-P, 'building and paving may not cover more than eighty (80) per cent of the lot surface area', a building-plus-paving metric on a planned office-park district) and the PUD performance criteria at Section 2.503.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}

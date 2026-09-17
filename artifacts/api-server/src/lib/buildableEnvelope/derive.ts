@@ -47,6 +47,12 @@ export interface BuildableEnvelopeProps {
       side?: boolean;
       rear?: boolean;
       side_corner?: boolean;
+      /**
+       * True when max_height_ft is a stated absence (provenance flag, or the
+       * canonical 999 sentinel): `maxHeightFt` is null for the same reason and
+       * must not be read as "no limit" or as a real height (P-299).
+       */
+      max_height?: boolean;
     };
   };
   /** How the front edge was inferred. */
@@ -60,6 +66,13 @@ export interface BuildableEnvelopeProps {
   buildableAreaPct: number;
   /** Dimensional caps that feed downstream ADU/addition sizing. */
   maxLotCoveragePct: number | null;
+  /**
+   * Feet, or null when the code states no feet height for this district.
+   * NEVER the corpus's 999 stated-absence sentinel (P-299): the sentinel means
+   * "read the provenance flag", and a consumer that reads it as a number sizes
+   * a 999-foot building. `setbacks.not_specified.max_height` says the same
+   * thing in the props' own vocabulary.
+   */
   maxHeightFt: number | null;
   /** Max footprint (sqft) = envelope area capped by lot coverage of the PARCEL. */
   maxFootprintSqFt: number | null;
@@ -132,6 +145,40 @@ function fieldNotSpecified(
   );
 }
 
+/**
+ * The canonical "the code states no feet limit" sentinel for max_height_ft
+ * (hauska-setback-corpus rule G7 / `NOT_SPECIFIED_MAX_HEIGHT_FT`).
+ *
+ * 999 is not a height any of these codes states — it is a placeholder that only
+ * means "read the flag". The flag is the entire payload: the provenance slot
+ * (`not_specified: true`) carries the meaning and the number carries none.
+ */
+export const NOT_SPECIFIED_MAX_HEIGHT_FT = 999;
+
+/**
+ * True when this district's height limit is ABSENT rather than a number.
+ *
+ * Two spellings map to absent, and both must be treated as absent here:
+ *   1. provenance.max_height_ft.not_specified === true — the honest form.
+ *   2. the bare canonical sentinel 999 with no flag — the form that leaked.
+ *      A table may not ship it (corpus rule G8 blocks it), but this reader sits
+ *      downstream of a JSON file, not of that gate, so it fails closed on the
+ *      value too: 999 ft is not a buildable height and G3's own sanity band tops
+ *      max_height_ft out at 300, so no district can mean 999.
+ *
+ * P-299: before this, the envelope props carried max_height_ft straight through,
+ * so a Round Rock stories-only district surfaced "max height 999 ft" to the UI
+ * and to any consumer sizing an ADU or an addition against it.
+ */
+function heightNotSpecified(d: SetbackDistrict): boolean {
+  const p = d.provenance?.["max_height_ft"];
+  const flagged =
+    !!p &&
+    typeof p === "object" &&
+    (p as { not_specified?: boolean }).not_specified === true;
+  return flagged || d.max_height_ft === NOT_SPECIFIED_MAX_HEIGHT_FT;
+}
+
 function composeDisclosure(
   approximate: boolean,
   labeling: EdgeLabelingResult,
@@ -139,6 +186,7 @@ function composeDisclosure(
   empty: boolean,
   emptyReason?: string,
   notSpecifiedNote?: string,
+  heightNotSpecifiedNote?: string,
 ): string {
   if (empty) {
     // Never default to consume-lot wording: an unexplained empty is a
@@ -155,6 +203,7 @@ function composeDisclosure(
     parts.push("Estimated buildable area");
   }
   if (notSpecifiedNote) parts.push(notSpecifiedNote.replace(/\.$/, ""));
+  if (heightNotSpecifiedNote) parts.push(heightNotSpecifiedNote.replace(/\.$/, ""));
   parts.push(labeling.note.replace(/\.$/, ""));
   parts.push(district.note.replace(/\.$/, ""));
   parts.push(
@@ -217,8 +266,12 @@ export function deriveBuildableEnvelope(
 
   const maxLotCoveragePct =
     typeof d.max_lot_coverage_pct === "number" ? d.max_lot_coverage_pct : null;
+  // P-299: a flagged (or bare-sentinel) height is ABSENT, not 999 feet. The
+  // sentinel is the code's way of saying "no feet scalar here" (Round Rock
+  // states these heights in stories), so it must reach the wire as absence.
+  const heightSilent = heightNotSpecified(d);
   const maxHeightFt =
-    typeof d.max_height_ft === "number" ? d.max_height_ft : null;
+    !heightSilent && typeof d.max_height_ft === "number" ? d.max_height_ft : null;
 
   let maxFootprintSqFt: number | null = null;
   if (!inset.empty && maxLotCoveragePct != null) {
@@ -250,6 +303,12 @@ export function deriveBuildableEnvelope(
   const silentNote = hasSilent
     ? "One or more scalar setbacks are not specified in the code (build-to-line governs); silent axes are not treated as 0 ft entitlements"
     : undefined;
+  // P-299: say the height is absent out loud. Serving null silently would drop
+  // the one fact the reader needs — that the code states no feet height for
+  // this district, rather than that the field is missing from the payload.
+  const heightNotSpecifiedNote = heightSilent
+    ? "The code states no feet-based maximum height for this district (height is stated in stories or not as a feet scalar); no height limit is reported here — check the district's own note and the city before relying on a height"
+    : undefined;
 
   const disclosure = composeDisclosure(
     approximate,
@@ -258,6 +317,7 @@ export function deriveBuildableEnvelope(
     inset.empty,
     emptyReason,
     silentNote,
+    heightNotSpecifiedNote,
   );
 
   const props: BuildableEnvelopeProps = {
@@ -271,7 +331,14 @@ export function deriveBuildableEnvelope(
       rear_ft: d.rear_ft,
       side_corner_ft: d.side_corner_ft,
       district: d.district_name,
-      ...(hasSilent ? { not_specified } : {}),
+      ...(hasSilent || heightSilent
+        ? {
+            not_specified: {
+              ...not_specified,
+              ...(heightSilent ? { max_height: true } : {}),
+            },
+          }
+        : {}),
     },
     edgeSignal: labeling.signal,
     edgeNote: labeling.note,
