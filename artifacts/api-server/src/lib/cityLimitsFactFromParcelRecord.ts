@@ -11,10 +11,13 @@
  * is an honest simplification, not a fabrication -- unmeasured already means
  * "nothing usable was determined" in this type -- but it does discard which
  * REFUSAL it was; the `basis` string carries that detail for a human/log
- * reader even though the structured `status` cannot. etjStatus is always
- * "unresolved" on BOTH the legacy source and this adapter (the legacy
- * containment logic has no buffer/offset path either -- see cad-ingest's own
- * module comment), so this is not a coverage narrowing.
+ * reader even though the structured `status` cannot. etjStatus is "unresolved"
+ * on this adapter's own output: it has no ETJ input, and the legacy
+ * containment logic has no buffer/offset path either (see cad-ingest's own
+ * module comment). P-296 (2026-09-17) reads ETJ at the serve wrapper
+ * (`cityLimitsFactServeCutover.ts`), which overlays the determination from
+ * `tx_etj_boundary` onto whichever branch answered, so the SERVED etjStatus is
+ * a real read while this adapter's own answer stays unchanged.
  *
  * Reads via loadParcelRecordCell (parcelRecordCellRead.ts). cityLimits is a
  * pure scalar rail -- no companion rows (live-verified 2026-09-02): a

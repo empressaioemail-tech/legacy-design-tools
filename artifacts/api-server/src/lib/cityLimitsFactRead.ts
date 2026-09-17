@@ -5,6 +5,12 @@
  * polygons only. ETJ is `etjStatus: unresolved` — this module has no
  * buffer, offset, or guessed-municipality path.
  *
+ * P-296 (2026-09-17): this module still reads no ETJ. The serve wrapper
+ * (`cityLimitsFactServeCutover.ts`) overlays the ETJ determination from
+ * `tx_etj_boundary` onto the wire this module builds, so the served
+ * `etjStatus` is a real read while the city-limits answer itself is
+ * unchanged. A direct `loadCityLimitsFact` call still says `unresolved`.
+ *
  * Empty table or missing usable query point is `unmeasured`, never
  * unincorporated. Unincorporated is only legal when the index is
  * populated and the point sits outside every polygon.
