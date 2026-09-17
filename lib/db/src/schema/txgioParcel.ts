@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   integer,
+  boolean,
   jsonb,
   doublePrecision,
   timestamp,
@@ -103,6 +104,27 @@ export const txgioParcel = pgTable(
      * table lookup on multi-city counties. NULL when no polygon matched.
      */
     zoningJurisdiction: text("zoning_jurisdiction"),
+    /**
+     * TRUE when `zoning_district` was read from a published value carrying a
+     * declared INTERIM qualifier (P-259b, operator ruling 2026-09-17) — Austin's
+     * `I-<base>` family, where the interim designation is granted on annexation
+     * until permanent zoning is established and the base district's standards
+     * apply by ordinance. `zoning_district` holds the BASE district ("I-SF-2-NP"
+     * stamps `SF-2`); this column is the disclosure that the zoning itself is
+     * interim, which is a different fact from "stably zoned SF-2".
+     *
+     * FALSE when a district was stamped from a value with no interim qualifier,
+     * including every layer that configures none. NULL when NOTHING was stamped
+     * (`zoning_district` NULL, or a feature skipped for carrying no CAD
+     * account), so NULL means "no stamp" and never "stamped, interim unknown".
+     *
+     * Written by the stamp's batched UPDATE (`zoning-stamp-db.ts`); migration
+     * 0103 backfills FALSE on rows already stamped before the column existed.
+     * NOTHING READS IT TODAY — no route, no MCP payload, no PDF, no router. It
+     * exists so the fact is recoverable from the store rather than only from a
+     * run log.
+     */
+    zoningDistrictInterim: boolean("zoning_district_interim"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
     /**

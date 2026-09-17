@@ -34,12 +34,25 @@
  * georgetown-tx.json's note for both. DO NOT transform the code before
  * stamping — the leading-token contract does the alignment.
  *
+ * AMENDED 2026-09-17 (P-259): "do not transform the code" holds for every
+ * layer that publishes a base code directly. A layer that publishes a
+ * COMPOUND value (Austin's `ZONING_ZTYPE`: "SF-3-HD-NP", "CS-1-MU-V-NCCD-…")
+ * sets `baseCodeParse`, and the transform is exactly ONE step — resolve the
+ * longest known base district off the front against that city's own setback
+ * vocabulary, discarding nothing (overlays, and any second `/`-joined
+ * district, are carried on the parsed result rather than thrown away). The
+ * stamped result is still a router-normalized district code, so the
+ * leading-token contract above is what does the alignment; the parse only
+ * decides WHICH district the layer is asserting for that polygon.
+ *
  * The stamp is county-scoped (it updates `txgio_parcel` rows for one
  * county) but zoning is a CITY layer, so each config carries the county
  * whose parcels it stamps. A parcel centroid that falls in no zoning
  * polygon (outside the city, or an un-zoned area) is left NULL — honest
  * fallback, never a guessed district.
  */
+
+import type { BaseCodeParseConfig } from "./zoning-base-code";
 
 export interface ZoningLayerConfig {
   /** City key (matches the setback jurisdictionKey stem, e.g. "georgetown-tx"). */
@@ -97,6 +110,21 @@ export interface ZoningLayerConfig {
    */
   codeDomainMap?: Record<string, string>;
   /**
+   * OPTIONAL. Resolve the code to its BASE district before stamping, for
+   * layers whose published value appends combining districts and overlays to
+   * the base with the same separator the base itself uses (`zoning-base-code.ts`
+   * has the finding; Austin's `ZONING_ZTYPE` is the case that motivated it:
+   * the longest-match rule yields `CS-1` where a naive first-token split yields
+   * `CS`, a different row that also exact-matches the router). Applied AFTER
+   * `codeDomainMap` and `codeExtractRegex`.
+   *
+   * When set, a value with no known base district is stamped VERBATIM (never a
+   * truncated prefix) and counted apart, and a planned-development value stamps
+   * its RAW code as before, so A-164's PUD message still fires. Registry entries
+   * are the only place this is set, and only `longest-match` is ever configured.
+   */
+  baseCodeParse?: BaseCodeParseConfig;
+  /**
    * OPTIONAL. Codes that are NOT zoning districts and must never be stamped
    * (left as NULL on the parcel). Example: San Antonio `OCL` (Outside City
    * Limits) and `UZROW` (unzoneable right-of-way). Compared case-insensitively
@@ -110,6 +138,97 @@ export interface ZoningLayerConfig {
    */
   layerWhere?: string;
 }
+
+/**
+ * Austin's base-district vocabulary, in the router's spelling: the 37
+ * `district_name` leading tokens of `lib/adapters/src/local/setbacks/
+ * austin-tx.json` (P-258 added 28 rows to that table on 2026-09-16, taking it
+ * to 37 districts). Listed explicitly rather than read from the table at
+ * runtime: `cad-ingest` does not depend on `adapters`/`api-server`, and a typo
+ * in a table row should not silently become this parser's vocabulary.
+ * `zoning-base-code.test.ts` asserts this list EQUALS the table's
+ * leading-token set (read at source) and that every member normalizes to a
+ * code `mapDistrict` exact-matches, so it cannot drift from the row it must
+ * hit.
+ */
+export const AUSTIN_BASE_CODES = [
+  "SF-1",
+  "SF-2",
+  "SF-3",
+  "SF-4A",
+  "SF-4B",
+  "SF-5",
+  "SF-6",
+  "MF-1",
+  "MF-2",
+  "MF-3",
+  "MF-4",
+  "MF-5",
+  "MF-6",
+  "CS",
+  "CS-1",
+  "GR",
+  "LI",
+  "RR",
+  "P",
+  "LO",
+  "LA",
+  "LR",
+  "MH",
+  "DR",
+  "CBD",
+  "GO",
+  "DMU",
+  "NO",
+  "IP",
+  "W/LO",
+  "CH",
+  "AV",
+  "MI",
+  "AG",
+  "R&D",
+  "CR",
+  "L",
+] as const;
+
+/**
+ * Planned-development codes (A-164: their setbacks come from their own
+ * ordinance, so they get the PUD message rather than a district). Pattern text
+ * and flag are copied VERBATIM from P-255's census
+ * (`doc_repo/scripts/setback-parcel-census.mjs`: `PLANNED_DEVELOPMENT =
+ * /^(PUD|PDD|PD|PC|P-?U-?D)([\s-].*)?$/i`), which P-256 also copied into the
+ * factory writer — three implementations would only be a divergence risk if
+ * they disagreed, so they carry the same formula.
+ *
+ * Austin's measured PD-shaped values (live layer, 2026-09-17): PUD (1,062
+ * polygons), PUD-NP (77), PUD-H-NP (1), PUD-H (1), PUD-NCCD-NP (1) — 1,142
+ * polygons over 5 values, and no value anywhere in the layer starts with
+ * `PD`, `PDD` or `PC`. `LI-PUD` (3 polygons) is NOT PD-shaped by this
+ * start-anchored formula: it stamps LI with PUD carried as an overlay, and
+ * `I-PUD` (1) is interim, so it reads as planned development under
+ * {@link AUSTIN_INTERIM_QUALIFIERS}. That is deliberate — see the ORDER note
+ * in zoning-base-code.ts.
+ */
+export const PLANNED_DEVELOPMENT_PATTERN = "^(PUD|PDD|PD|PC|P-?U-?D)([\\s-].*)?$";
+export const PLANNED_DEVELOPMENT_FLAGS = "i";
+
+/**
+ * Austin's INTERIM qualifier (P-259b, operator ruling 2026-09-17). The layer
+ * publishes an interim family as `I-<base>` over 14 live values / 1,229
+ * polygons: `I-SF-2` (662), `I-RR` (321), `I-SF-4A` (220), `I-LA` (12),
+ * `I-SF-3` (3), `I-GR` (2), `I-MF-3` (2), and 1 each of `I-AV`, `I-MF-2`,
+ * `I-PUD`, `I-RR-NP`, `I-SF-1`, `I-SF-2-NP`, `I-SF-6`.
+ *
+ * A designation granted on annexation until permanent zoning is established,
+ * which carries its base district's standards by ordinance — so the value reads
+ * as its base with the interim fact disclosed, never as a district of its own
+ * and never as a truncation. Source: City of Austin ordinances (C2O-2009-017
+ * for the `I-SF-2` reading); the city's 2016 development-standards table gives
+ * I-SF-2 front 25 / side 5 / rear 10, which is the shipped `austin-tx.json`
+ * SF-2 row. Only `I` is declared: the layer publishes no other interim family,
+ * and an undeclared qualifier leaves the value unrecognised as before.
+ */
+export const AUSTIN_INTERIM_QUALIFIERS = ["I"] as const;
 
 /**
  * Registry keyed by city. Georgetown is the first (and only wired) city;
@@ -301,20 +420,100 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "ZOINING_TY",
     descriptionField: "ZONING_DES",
   },
-  // Austin (Travis). LIVE-VERIFIED 2026-07-24: Publish_Zoning_AGOL/0,
-  // `BASE_ZONE` carries clean tokens (SF-1..SF-6, MF-1..MF-6, …). Setback
-  // table EXISTS (austin-tx.json) for SF-1/2/3 + MF-1..MF-6 — remaining GIS
-  // codes stamp as zoning-present / setback-pending (honest). Match contract
-  // CLEAN (leading-token). Second Travis layer — jurisdiction is per-parcel
-  // via stamped zoning_jurisdiction (PIP cityKey), not a county sole-key.
+  // ---------------------------------------------------------------------------
+  // Austin (Travis 48453, Williamson 48491, Hays 48209). SOURCE REPLACED
+  // 2026-09-17 (P-259) — both the layer and the code field changed. Read this
+  // before touching it.
+  //
+  // WAS: Publish_Zoning_AGOL/FeatureServer/0 with `BASE_ZONE`, "LIVE-VERIFIED
+  // 2026-07-24 … clean tokens (SF-1..SF-6, MF-1..MF-6, …)".
+  //
+  // NOW (A-164, measured live 2026-09-15 anonymously; re-measured by this lane
+  // at the fixtures' `fetchedAt`): PLANNINGCADASTRE_zoning_large_map_scale/
+  // FeatureServer/0 — HTTP 200, 22,504 zoning polygons, spatial reference wkid
+  // 102739 (latestWkid 2277, STATE PLANE FEET) with 558 distinct
+  // `ZONING_ZTYPE` values and fields `ZONING_BASE` / `ZONING_ZTYPE`.
+  // `ZONING_BASE` collapses codes (plain `SF`/`MF`, no numeric suffix) and
+  // cannot be used. `ZONING_ZTYPE` is the district PLUS its combining
+  // districts and overlays: "SF-3-HD-NP", "MF-4-H-CO",
+  // "CS-1-MU-V-NCCD-ETOD-DBETOD-NP".
+  //
+  // `codeField` is therefore ZONING_ZTYPE and `baseCodeParse` resolves the base
+  // off the front with the LONGEST match over AUSTIN_BASE_CODES, so
+  // "CS-1-MU-…" stamps CS-1 and never CS. Both CS and CS-1 are real rows in
+  // austin-tx.json AND both exact-match the router, so the truncated reading is
+  // not a conservative miss, it is the wrong district's setbacks silently.
+  // A value with no known base is stamped VERBATIM and counted separately: the
+  // interim `I-*` family (measured: 14 distinct values, 1,229 polygons), the
+  // overlay families the layer publishes as bare values (TOD/TOD-NP/TOD-CURE-NP/
+  // TOD-H-NP/TOD-NP-CO, NBG-*, ERC, TND, UNZ-*: 138 and 49 and 58 and 2 and 63
+  // polygons), and anything else this vocabulary does not carry. The dry run
+  // lists every one of them, and
+  // `_inbox/2026-09-17_p259-austin-zoning-source_cp1.json` records the measured
+  // counts.
+  //
+  // `descriptionField` is ZONING_BASE: the layer publishes no description, and
+  // the collapsed value is the one field worth recording per stamped polygon,
+  // because it is exactly what this lane does NOT use and it makes the
+  // difference auditable after the fact.
+  //
+  // The projection is READ at source and the frame is verified per page
+  // (zoning-service.ts: `outSR=4326` is requested and a page whose coordinates
+  // are outside WGS84 fails the run rather than PIP-ing in a mismatched frame).
+  // The layer's own `editingInfo.lastEditDate` is read as the vintage and
+  // printed by the CLI (`--layer-meta` is the default at the top of a run).
+  //
+  // THREE ENTRIES, ONE cityKey. The stamp is county-scoped and one config
+  // carries one countyFips, but Austin's jurisdiction spans three counties;
+  // the elgin-tx / elgin-tx-travis pair above is the same pattern. All three
+  // share cityKey "austin-tx" so a stamped parcel carries the same
+  // `zoning_jurisdiction` string wherever it sits — the key the single
+  // 37-district austin-tx setback table is routed by.
+  // ---------------------------------------------------------------------------
   "austin-tx": {
     cityKey: "austin-tx",
     cityName: "Austin",
     countyFips: "48453",
     layerUrl:
-      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/Publish_Zoning_AGOL/FeatureServer/0",
-    codeField: "BASE_ZONE",
-    descriptionField: "BASE_ZONE_CATEGORY",
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    codeField: "ZONING_ZTYPE",
+    descriptionField: "ZONING_BASE",
+    baseCodeParse: {
+      knownBaseCodes: AUSTIN_BASE_CODES,
+      plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
+      plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
+    },
+  },
+  "austin-tx-williamson": {
+    cityKey: "austin-tx",
+    cityName: "Austin",
+    countyFips: "48491",
+    layerUrl:
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    codeField: "ZONING_ZTYPE",
+    descriptionField: "ZONING_BASE",
+    baseCodeParse: {
+      knownBaseCodes: AUSTIN_BASE_CODES,
+      plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
+      plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
+    },
+  },
+  "austin-tx-hays": {
+    cityKey: "austin-tx",
+    cityName: "Austin",
+    countyFips: "48209",
+    layerUrl:
+      "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    codeField: "ZONING_ZTYPE",
+    descriptionField: "ZONING_BASE",
+    baseCodeParse: {
+      knownBaseCodes: AUSTIN_BASE_CODES,
+      plannedDevelopmentPattern: PLANNED_DEVELOPMENT_PATTERN,
+      plannedDevelopmentFlags: PLANNED_DEVELOPMENT_FLAGS,
+      interimQualifiers: AUSTIN_INTERIM_QUALIFIERS,
+    },
   },
   // Bastrop city (Bastrop). B3 Place Types are REPEALED (Ord. 2026-06 /
   // 2026-04-14). LIVE law is BDC Euclidean districts. Stamp reads

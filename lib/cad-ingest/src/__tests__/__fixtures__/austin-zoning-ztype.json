@@ -1,0 +1,2368 @@
+{
+  "$comment": [
+    "P-259 fixture: the real ZONING_ZTYPE vocabulary of Austin's public zoning",
+    "layer, read anonymously from source (see .source.fetchedAt and",
+    ".source.listQuery). The compound shapes here are exactly what the base-code",
+    "parser must resolve without truncating: a naive split on \"-\" yields CS for",
+    "the CS-1 value below, and CS is a different row in austin-tx.json that the",
+    "router also exact-matches, so the truncation is silent and wrong rather",
+    "than conservative. sampledValues is the >=20-live-value sample the dispatch",
+    "requires; allDistinctValues is the WHOLE published vocabulary, which is the",
+    "denominator any completeness claim about this layer travels with."
+  ],
+  "source": {
+    "layerUrl": "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0",
+    "codeField": "ZONING_ZTYPE",
+    "fetchedAt": "2026-09-17T00:58:08.766Z",
+    "fetchedBy": "anonymous GET, no token; node --use-system-ca",
+    "metaQuery": "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0?f=json",
+    "countQuery": "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0/query?where=1%3D1&returnCountOnly=true&f=json",
+    "listQuery": "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/PLANNINGCADASTRE_zoning_large_map_scale/FeatureServer/0/query?where=1%3D1&outFields=ZONING_ZTYPE&groupByFieldsForStatistics=ZONING_ZTYPE&outStatistics=%5B%7B%22statisticType%22%3A%22count%22%2C%22onStatisticField%22%3A%22OBJECTID%22%2C%22outStatisticFieldName%22%3A%22n%22%7D%5D&returnGeometry=false&f=json",
+    "layerName": "Zoning (Large Map Scale)",
+    "featureCount": 22504,
+    "maxRecordCount": 2000,
+    "spatialReference": {
+      "wkid": 102739,
+      "latestWkid": 2277
+    },
+    "lastEditDate": "2026-09-16T23:11:33.427Z"
+  },
+  "samplingRule": "the first 24 rows of the layer's own ZONING_ZTYPE group-by (outStatistics count over OBJECTID) ordered by polygon count descending, ties by published value ascending",
+  "sampledValues": [
+    {
+      "value": "SF-3-NP",
+      "polygons": 3022
+    },
+    {
+      "value": "SF-2",
+      "polygons": 2176
+    },
+    {
+      "value": "SF-3",
+      "polygons": 1269
+    },
+    {
+      "value": "PUD",
+      "polygons": 1062
+    },
+    {
+      "value": "I-SF-2",
+      "polygons": 662
+    },
+    {
+      "value": "SF-1",
+      "polygons": 570
+    },
+    {
+      "value": "SF-2-NP",
+      "polygons": 554
+    },
+    {
+      "value": "GR",
+      "polygons": 337
+    },
+    {
+      "value": "I-RR",
+      "polygons": 321
+    },
+    {
+      "value": "SF-4A",
+      "polygons": 309
+    },
+    {
+      "value": "CS",
+      "polygons": 301
+    },
+    {
+      "value": "P",
+      "polygons": 291
+    },
+    {
+      "value": "GR-CO",
+      "polygons": 288
+    },
+    {
+      "value": "P-NP",
+      "polygons": 275
+    },
+    {
+      "value": "LO",
+      "polygons": 272
+    },
+    {
+      "value": "MF-3-NP",
+      "polygons": 246
+    },
+    {
+      "value": "GR-NP",
+      "polygons": 230
+    },
+    {
+      "value": "DR",
+      "polygons": 223
+    },
+    {
+      "value": "CS-NP",
+      "polygons": 221
+    },
+    {
+      "value": "I-SF-4A",
+      "polygons": 220
+    },
+    {
+      "value": "CS-MU-CO-NP",
+      "polygons": 198
+    },
+    {
+      "value": "RR",
+      "polygons": 198
+    },
+    {
+      "value": "SF-3-CO-NP",
+      "polygons": 180
+    },
+    {
+      "value": "MF-2-NP",
+      "polygons": 177
+    }
+  ],
+  "a164NamedCompoundCodes": [
+    "SF-3-HD-NP",
+    "MF-4-H-CO",
+    "CS-1-MU-V-NCCD-ETOD-DBETOD-NP"
+  ],
+  "allDistinctValues": [
+    {
+      "value": "SF-3-NP",
+      "polygons": 3022
+    },
+    {
+      "value": "SF-2",
+      "polygons": 2176
+    },
+    {
+      "value": "SF-3",
+      "polygons": 1269
+    },
+    {
+      "value": "PUD",
+      "polygons": 1062
+    },
+    {
+      "value": "I-SF-2",
+      "polygons": 662
+    },
+    {
+      "value": "SF-1",
+      "polygons": 570
+    },
+    {
+      "value": "SF-2-NP",
+      "polygons": 554
+    },
+    {
+      "value": "GR",
+      "polygons": 337
+    },
+    {
+      "value": "I-RR",
+      "polygons": 321
+    },
+    {
+      "value": "SF-4A",
+      "polygons": 309
+    },
+    {
+      "value": "CS",
+      "polygons": 301
+    },
+    {
+      "value": "P",
+      "polygons": 291
+    },
+    {
+      "value": "GR-CO",
+      "polygons": 288
+    },
+    {
+      "value": "P-NP",
+      "polygons": 275
+    },
+    {
+      "value": "LO",
+      "polygons": 272
+    },
+    {
+      "value": "MF-3-NP",
+      "polygons": 246
+    },
+    {
+      "value": "GR-NP",
+      "polygons": 230
+    },
+    {
+      "value": "DR",
+      "polygons": 223
+    },
+    {
+      "value": "CS-NP",
+      "polygons": 221
+    },
+    {
+      "value": "I-SF-4A",
+      "polygons": 220
+    },
+    {
+      "value": "CS-MU-CO-NP",
+      "polygons": 198
+    },
+    {
+      "value": "RR",
+      "polygons": 198
+    },
+    {
+      "value": "SF-3-CO-NP",
+      "polygons": 180
+    },
+    {
+      "value": "MF-2-NP",
+      "polygons": 177
+    },
+    {
+      "value": "SF-3-NCCD-NP",
+      "polygons": 175
+    },
+    {
+      "value": "CS-CO-NP",
+      "polygons": 171
+    },
+    {
+      "value": "LR",
+      "polygons": 168
+    },
+    {
+      "value": "MF-4-NP",
+      "polygons": 165
+    },
+    {
+      "value": "CS-CO",
+      "polygons": 164
+    },
+    {
+      "value": "MF-2",
+      "polygons": 157
+    },
+    {
+      "value": "SF-6",
+      "polygons": 153
+    },
+    {
+      "value": "MF-3",
+      "polygons": 147
+    },
+    {
+      "value": "LO-NP",
+      "polygons": 136
+    },
+    {
+      "value": "CBD-DDB400",
+      "polygons": 134
+    },
+    {
+      "value": "GR-CO-NP",
+      "polygons": 123
+    },
+    {
+      "value": "SF-2-CO",
+      "polygons": 123
+    },
+    {
+      "value": "CS-MU-V-CO-NP",
+      "polygons": 122
+    },
+    {
+      "value": "GR-MU-CO-NP",
+      "polygons": 119
+    },
+    {
+      "value": "SF-3-HD-NCCD-NP",
+      "polygons": 118
+    },
+    {
+      "value": "SF-6-CO",
+      "polygons": 116
+    },
+    {
+      "value": "SF-6-NP",
+      "polygons": 115
+    },
+    {
+      "value": "LR-NP",
+      "polygons": 114
+    },
+    {
+      "value": "SF-3-H-NP",
+      "polygons": 111
+    },
+    {
+      "value": "TOD-NP",
+      "polygons": 111
+    },
+    {
+      "value": "LI",
+      "polygons": 109
+    },
+    {
+      "value": "CS-1",
+      "polygons": 102
+    },
+    {
+      "value": "SF-4A-CO",
+      "polygons": 98
+    },
+    {
+      "value": "LI-NP",
+      "polygons": 96
+    },
+    {
+      "value": "RR-NP",
+      "polygons": 95
+    },
+    {
+      "value": "GO",
+      "polygons": 94
+    },
+    {
+      "value": "LA",
+      "polygons": 89
+    },
+    {
+      "value": "LI-CO-NP",
+      "polygons": 86
+    },
+    {
+      "value": "LR-CO",
+      "polygons": 86
+    },
+    {
+      "value": "LO-CO",
+      "polygons": 85
+    },
+    {
+      "value": "SF-1-NP",
+      "polygons": 83
+    },
+    {
+      "value": "CS-MU-NP",
+      "polygons": 80
+    },
+    {
+      "value": "PUD-NP",
+      "polygons": 77
+    },
+    {
+      "value": "CS-V-CO-NP",
+      "polygons": 74
+    },
+    {
+      "value": "MH",
+      "polygons": 71
+    },
+    {
+      "value": "CS-1-NP",
+      "polygons": 69
+    },
+    {
+      "value": "LI-PDA-NP",
+      "polygons": 69
+    },
+    {
+      "value": "GR-MU-CO",
+      "polygons": 68
+    },
+    {
+      "value": "LI-CO",
+      "polygons": 68
+    },
+    {
+      "value": "MF-4",
+      "polygons": 68
+    },
+    {
+      "value": "GO-CO",
+      "polygons": 67
+    },
+    {
+      "value": "LR-MU-CO-NP",
+      "polygons": 65
+    },
+    {
+      "value": "CS-1-CO",
+      "polygons": 64
+    },
+    {
+      "value": "SF-3-HD-NP",
+      "polygons": 64
+    },
+    {
+      "value": "CS-CO-MU-NP",
+      "polygons": 63
+    },
+    {
+      "value": "GR-MU-NP",
+      "polygons": 62
+    },
+    {
+      "value": "UNZ",
+      "polygons": 59
+    },
+    {
+      "value": "CBD",
+      "polygons": 58
+    },
+    {
+      "value": "ERC",
+      "polygons": 58
+    },
+    {
+      "value": "MF-2-CO",
+      "polygons": 58
+    },
+    {
+      "value": "LO-MU-NP",
+      "polygons": 54
+    },
+    {
+      "value": "MF-3-CO",
+      "polygons": 54
+    },
+    {
+      "value": "LO-MU-CO-NP",
+      "polygons": 53
+    },
+    {
+      "value": "DMU",
+      "polygons": 51
+    },
+    {
+      "value": "GO-ETOD-DBETOD",
+      "polygons": 51
+    },
+    {
+      "value": "CS-MU-V-CO-ETOD-DBETOD-NP",
+      "polygons": 49
+    },
+    {
+      "value": "GO-NP",
+      "polygons": 49
+    },
+    {
+      "value": "SF-3-H",
+      "polygons": 49
+    },
+    {
+      "value": "MF-3-ETOD-DBETOD-NP",
+      "polygons": 46
+    },
+    {
+      "value": "CS-V",
+      "polygons": 45
+    },
+    {
+      "value": "GO-CO-NP",
+      "polygons": 45
+    },
+    {
+      "value": "MF-4-NCCD-ETOD-DBETOD-NP",
+      "polygons": 45
+    },
+    {
+      "value": "NBG-NP",
+      "polygons": 45
+    },
+    {
+      "value": "SF-3-H-HD-NCCD-NP",
+      "polygons": 45
+    },
+    {
+      "value": "MF-4-CO-NP",
+      "polygons": 43
+    },
+    {
+      "value": "CS-1-CO-NP",
+      "polygons": 41
+    },
+    {
+      "value": "MF-4-HD-NP",
+      "polygons": 40
+    },
+    {
+      "value": "GR-MU",
+      "polygons": 39
+    },
+    {
+      "value": "LO-CO-NP",
+      "polygons": 39
+    },
+    {
+      "value": "LR-MU-NP",
+      "polygons": 39
+    },
+    {
+      "value": "SF-4A-NP",
+      "polygons": 37
+    },
+    {
+      "value": "CBD-H-DDB400",
+      "polygons": 36
+    },
+    {
+      "value": "MF-2-CO-NP",
+      "polygons": 36
+    },
+    {
+      "value": "CS-CO-ETOD-DBETOD-NP",
+      "polygons": 35
+    },
+    {
+      "value": "CS-MU-CO",
+      "polygons": 35
+    },
+    {
+      "value": "GR-MU-V-CO-NP",
+      "polygons": 35
+    },
+    {
+      "value": "MF-3-NCCD-ETOD-DBETOD-NP",
+      "polygons": 35
+    },
+    {
+      "value": "CS-MU-V-NP",
+      "polygons": 34
+    },
+    {
+      "value": "SF-6-CO-NP",
+      "polygons": 33
+    },
+    {
+      "value": "LI-PDA",
+      "polygons": 32
+    },
+    {
+      "value": "SF-3-H-HD-NP",
+      "polygons": 32
+    },
+    {
+      "value": "NO",
+      "polygons": 31
+    },
+    {
+      "value": "SF-1-CO",
+      "polygons": 31
+    },
+    {
+      "value": "CS-V-CO-ETOD-DBETOD-NP",
+      "polygons": 30
+    },
+    {
+      "value": "GR-V-NP",
+      "polygons": 29
+    },
+    {
+      "value": "LR-CO-NP",
+      "polygons": 29
+    },
+    {
+      "value": "MF-3-CO-NP",
+      "polygons": 29
+    },
+    {
+      "value": "SF-2-CO-NP",
+      "polygons": 29
+    },
+    {
+      "value": "CS-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 28
+    },
+    {
+      "value": "DMU-CO-ETOD-DBETOD",
+      "polygons": 28
+    },
+    {
+      "value": "LO-ETOD-DBETOD",
+      "polygons": 28
+    },
+    {
+      "value": "GO-MU-CO-NP",
+      "polygons": 26
+    },
+    {
+      "value": "GR-V",
+      "polygons": 26
+    },
+    {
+      "value": "MF-1-NP",
+      "polygons": 26
+    },
+    {
+      "value": "MH-CO",
+      "polygons": 26
+    },
+    {
+      "value": "CS-ETOD-DBETOD",
+      "polygons": 25
+    },
+    {
+      "value": "MF-4-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 25
+    },
+    {
+      "value": "RR-CO",
+      "polygons": 25
+    },
+    {
+      "value": "SF-3-H-CO-NP",
+      "polygons": 25
+    },
+    {
+      "value": "LO-MU-CO",
+      "polygons": 24
+    },
+    {
+      "value": "MH-NP",
+      "polygons": 24
+    },
+    {
+      "value": "SF-3-H-NCCD-NP",
+      "polygons": 24
+    },
+    {
+      "value": "CS-V-NP",
+      "polygons": 23
+    },
+    {
+      "value": "IP",
+      "polygons": 23
+    },
+    {
+      "value": "MF-4-CO",
+      "polygons": 23
+    },
+    {
+      "value": "CS-1-V",
+      "polygons": 22
+    },
+    {
+      "value": "DMU-CO",
+      "polygons": 22
+    },
+    {
+      "value": "GR-V-CO-NP",
+      "polygons": 22
+    },
+    {
+      "value": "P-CO",
+      "polygons": 22
+    },
+    {
+      "value": "CBD-H",
+      "polygons": 21
+    },
+    {
+      "value": "CS-MU-NCCD-NP",
+      "polygons": 21
+    },
+    {
+      "value": "MF-1-CO",
+      "polygons": 21
+    },
+    {
+      "value": "MF-2-ETOD-DBETOD-NP",
+      "polygons": 21
+    },
+    {
+      "value": "MF-5",
+      "polygons": 21
+    },
+    {
+      "value": "CS-NCCD-ETOD-DBETOD-NP",
+      "polygons": 20
+    },
+    {
+      "value": "CS-MU-V-CO-DB90-NP",
+      "polygons": 19
+    },
+    {
+      "value": "LO-MU",
+      "polygons": 18
+    },
+    {
+      "value": "LR-MU-CO",
+      "polygons": 18
+    },
+    {
+      "value": "SF-3-CO",
+      "polygons": 18
+    },
+    {
+      "value": "CS-1-V-CO-NP",
+      "polygons": 17
+    },
+    {
+      "value": "CS-1-V-NP",
+      "polygons": 17
+    },
+    {
+      "value": "CS-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 17
+    },
+    {
+      "value": "CH",
+      "polygons": 16
+    },
+    {
+      "value": "CS-1-MU-CO-NP",
+      "polygons": 16
+    },
+    {
+      "value": "CS-1-MU-V-CO-NP",
+      "polygons": 16
+    },
+    {
+      "value": "GO-MU-NP",
+      "polygons": 16
+    },
+    {
+      "value": "NO-MU-NP",
+      "polygons": 16
+    },
+    {
+      "value": "NO-NP",
+      "polygons": 16
+    },
+    {
+      "value": "RR-CO-NP",
+      "polygons": 16
+    },
+    {
+      "value": "SF-5-CO",
+      "polygons": 16
+    },
+    {
+      "value": "CS-ETOD-DBETOD-NP",
+      "polygons": 15
+    },
+    {
+      "value": "P-H",
+      "polygons": 15
+    },
+    {
+      "value": "SF-5",
+      "polygons": 15
+    },
+    {
+      "value": "CBD-CURE-DDB400",
+      "polygons": 14
+    },
+    {
+      "value": "CS-V-ETOD-DBETOD",
+      "polygons": 14
+    },
+    {
+      "value": "GO-H-ETOD-DBETOD",
+      "polygons": 14
+    },
+    {
+      "value": "NO-CO",
+      "polygons": 14
+    },
+    {
+      "value": "W/LO-CO",
+      "polygons": 14
+    },
+    {
+      "value": "CS-1-NCCD-NP",
+      "polygons": 13
+    },
+    {
+      "value": "CS-V-ETOD-DBETOD-NP",
+      "polygons": 13
+    },
+    {
+      "value": "GR-CO-ETOD-DBETOD-NP",
+      "polygons": 13
+    },
+    {
+      "value": "LO-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 13
+    },
+    {
+      "value": "LO-V-NP",
+      "polygons": 13
+    },
+    {
+      "value": "MF-4-H-NP",
+      "polygons": 13
+    },
+    {
+      "value": "P-H-NP",
+      "polygons": 13
+    },
+    {
+      "value": "CS-1-MU-NP",
+      "polygons": 12
+    },
+    {
+      "value": "DR-NP",
+      "polygons": 12
+    },
+    {
+      "value": "GO-MU",
+      "polygons": 12
+    },
+    {
+      "value": "I-LA",
+      "polygons": 12
+    },
+    {
+      "value": "LR-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 12
+    },
+    {
+      "value": "MF-1",
+      "polygons": 12
+    },
+    {
+      "value": "MF-4-ETOD-DBETOD",
+      "polygons": 12
+    },
+    {
+      "value": "MF-4-ETOD-DBETOD-NP",
+      "polygons": 12
+    },
+    {
+      "value": "CBD-CO",
+      "polygons": 11
+    },
+    {
+      "value": "CH-CO",
+      "polygons": 11
+    },
+    {
+      "value": "CS-MU",
+      "polygons": 11
+    },
+    {
+      "value": "CS-NCCD-NP",
+      "polygons": 11
+    },
+    {
+      "value": "GO-MU-CO",
+      "polygons": 11
+    },
+    {
+      "value": "LR-V-NP",
+      "polygons": 11
+    },
+    {
+      "value": "MF-4-CO-ETOD-DBETOD-NP",
+      "polygons": 11
+    },
+    {
+      "value": "CS-1-CO-MU-NP",
+      "polygons": 10
+    },
+    {
+      "value": "GR-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 10
+    },
+    {
+      "value": "GR-MU-V-CO-ETOD-DBETOD-NP",
+      "polygons": 10
+    },
+    {
+      "value": "LR-MU-V-CO-NP",
+      "polygons": 10
+    },
+    {
+      "value": "MF-6-CO",
+      "polygons": 10
+    },
+    {
+      "value": "MF-6-CO-NP",
+      "polygons": 10
+    },
+    {
+      "value": "SF-5-CO-NP",
+      "polygons": 10
+    },
+    {
+      "value": "CS-V-CO-DB90-NP",
+      "polygons": 9
+    },
+    {
+      "value": "DMU-H-ETOD-DBETOD",
+      "polygons": 9
+    },
+    {
+      "value": "LO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 9
+    },
+    {
+      "value": "LR-MU",
+      "polygons": 9
+    },
+    {
+      "value": "LR-MU-V-NP",
+      "polygons": 9
+    },
+    {
+      "value": "MF-1-NCCD-ETOD-DBETOD-NP",
+      "polygons": 9
+    },
+    {
+      "value": "MF-2-NCCD-ETOD-DBETOD-NP",
+      "polygons": 9
+    },
+    {
+      "value": "P-CO-NP",
+      "polygons": 9
+    },
+    {
+      "value": "TOD-CURE-NP",
+      "polygons": 9
+    },
+    {
+      "value": "W/LO-NP",
+      "polygons": 9
+    },
+    {
+      "value": "CBD-CURE",
+      "polygons": 8
+    },
+    {
+      "value": "CS-1-CO-ETOD-DBETOD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "GO-V-NP",
+      "polygons": 8
+    },
+    {
+      "value": "GR-MU-V-NP",
+      "polygons": 8
+    },
+    {
+      "value": "IP-CO-NP",
+      "polygons": 8
+    },
+    {
+      "value": "LO-ETOD-DBETOD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "LO-MU-ETOD-DBETOD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "LR-ETOD-DBETOD",
+      "polygons": 8
+    },
+    {
+      "value": "MF-3-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "MF-3-NCCD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "MF-4-H-HD-NP",
+      "polygons": 8
+    },
+    {
+      "value": "MF-5-ETOD-DBETOD",
+      "polygons": 8
+    },
+    {
+      "value": "NO-MU-CO",
+      "polygons": 8
+    },
+    {
+      "value": "SF-1-CO-NP",
+      "polygons": 8
+    },
+    {
+      "value": "TOD-H-NP",
+      "polygons": 8
+    },
+    {
+      "value": "W/LO",
+      "polygons": 8
+    },
+    {
+      "value": "AV",
+      "polygons": 7
+    },
+    {
+      "value": "CR-CO",
+      "polygons": 7
+    },
+    {
+      "value": "CS-1-V-CO-ETOD-DBETOD-NP",
+      "polygons": 7
+    },
+    {
+      "value": "CS-MU-V-ETOD-DBETOD-NP",
+      "polygons": 7
+    },
+    {
+      "value": "IP-NP",
+      "polygons": 7
+    },
+    {
+      "value": "LO-MU-V-NP",
+      "polygons": 7
+    },
+    {
+      "value": "MF-1-CO-ETOD-DBETOD-NP",
+      "polygons": 7
+    },
+    {
+      "value": "MF-1-CO-NP",
+      "polygons": 7
+    },
+    {
+      "value": "MF-2-CO-ETOD-DBETOD-NP",
+      "polygons": 7
+    },
+    {
+      "value": "MF-3-ETOD-DBETOD",
+      "polygons": 7
+    },
+    {
+      "value": "MF-6-CO-ETOD-DBETOD-NP",
+      "polygons": 7
+    },
+    {
+      "value": "MH-CO-NP",
+      "polygons": 7
+    },
+    {
+      "value": "NO-MU-CO-NP",
+      "polygons": 7
+    },
+    {
+      "value": "SF-5-NP",
+      "polygons": 7
+    },
+    {
+      "value": "TOD-NP-CO",
+      "polygons": 7
+    },
+    {
+      "value": "W/LO-CO-NP",
+      "polygons": 7
+    },
+    {
+      "value": "CH-PDA-NP",
+      "polygons": 6
+    },
+    {
+      "value": "CS-1-H-NCCD-NP",
+      "polygons": 6
+    },
+    {
+      "value": "CS-1-MU-V-CO-ETOD-DBETOD-NP",
+      "polygons": 6
+    },
+    {
+      "value": "CS-1-MU-V-NP",
+      "polygons": 6
+    },
+    {
+      "value": "CS-MU-V-CO-DB90",
+      "polygons": 6
+    },
+    {
+      "value": "DMU-H",
+      "polygons": 6
+    },
+    {
+      "value": "DMU-H-CO-ETOD-DBETOD",
+      "polygons": 6
+    },
+    {
+      "value": "GR-MU-V-CO",
+      "polygons": 6
+    },
+    {
+      "value": "LO-H-ETOD-DBETOD",
+      "polygons": 6
+    },
+    {
+      "value": "NO-MU-ETOD-DBETOD-NP",
+      "polygons": 6
+    },
+    {
+      "value": "NO-MU-V-ETOD-DBETOD-NP",
+      "polygons": 6
+    },
+    {
+      "value": "P-HD-NCCD-NP",
+      "polygons": 6
+    },
+    {
+      "value": "SF-4A-CO-NP",
+      "polygons": 6
+    },
+    {
+      "value": "CS-1-H",
+      "polygons": 5
+    },
+    {
+      "value": "CS-1-NCCD-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "CS-1-V-CO",
+      "polygons": 5
+    },
+    {
+      "value": "CS-H",
+      "polygons": 5
+    },
+    {
+      "value": "CS-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "CS-MU-V-CO",
+      "polygons": 5
+    },
+    {
+      "value": "CS-MU-V-DB90-NP",
+      "polygons": 5
+    },
+    {
+      "value": "DMU-CURE",
+      "polygons": 5
+    },
+    {
+      "value": "DMU-DDB400",
+      "polygons": 5
+    },
+    {
+      "value": "DMU-ETOD-DBETOD",
+      "polygons": 5
+    },
+    {
+      "value": "GO-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "GO-MU-ETOD-DBETOD",
+      "polygons": 5
+    },
+    {
+      "value": "GO-MU-V-CO-NP",
+      "polygons": 5
+    },
+    {
+      "value": "GO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "GR-CO-MU-NP",
+      "polygons": 5
+    },
+    {
+      "value": "GR-MU-V",
+      "polygons": 5
+    },
+    {
+      "value": "GR-NCCD-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "GR-V-CO-ETOD-DBETOD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "IP-CO",
+      "polygons": 5
+    },
+    {
+      "value": "LO-MU-V-CO-NP",
+      "polygons": 5
+    },
+    {
+      "value": "LO-V",
+      "polygons": 5
+    },
+    {
+      "value": "LR-V-CO-NP",
+      "polygons": 5
+    },
+    {
+      "value": "MF-3-HD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "MF-6",
+      "polygons": 5
+    },
+    {
+      "value": "NO-CO-NP",
+      "polygons": 5
+    },
+    {
+      "value": "NO-MU",
+      "polygons": 5
+    },
+    {
+      "value": "P-NCCD-NP",
+      "polygons": 5
+    },
+    {
+      "value": "R&D",
+      "polygons": 5
+    },
+    {
+      "value": "SF-4",
+      "polygons": 5
+    },
+    {
+      "value": "CBD-CURE-CO-DDB400",
+      "polygons": 4
+    },
+    {
+      "value": "CR",
+      "polygons": 4
+    },
+    {
+      "value": "CS-1-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 4
+    },
+    {
+      "value": "CS-H-NP",
+      "polygons": 4
+    },
+    {
+      "value": "CS-V-CO",
+      "polygons": 4
+    },
+    {
+      "value": "CS-V-DB90",
+      "polygons": 4
+    },
+    {
+      "value": "GO-CO-ETOD-DBETOD-NP",
+      "polygons": 4
+    },
+    {
+      "value": "GO-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 4
+    },
+    {
+      "value": "GR-ETOD-DBETOD",
+      "polygons": 4
+    },
+    {
+      "value": "GR-V-CO",
+      "polygons": 4
+    },
+    {
+      "value": "GR-V-ETOD-DBETOD",
+      "polygons": 4
+    },
+    {
+      "value": "LO-NCCD-NP",
+      "polygons": 4
+    },
+    {
+      "value": "LR-CO-ETOD-DBETOD",
+      "polygons": 4
+    },
+    {
+      "value": "MF-3-H",
+      "polygons": 4
+    },
+    {
+      "value": "MF-5-CO-NP",
+      "polygons": 4
+    },
+    {
+      "value": "MF-5-NP",
+      "polygons": 4
+    },
+    {
+      "value": "MF-6-NP",
+      "polygons": 4
+    },
+    {
+      "value": "R&D-PDA",
+      "polygons": 4
+    },
+    {
+      "value": "SF-2-H",
+      "polygons": 4
+    },
+    {
+      "value": "SF-2-H-NP",
+      "polygons": 4
+    },
+    {
+      "value": "SF-2-NCCD-NP",
+      "polygons": 4
+    },
+    {
+      "value": "AG-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CBD-CURE-CO",
+      "polygons": 3
+    },
+    {
+      "value": "CH-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-1-MU-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-1-V-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-CO-ETOD-DBETOD",
+      "polygons": 3
+    },
+    {
+      "value": "CS-H-CO-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-H-MU-CO-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-H-NCCD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-HD-NCCD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-MU-CO-ETOD-DBETOD",
+      "polygons": 3
+    },
+    {
+      "value": "CS-MU-CO-H-NP",
+      "polygons": 3
+    },
+    {
+      "value": "CS-MU-CO-HD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "DMU-CURE-CO",
+      "polygons": 3
+    },
+    {
+      "value": "GO-H-NP",
+      "polygons": 3
+    },
+    {
+      "value": "GO-MU-H-NP",
+      "polygons": 3
+    },
+    {
+      "value": "GO-MU-V-NP",
+      "polygons": 3
+    },
+    {
+      "value": "GR-MU-H-CO-NP",
+      "polygons": 3
+    },
+    {
+      "value": "GR-MU-NCCD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "GR-MU-V-DB90",
+      "polygons": 3
+    },
+    {
+      "value": "I-SF-3",
+      "polygons": 3
+    },
+    {
+      "value": "L-NP",
+      "polygons": 3
+    },
+    {
+      "value": "LI-PUD",
+      "polygons": 3
+    },
+    {
+      "value": "LO-CO-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "LO-MU-H-CO-NP",
+      "polygons": 3
+    },
+    {
+      "value": "LO-V-CO",
+      "polygons": 3
+    },
+    {
+      "value": "LR-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "LR-V",
+      "polygons": 3
+    },
+    {
+      "value": "MF-4-HD-NCCD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "MF-6-CO-ETOD-DBETOD",
+      "polygons": 3
+    },
+    {
+      "value": "NO-MU-V-NP",
+      "polygons": 3
+    },
+    {
+      "value": "NO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 3
+    },
+    {
+      "value": "P-DDB400",
+      "polygons": 3
+    },
+    {
+      "value": "AG",
+      "polygons": 2
+    },
+    {
+      "value": "CBD-H-CURE-DDB400",
+      "polygons": 2
+    },
+    {
+      "value": "CH-CO-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CH-PDA",
+      "polygons": 2
+    },
+    {
+      "value": "CS-1-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CS-1-MU-CO",
+      "polygons": 2
+    },
+    {
+      "value": "CS-1-V-CO-DB90",
+      "polygons": 2
+    },
+    {
+      "value": "CS-1-V-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "CS-MU-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CS-MU-H-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CS-MU-H-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CS-MU-V-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CS-V-MU-CO",
+      "polygons": 2
+    },
+    {
+      "value": "GO-H",
+      "polygons": 2
+    },
+    {
+      "value": "GO-MU-H-CO-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "GO-V-CO-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GO-V-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "GO-V-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-H-CO-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-MU-CO-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-MU-CO-NP/MF-6-CO-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-MU-H-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-MU-V-CO-DB90",
+      "polygons": 2
+    },
+    {
+      "value": "GR-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-V-CO-DB90",
+      "polygons": 2
+    },
+    {
+      "value": "GR-V-CO-DB90-NP",
+      "polygons": 2
+    },
+    {
+      "value": "GR-V-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "I-GR",
+      "polygons": 2
+    },
+    {
+      "value": "I-MF-3",
+      "polygons": 2
+    },
+    {
+      "value": "IP-PDA",
+      "polygons": 2
+    },
+    {
+      "value": "L-V-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LO-H-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LO-MU-CO-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "LO-MU-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "LO-MU-HD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LO-MU-V-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LO-V-CO-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LO-V-ETOD-DBETOD",
+      "polygons": 2
+    },
+    {
+      "value": "LR-CO-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LR-HD-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LR-MU-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LR-MU-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "LR-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-2-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-2-HD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-3-CO-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-3-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-3-H-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-4-NCCD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MF-5-NCCD-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "MI-PDA",
+      "polygons": 2
+    },
+    {
+      "value": "NBG-TOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": "NO-ETOD-DBETOD-NP",
+      "polygons": 2
+    },
+    {
+      "value": null,
+      "polygons": 2
+    },
+    {
+      "value": "TND",
+      "polygons": 2
+    },
+    {
+      "value": "UNZ-H",
+      "polygons": 2
+    },
+    {
+      "value": "UNZ-NP",
+      "polygons": 2
+    },
+    {
+      "value": "CBD-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "CBD-ETOD-DBETOD-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "CBD-H-CURE",
+      "polygons": 1
+    },
+    {
+      "value": "CBD-H-ETOD-DBETOD-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-CO-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-V-CO-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-MU-V-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-V-CO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-V-H-CO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-1-V-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-CO-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-CO-MU-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-CO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-CO-V-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-CURE",
+      "polygons": 1
+    },
+    {
+      "value": "CS-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "CS-H-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-H-MU-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-CO-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-CO-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-CO-NP/MF-6-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-CO-V",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-H-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-NP/MF-6-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-V-ETOD-DBETOD-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-MU-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-V-CO-DB90",
+      "polygons": 1
+    },
+    {
+      "value": "CS-V-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "CS-V-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "DMU-CO-CURE",
+      "polygons": 1
+    },
+    {
+      "value": "DMU-CO-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "DMU-CURE-CO-H",
+      "polygons": 1
+    },
+    {
+      "value": "DMU-H-CO",
+      "polygons": 1
+    },
+    {
+      "value": "DR-CO",
+      "polygons": 1
+    },
+    {
+      "value": "DR-H",
+      "polygons": 1
+    },
+    {
+      "value": "GO-CO-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-CO-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-H-CO-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-MU-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "GO-MU-H",
+      "polygons": 1
+    },
+    {
+      "value": "GO-MU-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-MU-H-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "GO-MU-V-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GO-V-CO",
+      "polygons": 1
+    },
+    {
+      "value": "GO-V-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "GR-CO-DB90",
+      "polygons": 1
+    },
+    {
+      "value": "GR-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "GR-CO-MU-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-H-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "GR-H-CO-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-H-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "GR-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-HD-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-HD-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-CO-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-V-CO-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-V-CO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-V-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-MU-V-ETOD-DBETOD-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "GR-V-CO-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "I-AV",
+      "polygons": 1
+    },
+    {
+      "value": "I-MF-2",
+      "polygons": 1
+    },
+    {
+      "value": "I-PUD",
+      "polygons": 1
+    },
+    {
+      "value": "I-RR-NP",
+      "polygons": 1
+    },
+    {
+      "value": "I-SF-1",
+      "polygons": 1
+    },
+    {
+      "value": "I-SF-2-NP",
+      "polygons": 1
+    },
+    {
+      "value": "I-SF-6",
+      "polygons": 1
+    },
+    {
+      "value": "LI-PDA-CO",
+      "polygons": 1
+    },
+    {
+      "value": "LO-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-MU-V-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-MU-CO-DB90-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-MU-H-CO-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-MU-V-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "LO-V-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-V-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LO-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR -NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-CO-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-H-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-H-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "LR-H-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-MU-H-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "LR-MU-HD-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-MU-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-MU-V-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-V-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "LR-V-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "LR-V-MU-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-1-ETOD-DBETOD-NCCD",
+      "polygons": 1
+    },
+    {
+      "value": "MF-1-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-1-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-H-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-H-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-HD-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-2-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-3-H-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-3-HD-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-DDB400",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H-CO",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-4-H-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-5-CO",
+      "polygons": 1
+    },
+    {
+      "value": "MF-5-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MF-5-H",
+      "polygons": 1
+    },
+    {
+      "value": "MF-5-H-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "MF-6-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "MI",
+      "polygons": 1
+    },
+    {
+      "value": "MI-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NBG-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NBG-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-CO-MU-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-H-CO-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "NO-H-HD-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-H-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-MU-CO-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-MU-ETOD-DBETOD",
+      "polygons": 1
+    },
+    {
+      "value": "NO-MU-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "NO-V",
+      "polygons": 1
+    },
+    {
+      "value": "NO-V-NCCD-ETOD-DBETOD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "P-H-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "P-H-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "PUD-H",
+      "polygons": 1
+    },
+    {
+      "value": "PUD-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "PUD-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "R&D-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-1-H",
+      "polygons": 1
+    },
+    {
+      "value": "SF-2-H-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-2-H-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-2-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-2-NCCD-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-3--H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-3-CO-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-3-CO-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-3-HD",
+      "polygons": 1
+    },
+    {
+      "value": "SF-3-NCCD-H-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-4A-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-4B-CO",
+      "polygons": 1
+    },
+    {
+      "value": "SF-5-HD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "SF-6-NCCD-NP",
+      "polygons": 1
+    },
+    {
+      "value": "TOD",
+      "polygons": 1
+    },
+    {
+      "value": "TOD-CURE-CO-NP",
+      "polygons": 1
+    },
+    {
+      "value": "TOD-H-HD-NP",
+      "polygons": 1
+    }
+  ]
+}
