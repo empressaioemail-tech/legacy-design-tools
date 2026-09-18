@@ -187,29 +187,23 @@ jobs:
       # leaves lying around. This first run catches the tags that were already stale
       # before this deploy; the post-shift run below catches the ones this deploy creates.
       #
-      # Reads Cloud Run BY FIELD from --format=json, never positionally. Exit codes
-      # 0 pass / 1 FAIL / 2 REFUSE, and REFUSE fails this step too: a check that could
-      # not read what it needs must never read as green. It mutates nothing — removing
-      # or repointing a tag is an operator decision.
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the verdict is read from the check's OWN JSON report, never from its process exit
+      # code. A missing module, a syntax error, an uncaught exception, a usage error or an
+      # unreadable service all leave stdout without that JSON and read "did-not-run" — never
+      # "violation". scripts/p279-tagged-revision-check.mjs is the single table both call sites
+      # read; there is no second copy of a case statement to drift. Its non-zero exit fails this
+      # step (GitHub's default `bash -e`).
       - name: Tagged-revision credential check (P-279)
         run: |
-          set +e
-          node scripts/check-tagged-revision-env.mjs \
+          node scripts/p279-tagged-revision-check.mjs \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ env.GCP_REGION }}" \
             --service "${{ env.CLOUD_RUN_SERVICE }}"
-          CODE=$?
-          set -e
-          case "$CODE" in
-            0) echo "p279-tagged-revision-env: RESULT=clean" ;;
-            1)
-              echo "p279-tagged-revision-env: RESULT=violation - a tag points at a revision missing a credential the serving revision carries (named above)"
-              echo "p279-tagged-revision-env: removing or repointing a tag is an operator decision; this check mutates nothing"
-              exit 1
-              ;;
-            2) echo "p279-tagged-revision-env: RESULT=did-not-run (REFUSE - the service or its revisions could not be read; this is NOT a pass)"; exit 1 ;;
-            *) echo "p279-tagged-revision-env: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
-          esac
 
   shift-traffic:
     name: Shift traffic to smartsite-mcp canary
@@ -219,6 +213,21 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # P-362. This job calls a repo script (scripts/p279-tagged-revision-check.mjs), so the
+      # repo must exist on the runner. It did not in cloud-run-deploy.yml, and the missing
+      # module's exit 1 was reported as a credential violation.
+      #
+      # WHICH COMMIT: for a workflow_dispatch run `github.sha` is the head of the ref the run was
+      # dispatched against, and the workflow file itself is read from that same commit, so the
+      # script and the workflow are the same revision by construction. It is NOT necessarily the
+      # revision whose image is being shifted: `image_tag` is an operator input that defaults to
+      # `latest`, so the workflow cannot know the image's commit from inside the run. The
+      # guarantee bought here is workflow <-> script, which is the one this check needs.
+      - name: Checkout (the commit this workflow was dispatched from)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Validate required secrets
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -282,26 +291,17 @@ jobs:
       # shift, which is the moment the comparison becomes complete — and the moment
       # the stale tags become provably stale.
       #
-      # Reads Cloud Run BY FIELD from --format=json, never positionally. Exit codes
-      # 0 pass / 1 FAIL / 2 REFUSE, and REFUSE fails this step too: a check that could
-      # not read what it needs must never read as green. It mutates nothing — removing
-      # or repointing a tag is an operator decision.
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the same single table as the canary run above. The verdict is read from the check's
+      # OWN JSON report, never from its process exit code, so a check that could not run reads
+      # "did-not-run" and never "violation".
       - name: Tagged-revision credential check (P-279) [after traffic shift]
         run: |
-          set +e
-          node scripts/check-tagged-revision-env.mjs \
+          node scripts/p279-tagged-revision-check.mjs \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ env.GCP_REGION }}" \
             --service "${{ env.CLOUD_RUN_SERVICE }}"
-          CODE=$?
-          set -e
-          case "$CODE" in
-            0) echo "p279-tagged-revision-env: RESULT=clean" ;;
-            1)
-              echo "p279-tagged-revision-env: RESULT=violation - a tag points at a revision missing a credential the serving revision carries (named above)"
-              echo "p279-tagged-revision-env: removing or repointing a tag is an operator decision; this check mutates nothing"
-              exit 1
-              ;;
-            2) echo "p279-tagged-revision-env: RESULT=did-not-run (REFUSE - the service or its revisions could not be read; this is NOT a pass)"; exit 1 ;;
-            *) echo "p279-tagged-revision-env: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
-          esac
