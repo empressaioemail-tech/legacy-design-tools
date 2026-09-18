@@ -12,6 +12,8 @@
 
 import type { SetbackDistrict, SetbackTable } from "@workspace/adapters";
 
+import { isPlannedDevelopmentCode } from "./plannedDevelopmentSetback";
+
 export type DistrictMatchKind =
   | "matched" // zoningCode matched a district code
   | "fallback-conservative" // no zoning stamp; used the most-conservative district
@@ -64,6 +66,14 @@ function mostConservative(districts: SetbackDistrict[]): SetbackDistrict {
  * `R-1A` against a table's `R-1` row. A one-character token is never enough
  * evidence: it would collapse `P-5` (a Bastrop B3 place type) into the
  * unrelated `P Public/Institutional` row.
+ *
+ * P-257: the REVERSE direction (`districtCode.startsWith(zoningCode)`) has no
+ * such evidence requirement and is where the measured defect came from — a
+ * two-character code swallowed a longer, unrelated row (`PD` ->
+ * `PD-Z Zero Lot Line Garden Home District`, `48021:70907`, which then served
+ * 20/100/100/100 through the standing gates). `mapDistrict` guards the
+ * planned-development class against BOTH directions; the remaining reverse
+ * cases are a separate, unmeasured shape (see the lane close's known holes).
  */
 function isSafePrefixMatch(zoningCode: string, districtCode: string): boolean {
   const shorter = Math.min(zoningCode.length, districtCode.length);
@@ -71,6 +81,22 @@ function isSafePrefixMatch(zoningCode: string, districtCode: string): boolean {
     shorter >= 2 &&
     (zoningCode.startsWith(districtCode) || districtCode.startsWith(zoningCode))
   );
+}
+
+/**
+ * Does this table row this exact code? Exact token equality after
+ * {@link normalizeCode}, no prefix and no fallback — the first half of the
+ * planned-development gate's ordering, exported so the gate lives in one place
+ * and no second row matcher is ever written.
+ */
+export function districtCodeHasExactRow(
+  table: SetbackTable,
+  zoningCode: string | null | undefined,
+): boolean {
+  const code = (zoningCode ?? "").trim();
+  if (!code || !table.districts.length) return false;
+  const norm = normalizeCode(code);
+  return table.districts.some((d) => districtCode(d) === norm);
 }
 
 /**
@@ -87,6 +113,17 @@ export function mapDistrict(
   if (!districts.length) return null;
 
   if (districts.length === 1) {
+    // P-257: a one-row table is not a licence to paint a planned-development
+    // code as that row. The row still wins when it IS this code (exact), or
+    // when the parcel carries no code at all (the conservative fallback below);
+    // a planned-development code with no row of its own refuses.
+    // (`zoningCode` rather than `code`: the trimmed local is declared below.)
+    if (
+      isPlannedDevelopmentCode(zoningCode) &&
+      !districtCodeHasExactRow(table, zoningCode)
+    ) {
+      return null;
+    }
     return {
       district: districts[0]!,
       kind: "single",
@@ -123,6 +160,23 @@ export function mapDistrict(
         note: `Zoning "${code}" matched district ${exact.district_name}.`,
         zoningCode: code,
       };
+    }
+    /**
+     * P-257 — a planned-development code never resolves another district's row.
+     *
+     * Placed AFTER the exact-match loop and BEFORE the prefix fallback, which is
+     * exactly the "base vocabulary first" order `zoning-base-code.ts` records as
+     * its one deliberate divergence from the census: a district the table really
+     * rows resolves as a district (Smithville's `PD-Z`, Grand County's `PUD`),
+     * and only a code with no row of its own is read as planned development.
+     *
+     * This is the whole measured defect: `PD` (a planned-development code) has
+     * no row in Smithville's table, and the prefix fallback crossed it into
+     * `PD-Z Zero Lot Line Garden Home District` — kind "matched", confidence
+     * 0.7 — which is how `48021:70907` was served 20/100/100/100.
+     */
+    if (isPlannedDevelopmentCode(code)) {
+      return null;
     }
     if (prefix) {
       return {

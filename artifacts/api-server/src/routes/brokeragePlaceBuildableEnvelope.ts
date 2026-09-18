@@ -72,6 +72,9 @@ import {
   resolveAuthoritativeSetbacks,
   type AuthoritativeSetbackResolution,
 } from "../lib/buildableEnvelope/authoritativeSetbackSource";
+import { getSetbackTableForZoning } from "@workspace/adapters";
+import { districtCodeHasExactRow } from "../lib/buildableEnvelope/districtMapping";
+import { plannedDevelopmentSetbackRefusalFor } from "../lib/buildableEnvelope/plannedDevelopmentSetback";
 import {
   cityStateFromSitus,
   jurisdictionKeyFromParcelNode,
@@ -1175,12 +1178,43 @@ async function deriveAndRespond(args: {
   });
 
   if (!resolved) {
+    /**
+     * P-257 — say which kind of nothing this is.
+     *
+     * A planned-development code refuses a setback table for a REASON (its
+     * standards live in its own ordinance and development plan), and that
+     * reason has to reach the reader: the whole point of the refusal is that
+     * the code is not a district. The gate is asked here as well as inside the
+     * resolver because the resolver's `null` is deliberately shape-less and
+     * `jurisdictionKey` may be null (a parcel with no resolvable city key never
+     * reaches the resolver at all, so the district code is the only evidence
+     * left — and it is enough).
+     *
+     * hauska-map composes the identical sentence for the panel; the two are
+     * pinned byte-for-byte against each other's literals in both repos' suites.
+     */
+    const plannedDevelopment = plannedDevelopmentSetbackRefusalFor(
+      { jurisdictionKey, districtCode: effectiveZoningCode },
+      (code) => {
+        const table = jurisdictionKey
+          ? getSetbackTableForZoning(jurisdictionKey, code)
+          : null;
+        return !!table && districtCodeHasExactRow(table, code);
+      },
+    );
     res.status(404).json(
       withPlace(
         {
           status: "no-district",
-          reason:
-            "No authoritative setback source covers this district — geometry not derived.",
+          ...(plannedDevelopment
+            ? {
+                declineReason: plannedDevelopment.declineReason,
+                reason: plannedDevelopment.disclosure,
+              }
+            : {
+                reason:
+                  "No authoritative setback source covers this district — geometry not derived.",
+              }),
           jurisdictionKey: jurisdictionKey ?? null,
           parcel_node_id: parcelNodeIdValue,
         },
