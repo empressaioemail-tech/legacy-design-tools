@@ -34,7 +34,7 @@
  * carries `citationVintage` when the citation it serves is undated.
  */
 
-import type { SetbackCitationVintageRow } from "./buildableEnvelope/setbackCitationVintage";
+import type { SetbackCitationVintageDeclaration } from "./buildableEnvelope/setbackCitationVintage";
 
 export const SETBACK_RULES_FACT_SOURCE = "setback-rules-fact" as const;
 export const SETBACK_RULES_RAIL_KEY = "setbackRules" as const;
@@ -63,7 +63,7 @@ export type SetbackRulesFactPresent = {
    * agreeing control) and null when no citation is served — never null
    * because this payload declined to say.
    */
-  citationVintage: SetbackCitationVintageRow | null;
+  citationVintage: SetbackCitationVintageDeclaration | null;
   jurisdictionKey: string | null;
   resolvedTableKey: string | null;
   note: string | null;

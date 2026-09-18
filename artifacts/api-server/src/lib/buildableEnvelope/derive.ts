@@ -31,10 +31,20 @@ import type { RoadClassSetbackDistrictRow } from "./roadClassSetbacks";
 // parsing a date itself.
 import {
   disclosureWithCitationVintage,
+  readSetbackDateFromRowAtSource,
   readSetbackDateFromTable,
   setbackCitationVintageRow,
-  type SetbackCitationVintageRow,
+  todayIso,
+  SETBACK_ADOPTED_DATE_FIELD_KEYS,
+  type SetbackCitationVintageDeclaration,
 } from "./setbackCitationVintage";
+
+/**
+ * P-354 (2026-09-18). The district ROW's own date-bearing fields, in the
+ * source's own spellings. A row MAY state its own effective date, and when it
+ * does, that date is the row's rule and the table's is not.
+ */
+const SETBACK_RULE_ROW_DATE_FIELD_KEYS = ["effectiveDate", "effective_date"] as const;
 
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
@@ -106,17 +116,24 @@ export interface BuildableEnvelopeProps {
    * date could not be read, and `citationVintage` beside it says which of the
    * three causes applies. Never a placeholder: this lane writes no default
    * date anywhere.
+   *
+   * P-354 (2026-09-18): a date read from the ROW and LATER THAN TODAY is
+   * deliberately NOT published here either, even though it is readable. This
+   * field means "the citation's date, in force"; a rule adopted but not yet
+   * effective is declared through `citationVintage` instead, which names both
+   * its adoption date and its effective date.
    */
   citationEffectiveDate?: string;
   /**
-   * P-270 (OPS-24 X11). The conflict row, present only when the citation
-   * above is being served WITHOUT a readable effective date. Its absence
-   * means the vintage is known or nothing is cited — never that the payload
-   * declined to say. Composed by the ONE module
+   * P-270 (OPS-24 X11). The declaration row, present only when the citation
+   * above must not be printed as a plain in-force citation: its effective date
+   * could not be read, or it WAS read and has not arrived yet (P-354). Its
+   * absence means the vintage is known or nothing is cited — never that the
+   * payload declined to say. Composed by the ONE module
    * `buildableEnvelope/setbackCitationVintage.ts`, byte-identical to
    * hauska-map's copy of the same sentence.
    */
-  citationVintage?: SetbackCitationVintageRow;
+  citationVintage?: SetbackCitationVintageDeclaration;
   /** Empty-envelope reason, when there is no buildable area. */
   emptyReason?: string;
   /**
@@ -151,10 +168,10 @@ export interface BuildableEnvelopeResult {
   /** Set when empty: distinguishes consume-lot from a validation decline. */
   emptyKind?: InsetEmptyKind;
   citationUrl: string;
-  /** P-270 (OPS-24 X11): the citation's readable effective date, or absent. See `BuildableEnvelopeProps`. */
+  /** P-270 (OPS-24 X11): the citation's readable, IN-FORCE effective date, or absent. See `BuildableEnvelopeProps`. */
   citationEffectiveDate?: string;
-  /** P-270 (OPS-24 X11): the conflict row, present only on an undated citation. See `BuildableEnvelopeProps`. */
-  citationVintage?: SetbackCitationVintageRow;
+  /** P-270 (OPS-24 X11) + P-354: the declaration, present only when the citation is undated or not yet in force. See `BuildableEnvelopeProps`. */
+  citationVintage?: SetbackCitationVintageDeclaration;
   district: string;
 }
 
@@ -369,8 +386,27 @@ export function deriveBuildableEnvelope(
   // vintage to qualify, and declaring one would be a statement about an
   // instrument this payload does not name. `never-looked` is NOT reachable
   // here any more, because this line IS the look.
+  //
+  // P-354 (2026-09-18). The ROW is asked FIRST and the table only when the row
+  // states no date at all — the same precedence the corpus's own
+  // `dateFromRowEffectiveDate` applies, so the surface and the resolver cannot
+  // disagree about which of the two dates is the rule's. A row that states an
+  // UNREADABLE date does not fall back to the table: that would be the silent
+  // pick, and an unreadable value in a good field is a different defect from a
+  // source with no date. A row date LATER THAN TODAY reads as
+  // `future-effective`: the row is in the payload (the operator's A-218 ruling
+  // serves Georgetown from its rewrite ahead of 2026-11-01) and the sentence
+  // names BOTH dates instead of printing it as already in force.
   const citationUrl = (d.citation_url ?? "").trim();
-  const citationDateRead = readSetbackDateFromTable(table);
+  const rowDateRead = readSetbackDateFromRowAtSource(
+    d as unknown as Record<string, unknown>,
+    SETBACK_RULE_ROW_DATE_FIELD_KEYS,
+    { adoptedKeys: SETBACK_ADOPTED_DATE_FIELD_KEYS, asOf: todayIso() },
+  );
+  const citationDateRead =
+    rowDateRead.state === "unreadable-absent-at-source"
+      ? readSetbackDateFromTable(table)
+      : rowDateRead;
   const citationVintage = setbackCitationVintageRow({
     date: citationDateRead,
     citationUrl,

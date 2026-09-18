@@ -24,14 +24,19 @@ import { dateFromTableEffectiveDate } from "@empressaio/setback-corpus/resolve";
 
 import {
   NEVER_LOOKED_DATE_READ,
+  SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN,
   SETBACK_CITATION_VINTAGE_TOKEN,
   SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE,
+  applyFutureEffectiveState,
   disclosureWithCitationVintage,
   readableBasisOrNull,
+  readAdoptedDateFromRowAtSource,
   readSetbackDateAtSource,
   readSetbackDateFromRowAtSource,
   readSetbackDateFromTable,
   setbackCitationVintageRow,
+  setbackFutureEffectiveCardMarker,
+  setbackFutureEffectiveNote,
   stateFromWireBasis,
   type SetbackDateRead,
   type SetbackDateReadState,
@@ -366,5 +371,162 @@ describe("P-270 — a wire that carries only the corpus's basis", () => {
     ]) {
       expect(stateFromWireBasis(basis)).toEqual(NEVER_LOOKED_DATE_READ);
     }
+  });
+});
+
+describe("P-354 (2026-09-18) — a date that has not arrived yet", () => {
+  const AS_OF = "2026-09-18";
+  const GEORGETOWN_ADOPTED = "2026-08-11";
+  const GEORGETOWN_EFFECTIVE = "2026-11-01";
+
+  it("THE ROW: a real future date reads as `future-effective`, naming BOTH dates", () => {
+    const read = applyFutureEffectiveState(
+      { sourceDate: GEORGETOWN_EFFECTIVE, state: "read" },
+      { adoptedDate: GEORGETOWN_ADOPTED, asOf: AS_OF },
+    );
+    expect(read.state).toBe("future-effective");
+    expect(read.sourceDate).toBe(GEORGETOWN_EFFECTIVE);
+    expect(read.adoptedDate).toBe(GEORGETOWN_ADOPTED);
+
+    const declaration = setbackCitationVintageRow({
+      date: read,
+      citationUrl: CITATION,
+      sourceLabel: "codified setback table georgetown-tx",
+    });
+    expect(declaration?.kind).toBe(SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN);
+    expect(declaration?.kind).not.toBe(SETBACK_CITATION_VINTAGE_TOKEN);
+    expect(declaration?.note).toContain(`adopted ${GEORGETOWN_ADOPTED}`);
+    expect(declaration?.note).toContain(`takes effect ${GEORGETOWN_EFFECTIVE}`);
+    // ...and NEVER the sentence for a date that could not be read.
+    expect(declaration?.note).not.toBe(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE);
+  });
+
+  it("THE CONTROL: a date that HAS arrived is still `read`, and publishes no row", () => {
+    const read = applyFutureEffectiveState(
+      { sourceDate: "2026-04-14", state: "read" },
+      { adoptedDate: GEORGETOWN_ADOPTED, asOf: AS_OF },
+    );
+    expect(read).toEqual({ sourceDate: "2026-04-14", state: "read" });
+    expect(
+      setbackCitationVintageRow({ date: read, citationUrl: CITATION, sourceLabel: null }),
+    ).toBeNull();
+  });
+
+  it("THE DAY IT TAKES EFFECT IS NOT THE FUTURE: asOf == effectiveDate reads `read`", () => {
+    const read = applyFutureEffectiveState(
+      { sourceDate: GEORGETOWN_EFFECTIVE, state: "read" },
+      { asOf: GEORGETOWN_EFFECTIVE },
+    );
+    expect(read.state).toBe("read");
+  });
+
+  it("THE FALSIFIER FOR A SHAPE-ONLY DATE: `2026-13-99` is NOT promoted, and prints no nonsense", async () => {
+    // This is the bug this test was written from. `2026-13-99` IS a date to the
+    // corpus's shape-only reader, which ORDERS candidates by it, so this rail
+    // serves it as the effective date and makes no unreadable declaration (the
+    // ruling pinned in setbackRulesFactFromParcelRecord.test.ts). But it is NOT
+    // a real calendar date, so "has it arrived?" has no answer, and a lexical
+    // comparison would sail past `asOf` and print `takes effect 2026-13-99` as
+    // a legal fact to a customer.
+    const shapeOnly = readSetbackDateAtSource({ present: true, value: "2026-13-99" });
+    expect(shapeOnly.state).toBe("read"); // the corpus's stance, inherited
+    expect(shapeOnly.sourceDate).toBe("2026-13-99");
+
+    const read = applyFutureEffectiveState(shapeOnly, { asOf: AS_OF });
+    expect(read.state).toBe("read");
+    expect(read.state).not.toBe("future-effective");
+    expect(
+      setbackCitationVintageRow({ date: read, citationUrl: CITATION, sourceLabel: null }),
+    ).toBeNull();
+    expect(JSON.stringify(read)).not.toContain("takes effect");
+  });
+
+  it("...and the same holds for a roll-forward date: `2026-02-31` is not promoted either", () => {
+    // Lexically later than asOf, and shape-only a date, but it normalizes to
+    // 2026-03-03, so no arrival can be reasoned about.
+    const read = applyFutureEffectiveState(
+      { sourceDate: "2026-02-31", state: "read" },
+      { asOf: "2026-01-01" },
+    );
+    expect(read.state).toBe("read");
+  });
+
+  it("an UNREADABLE read is never promoted, whatever the asOf", () => {
+    for (const state of [
+      "unreadable-absent-at-source",
+      "unreadable-unparseable",
+      "unreadable-never-looked",
+    ] as const) {
+      expect(applyFutureEffectiveState({ sourceDate: null, state }, { asOf: "2000-01-01" })).toEqual({
+        sourceDate: null,
+        state,
+      });
+    }
+  });
+
+  it("AN ADOPTION DATE THAT IS NOT A REAL DATE is dropped, and the sentence names one date", () => {
+    // The resolver never reads this field, so requiring it to be real
+    // contradicts no ranking decision -- and the alternative is printing
+    // `adopted 2026-13-99` beside an otherwise honest effective date.
+    const read = applyFutureEffectiveState(
+      { sourceDate: GEORGETOWN_EFFECTIVE, state: "read" },
+      { adoptedDate: "2026-13-99", asOf: AS_OF },
+    );
+    expect(read.adoptedDate).toBeNull();
+    expect(setbackFutureEffectiveNote(read.adoptedDate ?? null, GEORGETOWN_EFFECTIVE)).toBe(
+      `Setback rule takes effect ${GEORGETOWN_EFFECTIVE} — the rule is served ahead of its effective date, not as current. Verify with the city.`,
+    );
+    expect(setbackFutureEffectiveCardMarker(null, GEORGETOWN_EFFECTIVE)).toBe(
+      `takes effect ${GEORGETOWN_EFFECTIVE}`,
+    );
+  });
+
+  it("reads the adoption date from the row's own spellings, and only real dates survive", () => {
+    expect(
+      readAdoptedDateFromRowAtSource({ adoptedDate: GEORGETOWN_ADOPTED }, [
+        "adoptedDate",
+        "adopted_date",
+      ]),
+    ).toBe(GEORGETOWN_ADOPTED);
+    expect(
+      readAdoptedDateFromRowAtSource({ adopted_date: GEORGETOWN_ADOPTED }, [
+        "adoptedDate",
+        "adopted_date",
+      ]),
+    ).toBe(GEORGETOWN_ADOPTED);
+    expect(
+      readAdoptedDateFromRowAtSource({ adoptedDate: "August 11, 2026" }, ["adoptedDate"]),
+    ).toBeNull();
+    expect(readAdoptedDateFromRowAtSource({}, ["adoptedDate"])).toBeNull();
+  });
+
+  it("the row read carries the adoption date through to the state in ONE call", () => {
+    const read = readSetbackDateFromRowAtSource(
+      { effectiveDate: GEORGETOWN_EFFECTIVE, adoptedDate: GEORGETOWN_ADOPTED },
+      ["effectiveDate", "effective_date"],
+      { adoptedKeys: ["adoptedDate", "adopted_date"], asOf: AS_OF },
+    );
+    expect(read).toEqual({
+      sourceDate: GEORGETOWN_EFFECTIVE,
+      state: "future-effective",
+      adoptedDate: GEORGETOWN_ADOPTED,
+    });
+  });
+
+  it("a future-effective date's BASIS is still reported: it was read, it is just not in force", () => {
+    // NOTE the basis used here is `corpus-table-effective-date`, an existing
+    // member of the installed corpus's `SetbackDateBasis`. The member this
+    // lane's factory half writes for a row-level date
+    // (`corpus-row-effective-date`) is NEW IN CORPUS 1.5.0, which is not
+    // published yet, so naming it in a typed position here would not compile
+    // against the 1.2.0 this repo installs. The assertion is about the STATE
+    // reporting its basis, not about which member it is, and it will hold
+    // unchanged when 1.5.0 lands.
+    expect(
+      readableBasisOrNull(
+        { sourceDate: GEORGETOWN_EFFECTIVE, state: "future-effective" },
+        "corpus-table-effective-date",
+      ),
+    ).toBe("corpus-table-effective-date");
   });
 });

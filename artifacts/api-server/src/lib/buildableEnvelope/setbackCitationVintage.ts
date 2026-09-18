@@ -38,12 +38,13 @@
  * corpus's vocabulary cannot express: the difference between a date field
  * that is ABSENT at source and one that is present and unparseable.
  *
- * THE THREE STATES (dispatch item 3). "Absent at source", "present but
- * unparseable" and "never looked for" are three different situations and none
- * of them is the others, so they are three members of one union and never one
- * boolean. A FOURTH value is deliberately NOT here: see `stateFromWireBasis`
- * for the one wire on which the first two cannot be told apart, which is
- * bounded and named rather than papered over with a new member.
+ * THE STATES (dispatch item 3, extended by P-354). "Absent at source",
+ * "present but unparseable", "never looked for" and "read, but not yet in
+ * effect" are four different situations and none of them is the others, so
+ * they are members of one union and never one boolean. A FIFTH value is
+ * deliberately NOT here: see `stateFromWireBasis` for the one wire on which
+ * the first two cannot be told apart, which is bounded and named rather than
+ * papered over with a new member.
  *
  * THE TWO AUDIENCES. The customer gets ONE sentence, identical in both repos
  * (see `SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE`), because three causes
@@ -82,16 +83,39 @@ import {
  *   the state the drawn-envelope path was in until this lane: `derive.ts`
  *   composed `citationUrl` out of the district row and never had a date read
  *   in it.
+ * - `future-effective` — P-354 (2026-09-18). The date WAS read, it is a real
+ *   date, and it is LATER than the day being served: the rule is adopted but
+ *   not yet in force, and the operator ruled it served anyway (A-218,
+ *   Georgetown: adopted 2026-08-11, effective 2026-11-01). This is not
+ *   unreadable and it is not `read`; conflating it with either is the bug this
+ *   member exists to kill. Before it, a future-dated row hit `read` and the
+ *   envelope printed the date as though it were already in force.
  */
 export type SetbackDateReadState =
   | "read"
+  | "future-effective"
   | "unreadable-absent-at-source"
   | "unreadable-unparseable"
   | "unreadable-never-looked";
 
+/** The three unreadable causes. Never `read`, never `future-effective`. */
+export type SetbackDateUnreadableState = Exclude<
+  SetbackDateReadState,
+  "read" | "future-effective"
+>;
+
 /** The wire token the conflict row below is published under (VOCABULARY). */
 export const SETBACK_CITATION_VINTAGE_TOKEN =
   "setback-citation-vintage-unreadable" as const;
+
+/**
+ * P-354. The token a FUTURE-EFFECTIVE citation's declaration is published
+ * under -- deliberately NOT the unreadable token, because a reader that
+ * switches on `kind` must not treat "adopted, takes effect later" as "we could
+ * not tell".
+ */
+export const SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN =
+  "setback-citation-future-effective" as const;
 
 /**
  * THE exact customer sentence. Byte-identical to hauska-map's
@@ -111,10 +135,46 @@ export const SETBACK_CITATION_VINTAGE_TOKEN =
 export const SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE =
   "Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.";
 
+/**
+ * P-354. THE exact sentence for a rule that IS dated and whose date has not
+ * arrived. Byte-identical to hauska-map's copy, pinned in both repos' tests for
+ * the same reason as the note above. It names BOTH dates and the fact that the
+ * rule is served AHEAD of its effective date — the price the operator's A-218
+ * ruling attaches to serving Georgetown from the rewrite before 2026-11-01.
+ *
+ * The adoption date is optional in the sentence and required in the row: a
+ * source that states no adoption date yields "Setback rule takes effect
+ * <date> ..." rather than an invented adoption date, because the alternative
+ * is a fabricated date entering a most-current-wins comparison.
+ */
+export function setbackFutureEffectiveNote(
+  adoptedDate: string | null,
+  effectiveDate: string,
+): string {
+  const adopted = adoptedDate ? `adopted ${adoptedDate}, ` : "";
+  return `Setback rule ${adopted}takes effect ${effectiveDate} — the rule is served ahead of its effective date, not as current. Verify with the city.`;
+}
+
+/** The terse form the envelope's own citation clause uses, from the same one place. */
+export function setbackFutureEffectiveCardMarker(
+  adoptedDate: string | null,
+  effectiveDate: string,
+): string {
+  const adopted = adoptedDate ? `adopted ${adoptedDate}, ` : "";
+  return `${adopted}takes effect ${effectiveDate}`;
+}
+
 /** A read of one source's own date-bearing field. `sourceDate` is only ever a value literally on the source. */
 export type SetbackDateRead = {
   sourceDate: string | null;
   state: SetbackDateReadState;
+  /**
+   * P-354 (2026-09-18). The rule's own adoption date, read at source, when the
+   * source carries one. Present only for `future-effective` today (it is what
+   * the future-effective sentence names first) and never inferred from the
+   * table's vintage or the source kind.
+   */
+  adoptedDate?: string | null;
 };
 
 /**
@@ -126,7 +186,7 @@ export type SetbackDateRead = {
 export type SetbackCitationVintageRow = {
   kind: typeof SETBACK_CITATION_VINTAGE_TOKEN;
   /** Which of the three unreadable causes. Never `"read"` — a readable date is not a conflict. */
-  state: Exclude<SetbackDateReadState, "read">;
+  state: SetbackDateUnreadableState;
   /** The source whose date could not be read, as the resolver knows it. */
   sourceLabel: string | null;
   /** The citation that is being served undated — the row is never published without one. */
@@ -134,6 +194,33 @@ export type SetbackCitationVintageRow = {
   /** The exact sentence every surface prints. Byte-identical across repos. */
   note: string;
 };
+
+/**
+ * P-354. The declaration published for a rule that IS dated and whose date has
+ * not arrived yet — a different thing from the conflict row above, with its
+ * own `kind`, so a reader that switches on `kind` cannot confuse "we do not
+ * know when this took effect" with "we know exactly when it takes effect, and
+ * it has not happened yet".
+ */
+export type SetbackCitationFutureEffectiveRow = {
+  kind: typeof SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN;
+  state: "future-effective";
+  /** Read at source from the rule's own adoption record; null if the source states none. */
+  adoptedDate: string | null;
+  /** The rule's own effective date, later than the day being served. */
+  effectiveDate: string;
+  sourceLabel: string | null;
+  citationUrl: string;
+  /** The full sentence, for the disclosure. Byte-identical across repos. */
+  note: string;
+  /** The terse form the envelope's own citation clause prints after the URL. */
+  cardMarker: string;
+};
+
+/** Either declaration. A citation carries AT MOST ONE of these. */
+export type SetbackCitationVintageDeclaration =
+  | SetbackCitationVintageRow
+  | SetbackCitationFutureEffectiveRow;
 
 /** No resolver on this path ever consulted a date-bearing field. */
 export const NEVER_LOOKED_DATE_READ: SetbackDateRead = {
@@ -206,13 +293,123 @@ export function readSetbackDateFromTable(table: unknown): SetbackDateRead {
 export function readSetbackDateFromRowAtSource(
   row: Record<string, unknown>,
   keys: readonly string[],
+  opts: { adoptedKeys?: readonly string[]; asOf?: string } = {},
 ): SetbackDateRead {
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(row, key)) {
-      return readSetbackDateAtSource({ present: true, value: row[key] });
+      const read = readSetbackDateAtSource({ present: true, value: row[key] });
+      if (read.state !== "read") return read;
+      const adopted = opts.adoptedKeys ? readAdoptedDateFromRowAtSource(row, opts.adoptedKeys) : null;
+      return applyFutureEffectiveState(read, { adoptedDate: adopted, asOf: opts.asOf });
     }
   }
   return { sourceDate: null, state: "unreadable-absent-at-source" };
+}
+
+/**
+ * P-354 (2026-09-18). The rule's own ADOPTION date, read at source in the same
+ * two spellings, and validated through the SAME corpus reader the effective
+ * date goes through — not a second parser, because two parsers on one path is
+ * how a most-current-wins comparison ends up comparing two notions of "a
+ * date". A value the corpus will not accept yields `null`, and the sentence
+ * then names the effective date alone rather than an invented adoption date.
+ */
+/** The source's own spellings for a rule's ADOPTION date. */
+export const SETBACK_ADOPTED_DATE_FIELD_KEYS = ["adoptedDate", "adopted_date"] as const;
+
+/**
+ * P-354 (2026-09-18). The rule's own ADOPTION date, read at source in the same
+ * two spellings, and kept only when it is a real calendar date — see
+ * `strictCalendarIsoOrNull` for why the resolver's shape-only tolerance is not
+ * inherited for THIS field while it is for the effective date.
+ */
+export function readAdoptedDateFromRowAtSource(
+  row: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
+    return strictCalendarIsoOrNull(row[key]);
+  }
+  return null;
+}
+
+/** The day being served, read ONCE per call so a resolution cannot straddle midnight. */
+export function todayIso(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * P-354. A value this module is willing to reason about ARRIVAL for: strict
+ * `yyyy-mm-dd` that is also a real calendar date.
+ *
+ * THE TWO-QUESTION SEPARATION, which is the whole reason this exists beside the
+ * corpus's reader rather than inside it. "Is this a date?" and "has this date
+ * arrived?" are different questions with different tolerances:
+ *
+ * - The corpus's `parseStrictIsoDate` (reached via `dateFromTableEffectiveDate`)
+ *   answers the FIRST one SHAPE-ONLY, and that is deliberate: it ORDERS
+ *   candidates by date, and `2026-13-99` sorts sensibly among real dates. This
+ *   module does not overrule that — the value is still served as the rule's
+ *   `effectiveDate`, and no unreadable declaration is made about it, because
+ *   calling "undated" a rule the resolver just ranked by its date would be this
+ *   rail inventing a second opinion (the ruling pinned in
+ *   `setbackRulesFactFromParcelRecord.test.ts`).
+ * - The SECOND question has no answer for a value that is not a real calendar
+ *   date. Promoting it to `future-effective` would print `takes effect
+ *   2026-13-99` — a nonsense date asserted to a customer as a legal fact, and
+ *   worse than the silence it replaced. So the promotion requires a real date,
+ *   and a shape-only value simply stays `read`: served, ranked, and unremarked.
+ *
+ * This is NOT a second date parser for the wire — nothing here produces a date
+ * the source did not carry, and nothing here rejects a value the resolver
+ * accepts. It is a comparability check on a value already read.
+ */
+function isComparableCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const ms = Date.parse(`${raw}T00:00:00.000Z`);
+  if (!Number.isFinite(ms)) return false;
+  // The round-trip rejects the roll-forward case: `2026-02-31` normalizes to
+  // `2026-03-03`, so a string that does not survive normalization was not a
+  // date and its "arrival" cannot be reasoned about.
+  return new Date(ms).toISOString().slice(0, 10) === raw;
+}
+
+/**
+ * P-354. Promote a plain `read` to `future-effective` when the date read is
+ * LATER than the day being served, carrying the source's own adoption date
+ * when one was read. An already-unreadable read passes through untouched, and
+ * a read that is in force today passes through untouched — so this is the ONE
+ * place the future question is asked, on every wire that reads a date, rather
+ * than a state each caller has to remember to compute.
+ *
+ * `asOf` defaults to today; passing it explicitly is how a test pins the state
+ * instead of depending on the wall clock.
+ */
+export function applyFutureEffectiveState(
+  read: SetbackDateRead,
+  opts: { adoptedDate?: unknown; asOf?: string } = {},
+): SetbackDateRead {
+  if (read.state !== "read" || !read.sourceDate) return read;
+  if (!isComparableCalendarDate(read.sourceDate)) return read;
+  const asOf = opts.asOf ?? todayIso();
+  if (read.sourceDate <= asOf) return read;
+  const adoptedDate = strictCalendarIsoOrNull(opts.adoptedDate);
+  return { sourceDate: read.sourceDate, state: "future-effective", adoptedDate };
+}
+
+/**
+ * The adoption date, kept only when it is a real calendar date. The resolver
+ * never reads this field — nothing orders by it — so requiring it to be real
+ * contradicts no ranking decision; and the alternative is a sentence that
+ * prints `adopted 2026-13-99` beside an otherwise honest effective date. A
+ * value that is not a real date yields `null`, and the sentence then names the
+ * effective date alone (see `setbackFutureEffectiveNote`).
+ */
+function strictCalendarIsoOrNull(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return isComparableCalendarDate(trimmed) ? trimmed : null;
 }
 
 /**
@@ -249,23 +446,32 @@ export function readableBasisOrNull(
   date: SetbackDateRead,
   basis: SetbackDateBasis | null | undefined,
 ): SetbackDateBasis | null {
-  return date.state === "read" && basis ? basis : null;
+  // P-354: `future-effective` belongs here too — that date was READ at source
+  // and its basis is as known as any other. The state differs from `read` in
+  // what the date MEANS (not yet in force), not in whether it was readable.
+  const readable = date.state === "read" || date.state === "future-effective";
+  return readable && basis ? basis : null;
 }
 
 /**
- * The conflict row, or `null` when there is nothing to declare.
+ * The declaration, or `null` when there is nothing to declare.
  *
- * `null` in exactly two cases, both of them correct rather than convenient:
- * no citation is being served (there is no citation to qualify), and the date
- * was readable (a readable date is not a conflict — this is the dispatch's
- * agreeing control, asserted in this module's own test so a change that
- * refuses the readable case fails rather than ships).
+ * `null` in exactly three cases, all of them correct rather than convenient:
+ * no citation is being served (there is no citation to qualify); the date was
+ * readable AND in force (an in-force dated rule is not a conflict — this is
+ * the dispatch's agreeing control, asserted in this module's own test so a
+ * change that refuses the readable case fails rather than ships); and nothing
+ * will be printed anyway.
+ *
+ * P-354 (2026-09-18): a `future-effective` read returns the SECOND kind, not
+ * `null`. That is the whole change — the envelope used to see `read` here and
+ * print `effective 2026-11-01` for a rule that does not have that force yet.
  */
 export function setbackCitationVintageRow(input: {
   date: SetbackDateRead;
   citationUrl: string | null | undefined;
   sourceLabel: string | null | undefined;
-}): SetbackCitationVintageRow | null {
+}): SetbackCitationVintageDeclaration | null {
   const url = typeof input.citationUrl === "string" ? input.citationUrl.trim() : "";
   if (!url) return null;
   if (input.date.state === "read") return null;
@@ -273,9 +479,28 @@ export function setbackCitationVintageRow(input: {
     typeof input.sourceLabel === "string" && input.sourceLabel.trim()
       ? input.sourceLabel.trim()
       : null;
+  if (input.date.state === "future-effective") {
+    const effectiveDate = (input.date.sourceDate ?? "").trim();
+    // A future-effective read always carries its date; if it somehow does not,
+    // fall back to the unreadable declaration rather than print a sentence with
+    // a hole in it.
+    if (effectiveDate) {
+      const adoptedDate = strictCalendarIsoOrNull(input.date.adoptedDate);
+      return {
+        kind: SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN,
+        state: "future-effective",
+        adoptedDate,
+        effectiveDate,
+        sourceLabel: label,
+        citationUrl: url,
+        note: setbackFutureEffectiveNote(adoptedDate, effectiveDate),
+        cardMarker: setbackFutureEffectiveCardMarker(adoptedDate, effectiveDate),
+      };
+    }
+  }
   return {
     kind: SETBACK_CITATION_VINTAGE_TOKEN,
-    state: input.date.state,
+    state: input.date.state === "future-effective" ? "unreadable-absent-at-source" : input.date.state,
     sourceLabel: label,
     citationUrl: url,
     note: SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE,
@@ -284,13 +509,13 @@ export function setbackCitationVintageRow(input: {
 
 /**
  * Append the sentence to whatever disclosure the payload already carries.
- * Returns the disclosure unchanged when there is no row, so a caller can call
- * this unconditionally and a payload that declares nothing is byte-identical
- * to what it was before this lane.
+ * Returns the disclosure unchanged when there is no declaration, so a caller
+ * can call this unconditionally and a payload that declares nothing is
+ * byte-identical to what it was before this lane.
  */
 export function disclosureWithCitationVintage(
   disclosure: string | null | undefined,
-  row: SetbackCitationVintageRow | null,
+  row: SetbackCitationVintageDeclaration | null,
 ): string | undefined {
   const existing = typeof disclosure === "string" ? disclosure.trim() : "";
   if (!row) return existing ? existing : undefined;
