@@ -458,3 +458,97 @@ describe("deriveBuildableEnvelope — setback-rule citation vintage (P-270, OPS-
     expect(p.citationVintage!.note).toBe(VINTAGE_NOTE);
   });
 });
+
+describe("P-354 (2026-09-18) — a district ROW that carries its own dates", () => {
+  const GEORGETOWN_ADOPTED = "2026-08-11";
+  const GEORGETOWN_EFFECTIVE = "2026-11-01";
+
+  /**
+   * Build the envelope with row-level dates on the R-MD district row. This is
+   * the shape Georgetown's rewrite rows carry after P-354: the row states its
+   * own `adoptedDate`/`effectiveDate` and the table states none.
+   */
+  function rowProps(rowDates: Record<string, unknown>) {
+    const table = {
+      ...TABLE,
+      districts: TABLE.districts.map((d) =>
+        d.district_name.startsWith("R-MD") ? { ...d, ...rowDates } : d,
+      ),
+    } as SetbackTable;
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const res = deriveBuildableEnvelope({
+      ring,
+      table,
+      district: mapDistrict(table, "R-MD")!,
+      labeling,
+    });
+    return { props: res.geojson.features[0]!.properties, res };
+  }
+
+  it("THE ROW IS ASKED FIRST: a row date is the rule's date, and both dates are named", () => {
+    // The falsifier for a silently-undefined import: if `adoptedKeys` never
+    // reaches `readSetbackDateFromRowAtSource`, the note loses the adoption
+    // date and this fails. (It did exactly that before this test existed: the
+    // constant was imported but never exported, so it arrived as `undefined`
+    // and the adoption date was skipped without a single failing test.)
+    const { props: p, res } = rowProps({
+      effectiveDate: GEORGETOWN_EFFECTIVE,
+      adoptedDate: GEORGETOWN_ADOPTED,
+    });
+
+    expect(p.citationVintage).toBeDefined();
+    expect(p.citationVintage!.kind).toBe("setback-citation-future-effective");
+    expect(p.citationVintage!.note).toContain(`adopted ${GEORGETOWN_ADOPTED}`);
+    expect(p.citationVintage!.note).toContain(`takes effect ${GEORGETOWN_EFFECTIVE}`);
+    expect(res.citationVintage).toEqual(p.citationVintage);
+    // The rule is NOT printed as if already in force...
+    expect(p.citationVintage!.note).not.toBe(
+      "Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.",
+    );
+    // ...and NOT published as an in-force `citationEffectiveDate`, which is
+    // what "the date it takes effect" must never be confused with.
+    expect(p.citationEffectiveDate).toBeUndefined();
+    expect("citationEffectiveDate" in p).toBe(false);
+    // The sentence reaches the disclosure, appended to the survey caveat.
+    expect(p.disclosure!.endsWith(p.citationVintage!.note)).toBe(true);
+  });
+
+  it("A ROW DATE BEATS THE TABLE DATE: a table date in force does not win over the row's own", () => {
+    const { props: p } = rowProps({
+      effectiveDate: GEORGETOWN_EFFECTIVE,
+      adoptedDate: GEORGETOWN_ADOPTED,
+    });
+    // TABLE carries no effectiveDate, so this asserts the row read happened at
+    // all; the precedence itself is pinned in the corpus resolver's own tests.
+    expect(p.citationVintage!.kind).toBe("setback-citation-future-effective");
+  });
+
+  it("A ROW WITH NO DATE FALLS BACK TO THE TABLE, unchanged: the paired control", () => {
+    // The row states neither field, so the table read is used exactly as
+    // before this lane — same state, same sentence, same bytes.
+    const { props: p } = rowProps({});
+    expect(p.citationVintage).toBeDefined();
+    expect(p.citationVintage!.state).toBe("unreadable-absent-at-source");
+    expect(p.citationVintage!.kind).toBe("setback-citation-vintage-unreadable");
+    expect(p.citationVintage!.note).toBe(
+      "Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.",
+    );
+  });
+
+  it("A ROW DATE ALREADY IN FORCE reads `read` and publishes no declaration", () => {
+    const { props: p } = rowProps({ effectiveDate: "2026-04-14", adoptedDate: "2026-01-01" });
+    expect(p.citationEffectiveDate).toBe("2026-04-14");
+    expect(p.citationVintage).toBeUndefined();
+  });
+
+  it("A SHAPE-ONLY ROW DATE IS NOT PROMOTED: `2026-13-99` prints no nonsense", () => {
+    // The corpus's reader is shape-only, so this IS a date to it and the rail
+    // must not call it unreadable. But its arrival cannot be reasoned about, so
+    // it is never promoted to "takes effect 2026-13-99".
+    const { props: p } = rowProps({ effectiveDate: "2026-13-99" });
+    expect(p.citationEffectiveDate).toBe("2026-13-99");
+    expect(p.citationVintage).toBeUndefined();
+    expect(JSON.stringify(p)).not.toContain("takes effect");
+  });
+});
