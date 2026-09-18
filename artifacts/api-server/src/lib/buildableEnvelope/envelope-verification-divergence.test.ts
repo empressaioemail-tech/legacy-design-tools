@@ -15,6 +15,13 @@
  * predicate edited ALONE fails here, on the case whose declared answer it now
  * contradicts.
  *
+ * P-331 (2026-09-18): "byte-identical" is now a CONTROL, not a claim — the
+ * `envelope-verification-v1-fixture` row of
+ * `scripts/check-cross-repo-literal-drift.mjs` hashes both files (CRLF
+ * normalised, because the two repos apply different eol attributes on checkout)
+ * and fails when they stop matching. This test keeps its own job: the
+ * predicates, not the bytes.
+ *
  * The two predicates answer DIFFERENT questions on purpose, and the fixture
  * keeps them apart: `verified` is read off the atom's promotion fields,
  * `machineVerifyDiagnostic` off the atom's reason TEXT. The unzoned /
