@@ -946,6 +946,17 @@ async function main() {
             `situs_city=${situsCity} county=${county} node=${parcelNodeId}`,
         );
       },
+      // P-273. The PIP stamp names a jurisdiction this build has no layer
+      // config for, so the setback router will fall back conservatively. The
+      // stamp is still authoritative and is served; this is the disclosure
+      // the registry check used to make silently.
+      onUnregisteredZoningStamp: ({ cityKey }) => {
+        console.warn(
+          `[node-facet-bake-t1-conformant] UNREGISTERED zoning stamp ` +
+            `jurisdiction=${cityKey} county=${county} node=${parcelNodeId} ` +
+            `(no ZONING_LAYERS entry; keeping the stamp)`,
+        );
+      },
     });
     // Owner is never baked: the claim carries ownerName and the builder never
     // reads it; this refuses the write if any owner-shaped key slipped in.
