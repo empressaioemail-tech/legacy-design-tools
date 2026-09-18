@@ -73,6 +73,55 @@ describe("railStateFromRead", () => {
 });
 
 describe("composeSmartSiteStub", () => {
+  // P-270 ADDRESS HALF (2026-09-18): the MCP's own composed answer must carry an
+  // address payload's city/state/ZIP, not the bare street line its `composed`
+  // argument used to win outright. Both directions, on `composeSmartSiteStub`
+  // itself rather than on the helper.
+  it("P-270: the label carries the payload's city, state and ZIP when the composed situs is a bare street line", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48453:445501",
+      facets: {
+        situsAddress: "21404 GRAND NATIONAL AVE",
+        baseFacts: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          situsCity: "Pflugerville",
+          situsState: "TX",
+          situsZip: "78660",
+        },
+      },
+    });
+    expect(stub.label).toBe("21404 GRAND NATIONAL AVE, Pflugerville, TX 78660");
+    expect(stub.situs).toBe("present");
+  });
+
+  it("P-270: byte-identical label when the payload's situs already reads in full", () => {
+    const spelledOut = "1109 Pecan St, Bastrop, TX 78602";
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48021:34049",
+      facets: {
+        situsAddress: spelledOut,
+        baseFacts: { situsAddress: spelledOut, situsCity: "Bastrop", situsState: "TX", situsZip: "78602" },
+      },
+    });
+    expect(stub.label).toBe(spelledOut);
+  });
+
+  it("P-270: names no city the payload does not carry (an earned-absence city object is not a city)", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48453:445501",
+      facets: {
+        situsAddress: "21404 GRAND NATIONAL AVE",
+        baseFacts: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          situsCity: { status: "absent", verdict: "absent-verified", authority: "Travis County CAD roll" },
+          situsZip: "78660",
+        },
+      },
+    });
+    expect(stub.label).toBe("21404 GRAND NATIONAL AVE, 78660");
+    expect(stub.label).not.toContain("Pflugerville");
+  });
+
   it("emits five-state rails only, with drainage unread when never fetched", () => {
     const stub = composeSmartSiteStub({
       parcelNodeId: "48021:34137",
