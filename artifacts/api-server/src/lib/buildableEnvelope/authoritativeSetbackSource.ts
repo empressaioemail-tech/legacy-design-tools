@@ -49,7 +49,8 @@ import {
   type SetbackDateBasis,
 } from "@empressaio/setback-corpus/resolve";
 
-import { mapDistrict, type DistrictMappingResult } from "./districtMapping";
+import { mapDistrict, districtCodeHasExactRow, type DistrictMappingResult } from "./districtMapping";
+import { plannedDevelopmentSetbackRefusalFor } from "./plannedDevelopmentSetback";
 
 export type SetbackScalars = {
   front_ft: number;
@@ -311,6 +312,31 @@ export function resolveAuthoritativeSetbacks(args: {
 
   const table = getSetbackTableForZoning(jurisdictionKey, districtCode);
   if (!table?.districts.length) return null;
+
+  /**
+   * P-257 — a planned-development code resolves NOTHING, on either side.
+   *
+   * The gate is here, ahead of both the codified row gate and the atom
+   * candidate, because a planned-development district's standards are in its
+   * own ordinance and development plan and no candidate on either side can
+   * supply them: a codified `PD` row would be a district schedule the code does
+   * not have, and a per-parcel/atom-chain rule for a PUD is the same defect one
+   * layer down (the measured `48021:70907` was served 20/100/100/100 from the
+   * parcel record's own precomputed axes). `mapDistrict` refuses the codified
+   * side by the same rule and the same ordering; this makes the atom side agree.
+   *
+   * `districtCodeHasExactRow` keeps a district the table really rows resolving
+   * as a district — Smithville's `PD-Z` and Grand County's `PUD` are both real
+   * rows and neither is refused.
+   */
+  if (
+    plannedDevelopmentSetbackRefusalFor(
+      { jurisdictionKey, districtCode },
+      (code) => districtCodeHasExactRow(table, code),
+    )
+  ) {
+    return null;
+  }
 
   const mapped = mapDistrict(table, districtCode);
   const hasCodifiedRow = !!mapped && mapped.kind !== "fallback-conservative";
