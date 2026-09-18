@@ -39,7 +39,8 @@
 import {
   buildEtjBoundaryIndex,
   resolveEtjAtPoint,
-  type EtjBoundaryIndexEntry,
+  type EtjBoundaryIndex,
+  type EtjBoundarySourceRow,
   type EtjSourceCoverageEntry,
 } from "./containment";
 import { etjFactFromContainment, type EtjFact } from "./etjFact";
@@ -155,7 +156,7 @@ export interface EtjVerifyResult {
   guards: EtjPublisherGuard[];
   outcomes: EtjControlOutcome[];
   coverage: EtjSourceCoverageEntry[];
-  index: EtjBoundaryIndexEntry[];
+  index: EtjBoundaryIndex;
 }
 
 export interface EtjVerifyOptions {
@@ -177,7 +178,14 @@ export async function verifyEtjControlPoints(
   const lines: string[] = [];
   const guards: EtjPublisherGuard[] = [];
   const coverage: EtjSourceCoverageEntry[] = [];
-  const indexEntries: EtjBoundaryIndexEntry[] = [];
+  // Rows, not index entries: this instrument acquires live publisher geometry
+  // and has no store and no city-limits index, so it cannot run the P-359
+  // derivation. It declares each freshly parsed ring `verbatim` — served
+  // unchanged — which is honest for an instrument whose job is the ACQUISITION
+  // path (the predicate guard, the paging guard, the four control points), and
+  // it says so in its own output. The store read path cannot do this: it selects
+  // `served_status` from the table, where an underived ring says `underived`.
+  const indexRows: EtjBoundarySourceRow[] = [];
 
   for (const entry of registry) {
     if (entry.layerUrl === null) {
@@ -207,7 +215,7 @@ export async function verifyEtjControlPoints(
       fetchJson ? { fetchJson } : {},
     );
     const counters = newCounters();
-    const rings: EtjBoundaryIndexEntry[] = [];
+    const rings: EtjBoundarySourceRow[] = [];
     for await (const feature of fetchEtjBoundaryFeatures(entry, {
       ...(fetchJson ? { fetchJson } : {}),
     })) {
@@ -223,11 +231,12 @@ export async function verifyEtjControlPoints(
           geometry: rec.geometry,
           bbox: rec.bbox,
           sourceCitation: rec.sourceCitation,
+          servedStatus: "verbatim",
         });
       }
     }
 
-    indexEntries.push(...rings);
+    indexRows.push(...rings);
     coverage.push({
       cityKey: entry.cityKey,
       cityName: entry.cityName,
@@ -304,7 +313,7 @@ export async function verifyEtjControlPoints(
     );
   }
 
-  const built = buildEtjBoundaryIndex(indexEntries);
+  const built = buildEtjBoundaryIndex(indexRows);
   const outcomes: EtjControlOutcome[] = [];
   for (const cp of controlPoints) {
     const result = resolveEtjAtPoint(
@@ -349,7 +358,12 @@ export async function verifyEtjControlPoints(
       kind: "summary",
       publishersWithRings: guards.length,
       publishersEnumeratedWithoutRings: coverage.filter((c) => !c.hasEtjRings).length,
-      ringsAcquired: built.length,
+      ringsAcquired: built.rings.length,
+      ringsRefused: built.refusals.length,
+      // The instrument's own statement of what it did NOT run (P-359). It
+      // measures acquisition: no store, no city limits, so no derivation.
+      servedStatusAssumption:
+        "rings served verbatim (freshly parsed, no derivation: this instrument has no store and no city-limits index)",
       controlPointsPassed: passed,
       controlPointsFailed: outcomes.filter((o) => !o.ok).length,
       predicateGuardFailures: guardFailures.map((g) => g.cityKey),
