@@ -25,7 +25,16 @@
  * move together as one unit" per that job's own close (S1/P-132). Fails the
  * gate on every in-scope county as of this card (live-verified, S4/P-135
  * and re-verified this card's own CP1). Never slated by this card.
+ *
+ * P-270 (OPS-24 X11): this was one of the three places in this repo that
+ * decided what to say about the rule row's own `effectiveDate`, and until
+ * this lane it said NOTHING -- a missing or unreadable value collapsed into a
+ * bare `null` with no state, and any non-empty string was served as a date.
+ * It now reads the date at source through `setbackCitationVintage.ts` and
+ * carries `citationVintage` when the citation it serves is undated.
  */
+
+import type { SetbackCitationVintageRow } from "./buildableEnvelope/setbackCitationVintage";
 
 export const SETBACK_RULES_FACT_SOURCE = "setback-rules-fact" as const;
 export const SETBACK_RULES_RAIL_KEY = "setbackRules" as const;
@@ -38,7 +47,23 @@ export type SetbackRulesFactPresent = {
   citationUrl: string | null;
   districtCode: string | null;
   districtName: string | null;
+  /**
+   * The rule row's own `effectiveDate`, read AT SOURCE (P-270, OPS-24 X11).
+   * Null whenever no readable date is on the row — the same null the field
+   * always carried, but now it is a READ rather than a pass-through: this
+   * adapter used to serve any non-empty string here (an "accessed ..." note
+   * included), and a citation's date is not a value to guess at. Which of the
+   * three unreadable causes applies is on `citationVintage` beside it.
+   */
   effectiveDate: string | null;
+  /**
+   * P-270 (OPS-24 X11). Present ONLY when this row serves a citation whose
+   * effective date could not be read, and then it names the cause, the
+   * citation and the one shared sentence. Null on a readable date (the
+   * agreeing control) and null when no citation is served — never null
+   * because this payload declined to say.
+   */
+  citationVintage: SetbackCitationVintageRow | null;
   jurisdictionKey: string | null;
   resolvedTableKey: string | null;
   note: string | null;

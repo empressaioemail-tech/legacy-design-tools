@@ -159,13 +159,24 @@ export function composeBuildableEnvelopeDerivation(args: {
     typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
 
   const derivePath = atomReconciled ? "labelEdges+derive+atom-reconciled" : "labelEdges+derive";
+  // P-270 (OPS-24 X11). `authoritativeSetbackSource` serves the literal string
+  // "unreadable" as the winner's `effectiveDate` when it could not read a date
+  // at source (never a placeholder date — see its own type doc). Interpolated
+  // raw, that produced "effective unreadable" in a coverage string a customer
+  // or the model reads: machine vocabulary standing where a date should be, and
+  // a SECOND phrasing of the one condition this lane's module owns. The
+  // sentence comes from `derived.citationVintage` — the declaration composed
+  // in `derive.ts` off the SAME table the resolver read — so the condition is
+  // named one way in this repo rather than two. A resolved date is untouched.
+  const vintageNote = derived.citationVintage?.note;
+  const parityNote = atomReconciled
+    ? "Buildable area reconciled against the property atom chain (map/export parity)."
+    : "Geometry from labelEdges+derive (map/export parity).";
   const provenanceNote = spineZoning
     ? spineZoningProvenanceNote(spineZoning)
-    : `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}, effective ${resolvedEffectiveDate}). ${
-        atomReconciled
-          ? "Buildable area reconciled against the property atom chain (map/export parity)."
-          : "Geometry from labelEdges+derive (map/export parity)."
-      }`;
+    : resolvedEffectiveDate === "unreadable" && vintageNote
+      ? `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}). ${vintageNote} ${parityNote}`
+      : `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}, effective ${resolvedEffectiveDate}). ${parityNote}`;
 
   const honesty: EngineHonesty = {
     confidence: { value: confidenceValue, kind: "asserted" },

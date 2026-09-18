@@ -49,6 +49,64 @@ describe("formatResearchAreaContextForLlm — subject parcel constraints", () =>
     expect(out).not.toContain("null");
   });
 
+  /**
+   * P-270 (OPS-24 X11): this block is the third site that formats a setback
+   * citation, and it printed `- Source: <url>` with no vintage line at all —
+   * a reader could copy that one line away and hold a citation with no
+   * statement of how current it was. The declaration now renders BESIDE the
+   * source line rather than only inside the disclosure paragraph above it.
+   */
+  it("P-270: a declared vintage renders on its own line beside the Source line", () => {
+    const out = formatResearchAreaContextForLlm(
+      RESEARCH_AREA_CONTEXT.parse({
+        scope: "property",
+        jurisdictionKey: "pflugerville_tx",
+        subject: {
+          parcelNodeId: "node-123",
+          address: "123 Main St",
+          envelope: {
+            disclosure: "Estimated buildable area. Not survey grade.",
+            citationUrl: "https://example.gov/udc",
+            citationVintage: {
+              kind: "setback-citation-vintage-unreadable",
+              state: "unreadable-absent-at-source",
+              sourceLabel: "codified setback table pflugerville-tx (City of Pflugerville)",
+              citationUrl: "https://example.gov/udc",
+              note: "Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(out).toContain("Source: https://example.gov/udc");
+    // Its own bullet, immediately after the source line it qualifies.
+    expect(out).toContain(
+      "- Setback rule vintage unknown — the rule is served undated, not as current. Verify with the city.",
+    );
+    const sourceIdx = out.indexOf("Source: https://example.gov/udc");
+    const noteIdx = out.indexOf("Setback rule vintage unknown");
+    expect(noteIdx).toBeGreaterThan(sourceIdx);
+  });
+
+  it("P-270: an undated payload renders no vintage line at all (a dated citation is untouched)", () => {
+    const out = formatResearchAreaContextForLlm(
+      RESEARCH_AREA_CONTEXT.parse({
+        scope: "property",
+        subject: {
+          parcelNodeId: "node-123",
+          address: "123 Main St",
+          envelope: {
+            disclosure: "Estimated buildable area. Not survey grade.",
+            citationUrl: "https://example.gov/udc",
+          },
+        },
+      }),
+    );
+    expect(out).toContain("Source: https://example.gov/udc");
+    expect(out).not.toContain("vintage unknown");
+  });
+
   it("renders parcel facts (acreage, living area, flood, land use) in the subject block", () => {
     const out = formatSubjectConstraintsForLlm({
       parcelFacts: {
