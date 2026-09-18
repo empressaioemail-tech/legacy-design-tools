@@ -142,6 +142,10 @@ import {
   isEarnedRecordRetirement,
   type Tier1RecordRetirement,
 } from "./recordRetirement";
+import type {
+  RetirementResolution,
+  Tier1RetirementResolution,
+} from "./retirementAccountResolution";
 import { classifyRawSitusAddress, type SitusAddressUnusableReason } from "./serveGuards";
 
 export const CONFORMANT_SHAPE_SOURCE = "conformant-v1";
@@ -788,6 +792,18 @@ export const BAKE_OWNED_REQUIRED_LEAF_PATHS: readonly string[] = [
  * unaffected.
  */
 export { isEarnedRecordRetirement, type Tier1RecordRetirement } from "./recordRetirement";
+/**
+ * P-351 (2026-09-18). The retirement-resolution shapes, re-exported so a reader
+ * of this module's payload types has one import for both the retirement and the
+ * statement that says how (or whether) the account was named.
+ */
+export type {
+  RetirementAccountPath,
+  RetirementKeyspaces,
+  RetirementResolution,
+  RetirementUnresolvedReason,
+  Tier1RetirementResolution,
+} from "./retirementAccountResolution";
 
 /**
  * Build the retirement declaration. The basis names THIS parcel, the county,
@@ -806,6 +822,13 @@ function buildRecordRetirement(input: {
   declaredTaxYear: number | null;
   lastSeenTaxYear: number | null;
   nowIso: string;
+  /**
+   * P-351. Present only when the caller supplied a resolution. It appends ONE
+   * sentence naming the account and the path, and it appends NOTHING when it is
+   * absent -- which is what keeps a single-keyspace county's retirement basis
+   * character-identical to its pre-P-351 string.
+   */
+  resolution?: RetirementResolution | null;
 }): Tier1RecordRetirement {
   const {
     parcelNodeId,
@@ -836,8 +859,79 @@ function buildRecordRetirement(input: {
         : "") +
       `. This account is not on the current roll -- split, merged, renumbered ` +
       `or removed; no successor account has been verified. The facts elsewhere ` +
-      `on this payload are the LAST-KNOWN claim, not current.`,
+      `on this payload are the LAST-KNOWN claim, not current.` +
+      (input.resolution
+        ? ` The key read was the record's ACCOUNT, not its served key` +
+          ` (${input.resolution.detail}).`
+        : ""),
     lastSeenTaxYear,
+  };
+}
+
+/**
+ * P-351. Build the payload's own statement of what the retirement arm compared.
+ * The basis names THIS record and the key, so two records never share a
+ * character-identical basis -- the same rule every earned absence in this bake
+ * follows. `authority` and `scopeSearched` name the same roll the retirement
+ * names, so a reader never has to guess which read the statement is about.
+ */
+function buildRetirementResolutionStatement(input: {
+  parcelNodeId: string;
+  countyFips: string;
+  countyName: string;
+  resolution: RetirementResolution;
+  declaredTaxYear: number | null;
+  declaredRollConsulted: boolean;
+  accountOnDeclaredRoll: boolean;
+  nowIso: string;
+}): Tier1RetirementResolution {
+  const {
+    parcelNodeId,
+    countyFips,
+    countyName,
+    resolution,
+    declaredTaxYear,
+    declaredRollConsulted,
+    accountOnDeclaredRoll,
+    nowIso,
+  } = input;
+  const resolved = resolution.status === "resolved";
+  const scopeSearched =
+    `cad_property, ALL rows (not filtered to a use code), county_fips ${countyFips}` +
+    (declaredTaxYear != null ? ` tax_year ${declaredTaxYear}` : "");
+  return {
+    verdict: resolved ? "account-resolved" : "key-unresolvable",
+    path: resolution.path,
+    nodeKey: resolution.nodeKey,
+    accountKey: resolution.accountKey,
+    nodeKeyspace: resolution.nodeKeyspace,
+    rollKeyspace: resolution.rollKeyspace,
+    rollTaxYear: declaredTaxYear,
+    via: resolution.via,
+    corroborator: resolution.corroborator,
+    reason: resolution.reason,
+    authority:
+      `${countyName} County CAD roll (cad_property) for county_fips ${countyFips}` +
+      (declaredTaxYear != null
+        ? ` at declared tax_year ${declaredTaxYear}`
+        : " (no declared CAD tax year)"),
+    scopeSearched,
+    asOf: nowIso,
+    basis:
+      `${parcelNodeId}: served key ${resolution.nodeKey} (${resolution.nodeKeyspace}) ` +
+      (resolved
+        ? `was resolved to ACCOUNT ${resolution.accountKey} by ${
+            resolution.path ?? "a published identifier"
+          }` +
+          (resolution.via != null ? ` (${resolution.via})` : "") +
+          (declaredRollConsulted
+            ? accountOnDeclaredRoll
+              ? `, and that account IS on the roll named above, so this record is NOT retired`
+              : `, and that account is ABSENT from the roll named above`
+            : `, but the roll named above was not consulted, so no retirement is claimed`)
+        : `could NOT be resolved to an account, so nothing was looked up and this record is ` +
+          `NOT retired`) +
+      `. ${resolution.detail}.`,
   };
 }
 
@@ -878,6 +972,13 @@ export interface ConformantTier1Payload extends Omit<
   publishRunId?: string;
   /** Record-level declared retirement; see the RECORD RETIREMENT block above. */
   recordRetirement: Tier1RecordRetirement | null;
+  /**
+   * P-351. What this record's retirement arm compared, or why it could compare
+   * nothing. Present only when the caller supplied a `retirementResolution`
+   * (a two-keyspace county); absent on every single-keyspace payload, which is
+   * what makes those payloads byte-identical to their pre-P-351 bytes.
+   */
+  retirementResolution?: Tier1RetirementResolution;
   facets: {
     base: { parcelNodeId: string; situsAddress: string | null; apn: string | null };
   };
@@ -1126,6 +1227,26 @@ export interface ConformantTier1BuildInput {
    */
   cadPropertyRoll?: ConformantCadPropertyRoll;
   /**
+   * P-351 (2026-09-18). HOW THIS RECORD'S ACCOUNT WAS NAMED, when the county's
+   * served keys and its CAD roll's keys are not the same keyspace.
+   *
+   * OPTIONAL, and its absence is a promise: a caller that omits it gets the
+   * pre-P-351 behaviour exactly -- the node's own bare key is read against the
+   * roll, the retirement predicate is unchanged, and no
+   * `retirementResolution` is written. Every single-keyspace county and every
+   * caller built before this card takes that path, byte for byte.
+   *
+   * A caller that supplies it says one of two things per record: the ACCOUNT
+   * key to read the roll by (`status: "resolved"`), or that no published
+   * identifier names an account (`status: "unresolved"`, with a reason). The
+   * second is the state this card exists to add: the record is NOT retired --
+   * nothing was looked up -- and the payload carries a declared
+   * `retirementResolution` saying so. See
+   * `./retirementAccountResolution.ts` for the resolution itself and the order
+   * of the paths.
+   */
+  retirementResolution?: RetirementResolution;
+  /**
    * Optional block set threaded into `landUseJoinKey` for key normalization.
    * Seed does NOT apply to the CAD-to-CAD landUse prop_id roll join (both
    * sides CAD; seed risk was TxGIO-to-CAD). 48209 and 48491 are clear on
@@ -1191,6 +1312,17 @@ export function buildConformantTier1Payload(
   const claim = readConformantCadClaim(input.body);
   const apn = parcelNodeId.split(":")[1] ?? null;
   const countyName = input.countyName ?? COUNTY_NAMES[countyFips] ?? countyFips;
+  // P-351 (2026-09-18). THE ACCOUNT THIS RECORD'S ROLL READ IS BY. Without a
+  // resolution this is the node's own bare key -- the exact key every payload
+  // built before this card was read by, so every earlier caller (and every
+  // county with ONE keyspace) is byte-identical. With a resolution it is the
+  // ACCOUNT the resolution named, or null when the resolution could not name
+  // one: a key that was never resolved is never looked up and never retired.
+  const retirementResolution: RetirementResolution | null =
+    input.retirementResolution ?? null;
+  const cadLookupKey: string | null = retirementResolution
+    ? retirementResolution.accountKey
+    : apn;
 
   const gateBlocked = input.parcelJoin.gateBlocked;
   // Prop_id row is never used on a blocked county (the collision).
@@ -1246,7 +1378,7 @@ export function buildConformantTier1Payload(
   // structural roll type, so it is narrowed to a string here rather than
   // asserted, and a non-string reads as absent instead of as "[object Object]".
   const crosswalkPropertyNumberRaw = crosswalkRow
-    ? input.cadPropertyRoll?.byPropId.get(apn ?? "")?.propertyNumber
+    ? input.cadPropertyRoll?.byPropId.get(cadLookupKey ?? "")?.propertyNumber
     : undefined;
   const crosswalkPropertyNumberForBasis =
     typeof crosswalkPropertyNumberRaw === "string" && crosswalkPropertyNumberRaw.trim()
@@ -1334,28 +1466,84 @@ export function buildConformantTier1Payload(
   // TxGIO-to-CAD gate and returns null for Hays/Williamson — using it here
   // would starve the two hollow-atom counties this card exists to fill.
   const cadPropConsulted = input.cadPropertyRoll?.consulted === true;
+  // P-351. THE PRESENCE VERDICT, and which direction is authoritative.
+  //
+  // `accountOnDeclaredRoll` is the resolution's own finding about the SAME roll
+  // this arm is about to read, so where it has a value it IS the retirement
+  // predicate's answer and the arm does not re-derive it:
+  //
+  //   - `true`  -- the account was named FROM the declared roll (the geo_id
+  //                bind, the declared account-number register), so it is on the
+  //                roll. Retiring here writes a payload that contradicts
+  //                itself: the retirement says "no row at account X" while the
+  //                statement beside it says the roll still carries R<key> as
+  //                account X. Measured on the F1 fixture before this line read
+  //                `true`, which is why it does now.
+  //   - `false` -- the account was named from the PRIOR declared vintage
+  //                precisely because the declared roll no longer carries its
+  //                account number; that is this county's real retirement signal
+  //                and it retires.
+  //   - `null`  -- nothing has decided it (the published-pair path names an
+  //                account in the roll's keyspace without reading the roll), so
+  //                the arm's own single lookup stays the test. This is the only
+  //                direction the pre-P-351 code ever had, and it is unchanged.
+  const accountOnDeclaredRoll =
+    retirementResolution == null ? null : retirementResolution.accountOnDeclaredRoll;
+  // `false` also means the declared roll is not READ at that key: the account was
+  // named from the prior vintage precisely because the declared roll no longer
+  // carries it, so a read would return whatever unrelated row happens to sit at
+  // the same number -- for the dollars as much as for the retirement.
   const cadPropRow =
-    apn && cadPropConsulted
-      ? (input.cadPropertyRoll?.byPropId.get(apn) ?? null)
+    cadLookupKey && cadPropConsulted && accountOnDeclaredRoll !== false
+      ? (input.cadPropertyRoll?.byPropId.get(cadLookupKey) ?? null)
       : null;
   const cadFacts = cadPropertyFactsFromRow(cadPropRow);
-
+  const accountAbsentFromDeclaredRoll =
+    accountOnDeclaredRoll === true
+      ? false
+      : accountOnDeclaredRoll === false
+        ? true
+        : cadPropRow == null;
   // RECORD RETIREMENT: the declared-vintage cad_property roll was consulted
-  // (not merely absent/undeclared) AND carries no row at all for this prop_id
-  // -- not "no coded row", ALL rows, the same table the dollar facets already
-  // read. A prop_id present in the current roll can never reach this branch.
+  // (not merely absent/undeclared) AND carries no row at all for this record's
+  // ACCOUNT -- not "no coded row", ALL rows, the same table the dollar facets
+  // already read. An account present in the current roll can never reach this
+  // branch, and neither can a record whose account was never named: P-351
+  // (2026-09-18) split the one statement `cadPropRow == null` back into the two
+  // it had been silently carrying. `cadLookupKey == null` means the resolution
+  // could not name an account, so nothing was looked up -- that is a declared
+  // `retirementResolution` below, never a retirement.
   const recordRetirement: Tier1RecordRetirement | null =
-    apn != null && cadPropConsulted && cadPropRow == null
+    cadLookupKey != null && cadPropConsulted && accountAbsentFromDeclaredRoll
       ? buildRecordRetirement({
           parcelNodeId,
           countyFips,
           countyName,
-          apn,
+          apn: cadLookupKey,
           declaredTaxYear: input.cadPropertyRoll?.declaredTaxYear ?? null,
           lastSeenTaxYear: claim.taxYear,
           nowIso,
+          resolution: retirementResolution,
         })
       : null;
+
+  // P-351. The disclosure beside the retirement: what this record compared, or
+  // why it could not compare anything. Emitted ONLY when the caller supplied a
+  // resolution (a gate-blocked county's two keyspaces); a single-keyspace
+  // county has nothing to disclose and keeps its bytes.
+  const retirementResolutionStatement: Tier1RetirementResolution | null =
+    retirementResolution == null
+      ? null
+      : buildRetirementResolutionStatement({
+          parcelNodeId,
+          countyFips,
+          countyName,
+          resolution: retirementResolution,
+          declaredTaxYear: input.cadPropertyRoll?.declaredTaxYear ?? null,
+          declaredRollConsulted: cadPropConsulted,
+          accountOnDeclaredRoll: !accountAbsentFromDeclaredRoll,
+          nowIso,
+        });
 
   // CTX-B7. The declared-vintage roll, then the claim, then an absence -- the
   // same rule and the same already-loaded row the dollars come from. Omitted by
@@ -1612,6 +1800,9 @@ export function buildConformantTier1Payload(
     source: CONFORMANT_TIER1_SOURCE,
     access: input.access,
     recordRetirement,
+    ...(retirementResolutionStatement
+      ? { retirementResolution: retirementResolutionStatement }
+      : {}),
     ...(input.accessNormalizedFrom
       ? { accessNormalizedFrom: input.accessNormalizedFrom }
       : {}),
