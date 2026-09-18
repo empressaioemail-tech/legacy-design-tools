@@ -328,8 +328,7 @@ describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
     ).toBeNull();
   });
 
-  it("situs_city is FALLBACK only when stamp is null (logs via callback)", () => {
-    const calls: string[] = [];
+  it("situs_city is FALLBACK only when stamp is null (logs via callback)", () => {    const calls: string[] = [];
     expect(
       resolveZoningJurisdiction(
         {
@@ -353,6 +352,68 @@ describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
         countyFips: "48453",
       }),
     ).toBe("pflugerville-tx");
+  });
+
+  // -------------------------------------------------------------------------
+  // P-273 control 3: the registry was validated and then ignored.
+  //
+  // The two branches this replaces were
+  //
+  //     if (stamped && ZONING_LAYERS[stamped]) return stamped;
+  //     if (stamped) return stamped;
+  //
+  // — the same expression, so the registry test decided nothing that any
+  // caller could observe, and an unregistered stamp was indistinguishable from
+  // a routable one. The rule ("an unknown-but-stamped key still wins over a
+  // situs guess") is kept deliberately: the stamp is PIP evidence of which
+  // city the parcel is in, and nulling it would discard that evidence. What
+  // changed is that the registry verdict is now REPORTED.
+  // -------------------------------------------------------------------------
+  describe("P-273: the registry verdict is observable", () => {
+    it("an unregistered stamp fires onUnregisteredStamp and KEEPS the key (never nulled into a guess)", () => {
+      const seen: Array<{ cityKey: string; countyFips: string }> = [];
+      const key = resolveZoningJurisdiction(
+        { zoningJurisdiction: "nowhere-tx", situsCity: "Austin", countyFips: "48453" },
+        { onUnregisteredStamp: (info) => seen.push(info) },
+      );
+      expect(key).toBe("nowhere-tx");
+      expect(seen).toEqual([{ cityKey: "nowhere-tx", countyFips: "48453" }]);
+    });
+
+    it("a REGISTERED stamp does not fire it — the control is not always-on", () => {
+      const seen: string[] = [];
+      const key = resolveZoningJurisdiction(
+        { zoningJurisdiction: "austin-tx", situsCity: null, countyFips: "48453" },
+        { onUnregisteredStamp: ({ cityKey }) => seen.push(cityKey) },
+      );
+      expect(key).toBe("austin-tx");
+      expect(seen).toEqual([]);
+      // ...and every cityKey in the registry is on the silent side of the
+      // check, so a firing callback means the key really is unregistered.
+      for (const registered of Object.values(ZONING_LAYERS)) {
+        const fired: string[] = [];
+        expect(
+          resolveZoningJurisdiction(
+            { zoningJurisdiction: registered.cityKey, situsCity: null, countyFips: registered.countyFips },
+            { onUnregisteredStamp: ({ cityKey }) => fired.push(cityKey) },
+          ),
+        ).toBe(registered.cityKey);
+        expect(fired).toEqual([]);
+      }
+    });
+
+    it("an UNDERSCORE-normalized stamp is looked up in its hyphen form before the verdict", () => {
+      const seen: string[] = [];
+      // `zoning_jurisdiction` is stored underscore-normalized on some paths;
+      // the check must still recognize a registered key rather than reporting
+      // every such row as unregistered.
+      const key = resolveZoningJurisdiction(
+        { zoningJurisdiction: "austin_tx", situsCity: null, countyFips: "48453" },
+        { onUnregisteredStamp: ({ cityKey }) => seen.push(cityKey) },
+      );
+      expect(key).toBe("austin-tx");
+      expect(seen).toEqual([]);
+    });
   });
 });
 
