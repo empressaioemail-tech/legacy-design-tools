@@ -12,10 +12,13 @@ import { labelEdges } from "./edgeLabeling";
 import { mapDistrict } from "./districtMapping";
 import { deriveBuildableEnvelope } from "./derive";
 import {
+  AREA_FIGURE_WITHHELD_DISCLOSURE,
   DEPTH_WARM_PROMOTION_MARKER,
   isEnvelopeAtomVerified,
   reconcileWithAtomEnvelope,
+  withholdUnverifiedAreaFigure,
 } from "./reconcileAtomEnvelope";
+import { SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE } from "./setbackCitationVintage";
 
 // Partial mock so the validation-failed fixture can force a gate rejection
 // (unreachable with honest inputs); every other test runs the real insetPerEdge.
@@ -411,5 +414,107 @@ describe("reconcileWithAtomEnvelope", () => {
       expect(isEnvelopeAtomVerified(null)).toBe(false);
       expect(isEnvelopeAtomVerified(undefined)).toBe(false);
     });
+  });
+});
+
+/**
+ * P-270 (OPS-24 scope X11) — the vintage declaration must survive the
+ * transformers between `derive.ts` and the wire.
+ *
+ * WHY THIS FILE NEEDS ITS OWN P-270 CASE. `derive.ts` composes the citation's
+ * declaration and appends its sentence to the disclosure. Both functions in
+ * this module then REWRITE the disclosure — the reconcile branches substitute
+ * the atom chain's own sentence, and `withholdUnverifiedAreaFigure` substitutes
+ * the withholding disclosure on every parcel without a verified atom (P-304),
+ * which is the COMMON path, not an edge case. Before this lane each of those
+ * rewriters silently dropped the sentence `derive.ts` had just added: the row
+ * survived on `props` (carried by the spread) while the disclosure no longer
+ * admitted the vintage, i.e. two fields on one payload disagreeing about the
+ * same citation. These tests pin BOTH halves so a future rewriter that drops
+ * one fails here.
+ *
+ * The fixtures inherit `TABLE`, which cites a URL and carries no
+ * `effectiveDate` — the shipped shape, and the reason the declaration fires.
+ */
+describe("P-270 — the citation vintage declaration survives the envelope transformers", () => {
+  it("the RECONCILE branch that rewrites the disclosure keeps the sentence, taken from the row", () => {
+    const res = reconcileWithAtomEnvelope(
+      buildableFixture(),
+      { kind: "buildable", areaSqFt: 5_000 },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
+    const props = res.geojson.features[0]!.properties;
+    // The atom chain's sentence is still the one that leads...
+    expect(props.disclosure).toContain("Buildable area from the property atom chain");
+    // ...and the declaration is still stated, from the ONE module.
+    expect(props.disclosure!.endsWith(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE)).toBe(true);
+    expect(props.citationVintage?.note).toBe(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE);
+  });
+
+  it("the NO-BUILDABLE-AREA branch keeps the sentence too — an empty envelope still serves its citation", () => {
+    const res = reconcileWithAtomEnvelope(
+      buildableFixture(),
+      { kind: "no-buildable-area", reason: "unzoned" },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
+    const props = res.geojson.features[0]!.properties;
+    expect(res.empty).toBe(true);
+    expect(props.disclosure).toContain("No buildable area");
+    expect(props.disclosure!.endsWith(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE)).toBe(true);
+    expect(props.citationVintage?.note).toBe(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE);
+  });
+
+  it("THE COMMON PATH: withholding the area figure replaces the disclosure and must not take the sentence with it", () => {
+    // P-304 withholds on every parcel without a verified atom, so this is the
+    // substitution most live payloads go through.
+    const res = withholdUnverifiedAreaFigure(buildableFixture(), null);
+    const props = res.geojson.features[0]!.properties;
+    expect(props.disclosure).toBe(
+      `${AREA_FIGURE_WITHHELD_DISCLOSURE} ${SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE}`,
+    );
+    expect(props.citationVintage?.note).toBe(SETBACK_CITATION_VINTAGE_UNREADABLE_NOTE);
+  });
+
+  it("carries no vintage into a payload whose envelope declares none (the agreeing control, through the withhold path)", () => {
+    // A table whose own `effectiveDate` IS readable, so `derive.ts` composes no
+    // row and appends nothing. The transformer must then be byte-identical to
+    // the pre-lane behaviour rather than appending a sentence for a vintage it
+    // does not dispute.
+    const dated = { ...TABLE, effectiveDate: "2026-04-14" } as SetbackTable;
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const derived = deriveBuildableEnvelope({
+      ring,
+      table: dated,
+      district: mapDistrict(dated, "R-MD")!,
+      labeling,
+    });
+    expect(derived.citationEffectiveDate).toBe("2026-04-14");
+
+    const res = withholdUnverifiedAreaFigure(derived, null);
+    expect(res.geojson.features[0]!.properties.disclosure).toBe(AREA_FIGURE_WITHHELD_DISCLOSURE);
+    expect(res.geojson.features[0]!.properties.citationVintage).toBeUndefined();
+  });
+
+  it("a payload that declares nothing is returned UNCHANGED by every transformer (no row, no rewrite)", () => {
+    const dated = { ...TABLE, effectiveDate: "2026-04-14" } as SetbackTable;
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const derived = deriveBuildableEnvelope({
+      ring,
+      table: dated,
+      district: mapDistrict(dated, "R-MD")!,
+      labeling,
+    });
+    const baseDisclosure = derived.geojson.features[0]!.properties.disclosure;
+    const reconciled = reconcileWithAtomEnvelope(
+      derived,
+      { kind: "buildable", areaSqFt: 5_000 },
+      { depthWarmPromotion: DEPTH_WARM_PROMOTION_MARKER },
+    );
+    // The reconcile branch's own sentence, with nothing appended after it —
+    // the declaration-free payload gains no words from this lane.
+    expect(reconciled.geojson.features[0]!.properties.disclosure).not.toContain("vintage unknown");
+    expect(baseDisclosure).not.toContain("vintage unknown");
   });
 });

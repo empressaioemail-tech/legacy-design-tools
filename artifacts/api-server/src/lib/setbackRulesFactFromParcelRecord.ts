@@ -15,6 +15,12 @@
 import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import type { ParcelRecordCompanionRow } from "./parcelRecordCellRead";
 import { parseParcelNodeId } from "./parcelNodeId";
+// P-270 (OPS-24 X11): the ONE place that decides what a citation's date read
+// was worth saying, shared with the drawn-envelope path (derive.ts).
+import {
+  readSetbackDateFromRowAtSource,
+  setbackCitationVintageRow,
+} from "./buildableEnvelope/setbackCitationVintage";
 import {
   SETBACK_RULES_FACT_SOURCE,
   SETBACK_RULES_RAIL_KEY,
@@ -22,6 +28,15 @@ import {
 } from "./setbackRulesFactRead";
 
 const RULE_ROW_INDEX = 0;
+
+/**
+ * The rule row's own date-bearing fields, in the source's own spellings. The
+ * `parcel_record` writer uses camelCase `effectiveDate` (see
+ * setbackRulesFactRead.ts's live-verified field list); the snake_case
+ * spelling is read too because the same row shape crosses writers, and a
+ * second spelling is exactly how one of these fields goes silently unread.
+ */
+const SETBACK_RULE_DATE_FIELD_KEYS = ["effectiveDate", "effective_date"] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -115,15 +130,29 @@ export async function setbackRulesFactFromParcelRecord(
     };
   }
 
+  const citationUrl = asNullableString(payload.citationUrl);
+  // P-270 (OPS-24 X11). Read the row's OWN date-bearing field at source,
+  // keeping "absent" and "unparseable" apart, then declare the vintage when
+  // there is a citation and no readable date. `effectiveDate` below is that
+  // read's `sourceDate`, so a value that is not a date can no longer be
+  // served as one.
+  const dateRead = readSetbackDateFromRowAtSource(payload, SETBACK_RULE_DATE_FIELD_KEYS);
+  const citationVintage = setbackCitationVintageRow({
+    date: dateRead,
+    citationUrl,
+    sourceLabel: `parcel_record ${SETBACK_RULES_RAIL_KEY} (${ruleRow?.source ?? "source-unrecorded"})`,
+  });
+
   return {
     state: "present",
     source: SETBACK_RULES_FACT_SOURCE,
     entityId: placeKey,
     matchKind: asNullableString(payload.matchKind),
-    citationUrl: asNullableString(payload.citationUrl),
+    citationUrl,
     districtCode: asNullableString(payload.districtCode),
     districtName: asNullableString(payload.districtName),
-    effectiveDate: asNullableString(payload.effectiveDate),
+    effectiveDate: dateRead.sourceDate,
+    citationVintage,
     jurisdictionKey: asNullableString(payload.jurisdictionKey),
     resolvedTableKey: asNullableString(payload.resolvedTableKey),
     note: asNullableString(payload.note),
