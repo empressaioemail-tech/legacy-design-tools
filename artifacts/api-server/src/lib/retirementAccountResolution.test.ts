@@ -1002,14 +1002,12 @@ describe("F8 WRITER (b) TESTS THE NODE'S OWN KEYSPACE (P-370)", () => {
   });
 
   it("the reverse builder reads the SAME pair the forward one does, with the roles swapped", () => {
-    const rows: PublishedAccountPairRow[] = [
+    const sharedRows: Array<{ nodeKey: string; accountKey: string; source: string }> = [
       { nodeKey: "R005578", accountKey: "123456", source: "tx_wcad_owner" },
       { nodeKey: "R006142", accountKey: "654321", source: "tx_wcad_owner" },
     ];
-    const forward = buildPublishedAccountPair([rows]);
-    const reverse = buildPublishedNodeKeyByAccountKey([
-      rows.map((r) => ({ accountKey: r.accountKey, nodeKey: r.nodeKey, source: r.source })),
-    ]);
+    const forward = buildPublishedAccountPair([sharedRows]);
+    const reverse = buildPublishedNodeKeyByAccountKey([sharedRows]);
     // The forward builder answers nodeKey -> accountKey; the reverse one answers
     // accountKey -> nodeKey over the SAME rows, so it is the inverse and not a
     // second opinion: neither can name a key the other refuses.
