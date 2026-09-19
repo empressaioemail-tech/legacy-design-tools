@@ -11,6 +11,24 @@ import {
 } from "./smartSiteStub";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
+import type { CityLimitsFactServed } from "./cityLimitsFactServeCutover";
+
+/**
+ * A served city-limits fact as the read builds one (`CityLimitsFactWire` plus
+ * `queryPoint`). Built through the real shape rather than a two-field literal so
+ * a fixture cannot pass the test while failing the type the route passes.
+ */
+const cityLimitsServed = (
+  over: Partial<CityLimitsFactServed>,
+): CityLimitsFactServed => ({
+  status: "incorporated",
+  etjStatus: "unresolved",
+  source: "tx_city_boundary",
+  basis: "test fixture: PIP against the incorporated-place layer",
+  cityName: "Pflugerville",
+  queryPoint: { longitude: -97.57404, latitude: 30.49893 },
+  ...over,
+});
 
 const ATOM_MISS = {
   attempted: true,
@@ -122,8 +140,99 @@ describe("composeSmartSiteStub", () => {
     expect(stub.label).not.toContain("Pflugerville");
   });
 
-  it("emits five-state rails only, with drainage unread when never fetched", () => {
+  /**
+   * P-270 CITY HALF (2026-09-19). The address half above made the label carry the
+   * city the payload HANDED it; the payload hands a DECLARED-absence object when
+   * the CAD roll states no city, so the label still named none. The licence
+   * (`situsCompose.resolveSitusCity`) may take the city-limits city in exactly
+   * that case — and only there.
+   */
+  it("P-270: names the containing city on a declared absent-verified roll city, and only when the caller served an INCORPORATED city-limits answer", () => {
+    const declaredAbsence = {
+      status: "absent",
+      verdict: "absent-verified",
+      authority: "Travis County CAD roll",
+    };
+    const withLimits = composeSmartSiteStub({
+      parcelNodeId: "48453:445501",
+      facets: {
+        situsAddress: "21404 GRAND NATIONAL AVE",
+        baseFacts: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          situsCity: declaredAbsence,
+          situsState: "TX",
+          situsZip: "78660",
+        },
+      },
+      cityLimitsFact: cityLimitsServed({ cityName: "Pflugerville" }),
+    });
+    expect(withLimits.label).toBe("21404 GRAND NATIONAL AVE, Pflugerville, TX 78660");
+
+    // The control that makes the licence a condition rather than a default: the
+    // SAME payload with an unincorporated answer names no city.
+    const unincorporated = composeSmartSiteStub({
+      parcelNodeId: "48453:445501",
+      facets: {
+        situsAddress: "21404 GRAND NATIONAL AVE",
+        baseFacts: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          situsCity: declaredAbsence,
+          situsState: "TX",
+          situsZip: "78660",
+        },
+      },
+      cityLimitsFact: cityLimitsServed({
+        status: "unincorporated",
+        cityName: "Pflugerville",
+      }),
+    });
+    expect(unincorporated.label).toBe("21404 GRAND NATIONAL AVE, TX 78660");
+  });
+
+  it("P-270: a roll that STATES its city keeps the roll's city even when a different jurisdiction city is served", () => {
     const stub = composeSmartSiteStub({
+      parcelNodeId: "48453:445501",
+      facets: {
+        situsAddress: "21404 GRAND NATIONAL AVE",
+        baseFacts: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          situsCity: "Austin",
+          situsState: "TX",
+          situsZip: "78660",
+        },
+      },
+      cityLimitsFact: cityLimitsServed({ cityName: "Pflugerville" }),
+    });
+    expect(stub.label).toBe("21404 GRAND NATIONAL AVE, Austin, TX 78660");
+    expect(stub.label).not.toContain("Pflugerville");
+  });
+
+  it("P-270: an undeclared absence (a bare null, or a lookup-failed verdict) names no city even with city limits served", () => {
+    for (const situsCity of [
+      null,
+      { status: "absent", verdict: "lookup-failed", authority: "Travis County CAD roll" },
+    ]) {
+      const stub = composeSmartSiteStub({
+        parcelNodeId: "48453:445501",
+        facets: {
+          situsAddress: "21404 GRAND NATIONAL AVE",
+          baseFacts: {
+            situsAddress: "21404 GRAND NATIONAL AVE",
+            situsCity,
+            situsState: "TX",
+            situsZip: "78660",
+          },
+        },
+        cityLimitsFact: cityLimitsServed({
+          status: "incorporated",
+          cityName: "Pflugerville",
+        }),
+      });
+      expect(stub.label).toBe("21404 GRAND NATIONAL AVE, TX 78660");
+    }
+  });
+
+  it("emits five-state rails only, with drainage unread when never fetched", () => {    const stub = composeSmartSiteStub({
       parcelNodeId: "48021:34137",
       facets: {
         situsAddress: "908 PINE, BASTROP, TX 78602",

@@ -1,0 +1,57 @@
+name: Cross-repo literal drift (P-331)
+
+# P-331 — the legacy-design-tools leg. Same rule, opposite direction: this repo
+# extracts ITS declaring modules and hauska-map's, and fails when the pair
+# disagrees. The script is byte-identical in both repos (DEV_PROCESS 2.4: two
+# implementations of one rule drift into two rules), and it auto-detects which
+# repo it is in, so there is no per-repo branch inside the rule.
+#
+# WHY A SCHEDULE. A push here does not re-run hauska-map's CI, and a push there
+# does not re-run this one. The nightly run is what catches "hauska-map changed
+# and legacy-design-tools did not push". Without it that direction is unobserved
+# until the next push here — a named bypass, stated in the script's header.
+#
+# WHAT FAILS: the drift step's exit code (1 = disagreement, 2 = a declaration
+# could not be read; 2 is never a pass). The selftest runs FIRST.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: cross-repo literal drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: checkout hauska-map main (the sibling copy)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-map
+          ref: main
+          path: map-main
+          sparse-checkout: |
+            apps/property-explorer/api/_lib/planned-development-district.ts
+            apps/property-explorer/api/_lib/setback-citation-vintage.ts
+            apps/property-explorer/api/_lib/pe-record-to-facets.ts
+            apps/property-explorer/api/_lib/pe-situs-search-core.ts
+            apps/property-explorer/src/lib/__fixtures__/envelope-verification.json
+            # P-270 city half (2026-09-19): the licence's declarations. Checked out
+            # now so the follow-up pin rows (see the check's header) need no
+            # workflow edit; the file exists on hauska-map main today.
+            apps/property-explorer/src/lib/situs-address.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: selftest (the control must be observed failing, not only passing)
+        run: node scripts/check-cross-repo-literal-drift.mjs --selftest
+      - name: drift against hauska-map main
+        run: node scripts/check-cross-repo-literal-drift.mjs --side ldt --map-root map-main

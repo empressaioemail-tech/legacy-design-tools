@@ -99,6 +99,8 @@ import { buildR1Brief } from "../lib/r1BriefCompose";
 import {
   isPunctuationOnlySitus,
   projectSavedPropertyLabel,
+  rollSitusCityFromFacets,
+  rollSitusCityIsDeclaredAbsent,
 } from "../lib/situsCompose";
 import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
 import {
@@ -465,12 +467,32 @@ async function assembleNodeBriefBody(
 async function assembleStubBody(parcelNodeId: string) {
   const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
   if (!snapshot) return null;
-  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact] = await Promise.all([
-    loadFloodHazardFactForServe(parcelNodeId),
-    // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
-    loadZoningFactForServe(parcelNodeId),
-    loadSetbacksFactForServe(parcelNodeId),
-  ]);
+  /**
+   * P-270 CITY HALF (2026-09-19). The MCP label's city-limits licence: the
+   * label's city comes from `situsCompose.resolveSitusCity`, which may name the
+   * city whose limits contain the parcel where the payload's own roll city is a
+   * DECLARED `absent-verified` absence.
+   *
+   * The determination is read ONLY for exactly that shape, so this path pays for
+   * a city-limits read only where the read can change the answer — a screen of
+   * stubs whose payloads state their own roll city reads nothing extra, and the
+   * label is byte-identical to before. The read itself is the same call the
+   * brief body above already makes (`loadCityLimitsFactForServe`, the snapshot's
+   * own query point), not a second mechanism.
+   */
+  const needsCityLimits = rollSitusCityIsDeclaredAbsent(
+    rollSitusCityFromFacets(snapshot.facets),
+  );
+  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact, cityLimitsFact] =
+    await Promise.all([
+      loadFloodHazardFactForServe(parcelNodeId),
+      // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
+      loadZoningFactForServe(parcelNodeId),
+      loadSetbacksFactForServe(parcelNodeId),
+      needsCityLimits
+        ? loadCityLimitsFactForServe(parcelNodeId, snapshot.queryPoint ?? null)
+        : Promise.resolve(null),
+    ]);
   return composeSmartSiteStub({
     parcelNodeId,
     facets: snapshot.facets,
@@ -479,6 +501,7 @@ async function assembleStubBody(parcelNodeId: string) {
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
+    cityLimitsFact,
   });
 }
 
