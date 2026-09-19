@@ -524,10 +524,13 @@ export function resolveTxParcelCounty(input: {
  *   - `county` set, `resolvedBy: "pip-tightest"` : several store counties
  *     reported containment (should not happen for real, non-overlapping
  *     parcels); the tightest containing parcel's county wins.
- *   - `county` set, `resolvedBy: "centroid-fallback"` : NO store county
- *     contains the point (a genuine gap / ROW, or a live-ArcGIS county) —
- *     fall back to the existing nearest-centroid router so the live-ArcGIS
- *     counties and the Cotality fall-through keep working unchanged.
+ *   - `county` set, `resolvedBy: "centroid-fallback"` : NO candidate
+ *     county's fabric was MEASURED to contain the point (a genuine gap /
+ *     ROW, a live-ArcGIS county that answered "not mine", or a probe that
+ *     did not answer at all) — fall back to the existing nearest-centroid
+ *     router so the live-ArcGIS counties and the Cotality fall-through keep
+ *     working unchanged. The label says the county was chosen by proximity,
+ *     never by containment.
  *   - `county` null                          : not a supported county at all.
  */
 export interface PipCountyResolution {
@@ -536,23 +539,57 @@ export interface PipCountyResolution {
 }
 
 /**
- * Does a LIVE county's own ArcGIS parcel layer contain the point?
- * (P-373.) The live mirror of {@link countyStoreContainsPoint}: one
- * bounded point-intersect query with geometry switched OFF, so it costs
- * one small read and answers containment only.
+ * The answer to "does this county's fabric contain the point?" — THREE
+ * values, never two (P-382).
  *
- * Fail-soft by design: a county that is down, slow or erroring answers
- * `false` (it does not contain the point as far as this caller can tell),
- * because the caller only uses this to CHOOSE a county among candidates —
- * an upstream hiccup must not turn into a routing decision, and the
- * centroid fallback stays available behind it.
+ *   - `contains`          : the layer ANSWERED and a parcel covers the point.
+ *   - `does-not-contain`  : the layer ANSWERED and no parcel covers the point.
+ *                           (Also the layer's own declared empty coverage:
+ *                           it answered "nothing here".)
+ *   - `unknown`           : the layer did NOT answer. `reason` NAMES the
+ *                           county and the upstream failure that stopped it.
+ *
+ * P-373 collapsed `unknown` into `does-not-contain` by catching every throw
+ * and returning `false`. Because the caller read a bare boolean, "this county
+ * is down" arrived as "this county does not own the point" — and with two
+ * candidate counties, one erroring and one genuinely containing, the errored
+ * county's `false` left exactly one `true` and the point was routed with
+ * `resolvedBy: "live-pip"` to a county that was never asked. A measurement that
+ * did not happen is not a negative; that is what this type makes
+ * unrepresentable, and why the caller never sees a boolean again.
+ */
+export type ArcGisContainment =
+  | { state: "contains" }
+  | { state: "does-not-contain" }
+  | { state: "unknown"; reason: string };
+
+/**
+ * Does a LIVE county's own ArcGIS parcel layer contain the point?
+ * (P-373, made three-valued by P-382.) The live mirror of
+ * {@link countyStoreContainsPoint}: one bounded point-intersect query with
+ * geometry switched OFF, so it costs one small read and answers containment
+ * only.
+ *
+ * Only a HELD point on a county line where the errored county might own the
+ * point is worth a refusal, so this does not throw and does not refuse by
+ * itself: it returns the third value with the failure named, and
+ * {@link resolvePointCountyByPip} — the only caller — declines to earn
+ * `live-pip` while any candidate is `unknown`.
+ *
+ * A MISS is not a throw: the adapter answers a non-intersecting point with
+ * zero features, which is the `does-not-contain` branch below. A thrown
+ * `AdapterRunError` coded `no-coverage` (the adapters' deterministic
+ * "this layer does not apply here" verdict) is likewise an ANSWER about the
+ * point, so it maps to `does-not-contain` too; every other throw is an
+ * `unknown`. Folding `no-coverage` into `unknown` instead would make a live
+ * county unrouteable on every genuine gap/ROW — the opposite defect.
  */
 export async function countyArcGisContainsPoint(input: {
   county: TxParcelCounty;
   latitude: number;
   longitude: number;
   fetchImpl?: typeof fetch;
-}): Promise<boolean> {
+}): Promise<ArcGisContainment> {
   const propIdField = input.county.propIdFields?.[0];
   try {
     const res = await arcgisPointQuery({
@@ -565,10 +602,30 @@ export async function countyArcGisContainsPoint(input: {
       upstreamLabel: txCountyProviderLabel(input.county),
       fetchImpl: input.fetchImpl,
     });
-    return res.features.length > 0;
-  } catch {
-    return false;
+    return res.features.length > 0
+      ? { state: "contains" }
+      : { state: "does-not-contain" };
+  } catch (err) {
+    if (err instanceof AdapterRunError && err.code === "no-coverage") {
+      return { state: "does-not-contain" };
+    }
+    return {
+      state: "unknown",
+      reason: `${txCountyProviderLabel(input.county)} containment probe did not answer (${describeProbeFailure(err)})`,
+    };
   }
+}
+
+/**
+ * One-line, operator-actionable description of why a probe failed: the
+ * adapter's own error code when there is one (so `network-error` reads
+ * differently from `timeout`), plus the upstream's message.
+ */
+function describeProbeFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof AdapterRunError) return `${err.code}: ${message}`;
+  const name = err instanceof Error ? err.name : "Error";
+  return `${name}: ${message}`;
 }
 
 /**
@@ -593,12 +650,16 @@ export async function countyArcGisContainsPoint(input: {
  *      parcel's county (`pip-tightest`).
  *   4. NO store county contains it -> ask each LIVE contract county whose
  *      bbox contains the point whether its own fabric contains it
- *      ({@link countyArcGisContainsPoint}, P-373). Exactly one -> route
- *      there (`live-pip`). Several -> refuse to choose (a named refuse
- *      beats guessing a neighbour).
- *   5. Still nothing (a genuine gap/ROW) -> fall back to the nearest-centroid
- *      {@link resolveTxParcelCounty} (`centroid-fallback`) so the
- *      pre-F4j behavior is unchanged where nothing owns the point.
+ *      ({@link countyArcGisContainsPoint}, P-373). Exactly one `contains`
+ *      and NO `unknown` -> route there (`live-pip`). Several -> refuse to
+ *      choose (a named refuse beats guessing a neighbour). A probe that did
+ *      not answer is not a "no" (P-382): `live-pip` is withheld rather than
+ *      awarded to the one county that happened to answer.
+ *   5. Still nothing (a genuine gap/ROW, a live county that answered "not
+ *      mine", or a live candidate that never answered) -> fall back to the
+ *      nearest-centroid {@link resolveTxParcelCounty} (`centroid-fallback`)
+ *      so the pre-F4j behavior is unchanged where nothing MEASURED owns the
+ *      point.
  *
  * This NEVER makes routing looser (commitment #1): a point that no store
  * OR live county contains is NOT force-routed anywhere — it falls back to
@@ -667,7 +728,7 @@ export async function resolvePointCountyByPip(input: {
     const probes = await Promise.all(
       liveCandidates.map(async (county) => ({
         county,
-        contains: await countyArcGisContainsPoint({
+        containment: await countyArcGisContainsPoint({
           latitude,
           longitude,
           county,
@@ -675,8 +736,16 @@ export async function resolvePointCountyByPip(input: {
         }),
       })),
     );
-    const containing = probes.filter((p) => p.contains);
-    if (containing.length === 1) {
+    const containing = probes.filter((p) => p.containment.state === "contains");
+    const unknown = probes.filter((p) => p.containment.state === "unknown");
+    // `live-pip` is EARNED only by a COMPLETE measurement: exactly one
+    // candidate's fabric contains the point and every other candidate
+    // ANSWERED. A probe that did not answer is not a "no" (P-382), so with
+    // any `unknown` in the set the point is not routed by live fabric — it
+    // falls through to the same nearest-centroid router it used before
+    // P-373, whose own `resolvedBy` label declares that the county was
+    // picked by proximity and not by containment.
+    if (containing.length === 1 && unknown.length === 0) {
       return { county: containing[0]!.county, resolvedBy: "live-pip" };
     }
     // Several live fabrics report containment (overlapping county-line

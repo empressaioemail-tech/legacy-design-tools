@@ -45,6 +45,8 @@ import {
   txParcelProviderMode,
   resolveTxParcelCounty,
   resolvePointCountyByPip,
+  countyArcGisContainsPoint,
+  storeCountiesContainingPoint,
   queryTxCountyParcelsGeoJson,
   queryTxCountyParcelByPropId,
   countiesContainingPoint,
@@ -1252,5 +1254,182 @@ describe("P-373: queryTxCountyParcelByPropId (one parcel, by identity)", () => {
         propId: "   ",
       }),
     ).toBeNull();
+  });
+});
+
+// ── P-382: the containment probe is THREE-valued ───────────────────────────
+//
+// P-373 taught `resolvePointCountyByPip` to ask each LIVE candidate county's
+// own fabric whether it contains the point. But `countyArcGisContainsPoint`
+// answered a boolean, and a probe that THREW (service down, timeout, parse
+// error) returned `false` — so "I could not tell" was indistinguishable from
+// "not mine". The resolver then kept whichever candidates returned `true` and
+// awarded `live-pip` to the one that happened to answer, labelling a
+// containment it never measured.
+//
+// Two live counties exist in the fabric (Bastrop 48021, Caldwell 48055) and
+// their routing bboxes overlap, so a straddle point gives exactly the reported
+// shape: two candidates, one probe dead.
+const P382_STRADDLE = { latitude: 29.95, longitude: -97.5 }; // in BOTH live bboxes
+const P382_ANSWER_WINS = { latitude: 30.0, longitude: -97.33 }; // Bastrop answers, Caldwell throws
+
+/** A point query answer: `features` non-empty == the fabric contains the point. */
+function pointQueryAnswer(contains: boolean): Response {
+  return new Response(
+    JSON.stringify({
+      features: contains ? [{ attributes: { prop_id: "1" } }] : [],
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+/** Route each live county's probe by its service URL; Caldwell is the dead one. */
+function liveProbeFetch(opts: {
+  bastrop: "contains" | "empty" | "throw";
+  caldwell: "contains" | "empty" | "throw";
+}): typeof fetch {
+  return vi.fn(async (input: unknown) => {
+    const url = String(input);
+    const which = /bastrop/i.test(url) ? opts.bastrop : opts.caldwell;
+    if (which === "throw") {
+      return new Response("Service unavailable", { status: 503 });
+    }
+    return pointQueryAnswer(which === "contains");
+  }) as unknown as typeof fetch;
+}
+
+describe("P-382: countyArcGisContainsPoint (three values, never a boolean)", () => {
+  const bastrop = () => countyByName("Bastrop");
+
+  it("contains: the county's own fabric reports the point inside a parcel", async () => {
+    const res = await countyArcGisContainsPoint({
+      county: bastrop(),
+      latitude: 30.11,
+      longitude: -97.31,
+      fetchImpl: vi.fn(async () =>
+        pointQueryAnswer(true),
+      ) as unknown as typeof fetch,
+    });
+    expect(res).toEqual({ state: "contains" });
+  });
+
+  it("does-not-contain: an EMPTY feature set is a MEASURED 'no', not an unknown", async () => {
+    const res = await countyArcGisContainsPoint({
+      county: bastrop(),
+      latitude: 30.11,
+      longitude: -97.31,
+      fetchImpl: vi.fn(async () =>
+        pointQueryAnswer(false),
+      ) as unknown as typeof fetch,
+    });
+    expect(res).toEqual({ state: "does-not-contain" });
+  });
+
+  it("unknown: a probe that did not answer is NEITHER, and the failure is NAMED", async () => {
+    const res = await countyArcGisContainsPoint({
+      county: bastrop(),
+      latitude: 30.11,
+      longitude: -97.31,
+      fetchImpl: vi.fn(
+        async () => new Response("Service unavailable", { status: 503 }),
+      ) as unknown as typeof fetch,
+    });
+    expect(res.state).toBe("unknown");
+    expect(res.state === "unknown" && res.reason).toContain("Bastrop");
+    expect(res.state === "unknown" && res.reason).toContain("upstream-error");
+  });
+
+  it("an unknown is not a 'no': the two-state boolean would have called this `false`", async () => {
+    // The load-bearing distinction, stated directly. Before P-382 this
+    // function answered `false` for the request below, so nothing downstream
+    // could tell a dead probe from a measured miss.
+    const res = await countyArcGisContainsPoint({
+      county: bastrop(),
+      latitude: 30.11,
+      longitude: -97.31,
+      fetchImpl: vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }) as unknown as typeof fetch,
+    });
+    expect(res.state).toBe("unknown");
+    expect(res).not.toEqual({ state: "does-not-contain" });
+  });
+});
+
+describe("P-382: resolvePointCountyByPip withholds `live-pip` unless the measurement is COMPLETE", () => {
+  it("FALSIFIER: one dead probe must not award live-pip to the county that answered", async () => {
+    // Pre-registered shape: a point in BOTH live counties' bboxes (Bastrop +
+    // Caldwell overlap) where Bastrop's fabric CONTAINS the point and
+    // Caldwell's probe is down. P-373 read the outage as `false` and resolved
+    // `live-pip` -> Bastrop, a measured point-in-polygon it never made. Worse
+    // here: the nearest-centroid router this falls back to picks CALDWELL, so
+    // the answer MOVES off the county whose fabric was actually measured.
+    expect(
+      countiesContainingPoint(P382_STRADDLE.latitude, P382_STRADDLE.longitude)
+        .map((c) => c.fips)
+        .sort(),
+    ).toEqual(["48021", "48055"]); // the premise: two live candidates, no store county
+    // Guard: no STORE county contains this point, so the store probe path
+    // (which needs the real store) is not the one under test.
+    expect(
+      storeCountiesContainingPoint(
+        P382_STRADDLE.latitude,
+        P382_STRADDLE.longitude,
+      ),
+    ).toEqual([]);
+    const res = await resolvePointCountyByPip({
+      ...P382_STRADDLE,
+      fetchImpl: liveProbeFetch({ bastrop: "contains", caldwell: "throw" }),
+    });
+    expect(res.resolvedBy).not.toBe("live-pip");
+    // It falls back to the PRE-P-373 path, with that path's own label: the
+    // county that answers is picked by PROXIMITY, and the label says so.
+    expect(res.resolvedBy).toBe("centroid-fallback");
+    expect(res.county?.fips).toBe(
+      resolveTxParcelCounty(P382_STRADDLE)?.fips ?? null,
+    );
+  });
+
+  it("FALSIFIER: the label alone changes where the counties agree (a containment claim is withheld)", async () => {
+    // Same outage, a point where the centroid router happens to agree with the
+    // answering county. The county is unchanged — the CLAIM is not: `live-pip`
+    // asserts a point-in-polygon that no candidate completed.
+    const res = await resolvePointCountyByPip({
+      ...P382_ANSWER_WINS,
+      fetchImpl: liveProbeFetch({ bastrop: "contains", caldwell: "throw" }),
+    });
+    expect(res.resolvedBy).not.toBe("live-pip");
+    expect(res.resolvedBy).toBe("centroid-fallback");
+    expect(res.county?.fips).toBe("48021");
+  });
+
+  it("CONTROL both directions: the SAME point with both probes answering resolves `live-pip` as today", async () => {
+    const res = await resolvePointCountyByPip({
+      ...P382_STRADDLE,
+      fetchImpl: liveProbeFetch({ bastrop: "contains", caldwell: "empty" }),
+    });
+    expect(res.resolvedBy).toBe("live-pip");
+    expect(res.county?.fips).toBe("48021");
+  });
+
+  it("CONTROL: the upstream's own DECLARED empty coverage is an ANSWER, so live-pip still holds", async () => {
+    // Caldwell answering "not mine" (an empty feature set) IS a measurement.
+    // If a declared no were treated as an unknown the resolver would never
+    // award live-pip at all, and every straddle would silently degrade to the
+    // centroid router.
+    const res = await resolvePointCountyByPip({
+      ...P382_ANSWER_WINS,
+      fetchImpl: liveProbeFetch({ bastrop: "contains", caldwell: "empty" }),
+    });
+    expect(res.resolvedBy).toBe("live-pip");
+    expect(res.county?.fips).toBe("48021");
+  });
+
+  it("CONTROL: two live fabrics that both report containment still DECLINE to choose (unchanged)", async () => {
+    const res = await resolvePointCountyByPip({
+      ...P382_STRADDLE,
+      fetchImpl: liveProbeFetch({ bastrop: "contains", caldwell: "contains" }),
+    });
+    expect(res).toEqual({ county: null, resolvedBy: "none" });
   });
 });

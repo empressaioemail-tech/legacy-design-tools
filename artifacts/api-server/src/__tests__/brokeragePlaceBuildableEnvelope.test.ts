@@ -15,6 +15,8 @@ import { AdapterRunError } from "@workspace/adapters/types";
 import { ctx } from "./test-context";
 import { feetToMeters } from "../lib/buildableEnvelope/geometry";
 import { DEPTH_WARM_PROMOTION_MARKER } from "../lib/buildableEnvelope/reconcileAtomEnvelope";
+import { placeKeyFromCoords, roundPlaceCoord } from "../lib/placeLayerUtils";
+import { resolveRooftopByAddress } from "../lib/txgioAddressResolve";
 
 const SERVICE_TOKEN = "test-service-token-be";
 const BROKERAGE_KEY = "brokerage-test-key-be";
@@ -1201,5 +1203,225 @@ describe("POST /place/buildable-envelope — P-374: the draw block and the route
     expect(routeDrew).toBe(true);
     expect(drawBlockDrew).toBe(false);
     expect(drawBlockDrew === routeDrew).toBe(false);
+  });
+});
+
+/**
+ * P-382 (2026-09-19) — AN UNKNOWN IS NOT A "NO".
+ *
+ * P-373 gave this route two lookups that answered a QUESTION with a two-valued
+ * yes/no when the honest answer was three-valued:
+ *
+ *   (a) `parcelNodeIdAtPoint` — "which parcel is at this point?" A parcels-layer
+ *       ERROR was caught and returned as `null`, which `resolvePostedParcelIdentity`
+ *       read as "no parcel there" == agreement with the posted identity. The
+ *       identity-mismatch refusal was SKIPPED and the request served with
+ *       `pointConfidence: "coordinates"` for a point nothing ever checked.
+ *   (b) the place point on a widened situs hit — "what point did this address
+ *       resolve to before P-373?" P-373's wider candidate set reaches addresses
+ *       in live-ArcGIS counties that used to fall through to `resolveContext`,
+ *       where the geocode is UPGRADED to the county's authoritative rooftop.
+ *       Serving the un-upgraded geocode is the seat's 2026-09-19 canary (five
+ *       `placeKey`s that moved off their parcels; 48055:130676 by 5,061 m).
+ *
+ * Both directions are asserted here: the falsifier (the failure shape) and the
+ * control (the same shape where the upstream DID answer, which must not move).
+ */
+describe("POST /place/buildable-envelope — P-382 an unknown is not a 'no'", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  it("REFUSES (named) when the posted point cannot be checked at all — never serves it unchecked", async () => {
+    parcelZoning = "R-MD";
+    // A real jurisdiction WITH a setback table (Bastrop) and a matching
+    // district (R-MD), so on the pre-change source this request has nothing
+    // stopping it: the unmade check is silently skipped and the envelope is
+    // SERVED (200) for a point nothing verified. (FALSIFIER.)
+    parcelSitusAddress = "1209 Main St, Bastrop, TX 78602";
+    // The caller names its parcel AND sends a point. Checking that point means
+    // asking the parcels layer; here the layer is DOWN. P-373 swallowed that
+    // into `null`, which read as "the point is in no parcel" — i.e. agreement
+    // with the identity — and the request was served for a point nothing
+    // verified.
+    pinQueryThrow = new AdapterRunError(
+      "upstream-error",
+      "county ArcGIS service returned HTTP 500",
+    );
+    const res = await postWith({
+      parcel_node_id: "48021:14899",
+      lat: 30.1105,
+      lng: -97.3252,
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.body.status).toBe("parcel-unavailable");
+    expect(res.body.declineReason).toBe("point-verification-unavailable");
+    // The failure is NAMED, so the surface can see WHY it could not check.
+    expect(res.body.reason).toContain("upstream-error");
+    // ...and the identity the caller named is echoed back, not a stranger's.
+    expect(res.body.parcel_node_id).toBe("48021:14899");
+    // Nothing is served: no envelope, no district, no setbacks.
+    expect(res.body.setbacks).toBeUndefined();
+  });
+
+  it("CONTROL: the upstream's DECLARED empty coverage is an answer — the check carries on", async () => {
+    parcelZoning = "R-MD";
+    parcelSitusAddress = "1209 Main St, Bastrop, TX 78602";
+    // Same request, but the layer ANSWERED: this point is in no parcel the
+    // provider covers (`no-coverage` is the route's established "no parcel
+    // here", not an outage). An unknown must not be a "no" — and a "no" must
+    // not be read as an unknown, or every honest gap would start 502ing.
+    pinQueryThrow = new AdapterRunError(
+      "no-coverage",
+      "point is outside the provider's coverage",
+    );
+    const res = await postWith({
+      parcel_node_id: "48021:14899",
+      lat: 30.1105,
+      lng: -97.3252,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.declineReason).not.toBe("point-verification-unavailable");
+    expect(res.body.parcel_node_id).toBe("48021:14899");
+  });
+
+  it("CONTROL: a clean identity request is unchanged (the point still agrees, and is honored)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48453:352594";
+    const res = await postWith({
+      parcel_node_id: "48453:352594",
+      lat: 30.1003,
+      lng: -97.82734,
+    });
+
+    expect(res.body.declineReason).not.toBe("point-verification-unavailable");
+    expect(res.body.parcel_node_id).toBe("48453:352594");
+    expect(lastPinQueryPoint).toEqual({
+      latitude: 30.1003,
+      longitude: -97.82734,
+    });
+  });
+
+  // ── The place point on a widened situs hit (the canary) ──────────────────
+  //
+  // 619 LADERA DR, LULING is a Caldwell (48055) address. Caldwell serves its
+  // polygons LIVE while its `txgio_parcel` rows carry no polygon, which is
+  // exactly why P-373 widened the situs candidate set to include it: the
+  // store's own statewide situs index holds the address, so the address now
+  // resolves to ITS parcel instead of a Hays no-coverage. But the geocode is
+  // only a ZIP centroid (Luling, 78648), and the pre-P-373 fall-through path
+  // upgraded it to Caldwell's own `txgio_address` rooftop before deriving.
+  // Serving the centroid is the canary's 5,061 m `placeKey` regression.
+  const LULING_ADDRESS = "619 LADERA DR, LULING, TX 78648";
+  const LULING_ZIP_CENTROID = { lat: 29.6829, lng: -97.6497 };
+  const LULING_ROOFTOP = { lat: 29.68018, lng: -97.66031 };
+
+  it("serves the owning county's ROOFTOP on a widened situs hit — not the coarse geocode (FALSIFIER)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    // This suite does not globally clear mock call history (it resets only the
+    // per-test controls), so scope the call assertions to THIS test.
+    vi.mocked(resolveRooftopByAddress).mockClear();
+    geocodeOverride = {
+      lat: LULING_ZIP_CENTROID.lat,
+      lng: LULING_ZIP_CENTROID.lng,
+      city: "Luling",
+      state: "TX",
+      matchRung: "zip", // a locality/ZIP centroid, NOT a street hit
+    };
+    // P-373's widened candidate set now consults Caldwell, whose store situs
+    // index answers with the subject's own node id.
+    situsOutcome = {
+      hit: {
+        parcelNodeId: "48055:130676",
+        rawPropId: "130676",
+        matchSource: "situs",
+      },
+      resolvedBy: "unique-situs",
+    };
+    identityFetchResult = {
+      geojson: rectParcel("R-MD", "48055:130676"),
+      featureCount: 1,
+      queryMode: "pin" as const,
+    };
+    // Caldwell's OWN address index holds the rooftop.
+    rooftopHit = {
+      latitude: LULING_ROOFTOP.lat,
+      longitude: LULING_ROOFTOP.lng,
+      matchSource: "txgio-address",
+    };
+
+    const res = await postWith({ address: LULING_ADDRESS });
+
+    // The place point is the rooftop the address had before P-373...
+    expect(res.body.placeKey).toBe(
+      placeKeyFromCoords(
+        roundPlaceCoord(LULING_ROOFTOP.lat),
+        roundPlaceCoord(LULING_ROOFTOP.lng),
+      ),
+    );
+    // ...and NOT the ZIP centroid the canary served (this is the regression:
+    // the geocode centroid was served as the place point).
+    expect(res.body.placeKey).not.toBe(
+      placeKeyFromCoords(
+        roundPlaceCoord(LULING_ZIP_CENTROID.lat),
+        roundPlaceCoord(LULING_ZIP_CENTROID.lng),
+      ),
+    );
+    // It was Caldwell's own index that was asked (county-scoped, so a live
+    // county's address index is reachable even though its polygons are not
+    // in the store).
+    expect(vi.mocked(resolveRooftopByAddress)).toHaveBeenCalledWith(
+      expect.objectContaining({ countyFips: "48055" }),
+    );
+  });
+
+  it("CONTROL: a situs hit in a STORE-tagged county is untouched (nothing else moves)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = null;
+    vi.mocked(resolveRooftopByAddress).mockClear();
+    // Hays is store-backed: the situs pre-pass reached it BEFORE P-373 too,
+    // so this branch's point is the pre-P-373 point and must not start asking
+    // an address index it never asked. (Both directions: the widening is
+    // undone for the counties it did not need to widen.)
+    geocodeOverride = {
+      lat: 29.99741,
+      lng: -98.09836,
+      city: "Wimberley",
+      state: "TX",
+      matchRung: "street",
+    };
+    situsOutcome = {
+      hit: {
+        parcelNodeId: "48209:193340",
+        rawPropId: "193340",
+        matchSource: "situs",
+      },
+      resolvedBy: "unique-situs",
+    };
+    identityFetchResult = {
+      geojson: rectParcel("R-MD", "48209:193340"),
+      featureCount: 1,
+      queryMode: "pin" as const,
+    };
+    rooftopHit = {
+      latitude: 29.9974,
+      longitude: -98.0984,
+      matchSource: "txgio-address",
+    };
+
+    const res = await postWith({
+      address: "300 Blanco River Rd, Wimberley, TX 78676",
+    });
+
+    expect(vi.mocked(resolveRooftopByAddress)).not.toHaveBeenCalled();
+    expect(res.body.placeKey).toBe(
+      placeKeyFromCoords(roundPlaceCoord(29.99741), roundPlaceCoord(-98.09836)),
+    );
   });
 });
