@@ -19,7 +19,8 @@ import {
   zoningDisposition,
   type R1BriefSectionDisposition,
 } from "./r1BriefCompose";
-import { composeSitusLabel } from "./situsCompose";
+import { composeSitusLabel, resolveSitusCity } from "./situsCompose";
+import type { CityLimitsFactServed } from "./cityLimitsFactServeCutover";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 
@@ -165,13 +166,36 @@ export function composeSmartSiteStub(input: {
   parcelRecordZoningFact?: ZoningFactRead | null;
   /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing. */
   parcelRecordSetbacksFact?: SetbacksFactRead | null;
+  /**
+   * P-270 CITY HALF (2026-09-19). The served city-limits determination, when the
+   * caller made one. It exists here for ONE reason: the licence in
+   * `situsCompose.resolveSitusCity` may name the city whose limits contain this
+   * parcel where the payload's own roll city is a DECLARED `absent-verified`
+   * absence. Omitted/null means no determination was in hand, and then the label
+   * names no city — never a guess.
+   *
+   * A caller pays for this read only when the payload's roll city is that
+   * declared absence (`rollSitusCityIsDeclaredAbsent`), so the ordinary label
+   * path is unchanged.
+   */
+  cityLimitsFact?: CityLimitsFactServed | null;
 }): SmartSiteStub {
   const root = asRecord(input.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
   const situsAddress =
     (typeof root.situsAddress === "string" ? root.situsAddress : null) ??
     (typeof baseFacts.situsAddress === "string" ? baseFacts.situsAddress : null);
-  const situsCity = typeof baseFacts.situsCity === "string" ? baseFacts.situsCity : null;
+  /**
+   * P-270 CITY HALF: the city is decided by the licence, not by a `typeof`
+   * test. `baseFacts.situsCity` is a DECLARED-absence object on a roll whose CAD
+   * roll states no city (the live `48453:445501` shape), and reading only
+   * strings silently dropped it — leaving the MCP label naming no city while the
+   * ledger held one. Only `resolveSitusCity` decides; this line does not.
+   */
+  const situsCity = resolveSitusCity({
+    rollSitusCity: baseFacts.situsCity,
+    cityLimits: input.cityLimitsFact,
+  }).city;
   const situsState = typeof baseFacts.situsState === "string" ? baseFacts.situsState : null;
   const situsZip = typeof baseFacts.situsZip === "string" ? baseFacts.situsZip : null;
   const situs = composeSitusLabel({

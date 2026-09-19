@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   composeSitusLabel,
   firstPresentSitusLabel,
+  incorporatedCityLimitsCity,
   isPunctuationOnlySitus,
   projectSavedPropertyLabel,
+  resolveSitusCity,
+  rollSitusCityFromFacets,
+  rollSitusCityIsDeclaredAbsent,
 } from "./situsCompose";
 
 describe("isPunctuationOnlySitus", () => {
@@ -170,5 +174,107 @@ describe("firstPresentSitusLabel", () => {
       label: "48021:25420",
       situs: "unknown",
     });
+  });
+});
+
+/**
+ * P-270 CITY HALF (2026-09-19). The licence: which city a composed label may
+ * name, and on what it is conditioned. Every branch is asserted in BOTH
+ * directions — the payload that gains a city and the payload that must name
+ * none — because the defect this closes was a silent drop, and a rule that
+ * cannot be shown to refuse is not a rule.
+ */
+describe("resolveSitusCity — P-270 city half", () => {
+  /** The bake's declaration, verbatim from the live `48453:445501` baseFacts.situsCity. */
+  const DECLARED_ABSENT = {
+    status: "absent",
+    verdict: "absent-verified",
+    authority: "Travis County CAD roll",
+  };
+  const INCORPORATED = { status: "incorporated", cityName: "Pflugerville" };
+
+  it("THE DEFECT: a declared absent-verified roll city plus an incorporated city-limits answer names the containing city, with its basis", () => {
+    expect(
+      resolveSitusCity({
+        rollSitusCity: DECLARED_ABSENT,
+        cityLimits: INCORPORATED,
+      }),
+    ).toEqual({ city: "Pflugerville", basis: "city-limits" });
+  });
+
+  it("the roll's own city wins whenever the payload states one — the containing city never replaces it", () => {
+    expect(
+      resolveSitusCity({
+        rollSitusCity: "Austin",
+        cityLimits: INCORPORATED,
+      }),
+    ).toEqual({ city: "Austin", basis: "cad-roll" });
+  });
+
+  it("FALSIFIER: an UNINCORPORATED city-limits answer names no city", () => {
+    expect(
+      resolveSitusCity({
+        rollSitusCity: DECLARED_ABSENT,
+        cityLimits: { status: "unincorporated", cityName: "Pflugerville" },
+      }),
+    ).toEqual({ city: null, basis: null });
+  });
+
+  it("FALSIFIER: a rail with no absent-verified DECLARATION names no city — a bare null is not evidence the roll has none", () => {
+    for (const rollSitusCity of [
+      null,
+      undefined,
+      "",
+      { status: "absent" },
+      { status: "absent", verdict: "lookup-failed" },
+      { status: "absent", verdict: "not-applicable" },
+      { status: "refused" },
+    ]) {
+      expect(
+        resolveSitusCity({ rollSitusCity, cityLimits: INCORPORATED }),
+      ).toEqual({ city: null, basis: null });
+    }
+  });
+
+  it("FALSIFIER: no determination in hand names no city, and the status word alone is not enough — the answer must NAME one", () => {
+    for (const cityLimits of [
+      undefined,
+      null,
+      { status: "unmeasured", cityName: "Pflugerville" },
+      { status: "incorporated" },
+      { status: "incorporated", cityName: "   " },
+    ]) {
+      expect(
+        resolveSitusCity({ rollSitusCity: DECLARED_ABSENT, cityLimits }),
+      ).toEqual({ city: null, basis: null });
+    }
+  });
+
+  it("reads the declaration the way the probe reads it: verdict first, then status", () => {
+    expect(
+      rollSitusCityIsDeclaredAbsent({ status: "absent", verdict: "absent-verified" }),
+    ).toBe(true);
+    // A `lookup-failed` verdict beside an `absent` status is not a verified
+    // absence, and never becomes one in transit.
+    expect(
+      rollSitusCityIsDeclaredAbsent({ status: "absent-verified", verdict: "lookup-failed" }),
+    ).toBe(false);
+    expect(rollSitusCityIsDeclaredAbsent("BASTROP")).toBe(false);
+    expect(rollSitusCityIsDeclaredAbsent(null)).toBe(false);
+  });
+
+  it("reads the roll city out of the facets the way the stub does (baseFacts, never a root sibling)", () => {
+    expect(
+      rollSitusCityFromFacets({ baseFacts: { situsCity: DECLARED_ABSENT } }),
+    ).toEqual(DECLARED_ABSENT);
+    expect(rollSitusCityFromFacets({ situsCity: "Austin" })).toBeNull();
+    expect(rollSitusCityFromFacets(null)).toBeNull();
+    expect(rollSitusCityFromFacets("nope")).toBeNull();
+  });
+
+  it("the gate is the city NAME, not the status word", () => {
+    expect(incorporatedCityLimitsCity(INCORPORATED)).toBe("Pflugerville");
+    expect(incorporatedCityLimitsCity({ status: "incorporated" })).toBeNull();
+    expect(incorporatedCityLimitsCity({ status: "unmeasured", cityName: "X" })).toBeNull();
   });
 });
