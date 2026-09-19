@@ -47,6 +47,10 @@ jobs:
             # now so the follow-up pin rows (see the check's header) need no
             # workflow edit; the file exists on hauska-map main today.
             apps/property-explorer/src/lib/situs-address.ts
+            # P-369 (2026-09-19): the P-340 conflict literal's home, and the
+            # sibling's copy of this check itself (the check-script-copies row).
+            apps/property-explorer/api/_lib/setback-source-conflict.ts
+            scripts/check-cross-repo-literal-drift.mjs
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v4
         with:
