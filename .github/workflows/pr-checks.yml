@@ -144,6 +144,18 @@ jobs:
         # every run: a Test log that does not carry this line, or carries it
         # with the wrong number, is itself the finding and no longer has to be
         # diagnosed from a suite's error text.
+        #
+        # THE `run:` BLOCK BELOW IS EXECUTED, NOT TRUSTED. It was extracted from
+        # this file byte-for-byte and run on a host that runs several containers
+        # from the same image, with exactly ONE line rebound (the container
+        # selector, because CI has exactly one and this host does not). That is
+        # how the `|| true` inside the readiness loop was found: without it the
+        # loop's first psql -- which fails on any postgres that is still
+        # restarting -- aborted the whole step with exit 2 under `set -e`, so
+        # the loop could only ever work when it was not needed. The guard that
+        # refuses an ambiguous container list was observed FIRING, not asserted:
+        # bound to a name with no container, the step exits 1 with "expected
+        # exactly one ... found 0".
         run: |
           set -euo pipefail
           TARGET=1024
@@ -163,9 +175,20 @@ jobs:
           # the server in crash recovery, where it answers the socket ("rejecting
           # connections", pg_isready exit 1) long before it can execute anything. Only a
           # real query proves the precondition for reading the setting back.
+          #
+          # `|| true` IS LOAD-BEARING, and this was found by RUNNING these bytes against a
+          # container that was in recovery, not by reading them. Without it the loop is
+          # decorative: psql that cannot connect exits 2, `set -o pipefail` makes the whole
+          # pipeline 2, and an assignment whose command substitution fails is itself a failed
+          # command under `set -e` -- so the FIRST iteration kills the step with a bare exit 2,
+          # the loop never loops, and the FAIL message below is unreachable. The loop
+          # therefore used to work exactly when it was not needed (CI's freshly-initialised
+          # container does a clean fast shutdown and answers the first probe) and fail
+          # silently in the one state it exists for. A gating indicator that cannot fire is
+          # not a control (DEV_PROCESS).
           READY=""
           for _ in $(seq 1 120); do
-            READY=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SELECT 1;" 2> /dev/null | tr -d '[:space:]')
+            READY=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SELECT 1;" 2> /dev/null | tr -d '[:space:]' || true)
             if [ "$READY" = "1" ]; then
               break
             fi
@@ -175,7 +198,11 @@ jobs:
             echo "FAIL: postgres did not accept a query within 120s of the restart, so the lock table state is unknown; the DB suites must not run against a server that was never confirmed up"
             exit 1
           fi
-          EFFECTIVE=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SHOW max_locks_per_transaction;" | tr -d '[:space:]')
+          # `|| true` for the same reason as the loop above: a psql that cannot connect must
+          # fall through to the comparison and be REPORTED, never abort the step with an
+          # unexplained exit 2. `2> /dev/null` keeps the log to our one line, which is the
+          # line a reader greps for.
+          EFFECTIVE=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SHOW max_locks_per_transaction;" 2> /dev/null | tr -d '[:space:]' || true)
           echo "effective max_locks_per_transaction=$EFFECTIVE (wanted $TARGET)"
           if [ "$EFFECTIVE" != "$TARGET" ]; then
             echo "FAIL: max_locks_per_transaction reads '$EFFECTIVE', not '$TARGET'; the restart did not take and the DB suites would run on the undersized default"
