@@ -30,10 +30,23 @@
  *   - an `unresolved` that is unresolved BECAUSE a ring was refused carries
  *     `refusedRings`, each with its status and the derivation's reason. A ring
  *     nobody could test is not a ring that was tested and missed.
+ *
+ * P-376 gives the `absent` disposition two readable grounds, additively:
+ *
+ *   - the ring test's ground, unchanged: `coveredBy` names the publishers whose
+ *     own extent covered the point and `ringsConsulted` counts what was tested;
+ *   - the incorporation ground: `settledBy: "incorporation"` with the
+ *     `incorporation` evidence (the city, the city-limits fact's own source and
+ *     its own basis sentence, which carries that source's vintage). A Texas ETJ
+ *     is unincorporated area by definition, so an incorporated parcel's answer
+ *     rests on the law and no ring was consulted — `coveredBy` is empty and
+ *     `ringsConsulted` is 0 because nothing was needed, not because a
+ *     measurement was lost. `settledBy` is what keeps those two absences apart.
  */
 
 import type {
   EtjContainmentResult,
+  EtjIncorporationSettlement,
   EtjStatus,
 } from "./containment";
 
@@ -76,6 +89,19 @@ export type EtjFact = {
     servedStatus: string;
     reason: string;
   }>;
+  /**
+   * P-376: present exactly when this `absent` was settled by the parcel's own
+   * incorporation rather than by the published-ring test. A consumer that wants
+   * to know whether a ring was ever tested reads this field; one that wants the
+   * measurements reads `coveredBy`/`ringsConsulted`.
+   */
+  settledBy?: "incorporation";
+  /**
+   * The incorporation determination behind a `settledBy: "incorporation"`
+   * absence: the city, the city-limits fact's own source, and that fact's own
+   * basis sentence (which carries the source's vintage where the source has one).
+   */
+  incorporation?: EtjIncorporationSettlement;
 };
 
 export function etjFactFromContainment(result: EtjContainmentResult): EtjFact {
@@ -105,6 +131,13 @@ export function etjFactFromContainment(result: EtjContainmentResult): EtjFact {
       basis: result.basis,
       coveredBy: result.coveredBy,
       ringsConsulted: result.ringsConsulted,
+      // P-376: additive, and present only on the incorporation ground, so a
+      // consumer of the ring test's own fields is unaffected. Omitted rather
+      // than `null`, like `derivationNote`: an absent ground is an absent field.
+      ...(result.settledBy !== undefined ? { settledBy: result.settledBy } : {}),
+      ...(result.incorporation !== undefined
+        ? { incorporation: result.incorporation }
+        : {}),
     };
   }
   return {

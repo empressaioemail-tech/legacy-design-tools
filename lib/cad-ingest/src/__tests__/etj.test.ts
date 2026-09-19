@@ -22,8 +22,11 @@ import {
   buildEtjBoundaryIndex,
   resolveEtj,
   resolveEtjAtPoint,
+  resolveEtjByIncorporation,
+  type EtjIncorporationSettlement,
   type EtjSourceCoverageEntry,
 } from "../boundary/containment";
+import { incorporationSettlesEtj } from "../boundary/cityLimitsFact";
 import {
   etjFactFromContainment,
   unmeasuredEtjFact,
@@ -707,3 +710,259 @@ describe("etj parse", () => {
     expect(counters.skipSamples[0]).toContain("no ring label");
   });
 });
+
+// ---------------------------------------------------------------------------
+// P-376: an incorporated parcel is outside every ETJ, and the determination says
+// so BEFORE any ring is consulted.
+//
+// Pre-change, every point reached the ring path, so a published ring the reader
+// must refuse (P-359) turned an incorporated parcel's answer into `unresolved`
+// — "we could not look", served for land the law had already placed outside
+// every ETJ. The subject is a parcel whose OWN city-limits fact determines it
+// incorporated; the ETJ side is P-359's refused-ring fixture, unchanged.
+//
+// Every assertion here is paired: the same fixture with the settlement removed
+// must still answer `unresolved` with the refused ring named. A change that
+// moves both directions is a change that flattened the disposition.
+// ---------------------------------------------------------------------------
+
+/** A query point inside the fixture city and inside the fixture rings. */
+const QUERY_LNG = -97.4;
+const QUERY_LAT = 30.3;
+
+/** What the city-limits fact hands over when it determines incorporation. */
+function settlement(
+  over: Partial<EtjIncorporationSettlement> = {},
+): EtjIncorporationSettlement {
+  return {
+    cityName: "Elgin",
+    geoId: "48118",
+    source: "tx_city_boundary",
+    cityLimitsBasis:
+      "parcel_record cityLimits: incorporated, city 'Elgin' " +
+      "(source: landing_parcel_jurisdiction, vintage: 2026-09-17T00:00:00.000Z).",
+    ...over,
+  };
+}
+
+/** A ring the reader may NOT test: no derivation pass has run (P-359). */
+const UNDERIVED_RING = {
+  etjId: "elgin-tx:3",
+  cityKey: "elgin-tx",
+  cityName: "Elgin",
+  ringLabel: "Elgin ETJ",
+  geometry: squareAround(QUERY_LNG, QUERY_LAT, 0.05),
+  servedGeometry: null,
+  servedStatus: "underived" as const,
+  derivation: null,
+  bbox: {
+    westLng: QUERY_LNG - 0.05,
+    southLat: QUERY_LAT - 0.05,
+    eastLng: QUERY_LNG + 0.05,
+    northLat: QUERY_LAT + 0.05,
+  },
+  sourceCitation: "https://example.test/elgin/3",
+};
+
+/** A ring the reader MAY test, drawn around the same point. */
+const ELGIN_VERBATIM_RING = {
+  ...UNDERIVED_RING,
+  etjId: "elgin-tx:10",
+  ringLabel: "Elgin ETJ (verbatim)",
+  geometry: squareAround(QUERY_LNG, QUERY_LAT, 0.05),
+  servedStatus: "verbatim" as const,
+};
+
+const ELGIN_EXTENT = coverageEntry({
+  cityKey: "elgin-tx",
+  cityName: "Elgin",
+  bbox: {
+    westLng: -97.6,
+    southLat: 30.1,
+    eastLng: -97.2,
+    northLat: 30.5,
+  },
+});
+
+describe("etj containment — P-376 the incorporation settlement", () => {
+  it("FALSIFIER 1: an incorporated parcel with a REAL basis reads not in an ETJ, and no refused ring is named", () => {
+    const result = resolveEtjAtPoint(
+      QUERY_LNG,
+      QUERY_LAT,
+      buildEtjBoundaryIndex([UNDERIVED_RING]),
+      [ELGIN_EXTENT],
+      { cityName: "Elgin", geoId: "48118", incorporation: settlement() },
+    );
+    expect(result.status).toBe("absent");
+    if (result.status !== "absent") return;
+    expect(result.settledBy).toBe("incorporation");
+    expect(result.coveredBy).toEqual([]);
+    expect(result.ringsConsulted).toBe(0);
+    expect(result.basis).toContain("not in an ETJ");
+    expect(result.basis).toContain("Elgin");
+    // The legal ground is NAMED in the answer, not left to the reader's memory.
+    expect(result.basis).toContain("UNINCORPORATED area contiguous");
+    expect(result.basis).toContain("Tex. Loc. Gov't Code ch. 42");
+    // The fact's own source and vintage travel with the settlement.
+    expect(result.incorporation).toEqual(settlement());
+    // The refused ring is NOT the reason this answer is what it is: it never had
+    // to be asked, so a consumer cannot read a refusal into a settled absence.
+    expect("refusedRings" in result).toBe(false);
+  });
+
+  it("FALSIFIER 2 (the control, same fixture): without the settlement the SAME point is unresolved and NAMES the refused ring", () => {
+    const result = resolveEtjAtPoint(
+      QUERY_LNG,
+      QUERY_LAT,
+      buildEtjBoundaryIndex([UNDERIVED_RING]),
+      [ELGIN_EXTENT],
+      { cityName: "Elgin", geoId: "48118" },
+    );
+    expect(result.status).toBe("unresolved");
+    if (result.status !== "unresolved") return;
+    expect(result.refusedRings?.[0]?.etjId).toBe("elgin-tx:3");
+    expect(result.basis).not.toContain("not in an ETJ");
+  });
+
+  it("FALSIFIER 3: the settlement precedes the EMPTY STORE too — an incorporated parcel is not answered by our coverage", () => {
+    // No rings, no refusals, no register at all. Pre-change (and without a
+    // settlement) this is `unresolved`: "no ETJ source has been acquired". The
+    // parcel's ETJ answer does not depend on our ETJ coverage, so it does not.
+    const withSettlement = resolveEtjAtPoint(QUERY_LNG, QUERY_LAT, { rings: [], refusals: [] }, [], {
+      cityName: "Elgin",
+      geoId: "48118",
+      incorporation: settlement(),
+    });
+    expect(withSettlement.status).toBe("absent");
+
+    const withoutSettlement = resolveEtjAtPoint(
+      QUERY_LNG,
+      QUERY_LAT,
+      { rings: [], refusals: [] },
+      [],
+      { cityName: "Elgin", geoId: "48118" },
+    );
+    expect(withoutSettlement.status).toBe("unresolved");
+    if (withoutSettlement.status !== "unresolved") return;
+    expect(withoutSettlement.basis).toContain("no ETJ source has been acquired");
+  });
+
+  it("FALSIFIER 4: a servable ring that CONTAINS the point does not answer for an incorporated parcel", () => {
+    // The pair is the direction check. The law settles the first: an ETJ is
+    // unincorporated area, so a published ring that swallows an in-city parcel
+    // is a drawing convention (P-359's own subject), not an answer.
+    const incorporated = resolveEtjAtPoint(
+      QUERY_LNG,
+      QUERY_LAT,
+      buildEtjBoundaryIndex([ELGIN_VERBATIM_RING]),
+      [ELGIN_EXTENT],
+      { cityName: "Elgin", geoId: "48118", incorporation: settlement() },
+    );
+    expect(incorporated.status).toBe("absent");
+    if (incorporated.status === "absent") {
+      expect(incorporated.settledBy).toBe("incorporation");
+    }
+
+    // The same ring and the same point, unincorporated: `present`, untouched,
+    // with the publisher's own label and layer.
+    const unincorporated = resolveEtjAtPoint(
+      QUERY_LNG,
+      QUERY_LAT,
+      buildEtjBoundaryIndex([ELGIN_VERBATIM_RING]),
+      [ELGIN_EXTENT],
+    );
+    expect(unincorporated.status).toBe("present");
+    if (unincorporated.status !== "present") return;
+    expect(unincorporated.etjId).toBe("elgin-tx:10");
+    expect(unincorporated.basis).toContain("etj_id=elgin-tx:10");
+  });
+
+  it("refuses to settle on a settlement that names no city, no source or no basis — the gate is able to fire", () => {
+    // Hand-assembled, so the check this asserts is the resolver's own and not a
+    // type's. Each of the three is dropped in turn; each must fall through to
+    // the ring path rather than serve "incorporated in ."
+    for (const broken of [
+      settlement({ cityName: "  " }),
+      settlement({ source: "" }),
+      settlement({ cityLimitsBasis: "\n" }),
+    ]) {
+      const result = resolveEtjAtPoint(
+        QUERY_LNG,
+        QUERY_LAT,
+        buildEtjBoundaryIndex([UNDERIVED_RING]),
+        [ELGIN_EXTENT],
+        { cityName: "Elgin", geoId: "48118", incorporation: broken },
+      );
+      expect(result.status, JSON.stringify(broken)).toBe("unresolved");
+      expect("settledBy" in result, JSON.stringify(broken)).toBe(false);
+    }
+    // Non-vacuity: the same call with an intact settlement settles.
+    const intact = resolveEtjByIncorporation({
+      incorporation: settlement(),
+    });
+    expect(intact?.status).toBe("absent");
+  });
+
+  it("never settles from an `unincorporated` or an unmeasured city-limits fact", () => {
+    expect(incorporationSettlesEtj(null)).toBeNull();
+    expect(
+      incorporationSettlesEtj({
+        status: "unmeasured",
+        etjStatus: "unresolved",
+        source: "tx_city_boundary",
+        basis: "tx_city_boundary has zero rows; city limits are unmeasured",
+      }),
+    ).toBeNull();
+    expect(
+      incorporationSettlesEtj({
+        status: "unincorporated",
+        etjStatus: "unresolved",
+        source: "tx_city_boundary",
+        basis: "no incorporated-place polygon contains the query point",
+      }),
+    ).toBeNull();
+    // An `incorporated` fact with no city to name is a legal ground with no
+    // subject: it settles nothing rather than settling on air.
+    expect(
+      incorporationSettlesEtj({
+        status: "incorporated",
+        etjStatus: "unresolved",
+        source: "tx_city_boundary",
+        basis: "point-in-polygon against tx_city_boundary geo_id=48118",
+      }),
+    ).toBeNull();
+  });
+
+  it("carries the fact's own city, geoId, source and basis sentence into the settlement verbatim", () => {
+    const s = incorporationSettlesEtj({
+      status: "incorporated",
+      etjStatus: "unresolved",
+      source: "tx_city_boundary",
+      basis:
+        "parcel_record cityLimits: incorporated, city 'Kyle' " +
+        "(source: landing_parcel_jurisdiction, vintage: 2026-09-16T00:00:00.000Z).",
+      cityName: " Kyle ",
+      geoId: "4824188",
+    });
+    expect(s).toEqual({
+      cityName: "Kyle",
+      geoId: "4824188",
+      source: "tx_city_boundary",
+      // NOT re-parsed: the vintage is inside the sentence the fact wrote.
+      cityLimitsBasis:
+        "parcel_record cityLimits: incorporated, city 'Kyle' " +
+        "(source: landing_parcel_jurisdiction, vintage: 2026-09-16T00:00:00.000Z).",
+    });
+    // And a branch with no geoId says so rather than inventing one.
+    expect(
+      incorporationSettlesEtj({
+        status: "incorporated",
+        etjStatus: "unresolved",
+        source: "tx_city_boundary",
+        basis: "parcel_record cityLimits: incorporated, city 'Buda'.",
+        cityName: "Buda",
+      })?.geoId,
+    ).toBeNull();
+  });
+});
+

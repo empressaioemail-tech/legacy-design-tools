@@ -11,6 +11,7 @@ import {
 import {
   buildEtjBoundaryIndex,
   type EtjBoundarySourceRow,
+  type EtjIncorporationSettlement,
   type EtjSourceCoverageEntry,
 } from "@workspace/cad-ingest/boundary";
 
@@ -429,3 +430,159 @@ describe("loadEtjFact — P-359 served geometry and refusals", () => {
     expect(reachable.refusedRings?.[0]?.etjId).toBe("austin-tx:10");
   });
 });
+
+// ---------------------------------------------------------------------------
+// P-376: the parcel's OWN city-limits fact settles its ETJ answer before any
+// ring is consulted — and before this reader's store guards, because an
+// incorporated parcel's ETJ answer is not a claim about tx_etj_boundary.
+//
+// Pre-change, an incorporated parcel whose publisher had a ring the reader must
+// refuse (P-359) was served `unresolved`: "we could not look", for land the law
+// had already placed outside every ETJ. Measured live on the 2026-09-19 canary:
+// 9 subjects moved absent -> unresolved and most were incorporated by the same
+// fact's own city-limits line (_inbox/2026-09-19_a231_merges_etj_deploys_RECORD.md
+// section 4).
+// ---------------------------------------------------------------------------
+
+const INCORPORATION: EtjIncorporationSettlement = {
+  cityName: "Austin",
+  geoId: "4805000",
+  source: "tx_city_boundary",
+  cityLimitsBasis:
+    "point-in-polygon against tx_city_boundary geo_id=4805000",
+};
+
+const PARCEL_RECORD_INCORPORATION: EtjIncorporationSettlement = {
+  cityName: "Kyle",
+  geoId: null,
+  source: "tx_city_boundary",
+  cityLimitsBasis:
+    "parcel_record cityLimits: incorporated, city 'Kyle' " +
+    "(source: landing_parcel_jurisdiction, vintage: 2026-09-16T00:00:00.000Z).",
+};
+
+describe("loadEtjFact — P-376 incorporation settles the answer first", () => {
+  it("FALSIFIER 1: an incorporated parcel whose covering ring was refused reads not in an ETJ, and the refusal is NOT named", async () => {
+    setEtjIndexForTests(injection({ index: indexOf(AUSTIN_UNDERIVED_ROW) }));
+    const fact = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+      incorporation: INCORPORATION,
+    });
+    expect(fact.status).toBe("absent");
+    expect(fact.settledBy).toBe("incorporation");
+    // Nothing was consulted, so nothing is claimed: the ring test's own fields
+    // are empty rather than carrying a measurement that never happened.
+    expect(fact.coveredBy).toEqual([]);
+    expect(fact.ringsConsulted).toBe(0);
+    expect(fact.refusedRings).toBeUndefined();
+    expect(fact.basis).toContain("not in an ETJ");
+    expect(fact.basis).toContain("Tex. Loc. Gov't Code ch. 42");
+    expect(fact.incorporation).toEqual(INCORPORATION);
+    expect(fact.queryPoint).toEqual(IN_DERIVED_ETJ);
+  });
+
+  it("FALSIFIER 1b: the fact's own source and vintage travel verbatim on the parcel_record branch", async () => {
+    setEtjIndexForTests(injection({ index: indexOf(AUSTIN_UNDERIVED_ROW) }));
+    const fact = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Kyle",
+      incorporation: PARCEL_RECORD_INCORPORATION,
+    });
+    expect(fact.status).toBe("absent");
+    // NOT re-parsed out of the sentence: the sentence is carried, so the source
+    // of record and the vintage reach the wire together.
+    expect(fact.incorporation?.cityLimitsBasis).toContain(
+      "source: landing_parcel_jurisdiction",
+    );
+    expect(fact.incorporation?.cityLimitsBasis).toContain(
+      "vintage: 2026-09-16T00:00:00.000Z",
+    );
+    expect(fact.basis).toContain("vintage: 2026-09-16T00:00:00.000Z");
+  });
+
+  it("FALSIFIER 2 (the control, the same fixture): without a settlement the refused ring is why the answer is unresolved", async () => {
+    setEtjIndexForTests(injection({ index: indexOf(AUSTIN_UNDERIVED_ROW) }));
+    const fact = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+    });
+    expect(fact.status).toBe("unresolved");
+    expect(fact.refusedRings?.[0]?.etjId).toBe("austin-tx:8");
+    expect(fact.settledBy).toBeUndefined();
+    expect(fact.incorporation).toBeUndefined();
+    expect(fact.basis).not.toContain("not in an ETJ");
+  });
+
+  it("FALSIFIER 3: the settlement precedes every store guard — an incorporated parcel is not answered by our coverage", async () => {
+    // Zero source rows: pre-change, and without a settlement, this is unmeasured
+    // ("no ETJ source has been acquired").
+    setEtjIndexForTests(injection({ sourceRowsPresent: false, coverage: [] }));
+    const settled = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+      incorporation: INCORPORATION,
+    });
+    expect(settled.status).toBe("absent");
+    expect(settled.settledBy).toBe("incorporation");
+    expect(settled.basis).not.toContain("no ETJ source has been acquired");
+
+    // The same store state with no settlement: the guard still fires, unchanged.
+    const guarded = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+    });
+    expect(guarded.status).toBe("unresolved");
+    expect(guarded.basis).toContain("no ETJ source has been acquired");
+
+    // The incomplete-acquisition guard too (the register claims rings and the
+    // ring table holds none) — the same pair, the same direction.
+    setEtjIndexForTests(injection({ index: indexOf(), ringRowsPresent: false }));
+    const settledIncomplete = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+      incorporation: INCORPORATION,
+    });
+    expect(settledIncomplete.status).toBe("absent");
+    expect(settledIncomplete.settledBy).toBe("incorporation");
+    const guardedIncomplete = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+    });
+    expect(guardedIncomplete.status).toBe("unresolved");
+    expect(guardedIncomplete.basis).toContain("incomplete");
+  });
+
+  it("FALSIFIER 4: a ring containment still answers for an unincorporated point, and does not for an incorporated one", async () => {
+    setEtjIndexForTests(injection({ index: indexOf(AUSTIN_DERIVED_ROW) }));
+    // Unincorporated: the derived strip is ETJ, unchanged, and says it was derived.
+    const unincorporated = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+    });
+    expect(unincorporated.status).toBe("present");
+    expect(unincorporated.servedStatus).toBe("derived");
+
+    // Incorporated: the law answers, because a Texas ETJ is unincorporated land.
+    const incorporated = await loadEtjFact(IN_DERIVED_ETJ, undefined, {
+      cityName: "Austin",
+      geoId: "4805000",
+      incorporation: INCORPORATION,
+    });
+    expect(incorporated.status).toBe("absent");
+    expect(incorporated.settledBy).toBe("incorporation");
+    expect(incorporated.etjId).toBeUndefined();
+  });
+
+  it("a point with no usable query point is still unmeasured: there is no point to place in a city", async () => {
+    setEtjIndexForTests(injection());
+    const fact = await loadEtjFact(null, undefined, {
+      cityName: "Austin",
+      incorporation: INCORPORATION,
+    });
+    expect(fact.status).toBe("unresolved");
+    expect(fact.basis).toContain("query point");
+    expect(fact.queryPoint).toBeNull();
+    expect(fact.settledBy).toBeUndefined();
+  });
+});
+

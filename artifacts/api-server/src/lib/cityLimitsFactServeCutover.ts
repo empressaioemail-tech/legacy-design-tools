@@ -57,11 +57,25 @@
  * `coveredBy`/`ringsConsulted` travel) but serves `unresolved`, naming why.
  * `present` is a ring containment and is unaffected on every branch: it does
  * not depend on the containing city at all.
+ *
+ * P-376 — AND AN INCORPORATED PARCEL IS NOT IN AN ETJ AT ALL. `incorporated` is
+ * not only a containing city: it is the determination that the parcel is INSIDE
+ * a city, and a Texas ETJ is, by definition, the UNINCORPORATED area contiguous
+ * to one (Tex. Loc. Gov't Code ch. 42). So the same fact that names the
+ * containing city also settles the ETJ question, and this wrapper passes that
+ * determination on as an `incorporation` settlement. The reader answers
+ * `absent` with `settledBy: "incorporation"` from it, before any ring is
+ * consulted — which is why an incorporated parcel can no longer be served
+ * `unresolved` because a published ring had to be refused. The settlement is
+ * built from the fact's OWN city, source and basis (`incorporationSettlesEtj`);
+ * `unmeasured` and `unincorporated` settle nothing, and their ring test is
+ * unchanged, refusal branch included.
  */
 
 import { loadCellServeDecision } from "./cellServeRule";
 import { parseParcelNodeId } from "./parcelNodeId";
 import { cityLimitsFactFromParcelRecord } from "./cityLimitsFactFromParcelRecord";
+import { incorporationSettlesEtj } from "@workspace/cad-ingest/city-limits";
 import { loadEtjFact, type EtjFactWire } from "./etjFactRead";
 import {
   loadCityLimitsFact,
@@ -106,11 +120,23 @@ async function overlayEtjStatus(
   const containingCityKnown = fact.status === "incorporated";
   const containingCityRuledOut = fact.status === "unincorporated";
 
+  // P-376: when the city-limits fact POSITIVELY determines incorporation, that
+  // determination also settles the ETJ answer — a Texas ETJ is unincorporated
+  // area by definition, so no published ring has to be tested, or refused, for
+  // this parcel. The settlement carries the fact's own city, source and basis
+  // (which holds the source's vintage); a fact that is itself unmeasured or
+  // unresolved settles nothing, and the ring test stands for it.
+  const incorporation = incorporationSettlesEtj(fact);
+
   const etj = await loadEtjFact(
     point,
     undefined,
     containingCityKnown
-      ? { cityName: fact.cityName ?? null, geoId: fact.geoId ?? null }
+      ? {
+          cityName: fact.cityName ?? null,
+          geoId: fact.geoId ?? null,
+          incorporation,
+        }
       : null,
   );
 
@@ -119,6 +145,10 @@ async function overlayEtjStatus(
   // containing city unread, a city that publishes no ETJ layer could be sitting
   // on this point, so the same miss is NOT a verified absence -- serving it as
   // one is the false negative `resolveEtjAtPoint` lives to prevent.
+  //
+  // A P-376 settled absence never reaches this rewrite, and that is structural
+  // rather than lucky: the settlement exists only when the fact reads
+  // `incorporated`, which is exactly when `containingCityKnown` is true.
   if (etj.status === "absent" && !containingCityKnown && !containingCityRuledOut) {
     const unresolved: EtjFactWire = {
       ...etj,

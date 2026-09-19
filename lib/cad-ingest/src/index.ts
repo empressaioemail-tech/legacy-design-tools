@@ -214,7 +214,9 @@ export {
   buildEtjBoundaryIndex,
   resolveEtj,
   resolveEtjAtPoint,
+  resolveEtjByIncorporation,
   ETJ_SERVABLE_STATUSES,
+  ETJ_UNINCORPORATED_AREA_LEGAL_GROUND,
   statusIsServable,
 } from "./boundary/containment";
 export type {
@@ -229,10 +231,13 @@ export type {
   EtjRingRefusal,
   EtjSourceCoverageEntry,
   EtjContainmentResult,
+  EtjContainingCity,
+  EtjIncorporationSettlement,
 } from "./boundary/containment";
 export {
   CITY_LIMITS_SOURCE,
   cityLimitsFactFromContainment,
+  incorporationSettlesEtj,
   unmeasuredCityLimitsFact,
   usableCityLimitsQueryPoint,
 } from "./boundary/cityLimitsFact";
