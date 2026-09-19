@@ -30,7 +30,11 @@ vi.mock("../brokerageGisCache", () => ({
 // stay real.
 vi.mock("../txgioParcelStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../txgioParcelStore")>();
-  return { ...actual, queryTxgioParcelsGeoJson: vi.fn() };
+  return {
+    ...actual,
+    queryTxgioParcelsGeoJson: vi.fn(),
+    queryTxgioParcelByPropId: vi.fn(),
+  };
 });
 
 import { AdapterRunError } from "@workspace/adapters/types";
@@ -42,6 +46,8 @@ import {
   resolveTxParcelCounty,
   resolvePointCountyByPip,
   queryTxCountyParcelsGeoJson,
+  queryTxCountyParcelByPropId,
+  countiesContainingPoint,
   txCountyAdapterKey,
   txCountyDisclaimer,
   txCountyProviderLabel,
@@ -55,6 +61,7 @@ import { queryGisLayerGeoJson } from "../brokerageGisLayers";
 import { getTxParcelTile, putTxParcelTile } from "../brokerageGisCache";
 import {
   queryTxgioParcelsGeoJson,
+  queryTxgioParcelByPropId,
   TXGIO_PARCEL_DISCLAIMER,
 } from "../txgioParcelStore";
 import { TX_COUNTY_PARCEL_FIXTURES } from "./__fixtures__/txCountyParcels";
@@ -1063,5 +1070,187 @@ describe("resolvePointCountyByPip (F4j fallback + guardrails)", () => {
     });
     expect(res.county).toBeNull();
     expect(res.resolvedBy).toBe("none");
+  });
+});
+
+// ── P-373: identity resolution (address/point -> the RIGHT parcel) ──────────
+//
+// The three P-373 subjects were unreachable by point alone: two Caldwell
+// addresses never matched a parcel, and a Travis/Buda parcel answered from
+// its record point with a HAYS parcel. Two seams fix that at the cause:
+//   - `countiesContainingPoint` — the address-index candidate set now
+//     includes live-ArcGIS counties, so a Caldwell address is consulted
+//     before a neighbour's no-coverage stands in for a match.
+//   - `queryTxCountyParcelByPropId` — one parcel, by its OWN appraisal id,
+//     from whichever source the county serves (store rows or live CAD).
+describe("P-373: countiesContainingPoint (address-index candidate set)", () => {
+  it("includes the LIVE-ArcGIS county sharing a bbox with a store county", () => {
+    // The `48055:40428` record point (Caldwell, San Marcos part) sits inside
+    // BOTH Hays' and Caldwell's routing bboxes. The store-only set dropped
+    // Caldwell, whose polygons are served live — so the county that actually
+    // holds the address was never asked.
+    const hits = countiesContainingPoint(29.88824, -97.87346);
+    expect(hits.map((c) => c.fips).sort()).toEqual(["48055", "48209"]);
+    expect(hits.find((c) => c.fips === "48055")?.source).toBeUndefined();
+    expect(hits.find((c) => c.fips === "48209")?.source).toBe("txgio-store");
+  });
+
+  it("is a SUPERSET of the store-only set (same point, store subset)", () => {
+    const all = countiesContainingPoint(29.88824, -97.87346).map((c) => c.fips);
+    const store = countiesContainingPoint(29.88824, -97.87346)
+      .filter((c) => c.source === "txgio-store")
+      .map((c) => c.fips);
+    for (const f of store) expect(all).toContain(f);
+    expect(store).not.toContain("48055");
+  });
+
+  it("is empty off the supported fabric, and for a non-finite point", () => {
+    expect(countiesContainingPoint(27.0, -95.0)).toEqual([]);
+    expect(countiesContainingPoint(Number.NaN, -97.87346)).toEqual([]);
+    expect(countiesContainingPoint(29.88824, Number.NaN)).toEqual([]);
+  });
+});
+
+describe("P-373: queryTxCountyParcelByPropId (one parcel, by identity)", () => {
+  function livePolygonFeature(propId: number) {
+    return {
+      type: "Feature",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.88, 29.88],
+            [-97.87, 29.88],
+            [-97.87, 29.89],
+            [-97.88, 29.89],
+            [-97.88, 29.88],
+          ],
+        ],
+      },
+      properties: { Prop_ID: propId },
+    };
+  }
+
+  it("store-backed county: delegates to the store reader unchanged", async () => {
+    const STORE = {
+      geojson: { type: "FeatureCollection", features: [] },
+      featureCount: 1,
+      queryMode: "pin" as const,
+    };
+    vi.mocked(queryTxgioParcelByPropId).mockResolvedValueOnce(
+      STORE as unknown as Awaited<ReturnType<typeof queryTxgioParcelByPropId>>,
+    );
+
+    const result = await queryTxCountyParcelByPropId({
+      county: countyByName("Hays"),
+      propId: "40428",
+    });
+
+    expect(result).toEqual(STORE);
+    expect(queryTxgioParcelByPropId).toHaveBeenCalledWith({
+      countyFips: "48209",
+      countyName: "Hays",
+      propId: "40428",
+    });
+  });
+
+  it("live-ArcGIS county: asks the county's OWN field, geometry included, marked identity", async () => {
+    const urls: string[] = [];
+    const fetchSpy = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      urls.push(url);
+      return new Response(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [livePolygonFeature(40428)],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await queryTxCountyParcelByPropId({
+      county: countyByName("Caldwell"),
+      propId: "40428",
+    });
+
+    expect(result?.queryMode).toBe("identity");
+    expect(result?.featureCount).toBe(1);
+    const props = (result?.geojson.features[0] as { properties: Record<string, unknown> })
+      .properties;
+    expect(props.apn).toBe("40428");
+    expect(props.parcel_node_id).toBe("48055:40428");
+    expect(props.countyFips).toBe("48055");
+    // The where-clause is over the county's own field, with the bare
+    // (integer) literal first — no point geometry is sent.
+    expect(urls[0]).toContain("where=Prop_ID%3D40428");
+    expect(urls[0]).not.toContain("geometry=");
+    // Identity reads are not viewport tiles: nothing is cached.
+    expect(putTxParcelTile).not.toHaveBeenCalled();
+  });
+
+  it("live-ArcGIS county: a quoted literal answers when the bare one does not", async () => {
+    const urls: string[] = [];
+    const fetchSpy = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      urls.push(decodeURIComponent(url));
+      const answered = url.includes("%2740428%27");
+      return new Response(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: answered ? [livePolygonFeature(40428)] : [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await queryTxCountyParcelByPropId({
+      county: countyByName("Caldwell"),
+      propId: "40428",
+    });
+
+    expect(result?.featureCount).toBe(1);
+    expect(urls.length).toBe(2);
+    expect(urls[0]).toContain("where=Prop_ID=40428");
+    expect(urls[1]).toContain("where=Prop_ID='40428'");
+  });
+
+  it("live-ArcGIS county: an id that names no feature is a TRUE null (honest miss)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fixtureFetchFor({ type: "FeatureCollection", features: [] }),
+    );
+
+    expect(
+      await queryTxCountyParcelByPropId({
+        county: countyByName("Caldwell"),
+        propId: "999999",
+      }),
+    ).toBeNull();
+  });
+
+  it("live-ArcGIS county: an upstream failure is RETHROWN, never a silent no-parcel", async () => {
+    const failFetch = vi.fn(
+      async () => new Response("Service unavailable", { status: 503 }),
+    ) as unknown as typeof fetch;
+
+    const err = await queryTxCountyParcelByPropId({
+      county: countyByName("Caldwell"),
+      propId: "40428",
+      fetchImpl: failFetch,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AdapterRunError);
+    expect(String((err as Error).message)).toContain("Caldwell County GIS parcels");
+  });
+
+  it("returns null for an empty prop id (no key, no lookup)", async () => {
+    expect(
+      await queryTxCountyParcelByPropId({
+        county: countyByName("Caldwell"),
+        propId: "   ",
+      }),
+    ).toBeNull();
   });
 });
