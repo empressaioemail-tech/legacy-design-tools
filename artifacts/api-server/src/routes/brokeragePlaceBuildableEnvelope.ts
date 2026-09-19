@@ -73,7 +73,13 @@ import {
   type AuthoritativeSetbackResolution,
 } from "../lib/buildableEnvelope/authoritativeSetbackSource";
 import { getSetbackTableForZoning } from "@workspace/adapters";
-import { districtCodeHasExactRow } from "../lib/buildableEnvelope/districtMapping";
+import {
+  districtCodeHasExactRow,
+  firstResolvableDistrictCode,
+} from "../lib/buildableEnvelope/districtMapping";
+// P-340: the R-1 conflict row the resolver has returned since P-154 and this
+// payload never served — see `setbackSourceConflict.ts`.
+import { sourceConflictRowForResolution } from "../lib/buildableEnvelope/setbackSourceConflict";
 import { plannedDevelopmentSetbackRefusalFor } from "../lib/buildableEnvelope/plannedDevelopmentSetback";
 import {
   cityStateFromSitus,
@@ -997,6 +1003,14 @@ async function deriveLabelAndRespond(args: {
   const provenanceRefs: ProvenanceRefs | undefined =
     Object.keys(builtProvenanceRefs).length > 0 ? builtProvenanceRefs : undefined;
 
+  /**
+   * P-340 — the conflict row for the resolution that produced this payload.
+   * Composed from the SAME `resolved` object the served 4-tuple comes from, so
+   * the row can never describe a different resolution than the one on the
+   * wire.
+   */
+  const sourceConflictRow = sourceConflictRowForResolution(resolved);
+
   res.status(200).json(
     withPlace(
       {
@@ -1006,6 +1020,17 @@ async function deriveLabelAndRespond(args: {
         derivePath,
         setbackSource: resolved.sourceKind,
         effectiveZoningCode,
+        /**
+         * P-340 (OPS-24). The R-1 conflict row. `authoritativeSetbackSource.ts`
+         * has returned `conflict` since P-154, but this payload builder names
+         * its fields explicitly, so the declaration never reached a customer —
+         * which is why the 2026-09-18 probe found an unreadable-date
+         * disagreement on three of its seven `PANEL-DRAW-TABLE-DISAGREE`
+         * subjects with no conflict row on either surface. Absent when there is
+         * no conflict, so a payload whose sources agree is byte-identical to
+         * what it was before this lane.
+         */
+        ...(sourceConflictRow ? { setbackSourceConflict: sourceConflictRow } : {}),
         ...(provenanceRefs ? { provenanceRefs } : {}),
         ...(spineZoning ? { spineZoningSource: spineZoning.source } : {}),
         setbacks: {
@@ -1106,16 +1131,68 @@ async function deriveAndRespond(args: {
     ? null
     : await resolveSpineZoningWhenGisAbsent(parcelNodeIdValue, parcel.zoningCode);
 
-  const effectiveZoningCode =
-    gisZoning ||
-    spineZoning?.district ||
-    (typeof atomChain?.zoningFact?.district === "string"
+  /**
+   * The ordered district-code signals, most specific first — the same order
+   * this site has always used (the parcel's own GIS zoning stamp, then Spine's
+   * zoning fact, then the atom chain's zoning fact, then its setback rule).
+   */
+  const districtCodeSignals: Array<string | null> = [
+    gisZoning || null,
+    spineZoning?.district ?? null,
+    typeof atomChain?.zoningFact?.district === "string"
       ? atomChain.zoningFact.district
-      : null) ||
-    (typeof atomChain?.setbackRule?.districtCode === "string"
+      : null,
+    typeof atomChain?.setbackRule?.districtCode === "string"
       ? atomChain.setbackRule.districtCode
-      : null) ||
-    "";
+      : null,
+  ];
+  const firstSignal = districtCodeSignals.find((c) => (c ?? "").trim() !== "") ?? "";
+
+  /**
+   * P-340 — read the engagement key BEFORE probing any table. The table probe
+   * below must run against the same jurisdiction key this site will resolve
+   * with, so a code that names no row can never move a parcel between
+   * jurisdictions. Hoisted above the no-zoning-stamp early return for that
+   * reason only; both helpers are pure string work.
+   */
+  const situsCityState = cityStateFromSitus(parcel.situsAddress);
+  const fromCityState = keyFromEngagementOrSynthesize({
+    jurisdictionCity: ctx.city ?? situsCityState.city,
+    jurisdictionState: ctx.state ?? situsCityState.state,
+    address: ctx.address ?? undefined,
+  });
+
+  const provisionalJurisdictionKey =
+    fromCityState ??
+    jurisdictionKeyFromParcelNode({
+      parcelNodeId: parcelNodeIdValue,
+      districtCode: firstSignal,
+    });
+
+  /**
+   * P-340 — A BASE CODE IS NOT A DISTRICT DETERMINATION.
+   *
+   * `parcel.zoningCode` (the county store's stamp) is sometimes a BASE code
+   * rather than a zoning district: Austin's `SF` is the base of `SF-1`..`SF-6`
+   * and `SF-4A`, and it names none of them. The first signal used to win
+   * outright, so the route looked `SF` up, crossed it into the longest prefix
+   * match (`SF-4A`, 15/3.5/5/10) and served that for two parcels whose own
+   * city layer and whose own setback-rule atom both say `SF-3`/`SF-2`
+   * (25/5/10/15) — the measured P-340 `48453:239852` / `48453:367134` defect,
+   * and the reason the panel and the drawing disagreed about a whole table
+   * rather than about one axis.
+   *
+   * `firstResolvableDistrictCode` takes the first signal that actually names a
+   * row in this jurisdiction's own table, falling back to the old first signal
+   * when none does. The jurisdiction key is the same one derived here from that
+   * first signal, so a code that names no row can never move a parcel between
+   * jurisdictions.
+   */
+  const effectiveZoningCode = firstResolvableDistrictCode(
+    districtCodeSignals,
+    provisionalJurisdictionKey,
+    (key, code) => getSetbackTableForZoning(key, code),
+  );
 
   if (!effectiveZoningCode.trim()) {
     const honesty: EngineHonesty = {
@@ -1168,18 +1245,14 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  const situsCityState = cityStateFromSitus(parcel.situsAddress);
-  const fromCityState = keyFromEngagementOrSynthesize({
-    jurisdictionCity: ctx.city ?? situsCityState.city,
-    jurisdictionState: ctx.state ?? situsCityState.state,
-    address: ctx.address ?? undefined,
-  });
-  const jurisdictionKey =
-    fromCityState ??
-    jurisdictionKeyFromParcelNode({
-      parcelNodeId: parcelNodeIdValue,
-      districtCode: effectiveZoningCode,
-    });
+  /**
+   * P-340: the SAME key the district signals were probed against above
+   * (`provisionalJurisdictionKey`, which read `fromCityState`) — this site must
+   * not re-derive it from the resolved district code, or the code the fallback
+   * picked could move the parcel to a different jurisdiction than the one its
+   * row was checked in.
+   */
+  const jurisdictionKey = provisionalJurisdictionKey;
 
   const resolved = resolveAuthoritativeSetbacks({
     jurisdictionKey,

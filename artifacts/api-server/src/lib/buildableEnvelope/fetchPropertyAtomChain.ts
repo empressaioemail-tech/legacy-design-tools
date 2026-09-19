@@ -15,6 +15,13 @@ export type PropertyAtomChainWire = {
     front?: number;
     side?: number;
     rear?: number;
+    /**
+     * P-340: the wire's OWN spelling, served by the atom chain (live-confirmed
+     * 2026-09-18 for all seven P-340 subjects). Carried here — and read by
+     * `authoritativeSetbackSource.ts` — so the route does not silently drop a
+     * corner axis it was served; see that file's `AtomChainSetbackWire` doc.
+     */
+    sideCornerFt?: number;
     side_corner?: number;
     sideCorner?: number;
     districtCode?: string | null;

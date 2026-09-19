@@ -103,6 +103,19 @@ export type AtomChainSetbackWire = {
   front?: number;
   side?: number;
   rear?: number;
+  /**
+   * P-340 — the wire's OWN spelling. The atom chain serves
+   * camelCase-with-`Ft` (`sideCornerFt`), live-confirmed 2026-09-18 on
+   * `retrieval/property-nodes/:id/atom-chain` for all seven P-340 subjects;
+   * `side_corner` / `sideCorner` below are historical spellings kept so an
+   * older wire still reads. Before this field existed here, the route's atom
+   * candidate dropped the corner axis entirely — so on three of the seven
+   * measured subjects (Buda `48209:140047`, San Marcos `48209:166141`,
+   * `48209:97658`) the route could not see that the atom rule and the
+   * codified row DISAGREE about the corner, and the R-1 conflict those three
+   * carry was never declared on this side.
+   */
+  sideCornerFt?: number;
   side_corner?: number;
   sideCorner?: number;
   districtCode?: string | null;
@@ -154,12 +167,17 @@ function scalarsFromAtomRule(rule: AtomChainSetbackWire): SetbackScalars | null 
   ) {
     return null;
   }
+  // P-340: the wire's own spelling first (`sideCornerFt`), then the historical
+  // ones — see `AtomChainSetbackWire`'s doc for why reading only the older two
+  // made the route blind to a corner disagreement on three measured subjects.
   const corner =
-    typeof rule.side_corner === "number"
-      ? rule.side_corner
-      : typeof rule.sideCorner === "number"
-        ? rule.sideCorner
-        : undefined;
+    typeof rule.sideCornerFt === "number"
+      ? rule.sideCornerFt
+      : typeof rule.side_corner === "number"
+        ? rule.side_corner
+        : typeof rule.sideCorner === "number"
+          ? rule.sideCorner
+          : undefined;
   return {
     front_ft: rule.front,
     side_ft: rule.side,

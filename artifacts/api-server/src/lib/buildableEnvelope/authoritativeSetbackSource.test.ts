@@ -189,6 +189,56 @@ describe("resolveAuthoritativeSetbacks", () => {
   });
 });
 
+describe("P-340 — the atom wire's own `sideCornerFt` spelling is read", () => {
+  it("carries the corner axis the chain actually serves, so a corner disagreement is visible", () => {
+    // The atom chain serves `sideCornerFt` (live-confirmed 2026-09-18 for all
+    // seven P-340 subjects). Reading only `side_corner`/`sideCorner` dropped
+    // the axis, which made the route blind to the corner disagreement on three
+    // measured subjects (Buda 48209:140047, San Marcos 48209:166141 and
+    // 48209:97658) and left their R-1 conflict undeclared on this side.
+    const resolved = resolveAuthoritativeSetbacks({
+      jurisdictionKey: "buda-tx",
+      districtCode: "R2",
+      atomRule: {
+        front: 20,
+        side: 10,
+        rear: 25,
+        sideCornerFt: 10,
+        districtCode: "R2",
+        sourceAdapter: "cortex-tier1-snapshot-breadth-bake",
+        sourceVintage: null,
+      },
+    })!;
+    const atomCandidate = resolved.conflict!.candidates.find(
+      (c) => c.sourceKind === "atom-chain",
+    )!;
+    expect(atomCandidate.scalars.side_corner_ft).toBe(10);
+    // The codified row says 15, so the disagreement is a declared conflict
+    // rather than a silent pick.
+    expect(resolved.conflict).toBeDefined();
+    expect(resolved.conflict!.candidates).toHaveLength(2);
+  });
+
+  it("still reads the historical spellings when the wire carries them instead", () => {
+    const snake = resolveAuthoritativeSetbacks({
+      jurisdictionKey: "buda-tx",
+      districtCode: "R2",
+      atomRule: { front: 20, side: 10, rear: 25, side_corner: 10, sourceVintage: null },
+    })!;
+    const camel = resolveAuthoritativeSetbacks({
+      jurisdictionKey: "buda-tx",
+      districtCode: "R2",
+      atomRule: { front: 20, side: 10, rear: 25, sideCorner: 10, sourceVintage: null },
+    })!;
+    for (const resolved of [snake, camel]) {
+      const candidate = resolved.conflict!.candidates.find(
+        (c) => c.sourceKind === "atom-chain",
+      )!;
+      expect(candidate.scalars.side_corner_ft).toBe(10);
+    }
+  });
+});
+
 describe("effectiveDateForTable", () => {
   it("reads explicit effectiveDate when set on table JSON", () => {
     expect(
