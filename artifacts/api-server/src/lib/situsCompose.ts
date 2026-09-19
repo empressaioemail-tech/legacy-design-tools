@@ -76,6 +76,139 @@ export function appendMissingSitusComponents(
 
 export type SitusDisposition = "present" | "unknown";
 
+/**
+ * P-270 CITY HALF (2026-09-19) — THE LICENCE, kept beside the composer.
+ *
+ * THE DEFECT. The composer above was fixed by P-270's address half to append a
+ * payload's city/state/ZIP to the street line, but it can only append a city the
+ * payload HANDS it. The bake writes the CAD roll's own situs city as a DECLARED
+ * absence when the roll has none (`{status:"absent", verdict:"absent-verified",
+ * authority: <county> CAD roll}` — the live shape on `48453:445501`), and
+ * `smartSiteStub` read that field with a `typeof === "string"` test, so the
+ * declaration became `null` and the MCP label named no city at all while the
+ * ledger held one.
+ *
+ * THE LICENCE (the same rule as the map's `applyCityLimitsSitusLicence`, in
+ * `hauska-map` `apps/property-explorer/api/_lib/pe-property-atoms.ts`, and as the
+ * probe's `addressCarriesLedgerLine` in `scripts/surface-probe.mjs`).
+ * P-331's pin (`scripts/check-cross-repo-literal-drift.mjs`) has MERGED ON BOTH
+ * MAINS (this repo #725, hauska-map #425, 2026-09-19; the two copies of the check
+ * are byte-identical, sha256 b2755e6e), and this rule's three decision literals
+ * are therefore DECLARED with names a row can read — `SitusCityBasis` (the basis
+ * vocabulary), `DECLARED_ABSENCE_VERDICT` and `CITY_LIMITS_INCORPORATED_STATUS`
+ * below — with the same names on the map's side. The pin's ROWS are deliberately
+ * not in the table yet for an ORDERING reason, not an unmerged half: a row reads
+ * the SIBLING'S MAIN, so it can only go green once both declarations are on both
+ * mains, and landing the rows in this lane's two PRs would exit 2 (REFUSE) on
+ * whichever merges first — a red no single merge could clear. The rows and their
+ * prerequisites are written out in this lane's close. The probe's copy is a
+ * THIRD repository's copy, outside the pair P-331 can read: named, not pinned.
+ * A city is taken from the city-limits answer ONLY when BOTH hold:
+ *
+ *   1. the roll's own situs city is a DECLARED absence with verdict
+ *      `absent-verified`. A bare null, a `lookup-failed`/`refused`, a
+ *      `not-applicable`, or a rail that never served licenses NOTHING: the
+ *      roll's silence is not evidence that the roll has no city, and naming the
+ *      containing city there would be inventing one;
+ *   2. the city-limits answer is `incorporated` AND names a city. An
+ *      `unincorporated` answer positively says there is no city to name;
+ *      `unmeasured` says nothing at all.
+ *
+ * A readable roll city is never replaced by the containing city, and a city
+ * taken from city limits is a DIFFERENT claim from the roll's mailing city —
+ * `basis` carries which is which so a caller can label it.
+ */
+export type CityLimitsDetermination =
+  | { status?: unknown; cityName?: unknown }
+  | null
+  | undefined;
+
+/**
+ * WHICH CITY THE LABEL'S CITY IS — the vocabulary this repo stamps and the map
+ * stamps, declared under one NAME so P-331's drift check can read it on both
+ * sides (`SitusCityBasis` there too, in `src/lib/situs-address.ts`). `"cad-roll"`
+ * = the roll's own city; `"city-limits"` = the containing city, licensed only
+ * from a declared-absent roll city; `null` = no city named.
+ */
+export type SitusCityBasis = "cad-roll" | "city-limits" | null;
+
+/**
+ * THE TWO WORDS THE LICENCE READS, declared here for the pin's sake: the verdict
+ * that makes the roll's silence licensable, and the city-limits answer that may
+ * then be named. The same names exist on the map's side
+ * (`src/lib/situs-address.ts`). Both words appear inline at many OTHER sites in
+ * this repo (the program-wide absence vocabulary and the jurisdiction
+ * vocabulary, neither of which P-270 owns) — what is pinned is the LICENCE's
+ * reading of them, not every copy in either repo, and that limit is stated here
+ * rather than implied.
+ */
+export const DECLARED_ABSENCE_VERDICT = "absent-verified";
+export const CITY_LIMITS_INCORPORATED_STATUS = "incorporated";
+
+export type SitusCityResolution = {
+  city: string | null;
+  /** `"cad-roll"` = the roll's own city; `"city-limits"` = the containing city. Null = no city named. */
+  basis: SitusCityBasis;
+};
+
+/** The roll's own situs city as the payload carries it — a string, or a declaration object, or nothing. */
+export function rollSitusCityFromFacets(facets: unknown): unknown {
+  if (!facets || typeof facets !== "object" || Array.isArray(facets)) return null;
+  const baseFacts = (facets as Record<string, unknown>).baseFacts;
+  if (!baseFacts || typeof baseFacts !== "object" || Array.isArray(baseFacts)) {
+    return null;
+  }
+  return (baseFacts as Record<string, unknown>).situsCity;
+}
+
+/**
+ * `verdict ?? status` is read in that ORDER because it is the order the probe's
+ * own extractor reads it (`surface-probe.mjs`'s `situsCityAbsenceVerdict`), so
+ * the licence cannot fire on a declaration the instrument would read
+ * differently. A `lookup-failed` verdict beside an `absent` status therefore
+ * licenses nothing — could-not-look is not found-nothing.
+ */
+export function rollSitusCityIsDeclaredAbsent(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  const word = (v: unknown) =>
+    typeof v === "string" && v.trim() ? v.trim() : null;
+  return (word(r.verdict) ?? word(r.status)) === DECLARED_ABSENCE_VERDICT;
+}
+
+/** The licence's own gate: an INCORPORATED answer that actually names a city. */
+export function incorporatedCityLimitsCity(
+  fact: CityLimitsDetermination,
+): string | null {
+  if (!fact || fact.status !== CITY_LIMITS_INCORPORATED_STATUS) return null;
+  return typeof fact.cityName === "string" && fact.cityName.trim()
+    ? fact.cityName.trim()
+    : null;
+}
+
+/**
+ * THE ONE PLACE the label's city is decided. Returns the roll's own city when
+ * the payload states one, the containing city when the roll's is a declared
+ * absence and city limits name an incorporated one, and no city otherwise —
+ * never a guess, never a jurisdiction city presented as the roll's.
+ */
+export function resolveSitusCity(args: {
+  rollSitusCity: unknown;
+  cityLimits?: CityLimitsDetermination;
+}): SitusCityResolution {
+  const rollCity =
+    typeof args.rollSitusCity === "string" && args.rollSitusCity.trim()
+      ? args.rollSitusCity.trim()
+      : null;
+  if (rollCity) return { city: rollCity, basis: "cad-roll" };
+  if (!rollSitusCityIsDeclaredAbsent(args.rollSitusCity)) {
+    return { city: null, basis: null };
+  }
+  const limitsCity = incorporatedCityLimitsCity(args.cityLimits);
+  return limitsCity
+    ? { city: limitsCity, basis: "city-limits" }
+    : { city: null, basis: null };
+}
 export type ComposedSitusLabel = {
   label: string;
   situs: SitusDisposition;

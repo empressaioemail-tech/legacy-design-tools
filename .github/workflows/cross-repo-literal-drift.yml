@@ -43,6 +43,10 @@ jobs:
             apps/property-explorer/api/_lib/pe-record-to-facets.ts
             apps/property-explorer/api/_lib/pe-situs-search-core.ts
             apps/property-explorer/src/lib/__fixtures__/envelope-verification.json
+            # P-270 city half (2026-09-19): the licence's declarations. Checked out
+            # now so the follow-up pin rows (see the check's header) need no
+            # workflow edit; the file exists on hauska-map main today.
+            apps/property-explorer/src/lib/situs-address.ts
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v4
         with:
