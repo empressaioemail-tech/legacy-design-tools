@@ -73,6 +73,11 @@ export interface ArcGisPointQueryInput {
   outFields?: string;
   /** When true, include feature geometries in the response. */
   returnGeometry?: boolean;
+  /**
+   * Cap the returned features (ArcGIS `resultRecordCount`). Used by the
+   * point-containment probe (P-373), which only asks "any feature here?".
+   */
+  resultRecordCount?: number;
   /** Spatial reference of the input point. Defaults to WGS84 (4326). */
   inSpatialReference?: number;
   /** Output spatial reference for returned geometries. Defaults to WGS84 (4326). */
@@ -131,6 +136,9 @@ export async function arcgisPointQuery(
     "returnGeometry",
     input.returnGeometry ? "true" : "false",
   );
+  if (input.resultRecordCount !== undefined) {
+    url.searchParams.set("resultRecordCount", String(input.resultRecordCount));
+  }
 
   const {
     response: res,
@@ -267,6 +275,123 @@ export async function arcgisPointQueryGeoJson(
   url.searchParams.set("spatialRel", "esriSpatialRelIntersects");
   url.searchParams.set("outFields", input.outFields ?? "*");
   url.searchParams.set("returnGeometry", "true");
+
+  const {
+    response: res,
+    attempts,
+    bodyExcerpt,
+    throwExcerpt,
+  } = await fetchWithRetry(
+    url.toString(),
+    {
+      signal: input.signal,
+      headers: {
+        "User-Agent": ARC_GIS_USER_AGENT,
+        Accept: "application/json, */*;q=0.1",
+      },
+    },
+    {
+      fetchImpl: input.fetchImpl,
+      signal: input.signal,
+      upstreamLabel: label,
+      captureThrowsAsResult: true,
+    },
+  );
+  if (!res.ok) {
+    if (throwExcerpt) {
+      throw new AdapterRunError(
+        "network-error",
+        `${label} did not get a response after ${attempts} attempt${attempts === 1 ? "" : "s"}. Network error: ${throwExcerpt}. Use Force refresh to retry.`,
+      );
+    }
+    const suffix = bodyExcerpt ? ` Upstream response: ${bodyExcerpt}` : "";
+    throw new AdapterRunError(
+      "upstream-error",
+      `${label} responded with HTTP ${res.status} after ${attempts} attempt${attempts === 1 ? "" : "s"}.${suffix} Use Force refresh to retry.`,
+    );
+  }
+
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch (err) {
+    throw new AdapterRunError(
+      "parse-error",
+      `${label} GeoJSON response was not JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!json || typeof json !== "object") {
+    throw new AdapterRunError(
+      "parse-error",
+      `${label} GeoJSON response was not a JSON object`,
+    );
+  }
+  const errorEnv = (json as { error?: { code?: number; message?: string } })
+    .error;
+  if (errorEnv) {
+    throw new AdapterRunError(
+      "upstream-error",
+      `${label} error ${errorEnv.code ?? "?"}: ${errorEnv.message ?? "unknown"}`,
+    );
+  }
+  const fc = json as ArcGisGeoJsonFeatureCollection;
+  if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features)) {
+    throw new AdapterRunError(
+      "parse-error",
+      `${label} GeoJSON response missing FeatureCollection.features`,
+    );
+  }
+  return fc;
+}
+
+export interface ArcGisWhereQueryInput {
+  serviceUrl: string;
+  /**
+   * ArcGIS `where` clause over the layer's OWN field names, e.g.
+   * `Prop_ID=40428`. Callers own the field spelling (and its literal
+   * type) — this helper only transports it.
+   */
+  where: string;
+  /** Comma-separated attribute list ("*" for everything). */
+  outFields?: string;
+  /** When true, include feature geometries in the response. Default true. */
+  returnGeometry?: boolean;
+  /** A hard cap on returned features (ArcGIS `resultRecordCount`). */
+  resultRecordCount?: number;
+  /** Output spatial reference for returned geometries. Defaults to WGS84 (4326). */
+  outSpatialReference?: number;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  upstreamLabel?: string;
+}
+
+/**
+ * Attribute-`where` query returning a GeoJSON FeatureCollection
+ * (`f=geojson`) — the read that resolves a parcel by its OWN
+ * appraisal-district identifier instead of by a point.
+ *
+ * P-373: a point that pin-queries a neighbour (or a county whose store
+ * carries no geometry) must not be the only way to reach a parcel the
+ * record already identifies. Never paginated: an identifier matches one
+ * parcel, and a caller that needs to cap asks for `resultRecordCount`.
+ */
+export async function arcgisWhereQueryGeoJson(
+  input: ArcGisWhereQueryInput,
+): Promise<ArcGisGeoJsonFeatureCollection> {
+  const outSr = input.outSpatialReference ?? 4326;
+  const label = input.upstreamLabel ?? "ArcGIS";
+  const url = new URL(`${input.serviceUrl.replace(/\/$/, "")}/query`);
+  url.searchParams.set("f", "geojson");
+  url.searchParams.set("where", input.where);
+  url.searchParams.set("outSR", String(outSr));
+  url.searchParams.set("outFields", input.outFields ?? "*");
+  url.searchParams.set(
+    "returnGeometry",
+    input.returnGeometry === false ? "false" : "true",
+  );
+  if (input.resultRecordCount !== undefined) {
+    url.searchParams.set("resultRecordCount", String(input.resultRecordCount));
+  }
 
   const {
     response: res,
