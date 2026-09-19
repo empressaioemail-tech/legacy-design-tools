@@ -208,12 +208,17 @@ describe("P-366 falsifier F5 — the atom-chain read is live on the PRODUCTION c
   });
 
   function stubFetchOk(district: string) {
-    const fetchMock = vi.fn(async () =>
-      new Response(
+    // Parameters are declared (and threaded through) so `mock.calls[n]` is
+    // typed as a real [url, init] tuple rather than `[]` — a zero-arg mock
+    // gives `calls[0]: []`, which TS refuses to narrow to the fetch signature.
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      void url;
+      void init;
+      return new Response(
         JSON.stringify({ zoningFact: { district }, setbackRule: null }),
         { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
@@ -223,9 +228,9 @@ describe("P-366 falsifier F5 — the atom-chain read is live on the PRODUCTION c
     const fetchMock = stubFetchOk("SF-2");
     const result = await resolveSpineZoningWhenGisAbsent("48209:150937", null);
     expect(result).toEqual({ district: "SF-2", source: "atom-chain" });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toContain("/property-nodes/48209%3A150937/atom-chain");
-    expect((init.headers as Record<string, string>).Authorization).toBe(
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
       "Bearer brief-key",
     );
   });
