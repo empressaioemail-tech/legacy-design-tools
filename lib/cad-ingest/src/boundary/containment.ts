@@ -16,6 +16,13 @@
  * `{ status: 'unincorporated', basis: ... }`, never as null, blank, or
  * a guessed city name. An empty index is a different state: unmeasured.
  * This helper never derives an ETJ ring or offset buffer.
+ *
+ * P-376: an INCORPORATED parcel is outside every ETJ by law — a Texas ETJ is
+ * the unincorporated area contiguous to a city — so when the caller hands in
+ * the parcel's own city-limits incorporation settlement the ETJ answer is
+ * settled from it before any ring is consulted (`resolveEtjByIncorporation`).
+ * That is a subtraction from the question, never an addition to it: this helper
+ * still derives no ring.
  */
 
 import {
@@ -54,9 +61,15 @@ export interface CountyBoundaryIndexEntry {
  *
  *   - `present`    — a published ETJ ring from a registered publisher
  *                    contains the point;
- *   - `absent`     — at least one registered publisher's own published ETJ
- *                    extent covers the point and none of that publisher's
- *                    rings contains it. This is a CHECKED answer;
+ *   - `absent`     — not in any ETJ, on one of two grounds. Either at least one
+ *                    registered publisher's own published ETJ extent covers the
+ *                    point and none of that publisher's rings contains it (the
+ *                    ring test, carrying `coveredBy`/`ringsConsulted`), or the
+ *                    parcel's own city-limits fact determines it INCORPORATED
+ *                    (P-376, carrying `settledBy: "incorporation"` and the
+ *                    `incorporation` evidence) — a Texas ETJ is unincorporated
+ *                    area by definition, so no ring has to be consulted for an
+ *                    incorporated parcel. A CHECKED answer on either ground;
  *   - `unresolved` — no source covers the point at all: no ETJ data has been
  *                    ingested, or the point lies outside every registered
  *                    publisher's published extent, or its city is enumerated
@@ -64,7 +77,9 @@ export interface CountyBoundaryIndexEntry {
  *                    check", and it is NOT a confirmed absence.
  *
  * `absent` and `unresolved` must never be collapsed: the first is a fact
- * about the land, the second is a fact about our coverage.
+ * about the land, the second is a fact about our coverage. The two grounds of
+ * `absent` must not be collapsed either: `settledBy` is what tells a consumer
+ * whether a ring was tested or whether the law settled the parcel first.
  */
 export type EtjStatus = "present" | "absent" | "unresolved";
 
@@ -597,6 +612,61 @@ export interface EtjSourceCoverageEntry {
   bbox: GeoBbox | null;
 }
 
+/**
+ * P-376: the incorporation determination that settles an ETJ answer without
+ * consulting a single ring.
+ *
+ * A Texas extraterritorial jurisdiction is, by definition, the UNINCORPORATED
+ * area contiguous to a municipality (Tex. Loc. Gov't Code ch. 42). An
+ * incorporated parcel is therefore not in any ETJ, and the ring question does
+ * not have to be asked — which matters here because asking it can only make the
+ * answer worse: a ring the reader may not test (P-359) turns a settled answer
+ * into "we could not look".
+ *
+ * This is the fact that says so, carried from the parcel's OWN city-limits
+ * answer: the city that answer named, that answer's source of record, and that
+ * answer's own basis sentence VERBATIM. The sentence is carried rather than
+ * re-parsed because it is what holds the source's vintage on the branch that has
+ * one (`parcel_record cityLimits: incorporated, city 'X' (source: ...,
+ * vintage: ...)`), and a second parser would be a second owner of a string the
+ * fact already owns.
+ */
+export interface EtjIncorporationSettlement {
+  /** The city the city-limits fact determined this parcel incorporated in. */
+  cityName: string;
+  /** The city-limits fact's own `geoId`, when that branch names one. */
+  geoId: string | null;
+  /** The city-limits fact's own `source`. */
+  source: string;
+  /** The city-limits fact's own basis sentence, verbatim. */
+  cityLimitsBasis: string;
+}
+
+/**
+ * P-376: the legal ground an incorporated parcel's ETJ answer rests on, named in
+ * the answer itself so a customer reads WHY and not only WHAT.
+ */
+export const ETJ_UNINCORPORATED_AREA_LEGAL_GROUND =
+  "a Texas extraterritorial jurisdiction is the UNINCORPORATED area contiguous " +
+  "to a municipality's boundaries (Tex. Loc. Gov't Code ch. 42)";
+
+/**
+ * What the ETJ resolver may be told about the parcel's containing city: the city
+ * the city-limits fact named, and (P-376) the incorporation settlement when that
+ * fact positively determined one.
+ *
+ * The containing city is optional in both directions, and so is the settlement:
+ * every caller that did not read the parcel's city-limits fact — including the
+ * live acquisition instrument (`etjCli.ts --verify`), whose control points are
+ * pure ring questions — passes none, and its behaviour does not change.
+ */
+export interface EtjContainingCity {
+  cityName?: string | null;
+  geoId?: string | null;
+  /** The city-limits fact's own incorporation determination, when it made one. */
+  incorporation?: EtjIncorporationSettlement | null;
+}
+
 export type EtjContainmentResult =
   | {
       status: "present";
@@ -618,9 +688,22 @@ export type EtjContainmentResult =
     }
   | {
       status: "absent";
-      /** Publishers whose own extent covered the query point. */
+      /**
+       * The ring test's own ground. Publishers whose own extent covered the
+       * query point, and rings actually tested. EMPTY and 0 when `settledBy` is
+       * `incorporation`: nothing was consulted, so nothing is claimed here.
+       */
       coveredBy: string[];
       ringsConsulted: number;
+      /**
+       * P-376: present exactly when INCORPORATION, not a ring test, settled this
+       * absence. An incorporated parcel is outside every ETJ by law, so no ring
+       * was consulted — and no ring could make this answer worse, which is why
+       * the settlement runs before the ring path rather than after it.
+       */
+      settledBy?: "incorporation";
+      /** The incorporation determination behind a `settledBy` absence. */
+      incorporation?: EtjIncorporationSettlement;
       basis: string;
     }
   | {
@@ -631,6 +714,8 @@ export type EtjContainmentResult =
        * the query point, with the derivation's own reason (P-359). Present
        * exactly when the refusal is WHY the answer is unresolved, so a caller
        * can tell "nobody publishes here" from "a ring could not be tested".
+       * Never present on a settled (incorporated) answer: a refusal is not why
+       * THAT answer is not a ring answer, because no ring has to be tested.
        */
       refusedRings?: Array<{
         etjId: string;
@@ -672,6 +757,51 @@ function coverageRowForCity(
 }
 
 /**
+ * P-376: settle ETJ from incorporation alone, before any ring is consulted —
+ * and, in the reader, before the ETJ store is consulted at all.
+ *
+ * Returns null when there is no settlement to serve, which is every caller that
+ * did not read the parcel's city-limits fact. The settlement is validated HERE,
+ * where it is served: one that names no city, no source or no basis is not
+ * servable and settles nothing, so a malformed settlement is a refusal to settle
+ * rather than a sentence with a hole in it. That check can fire — a settlement is
+ * a plain DTO any caller can hand-assemble — and it is asserted firing in this
+ * module's own suite.
+ */
+export function resolveEtjByIncorporation(
+  containing: EtjContainingCity | null,
+): EtjContainmentResult | null {
+  const settlement = containing?.incorporation ?? null;
+  if (settlement === null) return null;
+  const cityName = settlement.cityName.trim();
+  const source = settlement.source.trim();
+  const cityLimitsBasis = settlement.cityLimitsBasis.trim();
+  if (
+    cityName.length === 0 ||
+    source.length === 0 ||
+    cityLimitsBasis.length === 0
+  ) {
+    return null;
+  }
+  return {
+    status: "absent",
+    // Nothing was consulted, so nothing is claimed: an empty publisher list and
+    // a ring count of zero are the measurement of "no ring was needed", not a
+    // lost measurement. `settledBy` is what tells the two absences apart.
+    coveredBy: [],
+    ringsConsulted: 0,
+    settledBy: "incorporation",
+    incorporation: { cityName, geoId: settlement.geoId, source, cityLimitsBasis },
+    basis:
+      `not in an ETJ: the parcel's own city-limits fact determines it ` +
+      `incorporated in ${cityName}, and ${ETJ_UNINCORPORATED_AREA_LEGAL_GROUND}, ` +
+      `so no published ETJ ring can contain it and none was consulted. The ` +
+      `incorporation and its vintage are that fact's own answer ` +
+      `(source: ${source}): ${cityLimitsBasis}`,
+  };
+}
+
+/**
  * Resolve ETJ for a WGS84 point against published ETJ rings plus the source
  * register's coverage.
  *
@@ -705,14 +835,24 @@ function coverageRowForCity(
  * would have been called a VERIFIED absence while a ring covering it was never
  * tested is `unresolved`, naming the refused ring. Refusing is not measuring:
  * it must not be reported as a measurement.
+ *
+ * INCORPORATION DOMINATES BOTH (P-376). When the caller hands in the parcel's
+ * own incorporation settlement, the answer is settled from it before this
+ * function's empty-store guard and before any ring: an incorporated parcel is
+ * outside every ETJ by law, so a refused, underived or even empty ring table
+ * cannot turn that answer into `unresolved`. The store's health stays visible
+ * where it is the only answer — the unincorporated point.
  */
 export function resolveEtjAtPoint(
   longitude: number,
   latitude: number,
   index: EtjBoundaryIndex,
   coverage: EtjSourceCoverageEntry[],
-  containing: { cityName?: string | null; geoId?: string | null } | null = null,
+  containing: EtjContainingCity | null = null,
 ): EtjContainmentResult {
+  const settled = resolveEtjByIncorporation(containing);
+  if (settled !== null) return settled;
+
   if (index.rings.length === 0 && index.refusals.length === 0 && coverage.length === 0) {
     return {
       status: "unresolved",
@@ -849,7 +989,7 @@ export function resolveEtj(
   query: { longitude: number; latitude: number } | GeoJsonGeometry,
   index: EtjBoundaryIndex,
   coverage: EtjSourceCoverageEntry[],
-  containing: { cityName?: string | null; geoId?: string | null } | null = null,
+  containing: EtjContainingCity | null = null,
 ): EtjContainmentResult {
   if ("type" in query && "coordinates" in query) {
     const pt = representativePoint(query);

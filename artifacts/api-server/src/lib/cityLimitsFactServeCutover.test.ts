@@ -38,6 +38,7 @@ import {
 import { isSlatedForCellServe } from "./cellServeRule";
 import {
   buildEtjBoundaryIndex,
+  type CityBoundaryIndexEntry,
   type EtjBoundarySourceRow,
   type EtjSourceCoverageEntry,
 } from "@workspace/cad-ingest/boundary";
@@ -299,3 +300,202 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     expect("etjFact" in served).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P-376: the city-limits fact's OWN incorporation determination settles the ETJ
+// answer before any ring is consulted.
+//
+// The wire, both directions, and the shape the nine canary subjects actually
+// take: the settled answer is `absent` with `settledBy: "incorporation"` and an
+// empty `coveredBy` (nothing was consulted), where pre-change the same parcel
+// served `unresolved` because a published ring had to be refused (P-359).
+// ---------------------------------------------------------------------------
+
+/** A fixture city polygon. NOT a claim about any real city's boundary — a square
+ * around the query point, in the slated county this suite drives (48021). */
+const FIXTURE_CITY_LIMITS: CityBoundaryIndexEntry = {
+  geoId: "48118",
+  cityName: "Elgin",
+  gnis: "1357454",
+  geometry: {
+    type: "Polygon",
+    coordinates: [
+      [
+        [-97.45, 30.25],
+        [-97.35, 30.25],
+        [-97.35, 30.35],
+        [-97.45, 30.35],
+        [-97.45, 30.25],
+      ],
+    ],
+  },
+  bbox: { westLng: -97.45, southLat: 30.25, eastLng: -97.35, northLat: 30.35 },
+};
+
+const INCORPORATED_INDEX = {
+  tablePopulated: true,
+  entries: [FIXTURE_CITY_LIMITS],
+};
+
+/** Inside the fixture city limits, and inside the fixture rings below. */
+const IN_CITY = { longitude: -97.4, latitude: 30.3 };
+
+/** A ring the reader may NOT test: no derivation pass has run (P-359). */
+const UNDERIVED_COVERING_RING: EtjBoundarySourceRow = {
+  etjId: "elgin-tx:3",
+  cityKey: "elgin-tx",
+  cityName: "Elgin",
+  ringLabel: "Elgin ETJ",
+  geometry: {
+    type: "Polygon",
+    coordinates: [
+      [
+        [-97.48, 30.22],
+        [-97.32, 30.22],
+        [-97.32, 30.38],
+        [-97.48, 30.38],
+        [-97.48, 30.22],
+      ],
+    ],
+  },
+  servedGeometry: null,
+  servedStatus: "underived",
+  derivation: null,
+  bbox: { westLng: -97.48, southLat: 30.22, eastLng: -97.32, northLat: 30.38 },
+  sourceCitation: "https://example.test/elgin/3",
+};
+
+/** The same shape, served: the reader may test it. */
+const VERBATIM_COVERING_RING: EtjBoundarySourceRow = {
+  ...UNDERIVED_COVERING_RING,
+  etjId: "elgin-tx:10",
+  servedStatus: "verbatim",
+};
+
+const ELGIN_COVERAGE: EtjSourceCoverageEntry = {
+  cityKey: "elgin-tx",
+  cityName: "Elgin",
+  cityGeoId: "48118",
+  mode: "etj_layer",
+  hasEtjRings: true,
+  bbox: { westLng: -97.6, southLat: 30.1, eastLng: -97.2, northLat: 30.5 },
+};
+
+describe("cityLimitsFactServeCutover — P-376 incorporation settles the ETJ (the wire)", () => {
+  afterEach(() => {
+    resetEtjIndexForTests();
+    resetCityLimitsIndexForTests();
+  });
+
+  function setEtj(index: EtjBoundarySourceRow[]) {
+    setEtjIndexForTests({
+      sourceRowsPresent: true,
+      ringRowsPresent: true,
+      index: indexOf(...index),
+      coverage: [ELGIN_COVERAGE],
+    });
+  }
+
+  it("FALSIFIER 1: an incorporated parcel whose covering ring was refused serves not in an ETJ, naming the legal ground and the fact's own basis", async () => {
+    setCityLimitsIndexForTests(INCORPORATED_INDEX);
+    setEtj([UNDERIVED_COVERING_RING]);
+    const served = await loadCityLimitsFactForServe(UNSLATED, IN_CITY);
+    // The city-limits answer is untouched: this parcel IS incorporated.
+    expect(served.status).toBe("incorporated");
+    expect(served.cityName).toBe("Elgin");
+    // The ETJ answer is the law's, not the ring's.
+    expect(served.etjStatus).toBe("absent");
+    expect(served.etjFact?.settledBy).toBe("incorporation");
+    expect(served.etjFact?.coveredBy).toEqual([]);
+    expect(served.etjFact?.ringsConsulted).toBe(0);
+    expect(served.etjFact?.refusedRings).toBeUndefined();
+    expect(served.etjFact?.basis).toContain("not in an ETJ");
+    expect(served.etjFact?.basis).toContain("Tex. Loc. Gov't Code ch. 42");
+    expect(served.etjFact?.incorporation).toEqual({
+      cityName: "Elgin",
+      geoId: "48118",
+      source: "tx_city_boundary",
+      cityLimitsBasis:
+        "point-in-polygon against tx_city_boundary geo_id=48118",
+    });
+    // Both bases travel, as they always did: the city-limits answer first, then
+    // the ETJ determination that now restates it as the legal ground.
+    expect(served.basis).toContain("tx_city_boundary geo_id=48118");
+    expect(served.basis).toContain("ETJ: not in an ETJ");
+  });
+
+  it("FALSIFIER 2 (the control, the same ring): with the parcel UNINCORPORATED the refused ring is still why the answer is unresolved", async () => {
+    setCityLimitsIndexForTests(UNINCORPORATED_INDEX);
+    setEtj([UNDERIVED_COVERING_RING]);
+    const served = await loadCityLimitsFactForServe(UNSLATED, IN_CITY);
+    expect(served.status).toBe("unincorporated");
+    expect(served.etjStatus).toBe("unresolved");
+    expect(served.etjFact?.refusedRings?.[0]?.etjId).toBe("elgin-tx:3");
+    expect(served.etjFact?.settledBy).toBeUndefined();
+    expect(served.etjStatus).not.toBe("absent");
+  });
+
+  it("FALSIFIER 2b: an UNMEASURED city-limits fact settles nothing — the refused ring still governs", async () => {
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
+    setEtj([UNDERIVED_COVERING_RING]);
+    const served = await loadCityLimitsFactForServe(UNSLATED, IN_CITY);
+    expect(served.status).toBe("unmeasured");
+    expect(served.etjStatus).toBe("unresolved");
+    expect(served.etjFact?.refusedRings?.[0]?.etjId).toBe("elgin-tx:3");
+    expect(served.etjFact?.settledBy).toBeUndefined();
+  });
+
+  it("FALSIFIER 3: a servable ring that contains the point answers for an unincorporated parcel and NOT for an incorporated one", async () => {
+    setEtj([VERBATIM_COVERING_RING]);
+
+    setCityLimitsIndexForTests(UNINCORPORATED_INDEX);
+    const unincorporated = await loadCityLimitsFactForServe(UNSLATED, IN_CITY);
+    expect(unincorporated.etjStatus).toBe("present");
+    expect(unincorporated.etjFact?.etjId).toBe("elgin-tx:10");
+
+    setCityLimitsIndexForTests(INCORPORATED_INDEX);
+    const incorporated = await loadCityLimitsFactForServe(UNSLATED, IN_CITY);
+    expect(incorporated.etjStatus).toBe("absent");
+    expect(incorporated.etjFact?.settledBy).toBe("incorporation");
+    expect(incorporated.etjFact?.etjId).toBeUndefined();
+  });
+
+  it("the SLATED branch: the parcel_record cell's own source and vintage travel into the settlement", async () => {
+    // The shape the nine canary subjects take: their city-limits answer comes
+    // from this parcel's own cell, whose basis names the source of record and
+    // the vintage. Both reach the ETJ answer unfiltered.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: SLATED,
+            railKey: RAIL_KEY,
+            cellState: {
+              kind: "value",
+              value: "Elgin",
+              source: "landing_parcel_jurisdiction",
+              vintage: "2026-09-17T00:00:00.000Z",
+              disposition: "rows",
+            },
+          },
+        ],
+      }),
+    );
+    setEtj([UNDERIVED_COVERING_RING]);
+    const served = await loadCityLimitsFactForServe(SLATED, IN_CITY);
+    expect(served.status).toBe("incorporated");
+    expect(served.cityName).toBe("Elgin");
+    expect(served.etjStatus).toBe("absent");
+    expect(served.etjFact?.settledBy).toBe("incorporation");
+    expect(served.etjFact?.incorporation?.cityLimitsBasis).toContain(
+      "source: landing_parcel_jurisdiction",
+    );
+    expect(served.etjFact?.incorporation?.cityLimitsBasis).toContain(
+      "vintage: 2026-09-17T00:00:00.000Z",
+    );
+    // The vintage is in the SERVED basis too, not only in the structured field.
+    expect(served.basis).toContain("vintage: 2026-09-17T00:00:00.000Z");
+    expect(served.etjStatus).not.toBe("unresolved");
+  });
+});
+

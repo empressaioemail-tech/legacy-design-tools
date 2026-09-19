@@ -45,6 +45,16 @@
  * sites that would read it (`hauska-engine`'s report/feasibility hardcodes,
  * `hauska-map`'s three) are explicit follow-on work. This module is the read
  * path those sites can adopt without touching how it is built.
+ *
+ * P-376 — INCORPORATION SETTLES THE ANSWER, AND IT SETTLES IT FIRST. When the
+ * caller's city-limits fact positively determined this parcel incorporated, the
+ * caller hands that determination in on `containing.incorporation` and this
+ * module answers `not in an ETJ` from it (the existing `absent` disposition,
+ * `settledBy: "incorporation"`, `coveredBy: []`, `ringsConsulted: 0`) BEFORE any
+ * store guard and before any ring is considered. An incorporated parcel is
+ * outside every ETJ by law, so a refused, underived or simply unloaded ring
+ * table has nothing to say about it — and letting one speak would turn a settled
+ * answer into `unresolved`.
  */
 
 import { and, gte, lte } from "drizzle-orm";
@@ -52,8 +62,10 @@ import { txEtjBoundary, txEtjSource } from "@workspace/db/schema";
 import {
   buildEtjBoundaryIndex,
   resolveEtjAtPoint,
+  resolveEtjByIncorporation,
   type EtjBoundaryIndex,
   type EtjBoundarySourceRow,
+  type EtjContainingCity,
   type EtjSourceCoverageEntry,
 } from "@workspace/cad-ingest/boundary";
 import {
@@ -259,13 +271,25 @@ async function loadBboxCandidates(
 /**
  * Resolve ETJ for a WGS84 point. Pass null when the inspect snapshot has no
  * usable centroid — that is unresolved, not absent. `containing` is the
- * already-resolved containing city when the caller has it, used only so the
- * unresolved basis can name the city and its enumeration outcome.
+ * already-resolved containing city when the caller has it, used so the
+ * unresolved basis can name the city and its enumeration outcome — and, when the
+ * caller's own city-limits fact determined this parcel INCORPORATED, so the ETJ
+ * question can be settled without consulting a ring at all (P-376).
+ *
+ * P-376 — THE INCORPORATION CHECK RUNS FIRST. Before every store guard below and
+ * before any ring. A Texas ETJ is, by definition, the unincorporated area
+ * contiguous to a municipality (Tex. Loc. Gov't Code ch. 42), so an incorporated
+ * parcel's ETJ answer does not depend on our ETJ coverage in any way. Reading the
+ * store first would let an empty register, an incomplete acquisition or a ring
+ * the reader must refuse (P-359) turn a settled answer into `unresolved` — "we
+ * could not look" served for a parcel the law already placed outside every ETJ.
+ * The store's health stays visible exactly where it IS the answer: the
+ * unincorporated point that the ring test is the only answer for.
  */
 export async function loadEtjFact(
   point: EtjQueryPoint | null,
   db?: EtjFactDb,
-  containing: { cityName?: string | null; geoId?: string | null } | null = null,
+  containing: EtjContainingCity | null = null,
 ): Promise<EtjFactWire> {
   const usable = point
     ? usableEtjQueryPoint(point.longitude, point.latitude)
@@ -277,6 +301,13 @@ export async function loadEtjFact(
     };
   }
   const queryPoint = { longitude: usable.longitude, latitude: usable.latitude };
+
+  // The settlement is returned before the injected/real store branches are even
+  // read: an incorporated parcel's ETJ answer is not a claim about tx_etj_boundary.
+  const settled = resolveEtjByIncorporation(containing);
+  if (settled !== null) {
+    return { ...etjFactFromContainment(settled), queryPoint };
+  }
 
   if (injectedIndex !== undefined) {
     if (injectedIndex === null || !injectedIndex.sourceRowsPresent) {
