@@ -100,6 +100,114 @@ jobs:
         run: |
           cd artifacts/api-server
           node node_modules/puppeteer/install.mjs
+      - name: Size the postgres lock table for the test suite
+        # P-375 (2026-09-19). `Test` has failed intermittently on suites the PR
+        # under review does not touch (#722, #727, and P-362's PR) with Postgres
+        # error 53200 "out of shared memory" / "You might need to increase
+        # max_locks_per_transaction", thrown out of lib/db's `dropTestSchema`.
+        # The fleet's answer was "re-run once" (`_queue/cards/ldt-576-retry`),
+        # which is a habit, not a control: a real regression in those suites
+        # would be re-run away the same way.
+        #
+        # MEASUREMENT. On a container identical to this service (same image, same
+        # env, default max_locks_per_transaction=64, default 64 MB /dev/shm),
+        # driving the REAL fixture schema (142 tables, 228 indexes and 246 ADD
+        # CONSTRAINT = 616 objects) through the lifecycle the harness uses
+        # (DROP SCHEMA IF EXISTS / CREATE SCHEMA / DDL replay / DROP SCHEMA
+        # CASCADE):
+        #   * one `DROP SCHEMA ... CASCADE` on that schema takes ~2,400 locks in
+        #     ONE transaction (binary search on a single session).
+        #   * the default lock table holds ~12,800 locks (measured; not the
+        #     64 x 101 textbook figure), so about six test files dropping a
+        #     schema at the same moment exhaust it. `pnpm test` fans out well
+        #     past that, which is why the reds land on untouched suites.
+        #   * 12 concurrent schema lifecycles failed in 3 of 4 runs; 24
+        #     concurrent failed in 3 of 3 runs, with 20-24 `out of shared memory`
+        #     errors each, and left 20-22 schemas behind.
+        #   * at max_locks_per_transaction=1024 the same 24-way load was clean in
+        #     3 of 3 runs, and 12-way clean in 4 of 4. Measured capacity ~190,000
+        #     locks, about 79x the per-operation need.
+        #
+        # --shm-size IS DELIBERATELY NOT SET, because it was measured not to be
+        # the lever: lock capacity is identical (12,800) at 64 MB and at 2 GB of
+        # /dev/shm, an equal 12-way load fails on both, and 1024 starts and
+        # passes on the stock 64 MB /dev/shm. The lock table is anonymous shared
+        # memory, not /dev/shm, so a larger --shm-size can never clear this
+        # error; only the GUC sizes it, and the GUC is PGC_POSTMASTER, so it
+        # needs a restart. That is what this step does.
+        #
+        # A job in the service container cannot be given the GUC declaratively
+        # (`services.options` is passed to `docker create` and there is no
+        # command override), so the step sets it with ALTER SYSTEM, restarts the
+        # container, waits for readiness, READS BACK the effective value and
+        # fails loudly if it did not take. The effective value is printed on
+        # every run: a Test log that does not carry this line, or carries it
+        # with the wrong number, is itself the finding and no longer has to be
+        # diagnosed from a suite's error text.
+        #
+        # THE `run:` BLOCK BELOW IS EXECUTED, NOT TRUSTED. It was extracted from
+        # this file byte-for-byte and run on a host that runs several containers
+        # from the same image, with exactly ONE line rebound (the container
+        # selector, because CI has exactly one and this host does not). That is
+        # how the `|| true` inside the readiness loop was found: without it the
+        # loop's first psql -- which fails on any postgres that is still
+        # restarting -- aborted the whole step with exit 2 under `set -e`, so
+        # the loop could only ever work when it was not needed. The guard that
+        # refuses an ambiguous container list was observed FIRING, not asserted:
+        # bound to a name with no container, the step exits 1 with "expected
+        # exactly one ... found 0".
+        run: |
+          set -euo pipefail
+          TARGET=1024
+          MATCHES=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          COUNT=$(printf '%s\n' "$MATCHES" | grep -c . || true)
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: expected exactly one pgvector/pgvector:pg14 service container, found $COUNT. Refusing to guess which postgres the suites run against: guessing wrong leaves the lock table unsized and the DB suites fail in the out-of-shared-memory shape, which is a red that reads like a broken test."
+            exit 1
+          fi
+          CONTAINER_ID="$MATCHES"
+          docker exec "$CONTAINER_ID" psql -U postgres -d test_db -c "ALTER SYSTEM SET max_locks_per_transaction = $TARGET;"
+          docker restart --time 60 "$CONTAINER_ID" > /dev/null
+          # --time 60 (not the 10s default) so postgres gets a CLEAN fast shutdown instead of
+          # a SIGKILL: an unclean stop makes the next start replay WAL first, which turns a
+          # 2-second restart into minutes and would look exactly like a hung Test job.
+          # Wait for QUERY readiness, not `pg_isready`: a restart after an unclean stop puts
+          # the server in crash recovery, where it answers the socket ("rejecting
+          # connections", pg_isready exit 1) long before it can execute anything. Only a
+          # real query proves the precondition for reading the setting back.
+          #
+          # `|| true` IS LOAD-BEARING, and this was found by RUNNING these bytes against a
+          # container that was in recovery, not by reading them. Without it the loop is
+          # decorative: psql that cannot connect exits 2, `set -o pipefail` makes the whole
+          # pipeline 2, and an assignment whose command substitution fails is itself a failed
+          # command under `set -e` -- so the FIRST iteration kills the step with a bare exit 2,
+          # the loop never loops, and the FAIL message below is unreachable. The loop
+          # therefore used to work exactly when it was not needed (CI's freshly-initialised
+          # container does a clean fast shutdown and answers the first probe) and fail
+          # silently in the one state it exists for. A gating indicator that cannot fire is
+          # not a control (DEV_PROCESS).
+          READY=""
+          for _ in $(seq 1 120); do
+            READY=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SELECT 1;" 2> /dev/null | tr -d '[:space:]' || true)
+            if [ "$READY" = "1" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" != "1" ]; then
+            echo "FAIL: postgres did not accept a query within 120s of the restart, so the lock table state is unknown; the DB suites must not run against a server that was never confirmed up"
+            exit 1
+          fi
+          # `|| true` for the same reason as the loop above: a psql that cannot connect must
+          # fall through to the comparison and be REPORTED, never abort the step with an
+          # unexplained exit 2. `2> /dev/null` keeps the log to our one line, which is the
+          # line a reader greps for.
+          EFFECTIVE=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SHOW max_locks_per_transaction;" 2> /dev/null | tr -d '[:space:]' || true)
+          echo "effective max_locks_per_transaction=$EFFECTIVE (wanted $TARGET)"
+          if [ "$EFFECTIVE" != "$TARGET" ]; then
+            echo "FAIL: max_locks_per_transaction reads '$EFFECTIVE', not '$TARGET'; the restart did not take and the DB suites would run on the undersized default"
+            exit 1
+          fi
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
