@@ -74,6 +74,19 @@ function mostConservative(districts: SetbackDistrict[]): SetbackDistrict {
  * 20/100/100/100 through the standing gates). `mapDistrict` guards the
  * planned-development class against BOTH directions; the remaining reverse
  * cases are a separate, unmeasured shape (see the lane close's known holes).
+ *
+ * P-340: the remaining reverse case is measured now. Austin's `SF` — the
+ * county store's base code, the value `brokeragePlaceBuildableEnvelope.ts`
+ * reads as `effectiveZoningCode` for `48453:239852` and `48453:367134` — is a
+ * prefix of six Austin rows, and the pre-P-340 longest-match rule crossed it
+ * into `SF-4A` (15/3.5/5/10) while BOTH the city's own zoning layer and the
+ * parcel's setback-rule atom name `SF-3`/`SF-2` (25/5/10/15). A code that
+ * prefixes MORE THAN ONE row is not evidence of any one of them, so the
+ * crossing is refused by {@link mapDistrict} rather than resolved to the
+ * longest. This is the same doctrine already stated at the bottom of this
+ * function ("an explicit GIS code that matches nothing returns null so callers
+ * decline with setback-table-pending instead of inventing a wrong district"):
+ * an ambiguous code matches no district either.
  */
 function isSafePrefixMatch(zoningCode: string, districtCode: string): boolean {
   const shorter = Math.min(zoningCode.length, districtCode.length);
@@ -97,6 +110,45 @@ export function districtCodeHasExactRow(
   if (!code || !table.districts.length) return false;
   const norm = normalizeCode(code);
   return table.districts.some((d) => districtCode(d) === norm);
+}
+
+/**
+ * P-340 — pick the district code the route should RESOLVE with, out of the
+ * ordered district-code signals, and never let a base code stand in for a
+ * district it does not name.
+ *
+ * `signals` is most-specific-first (the parcel's own GIS zoning stamp, then
+ * Spine's zoning fact, then the atom chain's zoning fact, then its setback
+ * rule). The first signal that names a row in this jurisdiction's own table
+ * wins; when NONE names a row the first signal is returned unchanged, so a
+ * jurisdiction with no table, or a district no table rows, behaves exactly as
+ * it did before this function existed.
+ *
+ * WHY THIS IS NOT A PRECEDENCE CHANGE. The jurisdiction is chosen from the
+ * first signal, before and after (`brokeragePlaceBuildableEnvelope.ts` keeps
+ * its own key derivation and passes it in), so a code that names no row can
+ * never move a parcel between jurisdictions — it can only stop a base code
+ * from being read as the longest row whose name it happens to begin.
+ *
+ * Measured, 2026-09-18: Austin's county-store stamp `SF` (base of `SF-1`..
+ * `SF-6`, `SF-4A`) was crossed into `SF-4A` and served 15/3.5/5/10 for
+ * `48453:239852` and `48453:367134`, whose city layer and whose own setback
+ * atom both say `SF-3`/`SF-2` (25/5/10/15). With this function, `SF` names no
+ * row, the atom chain's `SF-3` does, and both surfaces resolve the same row.
+ */
+export function firstResolvableDistrictCode(
+  signals: ReadonlyArray<string | null | undefined>,
+  jurisdictionKey: string | null,
+  tableFor: (jurisdictionKey: string, districtCode: string) => SetbackTable | null,
+): string {
+  const codes = signals.map((c) => (c ?? "").trim()).filter((c) => c.length > 0);
+  const first = codes[0] ?? "";
+  if (!jurisdictionKey) return first;
+  for (const code of codes) {
+    const table = tableFor(jurisdictionKey, code);
+    if (table && mapDistrict(table, code)) return code;
+  }
+  return first;
 }
 
 /**
@@ -137,8 +189,7 @@ export function mapDistrict(
   if (code) {
     const norm = normalizeCode(code);
     let exact: SetbackDistrict | null = null;
-    let prefix: SetbackDistrict | null = null;
-    let prefixLen = -1;
+    const prefixMatches: SetbackDistrict[] = [];
     for (const d of districts) {
       const dc = districtCode(d);
       if (!dc) continue;
@@ -146,10 +197,10 @@ export function mapDistrict(
         exact = d;
         break;
       }
-      if (isSafePrefixMatch(norm, dc) && dc.length > prefixLen) {
-        prefix = d;
-        prefixLen = dc.length;
-      }
+      // P-340: a prefix crossing is evidence of a SPECIFIC row only when it
+      // names exactly one. Collected rather than "longest wins" — see
+      // `isSafePrefixMatch`.
+      if (isSafePrefixMatch(norm, dc)) prefixMatches.push(d);
     }
 
     if (exact) {
@@ -178,6 +229,17 @@ export function mapDistrict(
     if (isPlannedDevelopmentCode(code)) {
       return null;
     }
+    /**
+     * P-340 — an AMBIGUOUS prefix crossing is refused. `SF` names six Austin
+     * rows, so it names none of them: the pre-P-340 rule took the longest
+     * (`SF-4A`) and served 15/3.5/5/10 for two parcels whose city layer says
+     * `SF-3`/`SF-2`. The codified candidate is dropped here and the atom-chain
+     * candidate (which carries the city layer's own district) serves — the same
+     * absence/decline path an unmatched code already takes, never an invented
+     * district.
+     */
+    if (prefixMatches.length > 1) return null;
+    const prefix = prefixMatches[0];
     if (prefix) {
       return {
         district: prefix,
