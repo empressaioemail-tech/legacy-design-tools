@@ -61,6 +61,7 @@ import {
 } from "./etjIngest";
 import { newCounters } from "../types";
 import { ETJ_CONTROL_POINTS, verifyEtjControlPoints } from "./etjVerify";
+import type { EtjDeriveSummary } from "./etjDerive";
 
 const { Pool } = pg;
 
@@ -169,6 +170,7 @@ async function ingestCity(opts: {
   }
 
   let inserted = 0;
+  let derived: EtjDeriveSummary | null = null;
   if (!opts.dryRun && opts.db) {
     await deleteEtjBoundariesForSources(opts.db, [entry.cityKey]);
     const summary = await upsertEtjBoundaries(opts.db, records(), {
@@ -178,6 +180,25 @@ async function ingestCity(opts: {
       onBatch: (total) => log(`${entry.cityKey}: inserted ${total} rings...`),
     });
     inserted = summary.rowsInserted;
+    derived = summary.derivation;
+    // P-359: the derivation is the part an operator has to SEE. A ring that was
+    // derived (its own city's limits subtracted), repaired or excluded is a
+    // decision the ingest made about a publisher's drawing, and it is reported
+    // per publisher rather than left in a table nobody prints.
+    log(
+      `${entry.cityKey}: derived ${derived.ringsDerived} ring(s) — ` +
+        `verbatim=${derived.byStatus.verbatim} derived=${derived.byStatus.derived} ` +
+        `repaired=${derived.byStatus.repaired} excluded=${derived.byStatus.excluded} ` +
+        `withheld=${derived.byStatus.withheld}`,
+    );
+    for (const o of derived.outcomes) {
+      if (o.servedStatus === "excluded" || o.servedStatus === "withheld") {
+        log(
+          `${entry.cityKey}: ${o.etjId} ${o.servedStatus.toUpperCase()} — ` +
+            `${o.note ?? "no reason recorded"}`,
+        );
+      }
+    }
   } else {
     for await (const _ of records()) {
       // drain

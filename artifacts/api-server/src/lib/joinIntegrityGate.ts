@@ -393,6 +393,183 @@ export interface CountyCadPropertyRoll {
   consulted: boolean;
 }
 
+/**
+ * P-351 (2026-09-18). THE PRIOR DECLARED VINTAGE'S PUBLISHED ACCOUNT-NUMBER
+ * REGISTER, read for ONE purpose: NAMING the CAD account a node's served key
+ * belongs to when the DECLARED vintage no longer carries that account.
+ *
+ * WHY IT IS NEEDED AT ALL. On a two-keyspace county a node's served key is the
+ * county's published account number (`joinNormalize.ts`: Hays' `prop_id` values
+ * ARE the QuickRefID numbers with the R stripped at the source), and the roll is
+ * keyed by the CAD's own PropertyID. When an account leaves the roll -- split,
+ * merged, renumbered or removed -- the DECLARED roll cannot name it: there is no
+ * row left to read a prop_id off. Without a prior vintage the arm can never
+ * distinguish "the account is gone" from "I cannot name the account", and the
+ * retirement predicate would be silently weakened for exactly these counties.
+ *
+ * WHAT IT MAY BE USED FOR, and what it may NOT. Only the IDENTITY pair comes
+ * back -- the account's own prop_id and its published `property_number`, the
+ * latter used solely as a corroborator against the node's own `geo_id`. No
+ * dollar, area, year, legal or exemption column is selected, so this read
+ * STRUCTURALLY cannot serve a value: a value on the prior vintage is exactly
+ * what the P-178 vintage rule forbids. The declared roll remains the only
+ * presence test and the only source of facts.
+ *
+ * A county that publishes no account numbers at all (Williamson 48491 carries
+ * ZERO non-blank `quick_ref_id` on either vintage, measured 2026-09-18) gets an
+ * empty map and its caller skips the read rather than issuing it.
+ */
+export interface PriorVintageQuickRefRegister {
+  byQuickRefId: Map<string, { propId: string; propertyNumber: string | null }>;
+  taxYear: number | null;
+}
+
+export async function fetchPriorVintageQuickRefRegister(
+  pool: QueryablePool,
+  fips: string,
+): Promise<PriorVintageQuickRefRegister> {
+  const out = new Map<string, { propId: string; propertyNumber: string | null }>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byQuickRefId: out, taxYear: null };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byQuickRefId: out, taxYear: null };
+  }
+  const priorYear = await pool.query<{ tax_year: number | null }>(
+    `SELECT max(tax_year) AS tax_year
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year < $2`,
+    [declared.countyFips, declared.taxYear],
+  );
+  const prior = priorYear.rows[0]?.tax_year ?? null;
+  if (prior == null) return { byQuickRefId: out, taxYear: null };
+  const r = await pool.query<{
+    prop_id: string;
+    quick_ref_id: string | null;
+    property_number: string | null;
+  }>(
+    `SELECT prop_id, quick_ref_id, property_number
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND quick_ref_id IS NOT NULL
+        AND btrim(quick_ref_id) <> ''`,
+    [declared.countyFips, prior],
+  );
+  for (const row of r.rows) {
+    const key = row.quick_ref_id?.trim().toUpperCase() ?? "";
+    if (key === "" || out.has(key)) continue;
+    out.set(key, {
+      propId: row.prop_id,
+      propertyNumber:
+        typeof row.property_number === "string" && row.property_number.trim()
+          ? row.property_number.trim()
+          : null,
+    });
+  }
+  return { byQuickRefId: out, taxYear: prior };
+}
+
+/**
+ * P-351 (2026-09-18). THE COUNTY'S PUBLISHED NODE-KEY -> ACCOUNT-KEY PAIR, read
+ * from the county's own published extracts as a pair and never either side
+ * alone.
+ *
+ * WHAT MAKES THIS DIFFERENT FROM EVERY OTHER CROSSWALK IN THIS FILE. The bind
+ * above (`crosswalkBindCorroborated`) is a GEOGRAPHIC identity test and is the
+ * right tool for one-keyspace counties: it reconciles two published identifiers
+ * that both name the same parcel, and it can therefore be contradicted by the
+ * node's own identifiers. Williamson's pair is not geographic at all. Its
+ * served node key is the R-account number and its CAD account is the numeric
+ * PropertyID, and the ONLY thing that relates them is that the county's own
+ * published extract puts them in the same row. There is nothing to corroborate
+ * and nothing to contradict: the pair IS the crosswalk, published by the
+ * county, and reading one side without the other is exactly the keyspace
+ * mismatch this row exists to remove.
+ *
+ * RETURNED AS EXTRACTS, not as a finished map, because aggregating them is a
+ * decision with refusals in it and that decision belongs in
+ * `retirementAccountResolution.ts` beside the other paths -- one place decides
+ * what an account is, and it decides it once.
+ */
+export interface PublishedAccountPairExtract {
+  /** The served node key (e.g. Williamson's R-account number). */
+  propId: string;
+  /** The CAD account key the same published row pairs with it. */
+  accountPropId: string;
+  /** Which published extract said so, for the close artifact's attribution. */
+  source: string;
+}
+
+export interface PublishedAccountPairRead {
+  extracts: PublishedAccountPairExtract[];
+  /** Extract table names that carried a usable pair; for the per-writer counts. */
+  sourcesPresent: string[];
+  /** Extract table names this store does not have at all, named not omitted. */
+  sourcesAbsent: string[];
+}
+
+/** The extracts whose rows ARE a published node-key/account-key pair. */
+const PUBLISHED_ACCOUNT_PAIR_SOURCES: ReadonlyArray<{
+  table: string;
+  propIdColumn: string;
+  accountColumn: string;
+}> = [
+  { table: "tx_wcad_owner", propIdColumn: "prop_id", accountColumn: "wcad_property_id" },
+  { table: "tx_wcad_ag_valuation", propIdColumn: "prop_id", accountColumn: "wcad_property_id" },
+];
+
+/** Keys per statement: keeps a 282k-key county inside sane parameter bounds. */
+const PAIR_READ_CHUNK = 25_000;
+
+/**
+ * Reads the published pair for EXACTLY the node keys the bake is holding, not
+ * the whole extract. The filter is `prop_id = ANY($1)` against the county's own
+ * published node key, so a chunk whose keys the extract does not name returns
+ * nothing rather than forcing a scan -- and the returned rows still carry the
+ * raw `prop_id`, which is what makes an unpaired key OBSERVABLE downstream
+ * instead of silently dropped at the read.
+ */
+export async function fetchPublishedAccountPairExtracts(
+  pool: QueryablePool,
+  nodeKeys: readonly string[],
+): Promise<PublishedAccountPairRead> {
+  const extracts: PublishedAccountPairExtract[] = [];
+  const sourcesPresent: string[] = [];
+  const sourcesAbsent: string[] = [];
+  const keys = nodeKeys.map((k) => k.trim()).filter((k) => k !== "");
+  if (keys.length === 0) return { extracts, sourcesPresent, sourcesAbsent };
+
+  for (const src of PUBLISHED_ACCOUNT_PAIR_SOURCES) {
+    if (!(await tableExists(pool, src.table))) {
+      sourcesAbsent.push(src.table);
+      continue;
+    }
+    let read = 0;
+    for (let i = 0; i < keys.length; i += PAIR_READ_CHUNK) {
+      const chunk = keys.slice(i, i + PAIR_READ_CHUNK);
+      const r = await pool.query<{ prop_id: string; account: string | null }>(
+        `SELECT ${src.propIdColumn} AS prop_id,
+                ${src.accountColumn} AS account
+           FROM ${src.table}
+          WHERE ${src.propIdColumn} = ANY($1::text[])
+            AND ${src.accountColumn} IS NOT NULL
+            AND btrim(${src.accountColumn}) <> ''`,
+        [chunk],
+      );
+      for (const row of r.rows) {
+        const propId = row.prop_id?.trim() ?? "";
+        const accountPropId = row.account?.trim() ?? "";
+        if (propId === "" || accountPropId === "") continue;
+        extracts.push({ propId, accountPropId, source: src.table });
+        read += 1;
+      }
+    }
+    if (read > 0) sourcesPresent.push(src.table);
+  }
+  return { extracts, sourcesPresent, sourcesAbsent };
+}
+
 function numericOrNull(v: unknown): number | null {
   if (v == null) return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : null;

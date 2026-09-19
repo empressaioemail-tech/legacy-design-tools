@@ -165,6 +165,9 @@ describe("etj containment — three-valued disposition", () => {
     ringLabel: "AUSTIN 2 MILE ETJ",
     geometry: squareAround(-97.855113, 30.352812),
     sourceCitation: "https://example.test/austin/0",
+    // P-359: a row with no served status is REFUSED, not assumed testable. The
+    // publisher's own drawing is what `verbatim` names.
+    servedStatus: "verbatim" as const,
   };
 
   it("reports present with the publisher's own ring label", () => {
@@ -221,7 +224,12 @@ describe("etj containment — three-valued disposition", () => {
   });
 
   it("reports unresolved — never absent — when nothing has been acquired", () => {
-    const result = resolveEtjAtPoint(-97.855113, 30.352812, [], []);
+    const result = resolveEtjAtPoint(
+      -97.855113,
+      30.352812,
+      buildEtjBoundaryIndex([]),
+      [],
+    );
     expect(result.status).toBe("unresolved");
     expect(result.basis).toContain("unmeasured");
   });
@@ -380,11 +388,186 @@ describe("etj containment — three-valued disposition", () => {
     expect(result.status).toBe("present");
   });
 
-  it("drops an unbounded ring from the index rather than guessing a bbox", () => {
+  it("declares an untestable ring instead of silently dropping it from the index", () => {
+    // A point where a ring should be can never contain a query point, so it must
+    // not be indexed as a ring that was tested and missed. It is a REFUSAL with
+    // its reason (P-359), because "0 rings consulted" and "1 ring we could not
+    // test" are different facts about the point.
     const built = buildEtjBoundaryIndex([
       { ...austinRing, geometry: { type: "Point", coordinates: [0, 0] } },
     ]);
-    expect(built).toHaveLength(0);
+    expect(built.rings).toHaveLength(0);
+    expect(built.refusals).toHaveLength(1);
+    expect(built.refusals[0]!.etjId).toBe("austin-tx:22");
+    expect(built.refusals[0]!.reason).toMatch(/not a Polygon or MultiPolygon/);
+  });
+});
+
+describe("etj containment — P-359 served geometry", () => {
+  const AUSTIN_EXTENT_ENTRY = coverageEntry({
+    cityKey: "austin-tx",
+    cityName: "Austin",
+    bbox: { westLng: -98.02, southLat: 30.03, eastLng: -97.47, northLat: 30.53 },
+  });
+
+  /**
+   * The published ring is the outer square; the served geometry is that square
+   * minus a hole over the city limits the ring encloses — the real Austin shape
+   * (its 2-mile ETJ wraps city limits) reduced to a fixture.
+   */
+  const OUTER = [
+    [
+      [-97.90, 30.30],
+      [-97.80, 30.30],
+      [-97.80, 30.40],
+      [-97.90, 30.40],
+      [-97.90, 30.30],
+    ],
+  ];
+  const HOLE = [
+    [-97.87, 30.33],
+    [-97.83, 30.33],
+    [-97.83, 30.37],
+    [-97.87, 30.37],
+    [-97.87, 30.33],
+  ];
+  const IN_HOLE = { longitude: -97.85, latitude: 30.35 };
+  const IN_RING_OUTSIDE_HOLE = { longitude: -97.885, latitude: 30.385 };
+
+  function body(
+    servedStatus: "verbatim" | "underived" | "excluded" | "withheld",
+    over: Record<string, unknown> = {},
+  ) {
+    return {
+      etjId: "austin-tx:7",
+      cityKey: "austin-tx",
+      cityName: "Austin",
+      ringLabel: "AUSTIN 2 MILE ETJ",
+      geometry: { type: "Polygon", coordinates: OUTER },
+      sourceCitation: "https://example.test/austin/0",
+      servedStatus,
+      ...over,
+    } as Parameters<typeof buildEtjBoundaryIndex>[0][number];
+  }
+
+  const DERIVATION_NOTE =
+    "the ring contains its own city's representative point; served geometry is the ring minus that city's limits";
+
+  it("FALSIFIER A: the SERVED geometry is what containment tests, not the published ring", () => {
+    // Pre-change, `geometry` was tested for every row, so a point inside the
+    // subtracted city limits read `present` — ETJ over a house inside the city.
+    const derived = buildEtjBoundaryIndex([
+      body("derived", {
+        servedGeometry: { type: "Polygon", coordinates: [OUTER[0], HOLE] },
+        derivation: { kind: "self_containing", note: DERIVATION_NOTE },
+      }),
+    ]);
+    const inHole = resolveEtjAtPoint(
+      IN_HOLE.longitude,
+      IN_HOLE.latitude,
+      derived,
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(inHole.status).toBe("absent");
+    if (inHole.status !== "absent") throw new Error("unreachable");
+    // Two rings would be wrong to report as "tested and missed": the derived ring
+    // WAS tested, and its answer over its own hole is a real no.
+    expect(inHole.ringsConsulted).toBe(1);
+
+    // The pair: the same row still answers `present` over the derived part of
+    // the ring, so the falsifier is about WHICH polygon, not about refusing.
+    const inRing = resolveEtjAtPoint(
+      IN_RING_OUTSIDE_HOLE.longitude,
+      IN_RING_OUTSIDE_HOLE.latitude,
+      buildEtjBoundaryIndex([
+        body("derived", {
+          servedGeometry: { type: "Polygon", coordinates: [OUTER[0], HOLE] },
+          derivation: { kind: "self_containing", note: DERIVATION_NOTE },
+        }),
+      ]),
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(inRing.status).toBe("present");
+    if (inRing.status !== "present") throw new Error("unreachable");
+    expect(inRing.servedStatus).toBe("derived");
+    expect(inRing.derivationNote).toBe(DERIVATION_NOTE);
+    expect(inRing.basis).toContain("served derived");
+  });
+
+  it("a present on a verbatim ring carries verbatim and no derivation note", () => {
+    const result = resolveEtjAtPoint(
+      IN_RING_OUTSIDE_HOLE.longitude,
+      IN_RING_OUTSIDE_HOLE.latitude,
+      buildEtjBoundaryIndex([body("verbatim")]),
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(result.status).toBe("present");
+    if (result.status !== "present") throw new Error("unreachable");
+    expect(result.servedStatus).toBe("verbatim");
+    expect(result.derivationNote).toBeNull();
+    expect(etjFactFromContainment(result).derivationNote).toBeUndefined();
+  });
+
+  it("FALSIFIER B: a ring whose derivation never ran is refused, and the point is unresolved, never absent", () => {
+    // The row is IN the bbox pre-filter and its published polygon contains the
+    // point — pre-change that was a `present` against an unproven polygon.
+    const result = resolveEtjAtPoint(
+      -97.885,
+      30.385,
+      buildEtjBoundaryIndex([body("underived")]),
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(result.status).toBe("unresolved");
+    expect(result.status).not.toBe("absent");
+    if (result.status !== "unresolved") throw new Error("unreachable");
+    expect(result.basis).toContain("austin-tx:7");
+    expect(result.basis).toContain("underived");
+    expect(result.refusedRings).toEqual([
+      {
+        etjId: "austin-tx:7",
+        servedStatus: "underived",
+        reason: expect.stringContaining("no derivation pass has run"),
+      },
+    ]);
+  });
+
+  it("FALSIFIER C: an excluded ring declares the derivation's own reason instead of being tested", () => {
+    const reason =
+      "ST_IsValid false and ST_MakeValid moved the area beyond the declared relative tolerance; nothing is served";
+    const result = resolveEtjAtPoint(
+      -97.885,
+      30.385,
+      buildEtjBoundaryIndex([
+        body("excluded", { derivation: { kind: "invalid", note: reason } }),
+      ]),
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(result.status).toBe("unresolved");
+    if (result.status !== "unresolved") throw new Error("unreachable");
+    expect(result.basis).toContain(reason);
+    expect(result.refusedRings?.[0]?.servedStatus).toBe("excluded");
+  });
+
+  it("FALSIFIER D: a servable status with no usable served geometry is a refusal, not a silent absence", () => {
+    const result = resolveEtjAtPoint(
+      -97.885,
+      30.385,
+      buildEtjBoundaryIndex([
+        body("derived", { servedGeometry: null }),
+      ]),
+      [AUSTIN_EXTENT_ENTRY],
+      { cityName: "Austin", geoId: "4805000" },
+    );
+    expect(result.status).toBe("unresolved");
+    if (result.status !== "unresolved") throw new Error("unreachable");
+    expect(result.refusedRings?.[0]?.reason).toMatch(
+      /served_status=derived but the served geometry is not a Polygon/,
+    );
   });
 });
 

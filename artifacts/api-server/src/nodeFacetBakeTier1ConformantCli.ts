@@ -39,14 +39,19 @@ import { TIER1_ADAPTER_KEY } from "./lib/nodeFacetTier1Constants.js";
 import { contentHashForPayload } from "./lib/placeLayerUtils.js";
 import { conformantCadCountyWhere } from "./lib/conformantStorePredicate.js";
 import {
+  accountKeyedBlastRadius,
+  assertAccountKeyedBlastRadius,
   partitionAccountKeyedWork,
   planAccountKeyedRetirements,
+  type ServedKeyspace,
 } from "./lib/accountKeyedWork.js";
 import { normalizeAccessPair } from "./lib/serveGuards.js";
 import {
   fetchCountyCadPropertyRoll,
   fetchCountyLandUseByAddress,
   fetchCountyLandUseRoll,
+  fetchPriorVintageQuickRefRegister,
+  fetchPublishedAccountPairExtracts,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
   type CountyCadPropertyRoll,
@@ -54,15 +59,22 @@ import {
   type PropIdCadPropertyEntry,
 } from "./lib/joinIntegrityGate.js";
 import {
-  accountCrosswalkForNode,
   addressJoinKey,
   cadAccountNumberStem,
   crosswalkBindCorroborated,
   normalizeSitusAddress,
   parcelCrosswalkJoinKey,
-  type AccountCrosswalkReason,
 } from "./lib/joinNormalize.js";
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
+import {
+  buildPublishedAccountPair,
+  chooseRetirementResolution,
+  describeRetirementKeyspaces,
+  nodeKeyShapeClass,
+  type PublishedAccountPair,
+  type PublishedAccountPairRow,
+  type RetirementResolution,
+} from "./lib/retirementAccountResolution.js";
 import { COUNTY_NAMES, effectiveBlockedFips, firstRing } from "./lib/nodeFacetTier1Assemble.js";
 import {
   fetchParcelRowsByGeoIds,
@@ -202,6 +214,49 @@ function declaredRollTrustFor(
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * P-351 (2026-09-18). The served atom populations this run holds, split by the
+ * SHAPE of the served key, for writer (b)'s blast-radius instrument.
+ *
+ * WHY SPLIT BY SHAPE, and not one keyspace. One keyspace would only catch the
+ * case where the exclusion emptied EVERY served node. That is not the shape of
+ * the failure this program has already had twice: on a county whose served keys
+ * are the county's own published account numbers, the exclusion's premise
+ * ("missing from the parcel table's prop_id column, therefore a hollow
+ * account-keyed node") can be true of every key in ONE numbering system while
+ * being false of every key in the other, and then the pass retires a whole
+ * served keyspace while the other one survives untouched. Splitting by shape is
+ * what makes that population measurable.
+ *
+ * The name says which numbering system, because the refusal has to say which
+ * one is being emptied. Nothing here picks an account or classifies a key for
+ * any other purpose: `nodeKeyShapeClass` is the one implementation of that
+ * classification and it is only ever read by this instrument.
+ */
+function buildServedKeyspaces(servedKeys: readonly string[]): ServedKeyspace[] {
+  const byClass = new Map<string, Set<string>>();
+  for (const raw of servedKeys) {
+    const key = raw.trim();
+    if (key === "") continue;
+    const cls = nodeKeyShapeClass(key);
+    const bucket = byClass.get(cls);
+    if (bucket) bucket.add(key);
+    else byClass.set(cls, new Set([key]));
+  }
+  const names: Record<string, string> = {
+    numeric: "the county's numeric served node keys (the parcel index's own numbering)",
+    "r-account":
+      "the county's R-account served node keys (the CAD roll's own published account numbers)",
+    other: "the county's other-shaped served node keys",
+  };
+  const out: ServedKeyspace[] = [];
+  for (const cls of ["numeric", "r-account", "other"]) {
+    const keys = byClass.get(cls);
+    if (keys) out.push({ name: names[cls] as string, keys });
+  }
   return out;
 }
 
@@ -412,6 +467,29 @@ async function main() {
     const { kept, excluded } = partitionAccountKeyedWork(work, txgioPropIds);
     excludedAccountKeyed = excluded.length;
     excludedWork.push(...excluded);
+    // P-351 (2026-09-18). WRITER (b)'s BLAST-RADIUS REFUSAL, in front of the
+    // pass rather than in front of the write. P-327 measured that the pre-bake
+    // gate cannot reach this pass: it runs INSIDE the bake, after promotion, so
+    // a bake run outside the publish job bypasses the gate entirely and this is
+    // the only destructive write in the bake with no reachable refusal in front
+    // of it. The instrument is set equality, not a tuned percentage: the
+    // exclusion's premise ("a work id missing from the parcel table is an
+    // account-keyed HOLLOW node") is measured on Hays' five hollow atoms and is
+    // false for a county whose SERVED keyspace is not the parcel table's
+    // keyspace, where the excluded set can be a whole keyspace. The keyspaces
+    // are the served atom populations this run holds, split by key shape,
+    // because that split is exactly the Hays/Williamson difference.
+    // `workIds` is read BEFORE the partition above and still holds every served
+    // key, so the measurement is of the population, not of what survived it.
+    const servedKeyspaces = buildServedKeyspaces(workIds);
+    const blastRadius = accountKeyedBlastRadius(excluded, servedKeyspaces);
+    for (const k of blastRadius.perKeyspace) {
+      console.log(
+        `[node-facet-bake-t1-conformant] account-keyed exclusion vs served keyspace ` +
+          `"${k.name}" for ${county}: ${k.excluded} of ${k.served} served key(s) excluded`,
+      );
+    }
+    assertAccountKeyedBlastRadius(blastRadius);
     work.length = 0;
     work.push(...kept);
   }
@@ -542,10 +620,51 @@ async function main() {
   // an honest absence downstream (the same "no-roll-row" shape a genuinely
   // retired account already earns), never the colliding account's data.
   let effectiveCadPropertyRoll: CountyCadPropertyRoll = cadPropertyRoll;
+  // P-351. THE SECOND MAP, and why there have to be two. This file's own reads
+  // (`effectiveCadPropertyRoll`, above) and the builder's read inside
+  // `buildConformantTier1Payload` look at the SAME rows but ask for them by
+  // DIFFERENT keys, and this is the trap that cost a debug cycle here:
+  //
+  //   - the CLI asks for the row belonging to a SERVED NODE, so its map is
+  //     keyed by the node's own key (`get(propId)`), which is what P-177 built;
+  //   - the builder asks for the row belonging to the ACCOUNT it is about to
+  //     retire or serve (`get(cadLookupKey)`, and `cadLookupKey` IS
+  //     `resolution.accountKey`), because a retirement decision is a decision
+  //     about an ACCOUNT.
+  //
+  // On a two-keyspace county those keys are different strings, so ONE map
+  // cannot answer both: a node-keyed map makes the builder's account lookup
+  // miss every time and it retires the county; an account-keyed map makes the
+  // CLI's node lookups miss and the node loses its situs, ring and geometry.
+  // Both maps hold the SAME row objects, so this costs no extra read.
+  //
+  // A node whose account could not be named gets NO entry in the second map:
+  // the builder then looks up nothing, which is what "no account" means.
+  const builderRollByAccount = new Map<string, PropIdCadPropertyEntry>();
+  let builderCadPropertyRoll: CountyCadPropertyRoll = cadPropertyRoll;
   let accountAttrBound = 0;
   let accountAttrNoAccount = 0;
   let accountAttrCorroborationRefused = 0;
-  const accountJoinByPropId = new Map<string, AccountCrosswalkReason>();
+  // P-351. EVERY NODE GETS ONE RESOLUTION, and the resolution is what the
+  // retirement arm reads. Two maps leave this block:
+  //   `effectiveCadPropertyRoll` -- the declared-roll row (dollars, structural,
+  //     legal, exemption, situs) the node's OWN published identifier names, so
+  //     a bare-prop_id coincidence can never serve another account's facts; and
+  //   `retirementResolutionByPropId` -- what was compared for this node, or the
+  //     named reason no account could be named.
+  // The second is the one that did not exist before: without it, "the roll has
+  // no row at the key I looked up" reached the retirement arm from BOTH a real
+  // absence and a lookup that never happened, and on Hays/Williamson it was
+  // almost always the second.
+  const retirementKeyspaces = describeRetirementKeyspaces(joinGateBlocked);
+  const retirementResolutionByPropId = new Map<string, RetirementResolution>();
+  const retirementResolvedByPath: Record<string, number> = {};
+  const retirementUnresolvedByReason: Record<string, number> = {};
+  let publishedAccountPair: PublishedAccountPair | null = null;
+  let priorVintageQuickRefTaxYear: number | null = null;
+  const bump = (rec: Record<string, number>, key: string): void => {
+    rec[key] = (rec[key] ?? 0) + 1;
+  };
   if (joinGateBlocked && parcelTable && cadPropertyRoll.consulted) {
     const geoIdToAccountPropId = new Map<string, string>();
     for (const [cadPropId, key] of crosswalkKeyByPropId) {
@@ -561,24 +680,113 @@ async function main() {
       allPropIds,
       pageSize,
     );
+    // The published-identifier indexes, all built from rows ALREADY LOADED --
+    // the same roll read that feeds the dollars, so the resolution and the
+    // facts can never disagree about which row is which. A published account
+    // number the roll carries twice with different accounts is not indexed at
+    // all: it goes into the refusal set instead.
+    const propertyNumberByAccountPropId = new Map<string, string>();
+    const registerPropIdByQuickRefId = new Map<string, string>();
+    const refusedRegisterKeys = new Set<string>();
+    for (const [rollPropId, entry] of cadPropertyRoll.byPropId) {
+      const pn = entry.propertyNumber?.trim() ?? "";
+      if (pn !== "") propertyNumberByAccountPropId.set(rollPropId, pn);
+      const qr = entry.quickRefId?.trim().toUpperCase() ?? "";
+      if (qr === "") continue;
+      const existing = registerPropIdByQuickRefId.get(qr);
+      if (existing === undefined) registerPropIdByQuickRefId.set(qr, rollPropId);
+      else if (existing !== rollPropId) refusedRegisterKeys.add(qr);
+    }
+    // P-351: the county's OWN published node-key -> account-key pair, read for
+    // exactly the node keys this run holds. Refused keys (no account in any
+    // extract, one extract ambiguous, two extracts disagreeing) never reach the
+    // map; `buildPublishedAccountPair` counts each refusal separately.
+    const pairRead = await fetchPublishedAccountPairExtracts(neondb, allPropIds);
+    const pairRowsBySource = new Map<string, PublishedAccountPairRow[]>();
+    for (const x of pairRead.extracts) {
+      const bucket = pairRowsBySource.get(x.source);
+      const row: PublishedAccountPairRow = {
+        nodeKey: x.propId,
+        accountKey: x.accountPropId,
+        source: x.source,
+      };
+      if (bucket) bucket.push(row);
+      else pairRowsBySource.set(x.source, [row]);
+    }
+    publishedAccountPair = buildPublishedAccountPair([...pairRowsBySource.values()]);
+    // P-351: the PRIOR declared vintage's published account-number register,
+    // read for IDENTITY ONLY, for the one case the declared roll cannot answer:
+    // an account that has LEFT the roll cannot be named off the roll.
+    const prior = await fetchPriorVintageQuickRefRegister(neondb, county);
+    priorVintageQuickRefTaxYear = prior.taxYear;
+    const priorRegisterByQuickRefId = new Map<
+      string,
+      { propId: string; propertyNumber: string | null }
+    >();
+    const refusedPriorRegisterKeys = new Set<string>();
+    for (const [qr, v] of prior.byQuickRefId) {
+      const existing = priorRegisterByQuickRefId.get(qr);
+      if (existing === undefined) priorRegisterByQuickRefId.set(qr, v);
+      else if (existing.propId !== v.propId) refusedPriorRegisterKeys.add(qr);
+    }
     const remapped = new Map<string, PropIdCadPropertyEntry>();
     for (const propId of allPropIds) {
       const ownGeoId = ownGeoIdRows.get(propId)?.geo_id ?? null;
-      const { accountPropId, reason } = accountCrosswalkForNode(
-        propId,
-        ownGeoId,
+      const resolution = chooseRetirementResolution({
+        nodeKey: propId,
+        countyFips: county,
+        blocked: true,
+        nodeGeoId: ownGeoId,
         geoIdToAccountPropId,
         accountStemByPropId,
-      );
-      accountJoinByPropId.set(propId, reason);
-      if (reason === "crosswalk") accountAttrBound += 1;
-      else if (reason === "no-crosswalk-account") accountAttrNoAccount += 1;
-      else accountAttrCorroborationRefused += 1;
-      const entry = accountPropId ? (cadPropertyRoll.byPropId.get(accountPropId) ?? null) : null;
-      if (entry) remapped.set(propId, entry);
+        propertyNumberByAccountPropId,
+        registerPropIdByQuickRefId,
+        refusedRegisterKeys,
+        priorRegisterByQuickRefId,
+        refusedPriorRegisterKeys,
+        keyspaces: retirementKeyspaces,
+        ...(publishedAccountPair ? { publishedPair: publishedAccountPair } : {}),
+      });
+      retirementResolutionByPropId.set(propId, resolution);
+      if (resolution.status === "resolved" && resolution.path != null) {
+        bump(retirementResolvedByPath, resolution.path);
+      } else if (resolution.reason != null) {
+        bump(retirementUnresolvedByReason, resolution.reason);
+      }
+      // The three crosswalk counters keep their exact former meaning: they are
+      // the GEO BIND's own outcomes, now read off the resolution instead of a
+      // second call to the same function.
+      if (resolution.path === "crosswalk-geo-id-bind") accountAttrBound += 1;
+      else if (resolution.reason === "no-account-publishes-it") accountAttrNoAccount += 1;
+      else if (
+        resolution.reason === "corroboration-refused" ||
+        resolution.reason === "contradicted-by-node-identifier"
+      ) {
+        accountAttrCorroborationRefused += 1;
+      }
+      // A prior-vintage account is by construction NOT on the declared roll, so
+      // its prop_id is never read as a declared-roll row -- that is what
+      // `accountOnDeclaredRoll === false` says, and reading it here would be
+      // reading whatever unrelated row sits at the same number.
+      if (resolution.accountOnDeclaredRoll === false) continue;
+      const entry = resolution.accountKey
+        ? (cadPropertyRoll.byPropId.get(resolution.accountKey) ?? null)
+        : null;
+      if (entry) {
+        remapped.set(propId, entry);
+        // The second map, keyed the way the BUILDER asks (see above). Two nodes
+        // naming the same account share one entry here, which is correct: both
+        // are served, or retired, from that one account's row.
+        if (resolution.accountKey != null) builderRollByAccount.set(resolution.accountKey, entry);
+      }
     }
     effectiveCadPropertyRoll = {
       byPropId: remapped,
+      declaredTaxYear: cadPropertyRoll.declaredTaxYear,
+      consulted: cadPropertyRoll.consulted,
+    };
+    builderCadPropertyRoll = {
+      byPropId: builderRollByAccount,
       declaredTaxYear: cadPropertyRoll.declaredTaxYear,
       consulted: cadPropertyRoll.consulted,
     };
@@ -589,6 +797,38 @@ async function main() {
         "(a bound row takes its situs, dollars, structural facts and legal/exemption data " +
         "from the account its own published Geographic ID names; a node with no bound " +
         "account earns an honest absence, never the bare-prop_id-matched account)",
+    );
+    // P-351. The resolution lines, on stdout for every run, for the reason every
+    // other counter in this bake is: a path that stops being taken and a
+    // refusal that starts being taken are both silent otherwise, and this row's
+    // whole defect was a population that could not be seen from the outside.
+    console.log(
+      `[node-facet-bake-t1-conformant] retirement resolution for ${county}: ` +
+        `${JSON.stringify(retirementResolvedByPath)} resolved, ` +
+        `${JSON.stringify(retirementUnresolvedByReason)} unresolved, of ${allPropIds.length} ` +
+        `served node key(s); published pair sources=${
+          publishedAccountPair ? publishedAccountPair.sources.join("+") || "none" : "unread"
+        } ` +
+        `(refused: no-account=${publishedAccountPair?.refusedNoAccount ?? 0}, ` +
+        `ambiguous=${publishedAccountPair?.refusedAmbiguous ?? 0}, ` +
+        `disagreement=${publishedAccountPair?.refusedDisagreement ?? 0}), ` +
+        `prior declared vintage for identity-only account naming=${
+          priorVintageQuickRefTaxYear ?? "none"
+        }, declared register accounts=${registerPropIdByQuickRefId.size} ` +
+        `(refused ambiguous=${refusedRegisterKeys.size}), ` +
+        `resolved rows bound to a declared-roll account=${remapped.size} ` +
+        `(builder account-keyed rows=${builderRollByAccount.size}) ` +
+        "(a node whose account cannot be named is NOT retired and says so in its payload)",
+    );
+  } else if (joinGateBlocked) {
+    // A gate-blocked county whose declared roll was not consulted gets no
+    // resolution at all, and the builder's fallback then behaves exactly as it
+    // did before this card. Said out loud rather than left to inference.
+    console.log(
+      `[node-facet-bake-t1-conformant] retirement resolution for ${county}: NOT RUN ` +
+        `(declared cad_property roll consulted=${cadPropertyRoll.consulted}, ` +
+        `parcelTable=${parcelTable ? parcelTable.table : "none"}); the arm falls back to ` +
+        "its pre-P-351 behaviour for this run",
     );
   }
 
@@ -937,7 +1177,23 @@ async function main() {
       // dollars, structural, legal description, exemption codes, record
       // retirement) is unmodified; it now simply reads a roll that is
       // already keyed correctly for a gate-blocked county.
-      cadPropertyRoll: effectiveCadPropertyRoll,
+      // P-351: `builderCadPropertyRoll`, NOT `effectiveCadPropertyRoll`. The
+      // builder's own internal lookup is keyed by the ACCOUNT
+      // (`retirementResolution.accountKey`), while every use of
+      // `effectiveCadPropertyRoll` above and beside this call is keyed by the
+      // SERVED NODE. On a two-keyspace county those are different strings and
+      // handing the builder the node-keyed map retires the county; the note at
+      // the second map's declaration has the full reasoning.
+      cadPropertyRoll: builderCadPropertyRoll,
+      // P-351. THE ONE RESOLUTION this record's retirement arm reads: the
+      // account key to look up, or the named reason no account could be named.
+      // Supplied only for a gate-blocked county whose roll was consulted, and
+      // only for a key this block resolved -- a key the resolution block never
+      // saw (it does not happen on this path: the block iterates every work id)
+      // would silently fall back to the pre-P-351 rule, which is the defect.
+      ...(retirementResolutionByPropId.has(propId)
+        ? { retirementResolution: retirementResolutionByPropId.get(propId) as RetirementResolution }
+        : {}),
       blockedFips: blockedSet,
       nowIso,
       onSitusFallback: ({ cityKey, situsCity }) => {
@@ -1219,6 +1475,20 @@ async function main() {
       accountAttrBound,
       accountAttrNoAccount,
       accountAttrCorroborationRefused,
+      // P-351. Per-path and per-reason retirement resolution counts, plus the
+      // published-pair refusals and the prior-vintage register's declared year.
+      // The dry run's independent query is checked against exactly these.
+      retirementResolvedByPath,
+      retirementUnresolvedByReason,
+      retirementResolutionRows: retirementResolutionByPropId.size,
+      retirementBuilderRollRows: builderRollByAccount.size,
+      retirementKeyspaces,
+      publishedAccountPairSources: publishedAccountPair ? publishedAccountPair.sources : null,
+      publishedAccountPairRefusedNoAccount: publishedAccountPair?.refusedNoAccount ?? null,
+      publishedAccountPairRefusedAmbiguous: publishedAccountPair?.refusedAmbiguous ?? null,
+      publishedAccountPairRefusedDisagreement:
+        publishedAccountPair?.refusedDisagreement ?? null,
+      priorVintageQuickRefTaxYear,
       propIds,
       schemaVersion: TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
       declaredRollTrust: trustCounts,

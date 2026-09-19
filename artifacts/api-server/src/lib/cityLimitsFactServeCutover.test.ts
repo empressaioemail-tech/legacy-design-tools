@@ -27,6 +27,7 @@ import {
 import {
   resetEtjIndexForTests,
   setEtjIndexForTests,
+  type EtjIndexInjection,
 } from "./etjFactRead";
 import {
   memoryParcelRecordStore,
@@ -35,9 +36,10 @@ import {
   type ParcelRecordQueryable,
 } from "./parcelRecordCellRead";
 import { isSlatedForCellServe } from "./cellServeRule";
-import type {
-  EtjBoundaryIndexEntry,
-  EtjSourceCoverageEntry,
+import {
+  buildEtjBoundaryIndex,
+  type EtjBoundarySourceRow,
+  type EtjSourceCoverageEntry,
 } from "@workspace/cad-ingest/boundary";
 
 const RAIL_KEY = "cityLimits";
@@ -127,7 +129,7 @@ const IN_ETJ = { longitude: -97.855113, latitude: 30.352812 };
 /** Inside Austin's published extent, outside every published ring. */
 const IN_EXTENT_OUTSIDE_RINGS = { longitude: -97.75, latitude: 30.45 };
 
-const AUSTIN_ETJ_RING: EtjBoundaryIndexEntry = {
+const AUSTIN_ETJ_RING: EtjBoundarySourceRow = {
   etjId: "austin-tx:22",
   cityKey: "austin-tx",
   cityName: "Austin",
@@ -147,7 +149,15 @@ const AUSTIN_ETJ_RING: EtjBoundaryIndexEntry = {
   bbox: { westLng: -97.88, southLat: 30.33, eastLng: -97.83, northLat: 30.38 },
   sourceCitation:
     "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/BOUNDARIES_jurisdictions/FeatureServer/0",
+  servedStatus: "verbatim",
 };
+
+/** The reader's index, built the way the reader builds it — see the note in
+ * `etjFactRead.test.ts`: a hand-assembled index can hold rings the builder would
+ * refuse, and then the assertion tests the fixture's shortcut, not the contract. */
+function indexOf(...rows: EtjBoundarySourceRow[]): EtjIndexInjection["index"] {
+  return buildEtjBoundaryIndex(rows);
+}
 
 const AUSTIN_EXTENT: EtjSourceCoverageEntry = {
   cityKey: "austin-tx",
@@ -173,7 +183,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: true,
       ringRowsPresent: true,
-      index: [AUSTIN_ETJ_RING],
+      index: indexOf(AUSTIN_ETJ_RING),
       coverage: [AUSTIN_EXTENT],
     });
     const served = await loadCityLimitsFactForServe(UNSLATED, IN_ETJ);
@@ -196,7 +206,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: true,
       ringRowsPresent: true,
-      index: [AUSTIN_ETJ_RING],
+      index: indexOf(AUSTIN_ETJ_RING),
       coverage: [AUSTIN_EXTENT],
     });
     const served = await loadCityLimitsFactForServe(UNSLATED, IN_EXTENT_OUTSIDE_RINGS);
@@ -217,7 +227,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: true,
       ringRowsPresent: true,
-      index: [AUSTIN_ETJ_RING],
+      index: indexOf(AUSTIN_ETJ_RING),
       coverage: [AUSTIN_EXTENT],
     });
     const served = await loadCityLimitsFactForServe(UNSLATED, IN_EXTENT_OUTSIDE_RINGS);
@@ -238,7 +248,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: true,
       ringRowsPresent: true,
-      index: [AUSTIN_ETJ_RING],
+      index: indexOf(AUSTIN_ETJ_RING),
       coverage: [AUSTIN_EXTENT],
     });
     const served = await loadCityLimitsFactForServe(UNSLATED, IN_ETJ);
@@ -252,7 +262,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: false,
       ringRowsPresent: false,
-      index: [],
+      index: indexOf(),
       coverage: [],
     });
     const served = await loadCityLimitsFactForServe(UNSLATED, IN_ETJ);
@@ -266,7 +276,7 @@ describe("cityLimitsFactServeCutover — the ETJ overlay (P-296)", () => {
     setEtjIndexForTests({
       sourceRowsPresent: true,
       ringRowsPresent: true,
-      index: [AUSTIN_ETJ_RING],
+      index: indexOf(AUSTIN_ETJ_RING),
       coverage: [
         {
           cityKey: "round-rock-tx",
