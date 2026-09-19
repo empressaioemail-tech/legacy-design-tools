@@ -168,17 +168,26 @@ export function composeSmartSiteStub(input: {
 }): SmartSiteStub {
   const root = asRecord(input.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
+  const situsAddress =
+    (typeof root.situsAddress === "string" ? root.situsAddress : null) ??
+    (typeof baseFacts.situsAddress === "string" ? baseFacts.situsAddress : null);
+  const situsCity = typeof baseFacts.situsCity === "string" ? baseFacts.situsCity : null;
+  const situsState = typeof baseFacts.situsState === "string" ? baseFacts.situsState : null;
+  const situsZip = typeof baseFacts.situsZip === "string" ? baseFacts.situsZip : null;
   const situs = composeSitusLabel({
     parcelNodeId: input.parcelNodeId,
-    composed:
-      (typeof root.situsAddress === "string" ? root.situsAddress : null) ??
-      (typeof baseFacts.situsAddress === "string" ? baseFacts.situsAddress : null),
-    parts: [
-      typeof baseFacts.situsAddress === "string" ? baseFacts.situsAddress : null,
-      typeof baseFacts.situsCity === "string" ? baseFacts.situsCity : null,
-      typeof baseFacts.situsState === "string" ? baseFacts.situsState : null,
-      typeof baseFacts.situsZip === "string" ? baseFacts.situsZip : null,
-    ],
+    composed: situsAddress,
+    parts: [situsAddress, situsCity, situsState, situsZip],
+    // P-270 ADDRESS HALF: the label must CARRY the city/state/ZIP the payload
+    // holds rather than returning the bare street line. `composed` used to
+    // short-circuit before `parts` were consulted, so a payload whose situsAddress
+    // is a bare street got the bare street back on every parcel — the same shape
+    // the map's live payload shows for 48453:445501 (read 2026-09-18: the payload
+    // names Pflugerville and the line "21404 GRAND NATIONAL AVE" drops it). This
+    // is a code read and a unit test, not a measured MCP answer: no OAuth token
+    // for the gate in this lane. The probe's address predicate grades this side
+    // the moment one is supplied.
+    components: { city: situsCity, state: situsState, zip: situsZip },
   });
   const flood = railStateFromRead(input.flood ?? { attempted: false });
   // A live drainage read wins when one was attempted; otherwise the rail is

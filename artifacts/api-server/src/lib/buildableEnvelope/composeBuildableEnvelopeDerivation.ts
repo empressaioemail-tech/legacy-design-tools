@@ -27,6 +27,11 @@ import type { EdgeLabelingResult } from "./edgeLabeling";
 import type { Ring } from "./geometry";
 import type { PropertyAtomChainWire } from "./fetchPropertyAtomChain";
 import type { SetbackSourceKind } from "./authoritativeSetbackSource";
+// P-354 (2026-09-18): the declaration's own `kind`, so the sentence below can
+// tell "we could not read a date" from "we read a date that has not arrived" --
+// both must replace the interpolated date, and only the second is a rule that
+// is already adopted.
+import { SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN } from "./setbackCitationVintage";
 import {
   spineZoningProvenanceNote,
   type SpineZoningResolution,
@@ -168,13 +173,23 @@ export function composeBuildableEnvelopeDerivation(args: {
   // sentence comes from `derived.citationVintage` — the declaration composed
   // in `derive.ts` off the SAME table the resolver read — so the condition is
   // named one way in this repo rather than two. A resolved date is untouched.
+  // P-354 (2026-09-18). The declaration is not only for an unreadable date any
+  // more: a citation whose date was READ and has NOT ARRIVED is served by
+  // ruling A-218 (Georgetown, adopted 2026-08-11, effective 2026-11-01) and
+  // must not be interpolated as `effective 2026-11-01` — that would print a
+  // rule as though it already had its force. `derived.citationVintage` carries
+  // both dates in that case, so the sentence comes from the declaration for
+  // either cause and a resolved, in-force date is untouched.
   const vintageNote = derived.citationVintage?.note;
+  const vintageSupersedesResolvedDate =
+    resolvedEffectiveDate === "unreadable" ||
+    derived.citationVintage?.kind === SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN;
   const parityNote = atomReconciled
     ? "Buildable area reconciled against the property atom chain (map/export parity)."
     : "Geometry from labelEdges+derive (map/export parity).";
   const provenanceNote = spineZoning
     ? spineZoningProvenanceNote(spineZoning)
-    : resolvedEffectiveDate === "unreadable" && vintageNote
+    : vintageSupersedesResolvedDate && vintageNote
       ? `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}). ${vintageNote} ${parityNote}`
       : `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}, effective ${resolvedEffectiveDate}). ${parityNote}`;
 

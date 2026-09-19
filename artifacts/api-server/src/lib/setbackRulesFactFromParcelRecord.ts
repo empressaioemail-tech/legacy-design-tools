@@ -20,6 +20,7 @@ import { parseParcelNodeId } from "./parcelNodeId";
 import {
   readSetbackDateFromRowAtSource,
   setbackCitationVintageRow,
+  todayIso,
 } from "./buildableEnvelope/setbackCitationVintage";
 import {
   SETBACK_RULES_FACT_SOURCE,
@@ -37,6 +38,15 @@ const RULE_ROW_INDEX = 0;
  * second spelling is exactly how one of these fields goes silently unread.
  */
 const SETBACK_RULE_DATE_FIELD_KEYS = ["effectiveDate", "effective_date"] as const;
+
+/**
+ * P-354 (2026-09-18) — the rule row's own ADOPTION date, in the same two
+ * spellings. Read at source beside the effective date, never inferred from it:
+ * the factory writer's companion row carries `adoptedDate` for a row that
+ * states one (Georgetown's rewrite rows: `2026-08-11`), and the whole point of
+ * carrying it is to name both dates when the effective date has not arrived.
+ */
+const SETBACK_RULE_ADOPTED_DATE_FIELD_KEYS = ["adoptedDate", "adopted_date"] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -136,7 +146,14 @@ export async function setbackRulesFactFromParcelRecord(
   // there is a citation and no readable date. `effectiveDate` below is that
   // read's `sourceDate`, so a value that is not a date can no longer be
   // served as one.
-  const dateRead = readSetbackDateFromRowAtSource(payload, SETBACK_RULE_DATE_FIELD_KEYS);
+  const dateRead = readSetbackDateFromRowAtSource(payload, SETBACK_RULE_DATE_FIELD_KEYS, {
+    // P-354 (2026-09-18): the row's own adoption date, and the question of
+    // whether the date it states has ARRIVED. A readable future date is
+    // `future-effective`, not `read`, so this rail names both dates instead of
+    // serving the rule as if it were already in force.
+    adoptedKeys: SETBACK_RULE_ADOPTED_DATE_FIELD_KEYS,
+    asOf: todayIso(),
+  });
   const citationVintage = setbackCitationVintageRow({
     date: dateRead,
     citationUrl,
