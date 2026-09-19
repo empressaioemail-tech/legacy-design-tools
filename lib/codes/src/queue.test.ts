@@ -424,3 +424,16 @@ describe("drainQueue: lease reaper", () => {
     });
   });
 });
+
+// P-375 CONTROL (do not merge). This file is one of the two `lib/codes` suites that the
+// `Test` job was failing intermittently on, inside `lib/db`'s `dropTestSchema`, with
+// Postgres 53200 "out of shared memory". With the lock table sized in pr-checks.yml that
+// infrastructure can no longer produce that error, so the question this control answers is
+// whether the job still fails for a REAL reason. A deliberately broken assertion must fail
+// the job. If this test ever passes, the fix has masked real failures instead of removing
+// an infrastructure one.
+describe("P-375 control: a deliberately broken assertion must still fail Test", () => {
+  it("fails on purpose", () => {
+    expect(2 + 2).toBe(5);
+  });
+});
