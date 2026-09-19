@@ -11,14 +11,24 @@
  * unconditionally by smartsite-mcp's DERIVED_FIGURES_POLICY; this module
  * never puts a figure on the draw wire).
  *
- * Fail-closed by design: called ONLY when the caller has already confirmed
- * (a) the envelope is atom-pending (`envelopeReason(...) === "atom_path_pending"`)
- * and (b) a baked zoning code exists — see `propertyExplorer.ts`'s call
- * site. Inside here, any missing setback source, any ungeometric ring, a
- * parcel-identity mismatch at the resolved point, an empty/validation-failed
- * derivation, or any thrown error (network, parse, whatever) all fall
- * through to `null`; the caller then keeps TODAY'S hardcoded refused
- * envelope overlay, unchanged. This never throws.
+ * P-339 (Ruling 15, MCP half). This used to return `null` for every one of
+ * three DIFFERENT things — modelled, declined, unreached — so the caller could
+ * not tell a real decline from an attempt that never got there, and the draw
+ * overlay fell back to the bake's stored `atom_path_pending` token, which
+ * `envelopeHuman` renders "Withheld, setbacks unruled". It now returns a
+ * discriminated `EnvelopeDrawOutcome` naming WHICH step decided the outcome
+ * (and, where the chain was read, whether one existed), so the overlay's
+ * reason is the route's own answer rather than the bake's marker. See
+ * `./envelopeDrawOutcome.ts` for the defect this closes and the one owner of
+ * the reason.
+ *
+ * Fail-closed by design: called ONLY when the caller has already confirmed the
+ * bake is atom-pending — see `propertyExplorer.ts`'s call site. Inside here,
+ * any missing setback source, any ungeometric ring, a parcel-identity mismatch
+ * at the resolved point, an empty/validation-failed derivation, or any thrown
+ * error (network, parse, whatever) all resolve to a REFUSAL carrying its own
+ * step; the caller then serves that step's reason, never a claim the route did
+ * not make. This never throws.
  *
  * Real extra I/O, deliberately: up to three network/DB calls per atom-pending
  * draw-block request (parcel-ring pin-query, atom-chain fetch, nearby-roads
@@ -56,26 +66,26 @@ import {
 import { fetchNearbyRoads, namedRoadsToCandidates } from "./roads";
 import { labelEdges } from "./edgeLabeling";
 import { keyFromEngagementOrSynthesize } from "@workspace/codes";
+import type {
+  EnvelopeDrawChain,
+  EnvelopeDrawOutcome,
+  EnvelopeDrawStep,
+  EnvelopeModelledDraw,
+} from "./envelopeDrawOutcome";
 
-export type EnvelopeModelledForDraw = {
-  /** WGS84 [lng, lat] outer-ring vertices of the buildable-envelope polygon. */
-  ringLngLat: [number, number][];
-  setbacks: {
-    front_ft: number;
-    side_ft: number;
-    rear_ft: number;
-    side_corner_ft?: number;
-    district: string;
-  };
-  /** Human disclosure string off `deriveBuildableEnvelope`'s own props (not survey grade, etc). Carried for context; not independently re-serialized onto the draw wire today. */
-  disclosure: string;
-};
+/** Kept under its original name: this module's public shape is unchanged by P-339. */
+export type EnvelopeModelledForDraw = EnvelopeModelledDraw;
 
 /**
  * Attempt the same setback-geometry resolution `deriveAndRespond` runs,
  * seeded from a point the caller already resolved (no geocode, no situs
  * disambiguation here — the caller already knows which parcel this is).
- * Returns `null` on any refusal or failure; never throws.
+ * Returns the route's own outcome, discriminated; never throws.
+ *
+ * P-339: `modelled` is the only state that draws. `declined` is a real answer
+ * the derivation reached; `unreached` is an attempt that stopped before it got
+ * one. The two refusals differ precisely in whether the surface may say a
+ * determination was made, which is what `envelopeDrawRefusalReason` reads.
  */
 export async function tryComposeEnvelopeModelForDraw(args: {
   /** The parcel this draw block is for (from the baked snapshot). */
@@ -84,17 +94,40 @@ export async function tryComposeEnvelopeModelForDraw(args: {
   zoningCode: string | null;
   /** `snapshot.queryPoint` — the resolved point for this parcel. */
   queryPoint: { latitude: number; longitude: number } | null;
-}): Promise<EnvelopeModelledForDraw | null> {
+}): Promise<EnvelopeDrawOutcome> {
+  // Set from the moment the chain fetch is reached. `"unreached"` is the
+  // honest value for every earlier exit, and is load-bearing: it is what stops
+  // `atom_path_pending` ("nothing is ruled here") being served for an attempt
+  // that never read the chain at all.
+  let chain: EnvelopeDrawChain = "unreached";
+  /** An attempt that stopped before it reached an answer. Not a decline. */
+  const unreached = (step: EnvelopeDrawStep): EnvelopeDrawOutcome => ({
+    state: "unreached",
+    refusal: { step, chain },
+  });
+  /** A refusal the route REACHED — a real answer, carrying the route's own token. */
+  const declined = (
+    step: EnvelopeDrawStep,
+    declinedBy?: string | null,
+  ): EnvelopeDrawOutcome => ({
+    state: "declined",
+    refusal: declinedBy == null ? { step, chain } : { step, chain, declinedBy },
+  });
+  // P-339: the step the attempt had reached WHEN it threw. Advanced as the
+  // derivation progresses, so a throw is reported at the stage it really
+  // happened in where that stage has its own name, and as `derivation-threw`
+  // where it does not — never as a stage the attempt never got to.
+  let stageAtThrow: EnvelopeDrawStep = "parcel-ring-unavailable";
   try {
     const zoningCode = (args.zoningCode ?? "").trim();
-    if (!zoningCode) return null;
+    if (!zoningCode) return unreached("no-zoning-code");
     const point = args.queryPoint;
     if (
       !point ||
       !Number.isFinite(point.latitude) ||
       !Number.isFinite(point.longitude)
     ) {
-      return null;
+      return unreached("no-query-point");
     }
 
     // 1) The real parcel polygon at this point (same call deriveAndRespond makes).
@@ -104,7 +137,10 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       longitude: point.longitude,
     });
     const parcel = firstParcelRing(parcelGeo.geojson);
-    if (!parcel) return null;
+    if (!parcel) return unreached("parcel-ring-unavailable");
+    // Past the ring: the chain and road reads have no step name of their own,
+    // so a throw in either is reported as a throw, not as a ring failure.
+    stageAtThrow = "derivation-threw";
 
     // Identity guard: when the freshly-fetched parcel stamps its own
     // parcel_node_id, it must be the SAME parcel this draw block is for.
@@ -112,7 +148,7 @@ export async function tryComposeEnvelopeModelForDraw(args: {
     // snapshot's queryPoint and live GIS) must never draw a stranger's
     // envelope onto this parcel's draw block.
     if (parcel.parcelNodeId && parcel.parcelNodeId !== args.parcelNodeId) {
-      return null;
+      return unreached("parcel-identity-mismatch");
     }
     const parcelNodeId = parcel.parcelNodeId ?? args.parcelNodeId;
 
@@ -120,6 +156,7 @@ export async function tryComposeEnvelopeModelForDraw(args: {
     const atomChain = parcelNodeId
       ? await fetchPropertyAtomChain(parcelNodeId)
       : null;
+    chain = atomChain ? "present" : "absent";
 
     // 3) Jurisdiction key: city/state from the situs string only (no geocode
     // ctx at this call site), falling back to the parcel-node derivation —
@@ -143,7 +180,7 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       districtCode: zoningCode,
       atomRule: atomChain?.setbackRule ?? null,
     });
-    if (!resolved) return null;
+    if (!resolved) return declined("setbacks-unresolved");
 
     // 4) Nearby roads for edge labeling (same call deriveLabelAndRespond makes).
     const roads = namedRoadsToCandidates(
@@ -151,13 +188,15 @@ export async function tryComposeEnvelopeModelForDraw(args: {
     );
 
     // 5) Edge labeling.
+    stageAtThrow = "edge-labeling-unavailable";
     const labeling = labelEdges({
       ring: parcel.ring,
       roads,
       refPoint: { lng: point.longitude, lat: point.latitude },
       situsAddress: parcel.situsAddress,
     });
-    if (!labeling) return null;
+    if (!labeling) return unreached("edge-labeling-unavailable");
+    stageAtThrow = "derivation-threw";
 
     // 6) The SAME pure composition the map/export route runs — real reuse,
     // not a re-implementation.
@@ -173,30 +212,44 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       resolvedEffectiveDate: resolved.effectiveDate,
     });
 
-    // Only a real, drawn polygon reaches the draw block. "no-buildable-area"
-    // (setbacks genuinely consume the lot) and "geometry-validation-failed"
-    // (a gate decline) are both real outcomes but carry no polygon this
-    // ruling draws — both fall through to the untouched refused overlay,
-    // same as any other failure here.
-    if (wireStatus !== "ok") return null;
+    // P60b's split, carried through rather than flattened: "no-buildable-area"
+    // is a consume-lot MEASUREMENT and "geometry-validation-failed" is a gate
+    // decline. Neither is a withhold and neither may be reported as one, so the
+    // route's own `wireStatus` is the reason served.
+    if (wireStatus !== "ok") {
+      return declined("derivation-not-drawn", wireStatus);
+    }
     const feature = derived.geojson.features[0];
     const coordinates = feature?.geometry?.coordinates?.[0];
-    if (!feature || !coordinates || coordinates.length < 4) return null;
+    if (!feature || !coordinates || coordinates.length < 4) {
+      return unreached("ring-too-small");
+    }
 
     return {
-      ringLngLat: coordinates as [number, number][],
-      setbacks: {
-        front_ft: resolved.scalars.front_ft,
-        side_ft: resolved.scalars.side_ft,
-        rear_ft: resolved.scalars.rear_ft,
-        ...(typeof resolved.scalars.side_corner_ft === "number"
-          ? { side_corner_ft: resolved.scalars.side_corner_ft }
-          : {}),
-        district: zoningCode,
+      state: "modelled",
+      chain,
+      model: {
+        ringLngLat: coordinates as [number, number][],
+        setbacks: {
+          front_ft: resolved.scalars.front_ft,
+          side_ft: resolved.scalars.side_ft,
+          rear_ft: resolved.scalars.rear_ft,
+          ...(typeof resolved.scalars.side_corner_ft === "number"
+            ? { side_corner_ft: resolved.scalars.side_corner_ft }
+            : {}),
+          district: zoningCode,
+        },
+        disclosure: feature.properties.disclosure,
       },
-      disclosure: feature.properties.disclosure,
     };
   } catch {
-    return null;
+    // A throw is an attempt that never reached an answer — the same class as a
+    // missing ring, never a decline. It is reported at the stage it happened
+    // in (see `stageAtThrow`), never as a stage the attempt never got to:
+    // reporting a throw from a later stage as a missing ring would be the same
+    // defect as reporting `atom_path_pending` beside a chain, one layer down.
+    // `chain` still carries whatever was known when it threw, so a chain-read
+    // failure is never reported as "no chain exists".
+    return unreached(stageAtThrow);
   }
 }
