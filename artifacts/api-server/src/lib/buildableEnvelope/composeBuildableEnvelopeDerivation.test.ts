@@ -102,7 +102,9 @@ describe("composeBuildableEnvelopeDerivation (P-153 Step A extraction)", () => {
         ? "ok"
         : derivedExpected.emptyKind === "consumed"
           ? "no-buildable-area"
-          : "geometry-validation-failed";
+          : derivedExpected.emptyKind === "clip-failed"
+            ? "geometry-clip-failed"
+            : "geometry-validation-failed";
     const derivePathExpected = "labelEdges+derive";
     const provenanceNoteExpected =
       "Setbacks from codified-ordinance (Test, TX, effective 1970-01-01). Geometry from labelEdges+derive (map/export parity).";
