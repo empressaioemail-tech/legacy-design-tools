@@ -159,7 +159,17 @@ export type AssembleParcelDrawInput = {
         citations?: string[];
       }
     | { state: "refused" | "absent"; sourceVintage?: string | null };
-  envelopeRefusalReason: string | null;
+  /**
+   * P-339: REQUIRED, and required as a non-null `string` on purpose. This stub
+   * cannot know whether a property atom chain exists, so it must never mint a
+   * reason of its own — the old `?? "atom_path_pending"` default in
+   * `envelopeOverlay` below asserted "not ruled or baked for this jurisdiction
+   * yet" about parcels whose own payload ruled the table. The reason is now
+   * decided upstream and only carried here (`tryAssembleParcelDrawFromReads`
+   * takes it from the drawing route's own outcome when the route ran, and from
+   * the bake when it did not).
+   */
+  envelopeRefusalReason: string;
   /**
    * P-153: when the atom-chain path is pending but a real district + setback
    * table + geometry resolved (the SAME derivation the map/export route
@@ -543,7 +553,7 @@ function floodOverlay(
  * parcelDrawStub.test.ts).
  */
 function envelopeOverlay(
-  envelopeRefusalReason: string | null,
+  envelopeRefusalReason: string,
   envelopeModelled: AssembleParcelDrawInput["envelopeModelled"],
   anchor: DrawFrameAnchor | null,
 ): DrawOverlay {
@@ -563,7 +573,10 @@ function envelopeOverlay(
     geom: "none",
     draw: "suppress-setback-line",
     state: "refused",
-    reason: envelopeRefusalReason ?? "atom_path_pending",
+    // P-339: no fallback. The old `?? "atom_path_pending"` here was the last
+    // place a surface could invent "Withheld, setbacks unruled" out of having
+    // been told nothing; the caller now always states the reason it has.
+    reason: envelopeRefusalReason,
   };
 }
 

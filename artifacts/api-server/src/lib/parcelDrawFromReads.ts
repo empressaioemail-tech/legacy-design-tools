@@ -25,6 +25,10 @@ import {
   serializeTwinOnRecord,
 } from "./twinOnRecordSerialize";
 import { firstPresentSitusLabel } from "./situsCompose";
+import {
+  envelopeDrawRefusalReason,
+  type EnvelopeDrawOutcome,
+} from "./buildableEnvelope/envelopeDrawOutcome";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -65,6 +69,12 @@ function yearBuiltFromStructural(
  * already uses for the refused overlay's `reason`, rather than a second,
  * driftable copy of "is this atom-pending". `atomPathPending(refusal)` below
  * is the boolean form of that same test.
+ *
+ * P-339: this is the BAKE's reason, and after P-339 it decides the envelope
+ * overlay only when the drawing route was never attempted — `tryAssembleParcelDrawFromReads`'s
+ * `envelopeOutcome` wins whenever the route ran. Its two `atom_path_pending`
+ * paths (`declined-in-bake`, and an absent brief) are the bake's own
+ * anti-zombie marker: "go read the atom route". They are not a determination.
  */
 export function envelopeReason(refusal: EnvelopeBriefRefusal | null | undefined): string {
   if (!refusal) return "atom_path_pending";
@@ -226,12 +236,15 @@ export function tryAssembleParcelDrawFromReads(args: {
   bakedAt: string | null;
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
   /**
-   * P-153: the modelled buildable-envelope polygon + setbacks, when the
-   * caller already resolved one (see `envelopeModelled`'s doc comment on
-   * `AssembleParcelDrawInput`). Passed straight through to
-   * `assembleParcelDraw`; `null`/absent keeps the refused overlay.
+   * P-339: the point-seeded drawing route's OWN outcome, when the caller
+   * attempted it (`propertyExplorer.ts`). After P-339 this is the sole decider
+   * of the envelope overlay: `modelled` draws the polygon (P-153's path,
+   * unchanged), a refusal serves that outcome's own reason. The bake's stored
+   * `atom_path_pending` marker can therefore no longer outrank an attempt the
+   * route already answered. Absent/`null` means no attempt was made, and keeps
+   * today's baked-reason behaviour.
    */
-  envelopeModelled?: AssembleParcelDrawInput["envelopeModelled"];
+  envelopeOutcome?: EnvelopeDrawOutcome | null;
   queryPoint?: { latitude: number; longitude: number } | null;
   boundary: BoundaryEdgeFactRead;
   flood: FloodHazardFactRead;
@@ -249,6 +262,21 @@ export function tryAssembleParcelDrawFromReads(args: {
 }): ParcelDrawStub | undefined {
   const root = asRecord(args.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
+  // P-339: the route's own outcome, when it ran, decides BOTH the reason the
+  // overlay serves and whether a polygon is drawn. The bake's reason is
+  // consulted only when no attempt was made — that is what stops
+  // `atom_path_pending` travelling as the answer to a question the route
+  // already answered. `modelled-figure-withheld` is passed for the modelled
+  // case only because the input is required; a drawn overlay never reads it.
+  const envelopeOutcome = args.envelopeOutcome ?? null;
+  const envelopeModelled =
+    envelopeOutcome?.state === "modelled" ? envelopeOutcome.model : null;
+  const envelopeRefusalReason =
+    envelopeOutcome == null
+      ? envelopeReason(args.envelopeBriefRefusal)
+      : envelopeOutcome.state === "modelled"
+        ? "modelled-figure-withheld"
+        : envelopeDrawRefusalReason(envelopeOutcome.refusal);
   try {
     const draw = assembleParcelDraw({
       parcelNodeId: args.parcelNodeId,
@@ -261,8 +289,8 @@ export function tryAssembleParcelDrawFromReads(args: {
       anchor: anchorFromQueryPoint(args.queryPoint),
       boundary: boundaryInput(args.boundary),
       flood: floodInput(args.flood),
-      envelopeRefusalReason: envelopeReason(args.envelopeBriefRefusal),
-      envelopeModelled: args.envelopeModelled ?? null,
+      envelopeRefusalReason,
+      envelopeModelled,
       pipeline: pipelineInput(args.pipeline),
       well: wellInput(args.well),
       specialDistrict: specialDistrictInput(args.specialDistrict),

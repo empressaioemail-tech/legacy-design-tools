@@ -100,7 +100,16 @@ vi.mock("../brokerageGisLayers", async () => {
   return { ...actual, queryGisLayerGeoJson: queryGisLayerGeoJsonMock };
 });
 
-const fetchPropertyAtomChainMock = vi.fn(async () => null);
+/**
+ * P-339: mutable so a test can put a chain PRESENT — the case the fix is
+ * about. `null` (the default) is "no atom path at all", which is the one
+ * state where `atom_path_pending` is the honest reason.
+ */
+let atomChainResult: unknown = null;
+const fetchPropertyAtomChainMock = vi.fn(async () => {
+  if (atomChainResult instanceof Error) throw atomChainResult;
+  return atomChainResult;
+});
 vi.mock("./fetchPropertyAtomChain", () => ({
   fetchPropertyAtomChain: fetchPropertyAtomChainMock,
 }));
@@ -129,12 +138,14 @@ const { tryComposeEnvelopeModelForDraw } = await import(
   "./parcelDrawEnvelopeModel"
 );
 const { assembleParcelDraw } = await import("../parcelDrawStub");
+const { envelopeDrawRefusalReason } = await import("./envelopeDrawOutcome");
 
 afterEach(() => {
   parcelZoning = "R-MD";
   parcelNodeIdStamped = BASTROP_PARCEL_NODE_ID;
   parcelSitusAddress = "1209 Main St, Bastrop, TX 78602";
   parcelGeoThrows = null;
+  atomChainResult = null;
   queryGisLayerGeoJsonMock.mockClear();
   fetchPropertyAtomChainMock.mockClear();
   fetchNearbyRoadsMock.mockClear();
@@ -147,12 +158,17 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
       zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).not.toBeNull();
-    expect(result!.ringLngLat.length).toBeGreaterThanOrEqual(4);
-    expect(result!.setbacks.district).toBe("R-MD");
-    expect(result!.setbacks.front_ft).toBeGreaterThan(0);
-    expect(typeof result!.disclosure).toBe("string");
-    expect(result!.disclosure.length).toBeGreaterThan(0);
+    // P-339: P-153's `null` collapse is gone; the positive arm is NAMED.
+    expect(result.state).toBe("modelled");
+    if (result.state !== "modelled") throw new Error("unreachable");
+    // No atom chain exists for this parcel — the bake's "atom-pending" IS the
+    // truth — and the codified Bastrop table still resolves and still draws.
+    expect(result.chain).toBe("absent");
+    expect(result.model.ringLngLat.length).toBeGreaterThanOrEqual(4);
+    expect(result.model.setbacks.district).toBe("R-MD");
+    expect(result.model.setbacks.front_ft).toBeGreaterThan(0);
+    expect(typeof result.model.disclosure).toBe("string");
+    expect(result.model.disclosure.length).toBeGreaterThan(0);
     expect(queryGisLayerGeoJsonMock).toHaveBeenCalledTimes(1);
     expect(fetchPropertyAtomChainMock).toHaveBeenCalledTimes(1);
     expect(fetchNearbyRoadsMock).toHaveBeenCalledTimes(1);
@@ -164,7 +180,8 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
       zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).not.toBeNull();
+    expect(result.state).toBe("modelled");
+    if (result.state !== "modelled") throw new Error("unreachable");
 
     const draw = assembleParcelDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
@@ -177,8 +194,8 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
       anchor: { lat: BASTROP_LAT, lng: BASTROP_LNG },
       boundary: { state: "refused", code: "atom-miss" },
       flood: { state: "refused" },
-      envelopeRefusalReason: "atom_path_pending",
-      envelopeModelled: result,
+      envelopeRefusalReason: "modelled-figure-withheld",
+      envelopeModelled: result.model,
       pipeline: { state: "refused" },
       well: { state: "refused" },
       specialDistrict: { state: "refused" },
@@ -187,31 +204,46 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
     const envelope = draw.overlays.find((o) => o.id === "envelope");
     expect(envelope?.state).toBe("present");
     expect(envelope).not.toHaveProperty("reason");
+    // The token the package already carries for exactly this state: polygon
+    // drawn, buildable-area figure still withheld (P-153's rule, unchanged).
+    expect(envelope?.basis).toBe("modelled-figure-withheld");
     expect(Array.isArray(envelope?.geom)).toBe(true);
     expect((envelope?.geom as unknown[]).length).toBeGreaterThanOrEqual(4);
   });
 });
 
 describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shaped, no zoning code)", () => {
-  it("returns null without any I/O when there is no baked zoning code (the unincorporated / no-district case)", async () => {
+  it("names the step, with no I/O, when there is no baked zoning code (the unincorporated / no-district case)", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: "48453:474034",
       zoningCode: null,
       queryPoint: { latitude: 30.5, longitude: -97.9 },
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({
+      state: "unreached",
+      refusal: { step: "no-zoning-code", chain: "unreached" },
+    });
     expect(queryGisLayerGeoJsonMock).not.toHaveBeenCalled();
     expect(fetchPropertyAtomChainMock).not.toHaveBeenCalled();
     expect(fetchNearbyRoadsMock).not.toHaveBeenCalled();
   });
 
-  it("falsifier's other half: with no modelled envelope, assembleParcelDraw's refused overlay is exactly today's shape (unchanged)", async () => {
+  it("falsifier's other half: the no-district overlay now names the MISSING DISTRICT, not unruled setbacks", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: "48453:474034",
       zoningCode: null,
       queryPoint: { latitude: 30.5, longitude: -97.9 },
     });
-    expect(result).toBeNull();
+    expect(result.state).toBe("unreached");
+    if (result.state !== "unreached") throw new Error("unreachable");
+
+    const reason = envelopeDrawRefusalReason(result.refusal);
+    // The defect, exactly: this used to be the bake's stored
+    // `atom_path_pending`, which `envelopeHuman` renders "Withheld, setbacks
+    // unruled" — a claim about a setback table this parcel was never asked
+    // about, when the real gap was that no district was observed at all.
+    expect(reason).toBe("no-zoning-stamp");
+    expect(reason).not.toBe("atom_path_pending");
 
     const draw = assembleParcelDraw({
       parcelNodeId: "48453:474034",
@@ -224,8 +256,8 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
       anchor: { lat: 30.5, lng: -97.9 },
       boundary: { state: "refused", code: "atom-miss" },
       flood: { state: "refused" },
-      envelopeRefusalReason: "atom_path_pending",
-      envelopeModelled: result,
+      envelopeRefusalReason: reason,
+      envelopeModelled: null,
       pipeline: { state: "refused" },
       well: { state: "refused" },
       specialDistrict: { state: "refused" },
@@ -237,49 +269,150 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
       geom: "none",
       draw: "suppress-setback-line",
       state: "refused",
-      reason: "atom_path_pending",
+      reason: "no-zoning-stamp",
     });
   });
 });
 
 describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
-  it("returns null with no queryPoint (no I/O)", async () => {
+  it("names `no-query-point` with no I/O", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       zoningCode: "R-MD",
       queryPoint: null,
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({
+      state: "unreached",
+      refusal: { step: "no-query-point", chain: "unreached" },
+    });
     expect(queryGisLayerGeoJsonMock).not.toHaveBeenCalled();
   });
 
-  it("returns null when no parcel polygon is found at the point", async () => {
+  it("names `parcel-ring-unavailable` when the parcel layer throws — an attempt that never reached an answer, never a decline", async () => {
     parcelGeoThrows = new Error("boom");
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({
+      state: "unreached",
+      refusal: { step: "parcel-ring-unavailable", chain: "unreached" },
+    });
   });
 
-  it("returns null when the freshly-fetched parcel's own stamped id disagrees with the requested parcelNodeId (identity guard)", async () => {
+  it("names `parcel-identity-mismatch` when the freshly-fetched parcel's own stamped id disagrees with the requested parcelNodeId (identity guard)", async () => {
     parcelNodeIdStamped = "48021:99999";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({
+      state: "unreached",
+      refusal: { step: "parcel-identity-mismatch", chain: "unreached" },
+    });
   });
 
-  it("returns null for an unresolvable jurisdiction (no wired setback table for that city/district)", async () => {
+  it("names `derivation-threw` for a throw AFTER the ring — never `parcel-ring-unavailable`, and never `absent` for a chain it never read", async () => {
+    // The chain read is the first thing downstream of the ring. It throws.
+    // Pre-P-339 this was `null`, and the overlay then said the setbacks were
+    // unruled. Reporting it as a missing parcel ring (or as "no chain") would
+    // be a false step claim of exactly the kind this lane removes.
+    atomChainResult = new Error("chain read blew up");
+    const result = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      zoningCode: "R-MD",
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+    expect(result).toMatchObject({
+      state: "unreached",
+      refusal: { step: "derivation-threw", chain: "unreached" },
+    });
+  });
+
+  it("names `setbacks-unresolved` for an unresolvable jurisdiction — and with no chain that is the ONE honest `atom_path_pending`", async () => {
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       zoningCode: "Z-NOPE",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).toBeNull();
+    expect(result).toMatchObject({
+      state: "declined",
+      refusal: { step: "setbacks-unresolved", chain: "absent" },
+    });
+    if (result.state !== "declined") throw new Error("unreachable");
+    expect(envelopeDrawRefusalReason(result.refusal)).toBe("atom_path_pending");
+  });
+});
+
+/**
+ * P-339's own falsifiers. The dispatch's rule: `atom_path_pending` is
+ * reachable ONLY when no property atom chain exists at all. Each of these is
+ * inexpressible against the pre-P-339 code, whose only answer was `null`.
+ */
+describe("P-339 — the route's own outcome decides the reason (falsifiers)", () => {
+  it("FALSIFIER: chain PRESENT + no usable table is NOT `atom_path_pending` (the measured defect)", async () => {
+    // A parcel that HAS an atom path, whose jurisdiction/district has no wired
+    // table and whose chain carries no usable rule. Pre-P-339 this returned
+    // `null` and the overlay fell back to the bake's token, so the customer
+    // read "Withheld, setbacks unruled" about a parcel with a live atom chain.
+    atomChainResult = { setbackRule: null };
+    parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
+    const result = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      zoningCode: "Z-NOPE",
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+    expect(result).toMatchObject({
+      state: "declined",
+      refusal: { step: "setbacks-unresolved", chain: "present" },
+    });
+    if (result.state !== "declined") throw new Error("unreachable");
+    const reason = envelopeDrawRefusalReason(result.refusal);
+    expect(reason).toBe("setbacks-unresolved");
+    expect(reason).not.toBe("atom_path_pending");
+  });
+
+  it("the ONE surviving `atom_path_pending`: the same step with the chain ABSENT", async () => {
+    atomChainResult = null;
+    parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
+    const result = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      zoningCode: "Z-NOPE",
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+    if (result.state !== "declined") throw new Error("unreachable");
+    expect(result.refusal.chain).toBe("absent");
+    expect(envelopeDrawRefusalReason(result.refusal)).toBe("atom_path_pending");
+  });
+
+  it("P60b's split survives the re-pointing: a real derivation refusal serves the route's own wireStatus, unflattened", () => {
+    // `no-buildable-area` is a MEASUREMENT (the setbacks genuinely consume the
+    // lot) and `geometry-validation-failed` is a GATE decline. Neither is a
+    // withhold and the two must not collapse back into one token here.
+    expect(
+      envelopeDrawRefusalReason({
+        step: "derivation-not-drawn",
+        chain: "present",
+        declinedBy: "no-buildable-area",
+      }),
+    ).toBe("no-buildable-area");
+    expect(
+      envelopeDrawRefusalReason({
+        step: "derivation-not-drawn",
+        chain: "present",
+        declinedBy: "geometry-validation-failed",
+      }),
+    ).toBe("geometry-validation-failed");
+    // Nothing declined it: the gate token, never the withhold.
+    expect(
+      envelopeDrawRefusalReason({
+        step: "derivation-not-drawn",
+        chain: "present",
+        declinedBy: null,
+      }),
+    ).toBe("geometry-validation-failed");
   });
 });

@@ -342,30 +342,32 @@ async function assembleNodeBriefBody(
       yearBuilt: null,
     },
   );
-  // P-153: the polygon-only reversal of Ruling B. When the baked envelope
-  // is atom-pending (the same "atom_path_pending" test the refused overlay
-  // itself already uses) AND a baked zoning code is resolvable, attempt the
-  // SAME setback-geometry derivation the map/export route runs (real
-  // extra I/O -- see parcelDrawEnvelopeModel.ts's own doc comment). Any
-  // refusal or failure resolves to `null`, and `tryAssembleParcelDrawFromReads`
-  // below keeps today's hardcoded refused envelope overlay unchanged.
+  // P-153: the polygon-only reversal of Ruling B, re-pointed by P-339. When
+  // the baked envelope carries the bake's atom-pending marker (the same test
+  // the refused overlay already uses), attempt the SAME setback-geometry
+  // derivation the map/export route runs (real extra I/O -- see
+  // parcelDrawEnvelopeModel.ts's own doc comment) and let ITS OWN OUTCOME
+  // decide the overlay. P-339 dropped the old `&& bakedZoningCode` gate: a
+  // parcel with no district now gets the route's own `no-zoning-stamp` (via
+  // `unreached("no-zoning-code")`, which costs no I/O), instead of falling
+  // through to the bake's `atom_path_pending` and telling the customer its
+  // setbacks were unruled when the real gap was a missing district.
   const bakedZoningCode = districtCodeFromZoningFacet(
     (facetsWithCadRollOverlay as Record<string, unknown>).zoning,
   );
-  const envelopeModelled =
-    atomPathPending(snapshot.envelopeBriefRefusal) && bakedZoningCode
-      ? await tryComposeEnvelopeModelForDraw({
-          parcelNodeId,
-          zoningCode: bakedZoningCode,
-          queryPoint: snapshot.queryPoint ?? null,
-        })
-      : null;
+  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
+    ? await tryComposeEnvelopeModelForDraw({
+        parcelNodeId,
+        zoningCode: bakedZoningCode,
+        queryPoint: snapshot.queryPoint ?? null,
+      })
+    : null;
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
     facets: facetsWithCadRollOverlay,
     bakedAt,
     envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-    envelopeModelled,
+    envelopeOutcome,
     queryPoint: snapshot.queryPoint ?? null,
     boundary: boundaryFact,
     flood: floodHazardFact,
