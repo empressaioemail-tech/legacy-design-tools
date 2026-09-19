@@ -85,6 +85,139 @@ export function partitionAccountKeyedWork<T extends { parcelNodeId: string }>(
   return { kept, excluded };
 }
 
+/** The node's own bare prop_id (the part of the node id after the colon). */
+export function accountKeyedWorkPropId(parcelNodeId: string): string {
+  return parcelNodeId.split(":")[1] ?? "";
+}
+
+/**
+ * P-351 (2026-09-18). WRITER (b)'s BLAST-RADIUS INSTRUMENT.
+ *
+ * WHY WRITER (b) NEEDS ONE AND WRITER (a) DOES NOT. P-327 measured that the
+ * pre-bake gate (`requireRetirementGate` in `runBastropPublish`) cannot reach
+ * this pass -- the pass runs INSIDE the bake, after promotion, and any bake run
+ * outside that job bypasses the gate entirely. So the pass is the only
+ * destructive write in the bake with no reachable refusal in front of it, and
+ * the program trap is blunt about the class: "No writer in this program refuses
+ * on blast radius yet (P-320). Two counties have now been emptied by
+ * presence-shaped comparisons ... treat every destructive status write as
+ * unguarded and measure its population before running it."
+ *
+ * THE SHAPE THE DISPATCH ASKS FOR, and why this one. The pass's premise is
+ * "a work id missing from the parcel table is an account-keyed HOLLOW node".
+ * That premise is measured on Hays' five hollow atoms and is FALSE for a county
+ * whose SERVED keyspace is not the parcel table's keyspace: there, the excluded
+ * set can be a whole served keyspace rather than a hollow fringe. So the
+ * instrument measures the excluded set against the served keyspaces the caller
+ * read, and refuses when the excluded set IS one of them.
+ *
+ * IT IS NOT A SHARE THRESHOLD, deliberately. A percentage would have to be
+ * tuned, and a tuned number is the thing the program's one declared number
+ * (MAX_DESTRUCTIVE_SHARE) exists to prevent a second of. Set equality has no
+ * constant to argue with: a keyspace whose every member was excluded is a
+ * keyspace being emptied, at any size, and a keyspace with one member left is
+ * not.
+ *
+ * WHAT IT DOES NOT GUARD, stated here rather than discovered later: writer (a).
+ * The Williamson emptying was writer (a)'s -- its excluded set there was EMPTY,
+ * because every removed node was present in the parcel table. Writer (a)'s
+ * guard is the retirement resolution itself (a record whose account cannot be
+ * named is not retired), which is a different instrument in a different file.
+ * Claiming this one covers both is exactly the "a control that measures one
+ * thing does not protect the thing beside it" failure the program trap names.
+ */
+export interface ServedKeyspace {
+  /**
+   * The keyspace's name, as the caller read it off the served store. Two
+   * keyspaces in one county must be named two different things, or the refusal
+   * cannot say which one is being emptied.
+   */
+  name: string;
+  /** Every served node key in it. */
+  keys: ReadonlySet<string>;
+}
+
+export interface AccountKeyedBlastRadiusVerdict {
+  verdict: "ok" | "refuse";
+  /** Non-null exactly when `verdict` is `refuse`: the keyspace being emptied. */
+  keyspace: string | null;
+  /** The population the pass is about to retire. */
+  excludedCount: number;
+  /** Non-null exactly when `verdict` is `refuse`. */
+  reason: string | null;
+  /** Every keyspace measured, so a clean run is as legible as a refusal. */
+  perKeyspace: readonly { name: string; served: number; excluded: number }[];
+}
+
+/**
+ * Measure the excluded set against the served keyspaces. Pure, so the refusal
+ * can be proven by fixture in both directions.
+ *
+ * REFUSES when a keyspace has at least one served member and EVERY one of them
+ * is in the excluded set. An empty served keyspace is not refused (there is
+ * nothing to empty), and a keyspace with a surviving member is not refused --
+ * Hays' own measured shape (56,629 hollow atoms beside 116,421 live ones, in
+ * one keyspace) passes.
+ */
+export function accountKeyedBlastRadius(
+  excluded: readonly { parcelNodeId: string }[],
+  servedKeyspaces: readonly ServedKeyspace[],
+): AccountKeyedBlastRadiusVerdict {
+  const excludedKeys = new Set<string>();
+  for (const item of excluded) {
+    const key = accountKeyedWorkPropId(item.parcelNodeId).trim();
+    if (key !== "") excludedKeys.add(key);
+  }
+  const perKeyspace: { name: string; served: number; excluded: number }[] = [];
+  let refused: string | null = null;
+  for (const space of servedKeyspaces) {
+    const servedKeys = new Set<string>();
+    for (const k of space.keys) {
+      const key = k.trim();
+      if (key !== "") servedKeys.add(key);
+    }
+    let hit = 0;
+    for (const key of servedKeys) if (excludedKeys.has(key)) hit += 1;
+    perKeyspace.push({ name: space.name, served: servedKeys.size, excluded: hit });
+    if (refused == null && servedKeys.size > 0 && hit === servedKeys.size) {
+      refused = space.name;
+    }
+  }
+  if (refused == null) {
+    return {
+      verdict: "ok",
+      keyspace: null,
+      excludedCount: excludedKeys.size,
+      reason: null,
+      perKeyspace,
+    };
+  }
+  const measured = perKeyspace.find((k) => k.name === refused);
+  return {
+    verdict: "refuse",
+    keyspace: refused,
+    excludedCount: excludedKeys.size,
+    reason:
+      `ACCOUNT_KEYED_BLAST_RADIUS: the work excluded from the fact build IS the whole served ` +
+      `keyspace "${refused}" (${measured?.excluded ?? 0} of ${measured?.served ?? 0} served keys ` +
+      `excluded): the pass would retire an entire served keyspace rather than the hollow ` +
+      `account-keyed fringe it was written for. The exclusion's premise -- a work id missing ` +
+      `from the parcel table is an account-keyed HOLLOW node -- is measured on Hays' five hollow ` +
+      `atoms and is false for a county whose served keyspace is not the parcel table's keyspace. ` +
+      `Refusing the run; nothing was written.`,
+    perKeyspace,
+  };
+}
+
+/** The refusal, as the throw the CLI takes. Never swallowed by the caller. */
+export function assertAccountKeyedBlastRadius(
+  verdict: AccountKeyedBlastRadiusVerdict,
+): void {
+  if (verdict.verdict === "refuse") {
+    throw new Error(verdict.reason ?? "ACCOUNT_KEYED_BLAST_RADIUS");
+  }
+}
+
 /** A RECORD-LEVEL retirement declaration. Same shape every retirement consumer reads. */
 export interface AccountKeyedRetirementRecord {
   status: "retired";

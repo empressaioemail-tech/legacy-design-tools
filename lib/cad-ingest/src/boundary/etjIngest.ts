@@ -13,12 +13,24 @@
  * the city keys being re-acquired; the source row is keyed by cityKey and is
  * upserted in place, so a city that publishes no ETJ rings still lands a row
  * with `has_etj_rings=false` and the enumeration outcome recorded.
+ *
+ * P-359: the write and the DERIVATION are one act. After the last batch lands,
+ * this function runs `deriveEtjServedGeometry` for exactly the publishers it
+ * just wrote (it collects those keys itself — see `writtenCityKeys`), which is
+ * what puts a ring into `verbatim`/`derived`/`repaired` instead of leaving it at
+ * the column default `underived`. A ring inserted by any other path stays
+ * `underived` and the reader refuses and declares it, so the pass being here is
+ * a guarantee about this writer, not a hope about all writers.
  */
 
 import { inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txEtjBoundary, txEtjSource } from "@workspace/db/schema";
 import type { TxEtjBoundaryRecord } from "./etjParse";
+import {
+  deriveEtjServedGeometry,
+  type EtjDeriveSummary,
+} from "./etjDerive";
 
 export type EtjIngestDb = Pick<
   NodePgDatabase<Record<string, unknown>>,
@@ -57,6 +69,12 @@ export interface EtjUpsertOptions {
 export interface EtjUpsertSummary {
   rowsInserted: number;
   batches: number;
+  /**
+   * The P-359 derivation/validity pass, run here rather than left to the caller
+   * so an ingest CANNOT write rings without deriving them. This is the answer to
+   * "what executes the derivation": the same call that wrote the rows.
+   */
+  derivation: EtjDeriveSummary;
 }
 
 /** Delete the rings of exactly the publishers about to be re-acquired. */
@@ -81,6 +99,10 @@ export async function upsertEtjBoundaries(
   let batchKeys = new Set<string>();
   let rowsInserted = 0;
   let batches = 0;
+  // Every publisher this call writes for. Collected HERE rather than taken from
+  // the caller, so the derivation pass cannot be pointed at a different set of
+  // cities than the rows just written.
+  const writtenCityKeys = new Set<string>();
 
   async function flush(): Promise<void> {
     if (batch.length === 0) return;
@@ -115,6 +137,7 @@ export async function upsertEtjBoundaries(
   for await (const rec of records) {
     if (batchKeys.has(rec.etjId)) continue;
     batchKeys.add(rec.etjId);
+    writtenCityKeys.add(rec.cityKey);
     batch.push({
       etjId: rec.etjId,
       cityKey: rec.cityKey,
@@ -133,7 +156,11 @@ export async function upsertEtjBoundaries(
     if (batch.length >= batchSize) await flush();
   }
   await flush();
-  return { rowsInserted, batches };
+  // The rows are in with the fail-closed default (`served_status='underived'`).
+  // Derive them now, in the same call, so nothing leaves this function servable
+  // only by accident: until this returns, the reader refuses every row written.
+  const derivation = await deriveEtjServedGeometry(db, [...writtenCityKeys]);
+  return { rowsInserted, batches, derivation };
 }
 
 /**

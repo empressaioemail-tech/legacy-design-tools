@@ -20,6 +20,16 @@
  * `absent` and `unresolved` are never collapsed. Folding them together is the
  * defect this DTO exists to prevent: it turns "we looked and it is not there"
  * into "we could not look", and the customer cannot tell which they were told.
+ *
+ * P-359 adds two things to the same DTO, both additive:
+ *
+ *   - a `present` says HOW the containing ring was served (`servedStatus`:
+ *     `verbatim`, `derived` or `repaired`) and carries the derivation's own
+ *     sentence when it wrote one. An ETJ answer that rests on a ring from which
+ *     the city's own limits were subtracted is a derived answer, and it says so;
+ *   - an `unresolved` that is unresolved BECAUSE a ring was refused carries
+ *     `refusedRings`, each with its status and the derivation's reason. A ring
+ *     nobody could test is not a ring that was tested and missed.
  */
 
 import type {
@@ -48,6 +58,24 @@ export type EtjFact = {
   coveredBy?: string[];
   /** Rings actually tested by point-in-polygon. */
   ringsConsulted?: number;
+  /**
+   * How the containing ring was served (P-359): `verbatim`, `derived` (the ring
+   * minus its own city's limits) or `repaired`. A `present` that rests on a
+   * derived geometry names the derivation rather than looking like any other ring.
+   */
+  servedStatus?: "verbatim" | "derived" | "repaired";
+  /** The derivation's own sentence about that ring, when it wrote one. */
+  derivationNote?: string;
+  /**
+   * Rings the reader refused to test whose publisher's extent covers the point
+   * (P-359), present exactly when the refusal is why the answer is
+   * `unresolved`. A refused ring is not a ring that was measured and missed.
+   */
+  refusedRings?: Array<{
+    etjId: string;
+    servedStatus: string;
+    reason: string;
+  }>;
 };
 
 export function etjFactFromContainment(result: EtjContainmentResult): EtjFact {
@@ -61,6 +89,13 @@ export function etjFactFromContainment(result: EtjContainmentResult): EtjFact {
       ringLabel: result.ringLabel,
       etjId: result.etjId,
       sourceCitation: result.sourceCitation,
+      servedStatus: result.servedStatus,
+      // Omitted, not `null`: an absent note is an absent field, so a consumer
+      // cannot print "derivation: null" as if a derivation had run.
+      ...(typeof result.derivationNote === "string" &&
+      result.derivationNote.length > 0
+        ? { derivationNote: result.derivationNote }
+        : {}),
     };
   }
   if (result.status === "absent") {
@@ -76,6 +111,9 @@ export function etjFactFromContainment(result: EtjContainmentResult): EtjFact {
     status: "unresolved",
     source: ETJ_SOURCE,
     basis: result.basis,
+    ...(result.refusedRings !== undefined
+      ? { refusedRings: result.refusedRings }
+      : {}),
   };
 }
 

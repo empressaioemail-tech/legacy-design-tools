@@ -27,6 +27,20 @@
  * by individual development agreements and disannexation actions, so a
  * statutory buffer would contradict the published layer it claims to describe.
  *
+ * P-359 — THE REFUSAL IS IN THIS READER. `ST_Contains` against an INVALID
+ * polygon is undefined in GEOS, so this module never assumes the store holds
+ * valid geometry. It selects `served_geometry`, `served_status` and
+ * `derivation`, hands EVERY candidate row to `buildEtjBoundaryIndex` (including
+ * the ones it will refuse), and lets the builder decide: only `verbatim`,
+ * `derived` and `repaired` are testable. A row that is `underived` (no
+ * derivation pass has run), `excluded` (a repair moved the area beyond the
+ * declared tolerance) or `withheld` (a self-containing ring whose subtraction
+ * left nothing usable) is carried into the determination as a DECLARATION, and
+ * a point whose only covering rings were refused answers `unresolved` naming the
+ * refusal — never `absent`. The SQL deliberately does not filter the refused
+ * rows out: filtering would erase the only evidence that a publisher's ring was
+ * never measured.
+ *
  * Not wired to a route: this lane is the acquisition half, and the consumer
  * sites that would read it (`hauska-engine`'s report/feasibility hardcodes,
  * `hauska-map`'s three) are explicit follow-on work. This module is the read
@@ -38,7 +52,8 @@ import { txEtjBoundary, txEtjSource } from "@workspace/db/schema";
 import {
   buildEtjBoundaryIndex,
   resolveEtjAtPoint,
-  type EtjBoundaryIndexEntry,
+  type EtjBoundaryIndex,
+  type EtjBoundarySourceRow,
   type EtjSourceCoverageEntry,
 } from "@workspace/cad-ingest/boundary";
 import {
@@ -47,7 +62,6 @@ import {
   usableEtjQueryPoint,
   type EtjFact,
 } from "@workspace/cad-ingest/etj";
-import type { GeoJsonGeometry } from "@workspace/cad-ingest/txgio-geo";
 
 export const ETJ_FACT_SOURCE = "tx_etj_boundary" as const;
 
@@ -64,7 +78,7 @@ export type EtjFactWire = EtjFact & {
 export type EtjIndexInjection = {
   sourceRowsPresent: boolean;
   ringRowsPresent: boolean;
-  index: EtjBoundaryIndexEntry[];
+  index: EtjBoundaryIndex;
   coverage: EtjSourceCoverageEntry[];
 };
 
@@ -74,6 +88,9 @@ type EtjBoundaryRow = {
   cityName: string;
   ringLabel: string;
   geometry: unknown;
+  servedGeometry: unknown;
+  servedStatus: string;
+  derivation: unknown;
   westLng: number;
   southLat: number;
   eastLng: number;
@@ -124,15 +141,6 @@ export function resetEtjIndexForTests(): void {
   injectedIndex = undefined;
 }
 
-function asGeometry(value: unknown): GeoJsonGeometry | null {
-  if (!value || typeof value !== "object") return null;
-  const g = value as { type?: unknown };
-  if (g.type === "Polygon" || g.type === "MultiPolygon") {
-    return value as GeoJsonGeometry;
-  }
-  return null;
-}
-
 /** Every enumerated publisher, rings or not. */
 async function loadSourceCoverage(
   db: EtjFactDb,
@@ -181,12 +189,21 @@ async function countRings(db: EtjFactDb): Promise<number> {
   return rows.length;
 }
 
-/** Rings whose bbox contains the query point — the pre-filter only. */
+/** Rings whose bbox contains the query point — the pre-filter only.
+ *
+ * The bbox tested is the PUBLISHED ring's (`west_lng` … `north_lat`), and that
+ * is sound for every served geometry (P-359): `derived` is the published ring
+ * minus something, and `repaired` is `ST_MakeValid`'s redistribution of the
+ * published ring's own nodes, so neither can reach outside the footprint the
+ * publisher drew. A served geometry is therefore never lost to the pre-filter;
+ * a ring that cannot be tested at all still reaches the builder, which refuses
+ * it and says why.
+ */
 async function loadBboxCandidates(
   db: EtjFactDb,
   longitude: number,
   latitude: number,
-): Promise<EtjBoundaryIndexEntry[]> {
+): Promise<EtjBoundaryIndex> {
   const rows = (await db
     .select({
       etjId: txEtjBoundary.etjId,
@@ -194,6 +211,9 @@ async function loadBboxCandidates(
       cityName: txEtjBoundary.cityName,
       ringLabel: txEtjBoundary.ringLabel,
       geometry: txEtjBoundary.geometry,
+      servedGeometry: txEtjBoundary.servedGeometry,
+      servedStatus: txEtjBoundary.servedStatus,
+      derivation: txEtjBoundary.derivation,
       westLng: txEtjBoundary.westLng,
       southLat: txEtjBoundary.southLat,
       eastLng: txEtjBoundary.eastLng,
@@ -210,38 +230,29 @@ async function loadBboxCandidates(
       ),
     )) as EtjBoundaryRow[];
 
-  const built: Array<{
-    etjId: string;
-    cityKey: string;
-    cityName: string;
-    ringLabel: string;
-    geometry: GeoJsonGeometry;
+  // Every candidate row is handed to the builder, INCLUDING the ones the reader
+  // cannot test (`underived`, `excluded`, `withheld`) and the ones whose status
+  // claims a served geometry that is not a polygon. The builder refuses those
+  // and says why, and resolveEtjAtPoint turns a refusal into a declaration — so a
+  // ring that was never proven testable can never quietly become an `absent`.
+  // Filtering the refusals out in SQL would erase the only evidence of them.
+  const built: EtjBoundarySourceRow[] = rows.map((row) => ({
+    etjId: row.etjId,
+    cityKey: row.cityKey,
+    cityName: row.cityName,
+    ringLabel: row.ringLabel,
+    geometry: row.geometry,
+    servedGeometry: row.servedGeometry,
+    servedStatus: row.servedStatus as EtjBoundarySourceRow["servedStatus"],
+    derivation: row.derivation,
     bbox: {
-      westLng: number;
-      southLat: number;
-      eastLng: number;
-      northLat: number;
-    };
-    sourceCitation: string;
-  }> = [];
-  for (const row of rows) {
-    const geometry = asGeometry(row.geometry);
-    if (!geometry) continue;
-    built.push({
-      etjId: row.etjId,
-      cityKey: row.cityKey,
-      cityName: row.cityName,
-      ringLabel: row.ringLabel,
-      geometry,
-      bbox: {
-        westLng: row.westLng,
-        southLat: row.southLat,
-        eastLng: row.eastLng,
-        northLat: row.northLat,
-      },
-      sourceCitation: row.sourceCitation,
-    });
-  }
+      westLng: row.westLng,
+      southLat: row.southLat,
+      eastLng: row.eastLng,
+      northLat: row.northLat,
+    },
+    sourceCitation: row.sourceCitation,
+  }));
   return buildEtjBoundaryIndex(built);
 }
 
