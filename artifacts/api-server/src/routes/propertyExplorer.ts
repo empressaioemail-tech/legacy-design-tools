@@ -91,8 +91,8 @@ import {
   tryAssembleParcelDrawFromReads,
   atomPathPending,
 } from "../lib/parcelDrawFromReads";
-import { districtCodeFromZoningFacet } from "../lib/parcelDrawStub";
 import { tryComposeEnvelopeModelForDraw } from "../lib/buildableEnvelope/parcelDrawEnvelopeModel";
+import { resolveSitusCity } from "../lib/situsCompose";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import { buildR1Brief } from "../lib/r1BriefCompose";
@@ -344,23 +344,32 @@ async function assembleNodeBriefBody(
       yearBuilt: null,
     },
   );
-  // P-153: the polygon-only reversal of Ruling B, re-pointed by P-339. When
-  // the baked envelope carries the bake's atom-pending marker (the same test
-  // the refused overlay already uses), attempt the SAME setback-geometry
-  // derivation the map/export route runs (real extra I/O -- see
-  // parcelDrawEnvelopeModel.ts's own doc comment) and let ITS OWN OUTCOME
+  // P-153: the polygon-only reversal of Ruling B, re-pointed by P-339, made
+  // ONE derivation by P-374. When the baked envelope carries the bake's
+  // atom-pending marker (the same test the refused overlay already uses),
+  // attempt the SAME derivation the map/export route runs (real extra I/O --
+  // see parcelDrawEnvelopeModel.ts's own doc comment) and let ITS OWN OUTCOME
   // decide the overlay. P-339 dropped the old `&& bakedZoningCode` gate: a
-  // parcel with no district now gets the route's own `no-zoning-stamp` (via
-  // `unreached("no-zoning-code")`, which costs no I/O), instead of falling
-  // through to the bake's `atom_path_pending` and telling the customer its
-  // setbacks were unruled when the real gap was a missing district.
-  const bakedZoningCode = districtCodeFromZoningFacet(
-    (facetsWithCadRollOverlay as Record<string, unknown>).zoning,
-  );
+  // parcel with no district now gets the route's own `no-zoning-stamp` instead
+  // of falling through to the bake's `atom_path_pending` and telling the
+  // customer its setbacks were unruled when the real gap was a missing
+  // district. P-374 dropped the `zoningCode` ARGUMENT for the same reason one
+  // layer down: the bake's single facet is not the derivation's district
+  // signal order (that is the ring's stamp, then Spine, then the atom chain),
+  // and seeding this call with it let the draw block probe a different row than
+  // the route did. The jurisdiction city/state passed here are the card's own
+  // composed situs city (`resolveSitusCity` — the value the label already
+  // serves), which is this call site's equivalent of the route's request
+  // geocode; the derivation falls back to the ring's situs, then to the
+  // parcel-node FIPS, exactly as it does for the route.
   const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
     ? await tryComposeEnvelopeModelForDraw({
         parcelNodeId,
-        zoningCode: bakedZoningCode,
+        jurisdictionCity: resolveSitusCity({
+          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
+          cityLimits: cityLimitsFact,
+        }).city,
+        jurisdictionState: null,
         queryPoint: snapshot.queryPoint ?? null,
       })
     : null;
