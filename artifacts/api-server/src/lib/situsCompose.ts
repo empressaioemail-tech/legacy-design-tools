@@ -91,8 +91,11 @@ export type SitusDisposition = "present" | "unknown";
  * THE LICENCE (the same rule as the map's `applyCityLimitsSitusLicence`, in
  * `hauska-map` `apps/property-explorer/api/_lib/pe-property-atoms.ts`, and as the
  * probe's `addressCarriesLedgerLine` in `scripts/surface-probe.mjs`; the three
- * are NAMED, not pinned — P-331 has not merged). A city is taken from the
- * city-limits answer ONLY when BOTH hold:
+ * are NAMED, not pinned — P-331's map half has merged but its LDT half has not
+ * reached this repo's main, and the drift check reads the SIBLING'S MAIN, so a
+ * row comparing the two declarations here would REFUSE on every PR until then;
+ * the row and its prerequisites are written out in this lane's close). A city
+ * is taken from the city-limits answer ONLY when BOTH hold:
  *
  *   1. the roll's own situs city is a DECLARED absence with verdict
  *      `absent-verified`. A bare null, a `lookup-failed`/`refused`, a
