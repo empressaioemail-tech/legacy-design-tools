@@ -274,6 +274,71 @@ export function buildPublishedAccountPair(
 
 const AMBIGUOUS_WITHIN_SOURCE = "\u0000ambiguous";
 
+/**
+ * P-370 (2026-09-19). THE SAME PUBLISHED PAIR, READ BY THE ACCOUNT.
+ *
+ * WHY THE OTHER DIRECTION EXISTS AT ALL. `buildPublishedAccountPair` above is
+ * read BY the key the parcel index publishes and NAMES the account the declared
+ * roll is keyed by -- the direction writer (a)'s retirement arm needs, because
+ * a served node's account is what its roll lookup must use. Writer (b)'s
+ * membership test asks the mirror question: for a work key that the county's
+ * parcel table does NOT publish, is there a published parcel this key names?
+ * That is the pair read BY the account.
+ *
+ * THE ROLES SWAP IN EXACTLY ONE PLACE, deliberately. `buildPublishedAccountPair`
+ * is about two ROLES -- the key the pair is indexed by and the one key it names
+ * -- not about which numbering system each role happens to hold, so the swap is
+ * a field rename at this boundary and nowhere else. The alternative (a second
+ * builder with its own copy of the three fail-closed rules) would be two
+ * implementations of one contract, and the rules are exactly the ones a
+ * two-extract pair must keep: no key named with no value is a refusal, a key one
+ * extract names twice with different values is a refusal, and a key two extracts
+ * name with different values is a refusal rather than an arbitrary winner.
+ */
+export interface PublishedNodeKeyByAccountRow {
+  /** The account key the declared roll is keyed by -- the key the caller asked about. */
+  accountKey: string;
+  /** The parcel-index prop_id the extract publishes for that account key. */
+  nodeKey: string;
+  /** The extract this row came from, for the caller's own provenance line. */
+  source: string;
+}
+
+export interface PublishedNodeKeyByAccountKey {
+  /** account key -> the ONE parcel-index prop_id the extracts name for it. */
+  byAccountKey: ReadonlyMap<string, string>;
+  /** Account keys an extract carried with no parcel-index prop_id. Refused, counted. */
+  refusedNoNodeKey: number;
+  /** Account keys one extract named twice with different prop_ids. Refused, counted. */
+  refusedAmbiguous: number;
+  /** Account keys the extracts named with DIFFERENT prop_ids. Refused, counted. */
+  refusedDisagreement: number;
+  /** Every extract that contributed, named. */
+  sources: readonly string[];
+}
+
+export function buildPublishedNodeKeyByAccountKey(
+  extracts: readonly (readonly PublishedNodeKeyByAccountRow[])[],
+): PublishedNodeKeyByAccountKey {
+  const byRole = extracts.map((rows) =>
+    rows.map(
+      (r): PublishedAccountPairRow => ({
+        nodeKey: r.accountKey,
+        accountKey: r.nodeKey,
+        source: r.source,
+      }),
+    ),
+  );
+  const pair = buildPublishedAccountPair(byRole);
+  return {
+    byAccountKey: pair.pairByNodeKey,
+    refusedNoNodeKey: pair.refusedNoAccount,
+    refusedAmbiguous: pair.refusedAmbiguous,
+    refusedDisagreement: pair.refusedDisagreement,
+    sources: pair.sources,
+  };
+}
+
 /** The published R-account number for a node key, or null when the key is not a number. */
 export function rAccountRegisterKey(nodeKey: string): string | null {
   const bare = normalizeForJoin(nodeKey);

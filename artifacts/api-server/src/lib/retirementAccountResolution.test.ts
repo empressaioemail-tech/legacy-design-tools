@@ -32,6 +32,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPublishedAccountPair,
+  buildPublishedNodeKeyByAccountKey,
   chooseRetirementResolution,
   describeRetirementKeyspaces,
   ownPropIdResolution,
@@ -789,5 +790,229 @@ describe("F7 EVERY OUTCOME IS A DISTINCT PATH OR A DISTINCT NAMED REASON", () =>
       expect(r.detail.length).toBeGreaterThan(20);
       expect(r.nodeKey).toBe(k);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-370 (2026-09-19) -- WRITER (b) TESTS MEMBERSHIP IN THE NODE'S OWN KEYSPACE.
+//
+// THE DEFECT, IN ONE SENTENCE, because every test below is about this and
+// nothing else: `partitionAccountKeyedWork` asks whether the work key is a
+// `txgio_parcel` prop_id, and that is the right question only in a county whose
+// served keys ARE that table's keys. Williamson publishes R-prefixed ids in the
+// parcel table and keys its declared roll numerically, so the bare-key test
+// excluded the WHOLE numeric keyspace -- and F6's instrument above then REFUSED,
+// which is exactly the refusal that held the county out of the 2026-09-19
+// staging publish.
+//
+// MEASURED, read-only on staging 2026-09-19, and the numbers the fixture is a
+// scale model of: 319,480 numeric work keys, ALL 319,480 excluded by the
+// bare-key test (the whole numeric served keyspace, so the run refused and never
+// reached a write), of which 282,146 are named by the county's own staged pair
+// to an R prop_id the parcel table publishes, leaving 37,334 excluded. The
+// fixture keeps that arithmetic and its failure modes at 1/100,000 scale: mostly
+// reached, one reached-by-a-pair-row-that-names-a-prop_id-this-county-does-not-
+// publish (the two-source disagreement the reverse builder refuses rather than
+// guesses), and one named by nothing.
+//
+// BOTH DIRECTIONS, and the reason this file can show them without a stash: the
+// second arm is OPTIONAL, so the same fixture runs through the same partition
+// twice -- once as the code ran before P-370 (the refusal reproduces) and once
+// with the pair (the refusal is gone) -- and the instrument it refuses with is
+// the one F6 above already proves.
+// ---------------------------------------------------------------------------
+describe("F8 WRITER (b) TESTS THE NODE'S OWN KEYSPACE (P-370)", () => {
+  const served = (name: string, keys: readonly string[]) => ({ name, keys: new Set(keys) });
+
+  // The parcel table's prop_id column for this county, as `joinParcelRows` hands
+  // it over: R-prefixed. That prefix is the entire defect -- the numeric keys
+  // the work list carries are not in it.
+  const parcelIndexKeys = new Set(["R005578", "R006142", "R007323"]);
+  const NUMERIC_KEYS = ["123456", "999888", "777666"] as const;
+  const NUMERIC_KEYSPACE_LABEL =
+    "the county's numeric served node keys (the parcel index's own numbering)";
+  const R_KEYSPACE_LABEL = "the county's R-account served node keys";
+
+  // The work list: the numeric keys the declared roll is keyed by, and the R keys
+  // the parcel table publishes. Both are served; only the R keys are in the
+  // parcel table's own numbering.
+  const work: { parcelNodeId: string; body: Record<string, unknown> }[] = [
+    ...NUMERIC_KEYS.map((k) => ({ parcelNodeId: `48491:${k}`, body: {} })),
+    ...WILLIAMSON_SERVED_KEYS.map((k) => ({ parcelNodeId: `48491:${k}`, body: {} })),
+  ];
+  // 123456 -> R005578: the paydirt row (282,146 of the 319,480 measured).
+  // 999888 -> R999999: NAMED, but the parcel table does not publish R999999, so
+  // the county scoping must NOT let it through.
+  // 777666 -> nothing names it.
+  const pair = {
+    nodeKeyByAccountKey: new Map([
+      ["123456", "R005578"],
+      ["999888", "R999999"],
+    ]),
+    sources: ["tx_wcad_owner", "tx_wcad_ag_valuation"],
+    // The parcel table's own numbering for this county, measured on the keys the
+    // run read: r-account shaped, and NOT numeric.
+    parcelTableShapeClasses: new Set(["r-account"]),
+  };
+  /** The same pair whose parcel table DOES publish the work keys' shape (Hays). */
+  const pairSameNumbering = {
+    nodeKeyByAccountKey: new Map([
+      ["123456", "R005578"],
+      ["999888", "R999999"],
+    ]),
+    sources: ["tx_wcad_owner"],
+    parcelTableShapeClasses: new Set(["numeric"]),
+  };
+  const servedKeyspaces = [
+    served(NUMERIC_KEYSPACE_LABEL, NUMERIC_KEYS),
+    served(R_KEYSPACE_LABEL, WILLIAMSON_SERVED_KEYS),
+  ];
+
+  it("PRE-CHANGE: the bare-key test excludes the WHOLE numeric keyspace and the instrument REFUSES", () => {
+    const { excluded, kept, reachedByPublishedPair, declaredNoPublishedIdentifier } =
+      partitionAccountKeyedWork(work, parcelIndexKeys);
+    expect(excluded.map((w) => w.parcelNodeId)).toEqual([
+      "48491:123456",
+      "48491:999888",
+      "48491:777666",
+    ]);
+    expect(kept.map((w) => w.parcelNodeId)).toEqual([
+      "48491:R005578",
+      "48491:R006142",
+      "48491:R007323",
+    ]);
+    expect(reachedByPublishedPair).toBe(0);
+    expect(declaredNoPublishedIdentifier).toBe(0);
+    const verdict = accountKeyedBlastRadius(excluded, servedKeyspaces);
+    expect(verdict.verdict).toBe("refuse");
+    expect(verdict.keyspace).toBe(NUMERIC_KEYSPACE_LABEL);
+    expect(verdict.reason).toContain("ACCOUNT_KEYED_BLAST_RADIUS");
+    // The per-keyspace line, which is the line the dry run prints and the line
+    // the close artifact predicts by hand.
+    expect(verdict.perKeyspace).toEqual([
+      { name: NUMERIC_KEYSPACE_LABEL, served: 3, excluded: 3 },
+      { name: R_KEYSPACE_LABEL, served: 3, excluded: 0 },
+    ]);
+    expect(() => assertAccountKeyedBlastRadius(verdict)).toThrow(
+      /ACCOUNT_KEYED_BLAST_RADIUS/,
+    );
+  });
+
+  it("FIXED: NOTHING of the numeric keyspace is excluded, and the refusal is gone", () => {
+    const { kept, excluded, reachedByPublishedPair, declaredNoPublishedIdentifier } =
+      partitionAccountKeyedWork(work, parcelIndexKeys, pair);
+    // The prediction, asserted before the instrument is consulted: one key the
+    // pair names to a prop_id THIS county publishes, and two that no published
+    // identifier reaches -- which are DECLARED, not retired, so the exclusion is
+    // EMPTY rather than partial. The partial-exclusion alternative (999888 and
+    // 777666 retired) is the end state this lane built first and rejected: 37,334
+    // of the real 319,480 would have been false retirements, and a partial
+    // extraction of a keyspace is invisible to a guard whose contract is set
+    // equality.
+    expect(reachedByPublishedPair).toBe(1);
+    expect(declaredNoPublishedIdentifier).toBe(2);
+    expect(excluded).toEqual([]);
+    expect(kept.map((w) => w.parcelNodeId)).toEqual([
+      "48491:123456",
+      "48491:999888",
+      "48491:777666",
+      "48491:R005578",
+      "48491:R006142",
+      "48491:R007323",
+    ]);
+    const verdict = accountKeyedBlastRadius(excluded, servedKeyspaces);
+    expect(verdict.verdict).toBe("ok");
+    expect(verdict.keyspace).toBeNull();
+    expect(verdict.perKeyspace).toEqual([
+      { name: NUMERIC_KEYSPACE_LABEL, served: 3, excluded: 0 },
+      { name: R_KEYSPACE_LABEL, served: 3, excluded: 0 },
+    ]);
+    expect(() => assertAccountKeyedBlastRadius(verdict)).not.toThrow();
+  });
+
+  it("THE GUARD STILL FIRES, on the code that ships: no pair published leaves the exclusion whole", () => {
+    // The dispatched falsifier, kept exactly: a county whose whole keyspace
+    // misses the parcel table and which publishes NO pair still has a
+    // whole-keyspace exclusion and the guard still throws. (`undefined` -- not an
+    // empty map -- is "no pair": see the F8 membership test in the other suite.)
+    const { excluded, reachedByPublishedPair, declaredNoPublishedIdentifier } =
+      partitionAccountKeyedWork(work, parcelIndexKeys, undefined);
+    expect(reachedByPublishedPair).toBe(0);
+    expect(declaredNoPublishedIdentifier).toBe(0);
+    expect(excluded).toHaveLength(3);
+    expect(() => assertAccountKeyedBlastRadius(accountKeyedBlastRadius(excluded, servedKeyspaces))).toThrow(
+      /ACCOUNT_KEYED_BLAST_RADIUS/,
+    );
+    // ...and a pair whose presence the caller has NOT established (the same
+    // county with no read at all) is the same case. What is NOT the same case,
+    // and must not be confused with it: a pair the county DOES publish whose
+    // every row names an unpublished prop_id -- that is the county speaking, and
+    // its keys are DECLARED rather than retired, which is asserted in the suite
+    // that owns the membership rule.
+  });
+
+  it("HAYS IS UNCHANGED KEY FOR KEY: the same key shapes, the same hollow set, a parcel table that uses their numbering", () => {
+    const haysWork = HAYS_SERVED_KEYS.map((k) => ({
+      parcelNodeId: `48209:${k}`,
+      body: {},
+    }));
+    const haysParcelIndex = new Set(["100013", "100014"]);
+    const golden = ["48209:100015", "48209:100016", "48209:100017"];
+    for (const publishedPair of [undefined, pairSameNumbering]) {
+      const { excluded, reachedByPublishedPair, declaredNoPublishedIdentifier } =
+        partitionAccountKeyedWork(haysWork, haysParcelIndex, publishedPair);
+      expect(excluded.map((w) => w.parcelNodeId)).toEqual(golden);
+      // Nothing was declared and nothing was reached: the second published
+      // identifier is inert in a county whose parcel table speaks its own keys'
+      // numbering, whether or not an extract happens to name one of them.
+      expect(reachedByPublishedPair).toBe(0);
+      expect(declaredNoPublishedIdentifier).toBe(0);
+      // The hollow subset of ONE keyspace is the pass's premise, not a blast
+      // radius -- the same verdict F6 measures, taken through the new path.
+      const verdict = accountKeyedBlastRadius(excluded, [
+        served("numeric keys", HAYS_SERVED_KEYS),
+      ]);
+      expect(verdict.verdict).toBe("ok");
+    }
+  });
+
+  it("the REVERSE pair refuses a key two extracts disagree about rather than moving it on a toss", () => {
+    const { byAccountKey, refusedDisagreement } = buildPublishedNodeKeyByAccountKey([
+      [{ accountKey: "123456", nodeKey: "R005578", source: "tx_wcad_owner" }],
+      [{ accountKey: "123456", nodeKey: "R007323", source: "tx_wcad_ag_valuation" }],
+    ]);
+    expect(byAccountKey.size).toBe(0);
+    expect(refusedDisagreement).toBe(1);
+    // An account an extract carried with NO node key is counted, never assumed
+    // onto some parcel -- and an extract naming one account twice with two node
+    // keys is refused as ambiguous, as the forward builder already does.
+    const none = buildPublishedNodeKeyByAccountKey([
+      [{ accountKey: "123456", nodeKey: "", source: "tx_wcad_owner" }],
+    ]);
+    expect(none.byAccountKey.size).toBe(0);
+    expect(none.refusedNoNodeKey).toBe(1);
+    const ambiguous = buildPublishedNodeKeyByAccountKey([
+      [
+        { accountKey: "123456", nodeKey: "R005578", source: "tx_wcad_owner" },
+        { accountKey: "123456", nodeKey: "R007323", source: "tx_wcad_owner" },
+      ],
+    ]);
+    expect(ambiguous.byAccountKey.size).toBe(0);
+    expect(ambiguous.refusedAmbiguous).toBe(1);
+  });
+
+  it("the reverse builder reads the SAME pair the forward one does, with the roles swapped", () => {
+    const sharedRows: Array<{ nodeKey: string; accountKey: string; source: string }> = [
+      { nodeKey: "R005578", accountKey: "123456", source: "tx_wcad_owner" },
+      { nodeKey: "R006142", accountKey: "654321", source: "tx_wcad_owner" },
+    ];
+    const forward = buildPublishedAccountPair([sharedRows]);
+    const reverse = buildPublishedNodeKeyByAccountKey([sharedRows]);
+    // The forward builder answers nodeKey -> accountKey; the reverse one answers
+    // accountKey -> nodeKey over the SAME rows, so it is the inverse and not a
+    // second opinion: neither can name a key the other refuses.
+    const inverted = new Map([...forward.pairByNodeKey].map(([node, account]) => [account, node]));
+    expect([...reverse.byAccountKey]).toEqual([...inverted]);
+    expect(reverse.sources).toEqual(forward.sources);
   });
 });

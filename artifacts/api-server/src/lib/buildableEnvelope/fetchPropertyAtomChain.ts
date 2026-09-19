@@ -68,11 +68,16 @@ export async function fetchPropertyAtomChain(
   const baseUrl = (
     process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
     process.env.RETRIEVAL_API_URL?.trim() ||
+    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
     DEFAULT_RETRIEVAL
   ).replace(/\/$/, "");
   const key =
     process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
-    process.env.RETRIEVAL_API_KEY?.trim();
+    process.env.RETRIEVAL_API_KEY?.trim() ||
+    // P-366: the deployed cortex-api mounts BRIEF_RETRIEVAL_API_KEY, not the
+    // two names above, so this read was dead in production. Same fallback,
+    // same reason as parcelRecordReaderClient.ts and placeCoverageSource.ts.
+    process.env.BRIEF_RETRIEVAL_API_KEY?.trim();
   if (!key) return null;
 
   try {
