@@ -897,3 +897,138 @@ describe("POST /place/buildable-envelope — P-304 area figure withholding", () 
     expect(String(p.disclosure ?? "")).not.toContain("withheld");
   });
 });
+
+/**
+ * P-374 — THE DIVERGENCE TEST.
+ *
+ * The mission is not "the draw block agrees with the route in the cases we
+ * thought of"; it is "there is one derivation, and a test fails when the two
+ * callers get different answers". This block runs BOTH callers against the
+ * SAME parcel fixture in the SAME process:
+ *
+ *   - the route, through its real HTTP handler (`brokeragePlaceBuildableEnvelopeRouter`);
+ *   - the draw block, through `tryComposeEnvelopeModelForDraw`.
+ *
+ * and asserts their answers are the SAME answer — the same resolved district,
+ * the same four axes, the same polygon, and (where neither draws) the same
+ * named reason. Neither caller is hand-seeded with a jurisdiction key: the
+ * route's city comes from the request geocode, the draw block's from the same
+ * ring's own situs string (the fallback that stands in for the card's composed
+ * city here), and the two must still reach the one table. That is what pins the
+ * jurisdiction-key equivalence the old copy got wrong.
+ */
+describe("POST /place/buildable-envelope — P-374: the draw block and the route are ONE derivation", () => {
+  const ADDRESS = "1209 Main St, Bastrop, TX 78602";
+  const NODE = "48021:33512";
+
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  async function drawBlock(args: {
+    jurisdictionCity?: string | null;
+    jurisdictionState?: string | null;
+  }) {
+    const { tryComposeEnvelopeModelForDraw } = await import(
+      "../lib/buildableEnvelope/parcelDrawEnvelopeModel"
+    );
+    return tryComposeEnvelopeModelForDraw({
+      parcelNodeId: NODE,
+      jurisdictionCity: args.jurisdictionCity ?? null,
+      jurisdictionState: args.jurisdictionState ?? null,
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+  }
+
+  it("parity: the same parcel draws the SAME district, the SAME axes and the SAME polygon on both paths", async () => {
+    // The ring's OWN situs names the city (the route gets the same city from
+    // the request geocode). No key is hand-seeded on either side.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = NODE;
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(res.body.effectiveZoningCode).toBeTruthy();
+
+    const mcp = await drawBlock({});
+    expect(mcp.state).toBe("modelled");
+    if (mcp.state !== "modelled") throw new Error("unreachable");
+
+    // The resolved district the route SERVES, not the raw code that seeded the
+    // probe: pre-P-374 the draw block named its own input here.
+    expect(mcp.model.setbacks.district).toBe(res.body.effectiveZoningCode);
+    const routeSetbacks = res.body.setbacks as Record<string, number>;
+    expect(mcp.model.setbacks).toEqual({
+      front_ft: routeSetbacks.front_ft,
+      side_ft: routeSetbacks.side_ft,
+      rear_ft: routeSetbacks.rear_ft,
+      ...(typeof routeSetbacks.side_corner_ft === "number"
+        ? { side_corner_ft: routeSetbacks.side_corner_ft }
+        : {}),
+      district: res.body.effectiveZoningCode,
+    });
+    // ...and the same polygon: the two surfaces are looking at one draw.
+    const routeRing = (
+      res.body.payload.geojson.features[0] as {
+        geometry: { coordinates: [number, number][][] };
+      }
+    ).geometry.coordinates[0];
+    expect(mcp.model.ringLngLat).toEqual(routeRing);
+  });
+
+  it("parity where the ring carries no stamp: both paths read the spine, and both draw (the FALSIFIER for the old draw block)", async () => {
+    // Pre-P-374 this case was the divergence: the route read the spine and
+    // drew; the draw block refused `no-zoning-code` on its caller's missing
+    // facet alone, and the overlay then said the setbacks were unruled beside
+    // a ruled table. Same mock, same parcel, one derivation — so both draw.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = null;
+    parcelNodeIdStamped = NODE;
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "R-MD",
+      source: "baked-snapshot",
+      snapshotAt: "2026-07-20T12:00:00.000Z",
+    });
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.body.effectiveZoningCode).toBe("R-MD");
+
+    const mcp = await drawBlock({});
+    expect(mcp.state).toBe("modelled");
+    if (mcp.state !== "modelled") throw new Error("unreachable");
+    expect(mcp.model.setbacks.district).toBe(res.body.effectiveZoningCode);
+  });
+
+  it("THE PARITY CHECK CAN FAIL: seed the draw block with a jurisdiction the route never used and the answers differ", async () => {
+    // The control for the two tests above. If the two callers could not
+    // disagree, "they agree" would prove nothing — so here is a case where they
+    // must not, and the assertion the parity tests make (equality) is the one
+    // that breaks.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = NODE;
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.body.status).toBe("ok");
+
+    const mcp = await drawBlock({
+      jurisdictionCity: "Nowhere",
+      jurisdictionState: "XX",
+    });
+
+    // The parity predicate, stated explicitly: would a "the two agree"
+    // assertion pass here? No — the route drew and the draw block refuses,
+    // because their inputs name different jurisdictions. That is the control
+    // the parity tests above need.
+    const routeDrew = res.body.payload.geojson.features.length > 0;
+    const drawBlockDrew = mcp.state === "modelled";
+    expect(routeDrew).toBe(true);
+    expect(drawBlockDrew).toBe(false);
+    expect(drawBlockDrew === routeDrew).toBe(false);
+  });
+});
