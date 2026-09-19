@@ -25,6 +25,21 @@ import { reconcileWithAtomEnvelope, withholdUnverifiedAreaFigure } from "./recon
 import type { DistrictMappingResult } from "./districtMapping";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import type { Ring } from "./geometry";
+// P-372: the four-way class -> status mapping lives in its own dependency-light
+// module (`envelopeWireStatus.ts`, the same extraction reason this file itself
+// exists), so its four arms can be tested without this module's corpus/resolver
+// import graph, and so the `clip-failed` arm can be proven able to fire even
+// though no parcel fixture reaches it any more.
+import {
+  wireStatusForEmptyKind,
+  type BuildableEnvelopeWireStatus,
+} from "./envelopeWireStatus";
+
+// Re-exported so a consumer that already imports this composition (the route
+// file, `parcelDrawEnvelopeModel.ts`) does not need a second import path for
+// the status it reads off the result. The value and its mapping are owned by
+// `envelopeWireStatus.ts`; this is only the type the signatures here use.
+export type { BuildableEnvelopeWireStatus };
 import type { PropertyAtomChainWire } from "./fetchPropertyAtomChain";
 import type { SetbackSourceKind } from "./authoritativeSetbackSource";
 // P-354 (2026-09-18): the declaration's own `kind`, so the sentence below can
@@ -119,7 +134,7 @@ export function composeBuildableEnvelopeDerivation(args: {
   resolvedEffectiveDate: string;
 }): {
   derived: BuildableEnvelopeResult;
-  wireStatus: "ok" | "no-buildable-area" | "geometry-validation-failed";
+  wireStatus: BuildableEnvelopeWireStatus;
   honesty: EngineHonesty;
   derivePath: string;
 } {
@@ -214,11 +229,15 @@ export function composeBuildableEnvelopeDerivation(args: {
   // is only claimed when the boolean clip itself returned empty. A geometry
   // gate decline is a distinct machine-readable status — silent degradation
   // (a validation failure masquerading as a measurement) is prohibited.
-  const wireStatus = !derived.empty
-    ? "ok"
-    : derived.emptyKind === "consumed"
-      ? "no-buildable-area"
-      : "geometry-validation-failed";
+  //
+  // P-372 adds a THIRD empty class to the split, and the reason a caller reads
+  // names the stage it belongs to: "clip-failed" means no gate ever ran because
+  // the boolean clip could not be executed, so it must not be served as
+  // "geometry-validation-failed" (that would report a verdict on geometry that
+  // has no defect). The class travels from `derive.ts`'s `emptyKind` unchanged;
+  // an absent/unknown class still lands on the validation names, so an
+  // unclassified empty is never silently promoted to a measurement.
+  const wireStatus = wireStatusForEmptyKind(derived.empty, derived.emptyKind);
 
   return { derived, wireStatus, honesty, derivePath };
 }

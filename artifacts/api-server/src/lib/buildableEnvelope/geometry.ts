@@ -189,6 +189,177 @@ function xyFromClipRing(ring: polygonClipping.Ring): XY[] {
 }
 
 /**
+ * Quantisation grid for the boolean RETRY below: 2^-26 m (about 15 nm).
+ *
+ * === Why the retry exists at all (P-372) ===
+ *
+ * polygon-clipping 0.15.7 dead-ends ("Unable to complete output ring starting
+ * at [...]. Last matching segment found ends at [...].") when its two operands
+ * share EXACT boundary geometry. That is not exotic here, it is the normal case:
+ * each setback strip is anchored on the parcel's own vertices, so the union of
+ * the strips passes exactly through every parcel vertex, and the union's outer
+ * ring carries segments collinear with (and interior to) the parcel's own edges.
+ * Measured on 48209:145880 (Kyle, R-1-A 25/10/15/10): all four parcel vertices
+ * are bit-identical to vertices of the union's outer ring, four segments of that
+ * ring are collinear with parcel edges, and `difference` threw — while both
+ * operands are perfectly VALID rings and the difference is well defined (the
+ * answer is the union's own hole; an independent rasterisation of the strips'
+ * membership definition puts it at 310.536 m², and the library returns exactly
+ * 310.536 m² the moment the operands are de-correlated). So this is a LIBRARY
+ * robustness failure on valid input, not a bad ring: declining it would report
+ * a gate failure about geometry that has no defect.
+ *
+ * === Why a grid, and why this grid ===
+ *
+ * Re-running the operation on both operands quantised onto a common grid
+ * de-correlates them: the shared edges are no longer collinear and the shared
+ * vertices are no longer identical, because the two operands reach their shared
+ * values through different arithmetic. A power of two keeps `Math.round(v / g) *
+ * g` EXACT — the snapped value is a representable double, so the snap adds no
+ * error of its own beyond the grid step and is idempotent. At 2^-26 m a whole
+ * parcel perimeter (hundreds of metres) moves the boolean's area arithmetic by
+ * ~1e-6 m², six orders of magnitude below `conservationEpsilonM2`'s 0.5 m²
+ * floor, eight below a square centimetre, and eight below the 0.03 m survey
+ * noise `edgeLabeling` already tolerates. Both operands are quantised together
+ * so the repair cannot bias the result toward either one.
+ *
+ * === What this is not ===
+ *
+ * It is a RETRY, not a guarantee: quantisation provably breaks the collinear
+ * overlap (a shared segment gets a non-zero offset) but a shared VERTEX can
+ * survive if both operands' values happen to land on the same grid point, so a
+ * second failure is possible and is handled below by reporting the clip stage
+ * as the stage that failed rather than dressing it up as a validation verdict.
+ * It is attempted only AFTER the operation as constructed has thrown, so every
+ * parcel that already derives keeps bit-identical output.
+ */
+/**
+ * The retry grid, exported because it is a DECLARED tolerance: a caller (and a
+ * test) may read it to bound what the repair can move. Worst-case displacement
+ * of any coordinate is half a step, so the area a repair may shift is bounded by
+ * (perimeter/2) x step — about 9e-7 m² on a 120 m parcel perimeter, six orders
+ * below the conservation epsilon, which is why a repaired answer cannot pass
+ * the gates by having drifted.
+ */
+export const BOOLEAN_RETRY_GRID_M = 2 ** -26;
+
+/** One quantisation step onto the retry grid. Exact: the grid is a power of two. */
+function snapToRetryGrid(v: number): number {
+  return Math.round(v / BOOLEAN_RETRY_GRID_M) * BOOLEAN_RETRY_GRID_M;
+}
+
+/** Snap an open XY ring onto the retry grid, dropping vertices the snap merged. */
+function snapXYRing(points: XY[]): XY[] {
+  const out: XY[] = [];
+  for (const p of points) {
+    const x = snapToRetryGrid(p.x);
+    const y = snapToRetryGrid(p.y);
+    const last = out[out.length - 1];
+    if (last && last.x === x && last.y === y) continue;
+    out.push({ x, y });
+  }
+  while (
+    out.length > 1 &&
+    out[0]!.x === out[out.length - 1]!.x &&
+    out[0]!.y === out[out.length - 1]!.y
+  ) {
+    out.pop();
+  }
+  return out;
+}
+
+/**
+ * Snap a single-polygon operand (the difference's subject). Returns null when
+ * the snap leaves fewer than a triangle's worth of vertices, which is itself a
+ * reason to keep the unrepairable-clip verdict rather than to guess.
+ */
+function snapClipPolygon(
+  poly: polygonClipping.Polygon,
+): polygonClipping.Polygon | null {
+  const rings: polygonClipping.Polygon = [];
+  for (const ring of poly) {
+    const snapped = snapXYRing(xyFromClipRing(ring));
+    if (snapped.length >= 3) rings.push(closeClipRing(snapped));
+  }
+  return rings.length ? rings : null;
+}
+
+/** Snap every ring of a MultiPolygon operand; null when nothing usable survives. */
+function snapMultiPolygon(
+  mp: polygonClipping.MultiPolygon,
+): polygonClipping.MultiPolygon | null {
+  const out: polygonClipping.MultiPolygon = [];
+  for (const poly of mp) {
+    const snapped = snapClipPolygon(poly);
+    if (snapped) out.push(snapped);
+  }
+  return out.length ? out : null;
+}
+
+type BooleanOperand = polygonClipping.Polygon | polygonClipping.MultiPolygon;
+
+/**
+ * Outcome of one boolean operation with the retry policy applied.
+ * `repaired` is true only when the operation as constructed threw and the
+ * quantised operands stood, so a caller can disclose the repair rather than
+ * serve it silently.
+ */
+type BooleanAttempt<T> =
+  | { ok: true; value: T; repaired: boolean; firstError?: string }
+  | { ok: false; detail: string };
+
+/**
+ * Run ONE polygon-clipping operation, retrying once on quantised operands.
+ *
+ * The retry is `repair()` rather than an automatic snap because the two operand
+ * shapes (single Polygon vs MultiPolygon) need different snapping, and because a
+ * caller may have a healthier repair available. A null `repair()` — the snap
+ * destroyed an operand — leaves the original error as the verdict. Both the
+ * first error and the note that the retry also threw are kept in the detail,
+ * because "the library was asked twice and could not" is a different fact from
+ * "the library refused once".
+ */
+function booleanWithSnapRetry<T>(
+  label: string,
+  subject: BooleanOperand,
+  clip: BooleanOperand,
+  op: (a: BooleanOperand, b: BooleanOperand) => T,
+  repair: () => { subject: BooleanOperand; clip: BooleanOperand } | null,
+): BooleanAttempt<T> {
+  try {
+    return { ok: true, value: op(subject, clip), repaired: false };
+  } catch (first) {
+    const firstError = errorMessage(first);
+    const snapped = repair();
+    if (!snapped) {
+      return {
+        ok: false,
+        detail: `${label} threw (${firstError}) and neither operand survived quantisation onto the ${BOOLEAN_RETRY_GRID_M} m retry grid`,
+      };
+    }
+    try {
+      return {
+        ok: true,
+        value: op(snapped.subject, snapped.clip),
+        repaired: true,
+        firstError,
+      };
+    } catch {
+      return {
+        ok: false,
+        detail: `${label} threw (${firstError}) and threw again on both operands quantised to the ${BOOLEAN_RETRY_GRID_M} m retry grid`,
+      };
+    }
+  }
+}
+
+/** The message of a thrown value, without assuming it is an Error. */
+function errorMessage(e: unknown): string {
+  const message = (e as { message?: unknown } | null)?.message;
+  return typeof message === "string" ? message : String(e);
+}
+
+/**
  * Quarter-arc subdivision for a setback end cap. 15 segments over 90 degrees
  * (6 degrees per chord) puts the worst-case inscription shortfall at
  * d*(1-cos(3 deg)) = 0.00137*d — about 1 cm on a 25 ft setback, three orders of
@@ -261,9 +432,13 @@ function setbackStadium(
 
 /**
  * Union of the per-edge inward setback regions. Returns null when every edge
- * has a zero setback (no forbidden area at all). May throw when the boolean
- * union throws; callers convert that to an explicit clip-error, never to a
- * consume-lot verdict.
+ * has a zero setback (no forbidden area at all). A union that throws is
+ * reported as a detail string; callers convert that to an explicit clip-error,
+ * never to a consume-lot verdict.
+ *
+ * `quantise` puts every strip on the retry grid (see BOOLEAN_RETRY_GRID_M): the
+ * caller sets it only on the second attempt, after the as-constructed union or
+ * the follow-on difference has thrown.
  *
  * === Why each edge contributes a capped stadium and not a bare rectangle ===
  *
@@ -302,7 +477,8 @@ function setbackStadium(
 function buildForbiddenStrips(
   pts: XY[],
   insetMetersPerEdge: number[],
-): polygonClipping.MultiPolygon | null {
+  quantise: boolean,
+): { forbidden: polygonClipping.MultiPolygon | null } | { detail: string } {
   const n = pts.length;
   let forbidden: polygonClipping.MultiPolygon | null = null;
   for (let i = 0; i < n; i++) {
@@ -310,11 +486,23 @@ function buildForbiddenStrips(
     const b = pts[(i + 1) % n]!;
     const nrm = inwardNormal(a, b);
     if (!nrm) continue;
-    const strip = setbackStadium(a, b, nrm, insetMetersPerEdge[i]!);
+    const built = setbackStadium(a, b, nrm, insetMetersPerEdge[i]!);
+    if (!built) continue;
+    const strip = quantise ? snapClipPolygon(built) : built;
     if (!strip) continue;
-    forbidden = forbidden ? polygonClipping.union(forbidden, strip) : [strip];
+    if (!forbidden) {
+      forbidden = [strip];
+      continue;
+    }
+    try {
+      forbidden = polygonClipping.union(forbidden, strip);
+    } catch (e) {
+      return {
+        detail: `setback strip union threw (${errorMessage(e)})`,
+      };
+    }
   }
-  return forbidden;
+  return { forbidden };
 }
 
 /** Deviation-from-straight beyond which a vertex is a reversal, degrees. */
@@ -376,66 +564,107 @@ export function stripReversalSpikes(points: XY[]): XY[] {
 }
 
 /**
- * Outcome of the boolean clip. "empty" is the ONLY outcome that supports a
- * consume-lot claim; "clip-error" is an instrument failure and must surface
- * as a validation decline, never as a measurement.
+ * The clip as ONE attempt saw it. "empty" is the ONLY outcome that supports a
+ * consume-lot claim; "threw" is an instrument failure at the boolean layer and
+ * is what the retry policy below acts on — never a measurement.
+ *
+ * `parcelPoints` travels with the attempt because the retry quantises the
+ * SUBJECT as well as the clip, and a later consumer must validate the subject
+ * the clip actually stood on rather than the one as served. (`classifyInset`
+ * takes it directly below; the exported `geometryCorrectnessGate` still receives
+ * the ring as served, because its own retry reaches the same quantised subject
+ * — see `correctnessReasons` — and because that gate's signature is part of the
+ * CI regression surface.)
  */
+type ClipAttempt =
+  | {
+      kind: "ok";
+      points: XY[];
+      forbidden: polygonClipping.MultiPolygon | null;
+      parcelPoints: XY[];
+    }
+  | {
+      kind: "empty";
+      forbidden: polygonClipping.MultiPolygon | null;
+      parcelPoints: XY[];
+    }
+  | { kind: "threw"; detail: string };
+
+/**
+ * Record that the clip only stood after both operands were quantised onto the
+ * retry grid. Carried out of the clip so it can be disclosed (never served
+ * silently) and so the conservation gate validates the repaired operands.
+ */
+export type ClipRepair = {
+  /** The quantisation grid the retry used, in metres. */
+  gridM: number;
+  /** The failure the as-constructed attempt threw, verbatim. */
+  firstError: string;
+};
+
+/** Outcome of the boolean clip, after the retry policy has had its one retry. */
 type ClipOutcome =
   | {
       kind: "ok";
       points: XY[];
       forbidden: polygonClipping.MultiPolygon | null;
+      parcelPoints: XY[];
+      repair: ClipRepair | null;
     }
-  | { kind: "empty" }
-  | { kind: "clip-error"; detail: string };
+  | {
+      kind: "empty";
+      forbidden: polygonClipping.MultiPolygon | null;
+      parcelPoints: XY[];
+      repair: ClipRepair | null;
+    }
+  | { kind: "clip-error"; detail: string; repair: ClipRepair | null };
 
 /**
- * Variable-distance inset via strip union + difference (polygon-clipping).
+ * ONE pass of the clip: strip union then parcel-minus-strips difference, with
+ * every operand either as constructed or quantised onto the retry grid.
  *
+ * Variable-distance inset via strip union + difference (polygon-clipping).
  * `insetMetersPerEdge[i]` is the inward offset for edge i (vertex i -> i+1).
  * When the difference yields several pieces, the largest is kept (a parcel
  * pinched into disjoint buildable regions renders its dominant region).
  */
-function insetProjected(
-  proj: ProjectedRing,
+function clipAttempt(
+  parcelPoints: XY[],
   insetMetersPerEdge: number[],
-): ClipOutcome {
-  const pts = proj.points;
-  const n = pts.length;
-  if (n < 3 || insetMetersPerEdge.length !== n) {
-    return { kind: "clip-error", detail: "edge/setback count mismatch" };
+  quantise: boolean,
+): ClipAttempt {
+  const pts = quantise ? snapXYRing(parcelPoints) : parcelPoints;
+  if (pts.length < 3) {
+    return {
+      kind: "threw",
+      detail: `the parcel ring did not survive quantisation onto the ${BOOLEAN_RETRY_GRID_M} m retry grid`,
+    };
   }
 
-  for (const d of insetMetersPerEdge) {
-    if (!Number.isFinite(d) || d < 0) {
-      return { kind: "clip-error", detail: "invalid setback distance" };
-    }
-  }
-
-  const parcelPoly: polygonClipping.Polygon = [closeClipRing(pts)];
-
-  let forbidden: polygonClipping.MultiPolygon | null;
-  try {
-    forbidden = buildForbiddenStrips(pts, insetMetersPerEdge);
-  } catch {
-    return { kind: "clip-error", detail: "setback strip union threw" };
-  }
+  const strips = buildForbiddenStrips(pts, insetMetersPerEdge, quantise);
+  if ("detail" in strips) return { kind: "threw", detail: strips.detail };
+  const forbidden = strips.forbidden;
 
   if (!forbidden) {
     return {
       kind: "ok",
       points: pts.map((p) => ({ x: p.x, y: p.y })),
       forbidden: null,
+      parcelPoints: pts,
     };
   }
 
+  const parcelPoly: polygonClipping.Polygon = [closeClipRing(pts)];
   let diff: polygonClipping.MultiPolygon;
   try {
     diff = polygonClipping.difference(parcelPoly, forbidden);
-  } catch {
-    return { kind: "clip-error", detail: "parcel-minus-strips difference threw" };
+  } catch (e) {
+    return {
+      kind: "threw",
+      detail: `parcel-minus-strips difference threw (${errorMessage(e)})`,
+    };
   }
-  if (!diff.length) return { kind: "empty" };
+  if (!diff.length) return { kind: "empty", forbidden, parcelPoints: pts };
 
   let best: XY[] | null = null;
   let bestArea = 0;
@@ -451,12 +680,63 @@ function insetProjected(
     }
   }
 
-  if (!best) return { kind: "empty" };
+  if (!best) return { kind: "empty", forbidden, parcelPoints: pts };
   // Clean degenerate zero-width excursions BEFORE the ring reaches callers:
   // the wire geometry, exports, and the conservation gate all see the same
   // spike-free ring (spikes carry no area, so the gate arithmetic is
   // unaffected either way).
-  return { kind: "ok", points: stripReversalSpikes(best), forbidden };
+  return {
+    kind: "ok",
+    points: stripReversalSpikes(best),
+    forbidden,
+    parcelPoints: pts,
+  };
+}
+
+/**
+ * The clip with its retry policy: run it as constructed, and only if that
+ * THROWS, run it once more with every operand quantised onto the retry grid
+ * (see BOOLEAN_RETRY_GRID_M for why that de-correlates the operands, and why it
+ * is a retry rather than a guarantee).
+ *
+ * A parcel that already derives takes the first branch and is bit-identical to
+ * its pre-P-372 output. A parcel that only derives on the repaired operands
+ * comes back with `repair` set, so the repair travels with the answer instead of
+ * being invisible. When both attempts throw, the failure is reported as a
+ * CLIP-stage refusal carrying both errors — it is never dressed up as a
+ * validation verdict, because no validation ran.
+ */
+function insetProjected(
+  proj: ProjectedRing,
+  insetMetersPerEdge: number[],
+): ClipOutcome {
+  const pts = proj.points;
+  const n = pts.length;
+  if (n < 3 || insetMetersPerEdge.length !== n) {
+    return { kind: "clip-error", detail: "edge/setback count mismatch", repair: null };
+  }
+
+  for (const d of insetMetersPerEdge) {
+    if (!Number.isFinite(d) || d < 0) {
+      return { kind: "clip-error", detail: "invalid setback distance", repair: null };
+    }
+  }
+
+  const first = clipAttempt(pts, insetMetersPerEdge, false);
+  if (first.kind !== "threw") return { ...first, repair: null };
+
+  const retry = clipAttempt(pts, insetMetersPerEdge, true);
+  if (retry.kind === "threw") {
+    return {
+      kind: "clip-error",
+      detail: `${first.detail}; retried with both operands quantised to the ${BOOLEAN_RETRY_GRID_M} m grid and ${retry.detail}`,
+      repair: null,
+    };
+  }
+  return {
+    ...retry,
+    repair: { gridM: BOOLEAN_RETRY_GRID_M, firstError: first.detail },
+  };
 }
 
 /** Ray-cast point-in-polygon with an on-edge tolerance (local metres). */
@@ -583,41 +863,74 @@ function conservationEpsilonM2(parcelAreaM2: number): number {
  * digitized edges and on probes landing in a NEIGHBORING edge's legitimate
  * strip (P60b forensics, parcel 48453:280239).
  */
+type ConservationCheck =
+  | { kind: "ran"; failures: string[] }
+  /**
+   * The boolean layer itself could not complete — an INSTRUMENT failure, never
+   * a finding about the geometry. Kept as its own shape since P-372 so a caller
+   * can retry the operation (the clip does) instead of reporting a violation.
+   */
+  | { kind: "could-not-run"; reason: string };
+
 function conservationFailures(
   parcelPts: XY[],
   insetPts: XY[],
   forbidden: polygonClipping.MultiPolygon | null,
-): string[] {
+  quantise: boolean,
+): ConservationCheck {
   const failures: string[] = [];
-  const parcelAreaM2 = ringAreaM2(parcelPts);
-  const insetAreaM2 = ringAreaM2(insetPts);
+  // Validate the operand set the clip actually stood on. When the clip needed
+  // the retry, the gate must be handed the quantised copies too: it re-runs the
+  // SAME difference, so a gate left on the as-constructed operands would throw
+  // exactly where the clip just threw, and would report a clip failure as a
+  // validation failure — the mis-staging P-372 exists to remove.
+  const parcel = quantise ? snapXYRing(parcelPts) : parcelPts;
+  const inset = quantise ? snapXYRing(insetPts) : insetPts;
+  const strips = quantise && forbidden ? snapMultiPolygon(forbidden) : forbidden;
+  if (quantise && forbidden && !strips) {
+    return {
+      kind: "could-not-run",
+      reason: "the strip union vanished under quantisation",
+    };
+  }
+
+  const parcelAreaM2 = ringAreaM2(parcel);
+  const insetAreaM2 = ringAreaM2(inset);
   const eps = conservationEpsilonM2(parcelAreaM2);
 
-  if (!forbidden) {
+  if (!strips) {
     if (Math.abs(parcelAreaM2 - insetAreaM2) >= eps) {
       failures.push(
         `zero-setback inset area ${insetAreaM2.toFixed(2)} m² does not match parcel ${parcelAreaM2.toFixed(2)} m²`,
       );
     }
-    return failures;
+    return { kind: "ran", failures };
   }
 
-  const parcelPoly: polygonClipping.Polygon = [closeClipRing(parcelPts)];
-  const insetPoly: polygonClipping.Polygon = [closeClipRing(insetPts)];
+  const parcelPoly: polygonClipping.Polygon = [closeClipRing(parcel)];
+  const insetPoly: polygonClipping.Polygon = [closeClipRing(inset)];
 
   let overlapM2: number;
   let forbiddenInParcelM2: number;
   let remainder: polygonClipping.MultiPolygon;
+  // `stage` names WHICH boolean could not run, so the reason can say so instead
+  // of the old blanket "boolean op threw".
+  let stage = "intersection(inset ∩ strips)";
   try {
     overlapM2 = multiPolygonAreaM2(
-      polygonClipping.intersection(insetPoly, forbidden),
+      polygonClipping.intersection(insetPoly, strips),
     );
+    stage = "intersection(strips ∩ parcel)";
     forbiddenInParcelM2 = multiPolygonAreaM2(
-      polygonClipping.intersection(forbidden, parcelPoly),
+      polygonClipping.intersection(strips, parcelPoly),
     );
-    remainder = polygonClipping.difference(parcelPoly, forbidden);
-  } catch {
-    return ["conservation check could not run (boolean op threw)"];
+    stage = "difference(parcel - strips)";
+    remainder = polygonClipping.difference(parcelPoly, strips);
+  } catch (e) {
+    return {
+      kind: "could-not-run",
+      reason: `${stage} threw: ${errorMessage(e)}`,
+    };
   }
 
   if (overlapM2 >= eps) {
@@ -644,7 +957,7 @@ function conservationFailures(
     );
   }
 
-  return failures;
+  return { kind: "ran", failures };
 }
 
 /** Classified rejection of a clip-produced inset. Null when the inset stands. */
@@ -665,6 +978,7 @@ function classifyInset(
   orig: XY[],
   inset: XY[],
   forbidden: polygonClipping.MultiPolygon | null,
+  quantise: boolean,
 ): InsetRejection {
   const origArea = signedArea(orig);
   const insetArea = signedArea(inset);
@@ -691,9 +1005,19 @@ function classifyInset(
       };
     }
   }
-  const failures = conservationFailures(orig, inset, forbidden);
-  if (failures.length) {
-    return { kind: "validation-failed", reason: failures.join("; ") };
+  const conservation = conservationFailures(orig, inset, forbidden, quantise);
+  if (conservation.kind === "could-not-run") {
+    // The conservation gate's own boolean could not complete. This is the
+    // VALIDATION stage failing, not the clip (which already succeeded) and not a
+    // finding about the ring, so it declines as a validation failure whose
+    // reason names the operation that could not run.
+    return {
+      kind: "validation-failed",
+      reason: `conservation check could not run (${conservation.reason})`,
+    };
+  }
+  if (conservation.failures.length) {
+    return { kind: "validation-failed", reason: conservation.failures.join("; ") };
   }
   return null;
 }
@@ -705,13 +1029,20 @@ function classifyInset(
  * conservation checks (inset ∩ strips ≈ 0; inset area matches the recomputed
  * clip remainder). The retired 8 cm self-touch and midpoint-probe heuristics
  * are gone: they false-fired on legitimate insets of digitized rings.
+ *
+ * P-372: the boolean-bearing half is run under the clip's own retry policy
+ * (operands as constructed, then quantised onto BOOLEAN_RETRY_GRID_M). Without
+ * it this gate re-derives the same strips and re-runs the same difference that
+ * the clip just needed the retry for, so a repaired clip would be failed here by
+ * the identical operation — reporting a library limitation as a geometry
+ * defect. When both operand sets fail to run, that is stated as such and is
+ * still a `pass: false`: the gate never silently passes.
  */
 export function geometryCorrectnessGate(
   parcelRing: Ring,
   insetRing: Ring | null,
   insetFeetPerEdge: number[],
 ): GeometryCorrectnessResult {
-  const reasons: string[] = [];
   if (!insetRing) {
     return { pass: false, reasons: ["inset ring is null"] };
   }
@@ -724,35 +1055,68 @@ export function geometryCorrectnessGate(
   if (!inset || inset.length < 3) {
     return { pass: false, reasons: ["inset is not a valid polygon"] };
   }
-  if (insetFeetPerEdge.length !== orig.length) {
+
+  const asBuilt = correctnessReasons(orig, inset, insetFeetPerEdge, false);
+  if (asBuilt) return { pass: asBuilt.length === 0, reasons: asBuilt };
+
+  const repaired = correctnessReasons(orig, inset, insetFeetPerEdge, true);
+  if (repaired) return { pass: repaired.length === 0, reasons: repaired };
+
+  return {
+    pass: false,
+    reasons: [
+      `the boolean layer could not run on the operands as constructed or quantised to the ${BOOLEAN_RETRY_GRID_M} m retry grid`,
+    ],
+  };
+}
+
+/**
+ * The gate's reason list for ONE operand set, or null when the boolean layer
+ * could not run on it (the caller retries quantised before reporting).
+ */
+function correctnessReasons(
+  orig: XY[],
+  inset: XY[],
+  insetFeetPerEdge: number[],
+  quantise: boolean,
+): string[] | null {
+  const parcel = quantise ? snapXYRing(orig) : orig;
+  const candidate = quantise ? snapXYRing(inset) : inset;
+  if (parcel.length < 3 || candidate.length < 3) return null;
+
+  const reasons: string[] = [];
+  if (insetFeetPerEdge.length !== parcel.length) {
     reasons.push(
-      `edge/setback count mismatch (${insetFeetPerEdge.length} vs ${orig.length})`,
+      `edge/setback count mismatch (${insetFeetPerEdge.length} vs ${parcel.length})`,
     );
   }
-  if (signedArea(inset) <= 0) reasons.push("inset orientation flipped or zero area");
-  if (ringSelfIntersects(inset)) reasons.push("inset ring self-intersects");
-  for (const p of inset) {
-    if (!pointInOrOnPolygon(p, orig, 0.12)) {
+  if (signedArea(candidate) <= 0) reasons.push("inset orientation flipped or zero area");
+  if (ringSelfIntersects(candidate)) reasons.push("inset ring self-intersects");
+  for (const p of candidate) {
+    if (!pointInOrOnPolygon(p, parcel, 0.12)) {
       reasons.push("inset vertex lies outside parcel");
       break;
     }
   }
-  if (insetAreaTooSmall(orig, inset)) {
+  if (insetAreaTooSmall(parcel, candidate)) {
     reasons.push("inset collapsed to a sliver relative to parcel");
   }
-  if (insetFeetPerEdge.length === orig.length) {
+  if (insetFeetPerEdge.length === parcel.length) {
     const insetMeters = insetFeetPerEdge.map((ft) =>
       feetToMeters(Math.max(0, ft)),
     );
-    let forbidden: polygonClipping.MultiPolygon | null;
-    try {
-      forbidden = buildForbiddenStrips(orig, insetMeters);
-      reasons.push(...conservationFailures(orig, inset, forbidden));
-    } catch {
-      reasons.push("conservation check could not run (strip union threw)");
-    }
+    const strips = buildForbiddenStrips(parcel, insetMeters, quantise);
+    if ("detail" in strips) return null;
+    const conservation = conservationFailures(
+      parcel,
+      candidate,
+      strips.forbidden,
+      quantise,
+    );
+    if (conservation.kind === "could-not-run") return null;
+    reasons.push(...conservation.failures);
   }
-  return { pass: reasons.length === 0, reasons };
+  return reasons;
 }
 
 function insetAreaTooSmall(orig: XY[], inset: XY[]): boolean {
@@ -762,15 +1126,29 @@ function insetAreaTooSmall(orig: XY[], inset: XY[]): boolean {
 }
 
 /**
- * Machine-readable class of an empty inset result (P60b reason split):
+ * Machine-readable class of an empty inset result (P60b reason split, extended
+ * by P-372):
  *  - "invalid-input": the parcel ring or setback array could not be used;
  *  - "consumed": the boolean clip itself returned empty or degenerate-by-area
  *    — the ONLY class that supports a "setbacks exceed the lot" claim;
  *  - "validation-failed": the clip produced a ring that the correctness /
  *    conservation gates rejected. A validation failure must surface as such,
- *    never masquerade as a consume-lot measurement.
+ *    never masquerade as a consume-lot measurement;
+ *  - "clip-failed" (P-372): the boolean CLIP could not be executed at all, on
+ *    the operands as constructed or on their quantised retry — an INSTRUMENT
+ *    failure. Distinct from "validation-failed" because no gate ever judged a
+ *    ring: reporting a library that could not subtract a valid parcel from a
+ *    valid strip union as a "geometry validation failure" tells the reader a
+ *    verdict was reached about geometry that has no defect. (Before P-372 this
+ *    case arrived as `emptyKind: "validation-failed"` with a reason whose own
+ *    text said "boolean clip error" — the reason already knew, the class did
+ *    not, and the wire only carried the class.)
  */
-export type InsetEmptyKind = "invalid-input" | "consumed" | "validation-failed";
+export type InsetEmptyKind =
+  | "invalid-input"
+  | "consumed"
+  | "validation-failed"
+  | "clip-failed";
 
 export interface InsetResult {
   ring: Ring | null;
@@ -779,6 +1157,14 @@ export interface InsetResult {
   empty: boolean;
   emptyReason?: string;
   emptyKind?: InsetEmptyKind;
+  /**
+   * Present when the clip only stood after both operands were quantised onto
+   * the retry grid (see BOOLEAN_RETRY_GRID_M). Not a customer-facing fact — it
+   * moves a figure by ~1e-6 m² — but it must be countable, so a caller can
+   * report how often this engine depends on the repair instead of the repair
+   * being invisible.
+   */
+  clipRepair?: ClipRepair;
 }
 
 /**
@@ -830,6 +1216,26 @@ export function insetPerEdge(
   const insetMeters = insetFeetPerEdge.map((ft) =>
     feetToMeters(Math.max(0, ft)),
   );
+
+  // P-372: a parcel ring that CROSSES ITSELF is not a boundary, and the honest
+  // place to say so is here rather than at the boolean layer. Measured on a
+  // bowtie fixture: the clip throws on both the as-constructed and the
+  // quantised operands, so the payload used to decline as a clip failure —
+  // naming a library that refused a ring which is itself the defect. This is a
+  // proper-crossing test (segCrossProper), so the exact-touch and near-collinear
+  // vertices digitized cadastral rings legitimately carry do not trip it.
+  if (ringSelfIntersects(proj.points)) {
+    return {
+      ring: null,
+      areaSqFt: 0,
+      parcelAreaSqFt,
+      empty: true,
+      emptyReason:
+        "parcel ring self-intersects — the served polygon is not a valid boundary",
+      emptyKind: "invalid-input",
+    };
+  }
+
   const clip = insetProjected(proj, insetMeters);
   if (clip.kind === "clip-error") {
     return {
@@ -837,8 +1243,12 @@ export function insetPerEdge(
       areaSqFt: 0,
       parcelAreaSqFt,
       empty: true,
-      emptyReason: `geometry validation failed (boolean clip error: ${clip.detail})`,
-      emptyKind: "validation-failed",
+      // P-372: the CLIP stage names itself. The reason says which operation
+      // threw and that the quantised retry also ran and also threw, so a reader
+      // can tell "the boolean library could not subtract these operands" from
+      // "the ring failed a gate" without guessing.
+      emptyReason: `geometry clip failed — no ring was produced to validate (${clip.detail})`,
+      emptyKind: "clip-failed",
     };
   }
   if (clip.kind === "empty") {
@@ -852,7 +1262,12 @@ export function insetPerEdge(
     };
   }
 
-  const rejection = classifyInset(proj.points, clip.points, clip.forbidden);
+  const rejection = classifyInset(
+    clip.parcelPoints,
+    clip.points,
+    clip.forbidden,
+    clip.repair !== null,
+  );
   if (rejection) {
     if (rejection.kind === "consumed") {
       return {
@@ -871,6 +1286,7 @@ export function insetPerEdge(
       empty: true,
       emptyReason: `geometry validation failed (${rejection.reason})`,
       emptyKind: "validation-failed",
+      ...(clip.repair ? { clipRepair: clip.repair } : {}),
     };
   }
 
@@ -888,6 +1304,7 @@ export function insetPerEdge(
       empty: true,
       emptyReason: `geometry validation failed (correctness gate: ${fullGate.reasons.join("; ")})`,
       emptyKind: "validation-failed",
+      ...(clip.repair ? { clipRepair: clip.repair } : {}),
     };
   }
 
@@ -896,5 +1313,6 @@ export function insetPerEdge(
     areaSqFt: insetArea,
     parcelAreaSqFt,
     empty: false,
+    ...(clip.repair ? { clipRepair: clip.repair } : {}),
   };
 }
