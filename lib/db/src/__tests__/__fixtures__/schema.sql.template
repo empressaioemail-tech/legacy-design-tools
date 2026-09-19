@@ -2309,7 +2309,13 @@ CREATE TABLE @@SCHEMA@@.tx_etj_boundary (
     source text NOT NULL,
     source_vintage text NOT NULL,
     source_citation text NOT NULL,
-    ingested_at timestamp with time zone DEFAULT now() NOT NULL
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    served_geometry jsonb,
+    served_status text DEFAULT 'underived'::text NOT NULL,
+    derivation jsonb,
+    area_published double precision,
+    area_served double precision,
+    derived_at timestamp with time zone
 );
 
 
@@ -4529,6 +4535,11 @@ CREATE INDEX tx_etj_boundary_bbox_idx ON @@SCHEMA@@.tx_etj_boundary USING btree 
 -- Name: tx_etj_boundary_city_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX tx_etj_boundary_city_idx ON @@SCHEMA@@.tx_etj_boundary USING btree (city_key);
+
+
+-- Name: tx_etj_boundary_served_status_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX tx_etj_boundary_served_status_idx ON @@SCHEMA@@.tx_etj_boundary USING btree (served_status);
 
 
 -- Name: tx_etj_source_extent_idx; Type: INDEX; Schema: public; Owner: -

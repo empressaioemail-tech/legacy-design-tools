@@ -199,8 +199,14 @@ function isPosition(v: unknown): v is [number, number] {
  * Bbox of a GeoJSON geometry by walking the coordinate nesting
  * generically. Returns null when the geometry holds no finite
  * positions (empty or malformed).
+ *
+ * The parameter is `unknown`, not `GeoJsonGeometry`, on purpose: the ETJ
+ * reader (P-359) computes an envelope from a row whose geometry it has not
+ * accepted yet — a published drawing it may go on to refuse — and it must be
+ * able to do that without asserting the very thing it is about to check. The
+ * walk is already type-blind, so nothing here trusts the shape.
  */
-export function bboxOfGeometry(geometry: GeoJsonGeometry): GeoBbox | null {
+export function bboxOfGeometry(geometry: unknown): GeoBbox | null {
   let west = Infinity;
   let south = Infinity;
   let east = -Infinity;
@@ -223,7 +229,9 @@ export function bboxOfGeometry(geometry: GeoJsonGeometry): GeoBbox | null {
     }
   }
 
-  walk(geometry?.coordinates);
+  walk(
+    (geometry as { coordinates?: unknown } | null | undefined)?.coordinates,
+  );
   if (!found) return null;
   return { westLng: west, southLat: south, eastLng: east, northLat: north };
 }

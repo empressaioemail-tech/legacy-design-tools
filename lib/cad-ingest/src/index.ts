@@ -214,6 +214,8 @@ export {
   buildEtjBoundaryIndex,
   resolveEtj,
   resolveEtjAtPoint,
+  ETJ_SERVABLE_STATUSES,
+  statusIsServable,
 } from "./boundary/containment";
 export type {
   CityBoundaryIndexEntry,
@@ -221,7 +223,10 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
   EtjStatus,
+  EtjBoundaryIndex,
   EtjBoundaryIndexEntry,
+  EtjBoundarySourceRow,
+  EtjRingRefusal,
   EtjSourceCoverageEntry,
   EtjContainmentResult,
 } from "./boundary/containment";
@@ -286,6 +291,17 @@ export type {
   EtjUpsertOptions,
   EtjUpsertSummary,
 } from "./boundary/etjIngest";
+export {
+  REPAIR_RELATIVE_AREA_TOLERANCE,
+  ETJ_AREA_SRID,
+  ETJ_DERIVED_STATUSES,
+  deriveEtjServedGeometry,
+} from "./boundary/etjDerive";
+export type {
+  EtjDeriveDb,
+  EtjDeriveSummary,
+  EtjRingDerivationOutcome,
+} from "./boundary/etjDerive";
 export {
   ETJ_CONTROL_POINTS,
   verifyEtjControlPoints,
