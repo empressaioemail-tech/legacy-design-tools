@@ -48,7 +48,59 @@
  * retirement, and deliberately no `baseFacts` / `zoning` / `envelope` /
  * `acreage` / `landUse` value. It is a retirement, not a bake.
  * ---------------------------------------------------------------------------
+ *
+ * ---------------------------------------------------------------------------
+ * P-370 (2026-09-19). THE MEMBERSHIP TEST ASKS THE NODE'S OWN KEYSPACE.
+ *
+ * P-180's rule reads "a work item whose prop_id is not a `txgio_parcel` prop_id
+ * is account-keyed". That sentence is only true of a county with ONE numbering
+ * system. Measure it on Williamson 48491 (staging, read-only, 2026-09-19): the
+ * parcel table holds 304,162 R-prefixed prop_ids and ZERO numeric ones, while
+ * the bake's work list carries the 319,480 numeric keys the declared roll is
+ * keyed by. So the bare-key test calls every one of them account-keyed, the
+ * excluded set IS the whole numeric served keyspace, and P-351's blast-radius
+ * refusal fires -- refusing the run instead of emptying the county, which is
+ * how the 2026-09-17 write that retired 319,480 live rows was caught, and also
+ * why the county cannot publish at all.
+ *
+ * THE THIRD VERDICT IS A DECLARATION, NOT A RETIREMENT. The dispatch's own
+ * sentence is "a node the pair maps to a published parcel is not hollow; a node
+ * no published identifier reaches is DECLARED (not retired, not excluded as
+ * hollow)". Read with its neighbours that can only mean: in a county that
+ * PUBLISHES a pair over this run's account-shaped keys, the bare-key comparison
+ * is not admissible evidence of hollowness for those keys at all. A key the
+ * pair names to a prop_id this county's parcel table publishes is a served
+ * parcel (kept, counted); a key it does not name is KEPT AND DECLARED, with the
+ * declaration made by the arm that already declares a node whose account cannot
+ * be resolved (writer (a)'s `retirementResolution`, P-351). Nothing in that
+ * keyspace is retired on a comparison between two numbering systems.
+ *
+ * WHY THE LOUDER-LOOKING ALTERNATIVE IS THE WRONG ONE, measured rather than
+ * argued. An arm that only MOVES REACHED KEYS BACK leaves the keys the pair
+ * does not reach excluded, i.e. retired: 319,480 excluded by the bare test,
+ * 282,146 moved back, 37,334 STILL RETIRED -- and 37,334 is 11.7% of a
+ * keyspace whose every key P-327 measured present on the declared 2026 roll,
+ * so the run would write 37,334 false retirements while P-351's guard, which is
+ * SET EQUALITY against a whole keyspace, cannot see it and cannot fire. A
+ * narrower version of the same defect. The shipped rule retires nothing on a
+ * comparison the county's own published identifiers cannot settle.
+ *
+ * THE COUNTY SCOPING IS THE TEST, not a filter someone remembered to add. The
+ * staged extracts carry no county column, so a lookup by account number alone
+ * can MATCH ANOTHER COUNTY'S PARCEL. The second identifier is therefore scoped
+ * by `txgioPropIds` -- THIS county's parcel table -- so a key whose paired
+ * prop_id this county does not publish is not reached by it, whatever the
+ * extract said. Measured: no Hays 48209 key is named by the pair to a key
+ * Hays' parcel table publishes, so Hays' hollow set is unchanged key for key.
+ *
+ * ABSENT, THIS IS THE OLD TEST EXACTLY. A county that publishes no pair, and
+ * every caller written before P-370, passes nothing and gets the pre-P-370
+ * verdict -- which is what keeps Hays' measured shape behaving exactly as it
+ * did.
+ * ---------------------------------------------------------------------------
  */
+
+import { nodeKeyShapeClass } from "./retirementAccountResolution";
 
 /** The subject a work item carries: the atom body and the node id derived from it. */
 export interface AccountKeyedWorkItem {
@@ -56,13 +108,138 @@ export interface AccountKeyedWorkItem {
   parcelNodeId: string;
 }
 
+/**
+ * P-370 (2026-09-19). THE COUNTY'S OWN PUBLISHED PAIR, READ BY THE ACCOUNT.
+ *
+ * The subject is the map `buildPublishedNodeKeyByAccountKey` returns: account
+ * key -> the ONE parcel-index prop_id the county's extracts name for it, for
+ * `tx_wcad_owner` / `tx_wcad_ag_valuation` the numeric account the declared
+ * roll is keyed by against the R prop_id the parcel index publishes.
+ *
+ * PRESENCE IS THE TRIGGER, and it is deliberately not inferable from the map's
+ * size. NON-NULL means "this county publishes a pair over this run's
+ * account-shaped keys: the read returned at least one row naming one of them",
+ * which is exactly when the dispatch's third verdict applies. A county whose
+ * read returned nothing for its keys passes NOTHING -- not an empty map -- and
+ * gets the pre-P-370 verdict, which is what keeps a county whose published pair
+ * is silent byte-identical to before. `sources` names every extract that
+ * contributed so a declaration can say which identifiers were searched.
+ */
+export interface PublishedPairMembership {
+  /** account key -> the ONE parcel-index prop_id the extracts name for it. */
+  readonly nodeKeyByAccountKey: ReadonlyMap<string, string>;
+  /** Every extract that contributed, named. */
+  readonly sources: readonly string[];
+  /**
+   * THE SECOND FACT, WITHOUT WHICH THE FIRST IS DANGEROUS: the key SHAPE CLASSES
+   * the parcel table's own prop_id column publishes, measured on the rows this
+   * run just read (`nodeKeyShapeClass` over `txgioPropIds`).
+   *
+   * A key whose own shape class is NOT among them belongs to a numbering this
+   * table does not use, so its absence from the table is not evidence of
+   * hollowness. This is what keeps a CROSS-COUNTY pair row from disarming a
+   * county whose parcel table DOES use the key's numbering: the staged extracts
+   * carry no county column, so an account number in one county can match a
+   * parcel in another, and without this fact Hays -- parcel table numeric, work
+   * keys numeric, and a pair row that happens to name one of its keys to a
+   * Williamson prop_id -- would have its whole hollow set declared instead of
+   * retired. Measured 2026-09-19: Williamson's parcel table publishes 304,162
+   * r-account-shaped keys and ZERO numeric ones; Hays' publishes numeric keys.
+   */
+  readonly parcelTableShapeClasses: ReadonlySet<string>;
+}
+
+/**
+ * P-370. THE FOUR OUTCOMES, each named so a caller cannot read one as another.
+ * The first three are KEPT IN THE FACT BUILD; only the last is excluded.
+ */
+export type AccountKeyedMembershipVerdict =
+  /** The parcel table publishes this key in its own numbering. Kept. */
+  | "published-parcel-node"
+  /** The county's published pair names it to a prop_id the parcel table publishes. Kept. */
+  | "reached-by-published-pair"
+  /**
+   * The county publishes a pair over this run's account-shaped keys and it does
+   * NOT name this one. Kept, and its absence of an account is DECLARED rather
+   * than retired: the comparison the bare-key test makes is between two
+   * numbering systems, and a declaration beats a false absence.
+   */
+  | "declared-no-published-identifier"
+  /** No pair published for this county: the pre-P-370 verdict. Excluded. */
+  | "hollow-account-keyed";
+
+/**
+ * P-370 (2026-09-19). THE MEMBERSHIP TEST ASKS THE NODE'S OWN KEYSPACE.
+ *
+ * THE DEFECT THIS CLOSES. The test was "is this key a `txgio_parcel` prop_id".
+ * That is the right question for a county whose served keys ARE the parcel
+ * table's keys, and it is the wrong question for a county that publishes TWO
+ * numbering systems for one parcel: there a key can be absent from the parcel
+ * table and still be a node with a published parcel, because the parcel table
+ * is keyed by the county's OTHER number. Measured on staging 2026-09-19
+ * (read-only): Williamson 48491's parcel table holds 304,162 R-prefixed
+ * prop_ids and ZERO numeric ones, while the bake's work list carries 319,480
+ * numeric declared-roll keys, of which 282,146 are named by the county's own
+ * published pair to an R prop_id the parcel table DOES publish. On the bare-key
+ * test every one of the 319,480 is "account-keyed", the exclusion IS the whole
+ * numeric served keyspace, and writer (b)'s blast-radius refusal (P-351) fires
+ * -- which is how the whole-keyspace write that emptied 319,480 live rows on
+ * 2026-09-17 (P-327's F5) was caught, and also why Williamson cannot publish.
+ *
+ * WHAT THE SECOND IDENTIFIER IS, exactly. `publishedPair` is the county's OWN
+ * pair, read in the ACCOUNT direction for exactly the keys this run holds. A
+ * key it names whose named node key IS in `txgioPropIds` is a key a published
+ * identifier reaches a PUBLISHED parcel through, so it is not hollow -- that is
+ * the node's own keyspace being read through the county's own pair instead of
+ * through a table in the other numbering system. A key it does not name is
+ * DECLARED, not retired (see the file header for why that is the dispatch's
+ * sentence and why the alternative writes false retirements).
+ */
+export function accountKeyedMembershipVerdict(
+  propId: string,
+  txgioPropIds: ReadonlySet<string>,
+  publishedPair?: PublishedPairMembership | null,
+): AccountKeyedMembershipVerdict {
+  const id = propId.trim();
+  // An unparseable id is not a key at all. It keeps the pre-P-370 verdict
+  // (kept): excluding on an id the pass never read is how a pass drops a row it
+  // cannot account for.
+  if (id === "") return "published-parcel-node";
+  if (txgioPropIds.has(id)) return "published-parcel-node";
+  if (publishedPair != null) {
+    const pairedNodeKey = publishedPair.nodeKeyByAccountKey.get(id) ?? null;
+    if (pairedNodeKey != null && txgioPropIds.has(pairedNodeKey)) {
+      return "reached-by-published-pair";
+    }
+    // THE DECLARATION RESTS ON TWO FACTS AND BOTH MUST HOLD. (1) the county
+    // publishes a pair over this run's keys -- `publishedPair` is present; and
+    // (2) the parcel table does not use THIS key's numbering at all, measured on
+    // the table's own keys. Either alone is not enough, and each has its own
+    // measured failure: the pair alone lets a cross-county pair row turn a
+    // county whose parcel table DOES use this numbering (Hays) into a county
+    // that declares its whole hollow set; the shape alone would stop a county
+    // with a disjoint numbering from retiring anything, with no published
+    // identifier taking the retirement's place -- a silent gap rather than a
+    // declared one.
+    if (!publishedPair.parcelTableShapeClasses.has(nodeKeyShapeClass(id))) {
+      return "declared-no-published-identifier";
+    }
+  }
+  return "hollow-account-keyed";
+}
+
+/**
+ * `true` when the key would be EXCLUDED as an account-keyed hollow node. Kept
+ * as the predicate every guard and caller written before P-370 already reads,
+ * now answered by the verdict above so there is one rule and not two.
+ */
 export function isAccountKeyedNodeId(
   propId: string,
   txgioPropIds: ReadonlySet<string>,
+  publishedPair?: PublishedPairMembership | null,
 ): boolean {
-  const id = propId.trim();
-  if (id === "") return false;
-  return !txgioPropIds.has(id);
+  return accountKeyedMembershipVerdict(propId, txgioPropIds, publishedPair) ===
+    "hollow-account-keyed";
 }
 
 /**
@@ -74,15 +251,44 @@ export function isAccountKeyedNodeId(
 export function partitionAccountKeyedWork<T extends { parcelNodeId: string }>(
   work: readonly T[],
   txgioPropIds: ReadonlySet<string>,
-): { kept: T[]; excluded: T[] } {
+  publishedPair?: PublishedPairMembership | null,
+): {
+  kept: T[];
+  excluded: T[];
+  reachedByPublishedPair: number;
+  declaredNoPublishedIdentifier: number;
+} {
   const kept: T[] = [];
   const excluded: T[] = [];
+  /**
+   * P-370. Counted, not inferred: the keys the county's published pair moved
+   * back into the fact build. A run that reports 0 here on a two-keyspace
+   * county is the run in which the new identifier did nothing, and it must be
+   * legible from outside rather than discovered from a refusal.
+   */
+  let reachedByPublishedPair = 0;
+  /**
+   * P-370. And the keys that are KEPT AND DECLARED rather than excluded -- the
+   * population the dispatch's third case is about. Counted for the same reason,
+   * and counted SEPARATELY: a declaration is not a retirement with softer
+   * wording, and a run whose declaration count is not visible cannot be
+   * distinguished from a run that retired them.
+   */
+  let declaredNoPublishedIdentifier = 0;
   for (const item of work) {
     const propId = item.parcelNodeId.split(":")[1] ?? "";
-    if (isAccountKeyedNodeId(propId, txgioPropIds)) excluded.push(item);
-    else kept.push(item);
+    const verdict = accountKeyedMembershipVerdict(propId, txgioPropIds, publishedPair);
+    if (verdict === "hollow-account-keyed") {
+      excluded.push(item);
+      continue;
+    }
+    if (verdict === "reached-by-published-pair") reachedByPublishedPair += 1;
+    else if (verdict === "declared-no-published-identifier") {
+      declaredNoPublishedIdentifier += 1;
+    }
+    kept.push(item);
   }
-  return { kept, excluded };
+  return { kept, excluded, reachedByPublishedPair, declaredNoPublishedIdentifier };
 }
 
 /** The node's own bare prop_id (the part of the node id after the colon). */
@@ -295,15 +501,18 @@ export const ACCOUNT_KEYED_RETIREMENT_FORBIDDEN_FACT_KEYS: readonly string[] = [
 export function buildAccountKeyedRetirementRecord(
   input: Pick<
     AccountKeyedRetirementInput,
-    | "parcelNodeId"
-    | "countyFips"
-    | "countyName"
-    | "propId"
-    | "asOf"
-    | "lastSeenTaxYear"
+    "parcelNodeId" | "countyFips" | "countyName" | "propId" | "asOf" | "lastSeenTaxYear"
   >,
 ): AccountKeyedRetirementRecord {
   const { parcelNodeId, countyFips, countyName, propId, asOf, lastSeenTaxYear } = input;
+  // P-370 (2026-09-19). UNCHANGED, deliberately. A record here is only written
+  // for a key the membership test called HOLLOW, and after P-370 that verdict is
+  // reachable only for a county that publishes NO pair over this run's
+  // account-shaped keys -- i.e. exactly the counties whose records were already
+  // right. The third verdict (a key a county's own pair does not reach) is KEPT
+  // AND DECLARED and never reaches this function, so nothing on the retirement
+  // path had to change for it: widening this text would have described a
+  // declaration with the wording of a retirement.
   return {
     status: "retired",
     verdict: "absent-verified",
