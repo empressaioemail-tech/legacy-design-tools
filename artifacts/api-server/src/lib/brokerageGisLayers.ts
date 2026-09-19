@@ -126,7 +126,13 @@ export function resolveGisLayerEndpoint(
 export type GisLayerGeoJsonResult = GisLayerEndpoint & {
   geojson: ArcGisGeoJsonFeatureCollection;
   featureCount: number;
-  queryMode: "pin" | "bbox";
+  /**
+   * How the features were asked for. `identity` (P-373) is a parcel fetched by
+   * its own appraisal id rather than by a point or a box; county-provider
+   * results carry it, and a county result spread through this shape must stay
+   * assignable, so the union is the provider's own.
+   */
+  queryMode: "pin" | "bbox" | "identity";
   truncated?: boolean;
   /**
    * Set on county-GIS-served parcels: county appraisal-district polygons

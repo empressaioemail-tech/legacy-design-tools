@@ -43,6 +43,7 @@ import {
   assertAccountKeyedBlastRadius,
   partitionAccountKeyedWork,
   planAccountKeyedRetirements,
+  type PublishedPairMembership,
   type ServedKeyspace,
 } from "./lib/accountKeyedWork.js";
 import { normalizeAccessPair } from "./lib/serveGuards.js";
@@ -52,6 +53,7 @@ import {
   fetchCountyLandUseRoll,
   fetchPriorVintageQuickRefRegister,
   fetchPublishedAccountPairExtracts,
+  fetchPublishedAccountPairExtractsByAccount,
   loadLedgerBlockedFips,
   resolveAddressLandUse,
   type CountyCadPropertyRoll,
@@ -68,6 +70,7 @@ import {
 import { ringCentroid } from "./lib/nodeFacetBakeTier1.js";
 import {
   buildPublishedAccountPair,
+  buildPublishedNodeKeyByAccountKey,
   chooseRetirementResolution,
   describeRetirementKeyspaces,
   nodeKeyShapeClass,
@@ -442,6 +445,15 @@ async function main() {
   // keeps a stale publishRunId the factory verify-walk refuses.
   let excludedAccountKeyed = 0;
   const excludedWork: Array<{ body: Record<string, unknown>; parcelNodeId: string }> = [];
+  // P-370. The two counters the run's own summary carries about the county's
+  // published pair: the keys it named to a published prop_id (moved back into
+  // the fact build), and the keys it did not name (KEPT AND DECLARED, never
+  // retired -- see `accountKeyedMembershipVerdict`). Plus the count of keys the
+  // pair named to a prop_id THIS county's parcel index does not publish, which
+  // is the cross-county collision the county scoping exists for.
+  let reachedByPublishedPairCount = 0;
+  let declaredNoPublishedIdentifierCount = 0;
+  let pairReachedNoPublishedParcel = 0;
   // P-183 (2026-09-14). The same prepass fetch already reads every work id's
   // row from the parcel table's prop_id column -- the membership test the
   // account-keyed exclusion uses. Those rows are the NODES' OWN parcels, so
@@ -464,9 +476,105 @@ async function main() {
     );
     ownPropIdRows = txgioPresent.byPropId;
     const txgioPropIds = new Set(txgioPresent.byPropId.keys());
-    const { kept, excluded } = partitionAccountKeyedWork(work, txgioPropIds);
+    // P-370 (2026-09-19). THE MEMBERSHIP TEST ASKS THE NODE'S OWN KEYSPACE.
+    //
+    // The bare-key test above is only the right question in a county whose
+    // served keys ARE this table's keys. Williamson is not: staging holds
+    // 304,162 R-prefixed prop_ids and ZERO numeric ones for 48491, while the
+    // work list carries 319,480 numeric declared-roll keys -- so the bare test
+    // excludes a whole served keyspace that is alive, and P-351's refusal (the
+    // thing that exists so the 2026-09-17 emptying cannot repeat) turns the
+    // county unable to publish instead. The second published identifier is the
+    // county's OWN pair read by the ACCOUNT: a work key the pair names to a
+    // prop_id THIS county's parcel table publishes is a key a published
+    // identifier reaches a published parcel through, so it is not hollow; a key
+    // the pair does not name is KEPT AND DECLARED, never retired (the dispatch's
+    // third case, and the reason `publishedPair` presence -- not map size -- is
+    // the trigger).
+    //
+    // Asked only for the keys the first arm is about to exclude AND whose shape
+    // is the account shape the pair is keyed by, so a county whose exclusion is
+    // already empty adds no query and a one-keyspace county asks for nothing.
+    // Handed to `partitionAccountKeyedWork` ONLY when the read returned rows:
+    // absent, the partition is the pre-P-370 verdict exactly (Hays' measured
+    // shape), and the retirement records keep their old text.
+    let publishedPair: PublishedPairMembership | undefined;
+    const accountKeysToResolve = [
+      ...new Set(
+        workIds.filter(
+          (id) => !txgioPropIds.has(id) && nodeKeyShapeClass(id) === "numeric",
+        ),
+      ),
+    ];
+    if (accountKeysToResolve.length > 0) {
+      const pairRead = await fetchPublishedAccountPairExtractsByAccount(
+        neondb,
+        accountKeysToResolve,
+      );
+      if (pairRead.rows.length > 0) {
+        const bySource = new Map<string, Array<{ accountKey: string; nodeKey: string; source: string }>>();
+        for (const r of pairRead.rows) {
+          const bucket = bySource.get(r.source);
+          if (bucket) bucket.push(r);
+          else bySource.set(r.source, [r]);
+        }
+        const byAccount = buildPublishedNodeKeyByAccountKey([...bySource.values()]);
+        publishedPair = {
+          nodeKeyByAccountKey: byAccount.byAccountKey,
+          sources: byAccount.sources,
+          // Measured on THIS run's own read of the parcel table, not assumed:
+          // the shape classes of the keys the table publishes. A key of a shape
+          // the table does not use at all cannot be judged hollow by its absence
+          // from it, which is the whole defect; and a key of a shape the table
+          // DOES use (Hays) stays judged exactly as it was.
+          parcelTableShapeClasses: new Set([...txgioPropIds].map(nodeKeyShapeClass)),
+        };
+        pairReachedNoPublishedParcel = [...byAccount.byAccountKey.values()].filter(
+          (nodeKey) => !txgioPropIds.has(nodeKey),
+        ).length;
+        console.log(
+          `[node-facet-bake-t1-conformant] published account pair for ${county}: ` +
+            `${byAccount.byAccountKey.size} of ${accountKeysToResolve.length} account-shaped key(s) ` +
+            `the bare-key test would have excluded is named by a published extract ` +
+            `(refused no-prop-id=${byAccount.refusedNoNodeKey}, ambiguous=${byAccount.refusedAmbiguous}, ` +
+            `disagreement=${byAccount.refusedDisagreement}, sources=${byAccount.sources.join("+")}, ` +
+            `absent=${pairRead.sourcesAbsent.join("+") || "none"}); ` +
+            `${pairReachedNoPublishedParcel} of those name a prop_id the parcel index does NOT ` +
+            `publish, so the county scoping keeps them out of it`,
+        );
+      }
+    }
+    const {
+      kept,
+      excluded,
+      reachedByPublishedPair,
+      declaredNoPublishedIdentifier,
+    } = partitionAccountKeyedWork(work, txgioPropIds, publishedPair);
+    reachedByPublishedPairCount = reachedByPublishedPair;
+    declaredNoPublishedIdentifierCount = declaredNoPublishedIdentifier;
     excludedAccountKeyed = excluded.length;
-    excludedWork.push(...excluded);
+    // P-370. SPREAD IS NOT AN APPEND AT THIS SIZE. `excludedWork.push(...excluded)`
+    // threw `RangeError: Maximum call stack size exceeded` on staging 2026-09-19
+    // at 602,050 work items / 319,480 exclusions -- i.e. in exactly the case this
+    // pass exists to refuse, and BEFORE P-351's refusal below could run: the
+    // full-county bake died of the append and never reached the guard whose
+    // whole reason for being is a whole-keyspace exclusion. A per-item loop is
+    // mechanically identical and has no argument-count limit.
+    for (const item of excluded) excludedWork.push(item);
+    // P-370. What the county's published pair did, printed rather than inferred:
+    // the run that holds a pair and reports 0 reached is the run whose second
+    // published identifier changed nothing, and the DECLARED count is what says
+    // how many keys stayed in the fact build without a resolvable account
+    // instead of being retired.
+    if (publishedPair != null) {
+      console.log(
+        `[node-facet-bake-t1-conformant] node's own keyspace for ${county}: ` +
+          `${reachedByPublishedPair} work key(s) the bare-key test called account-keyed are ` +
+          `named by the county's published pair to a prop_id the parcel index publishes, so ` +
+          `they stay in the fact build; ${declaredNoPublishedIdentifier} more are named by no ` +
+          `published identifier and are KEPT AND DECLARED rather than retired`,
+      );
+    }
     // P-351 (2026-09-18). WRITER (b)'s BLAST-RADIUS REFUSAL, in front of the
     // pass rather than in front of the write. P-327 measured that the pre-bake
     // gate cannot reach this pass: it runs INSIDE the bake, after promotion, so
@@ -490,8 +598,10 @@ async function main() {
       );
     }
     assertAccountKeyedBlastRadius(blastRadius);
+    // P-370. Same reason as the exclusion append above: `push(...kept)` is an
+    // argument list, and 282,569 of them is past the stack's limit.
     work.length = 0;
-    work.push(...kept);
+    for (const item of kept) work.push(item);
   }
   let parcelRows = new Map<string, ParcelJoinRow>();
   let situsRows = new Map<string, ParcelJoinRow>();
@@ -1338,6 +1448,13 @@ async function main() {
         }
       },
       readLastSeenTaxYear: (body) => readConformantCadClaim(body).taxYear,
+      // P-370 (2026-09-19). NO PAIR SCOPE IS PASSED HERE, and that is the
+      // change, not an omission. This pass only ever sees a key the membership
+      // test called HOLLOW, and after P-370 that verdict is reachable ONLY for a
+      // county that publishes no pair over this run's account-shaped keys -- the
+      // counties whose retirement text was already right. A key a county's own
+      // pair does not reach is now kept in the fact build and DECLARED by
+      // writer (a)'s resolution, so it never reaches this pass at all.
     });
     excludedAccountKeyedAccessRefused = retirementPlan.accessRefused;
     for (const write of retirementPlan.writes) {
@@ -1505,6 +1622,21 @@ async function main() {
       written,
       retired,
       excludedAccountKeyed,
+      // P-370. The keys the bare-key test called account-keyed and the county's
+      // OWN published pair named to a prop_id the parcel index publishes. 0 on a
+      // two-keyspace county is the run in which the second published identifier
+      // changed nothing.
+      reachedByPublishedPair: reachedByPublishedPairCount,
+      // P-370. And the account-shaped keys the pair names to NOTHING this county
+      // publishes: KEPT AND DECLARED, never retired. Printed beside the reached
+      // count because a declaration is not a retirement, and a run that retired
+      // them would otherwise report the same `excludedAccountKeyed` as a run
+      // that declared them.
+      declaredNoPublishedIdentifier: declaredNoPublishedIdentifierCount,
+      // P-370. The account-shaped keys whose paired prop_id the parcel index
+      // does NOT publish: named by the pair, still no published parcel in THIS
+      // county, so the county scoping keeps them out of the second identifier.
+      pairReachedNoPublishedParcel,
       // P-180 wave 6: the exclusions retired with the current run id, and the
       // ones that could not be (an unnormalizable access pair -- the fact build
       // skips exactly those too). `excludedAccountKeyed` must equal

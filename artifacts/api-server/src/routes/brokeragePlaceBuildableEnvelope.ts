@@ -32,10 +32,8 @@ import {
   type Response,
 } from "express";
 import { z } from "zod";
-import { keyFromEngagementOrSynthesize } from "@workspace/codes";
 import {
   wrapEngineEnvelope,
-  type EngineHonesty,
 } from "../../../../lib/engine-core/src/envelope";
 import {
   legacyHonestyToReadContract,
@@ -56,53 +54,41 @@ import {
 import {
   resolveTxParcelCounty,
   resolvePointCountyByPip,
-  storeCountiesContainingPoint,
+  countiesContainingPoint,
   allStoreCounties,
+  queryTxCountyParcelByPropId,
   txCountyProviderLabel,
   txParcelProviderMode,
+  TX_PARCEL_COUNTIES,
   type TxParcelCounty,
 } from "../lib/brokerageTxParcels";
-import { queryTxgioParcelByPropId } from "../lib/txgioParcelStore";
+import { parcelNodeId, parseParcelNodeId } from "../lib/parcelNodeId";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
-import {
-  fetchPropertyAtomChain,
-  type PropertyAtomChainWire,
-} from "../lib/buildableEnvelope/fetchPropertyAtomChain";
-import {
-  resolveAuthoritativeSetbacks,
-  type AuthoritativeSetbackResolution,
-} from "../lib/buildableEnvelope/authoritativeSetbackSource";
-import { getSetbackTableForZoning } from "@workspace/adapters";
-import {
-  districtCodeHasExactRow,
-  firstResolvableDistrictCode,
-} from "../lib/buildableEnvelope/districtMapping";
+import { type PropertyAtomChainWire } from "../lib/buildableEnvelope/fetchPropertyAtomChain";
+import { type AuthoritativeSetbackResolution } from "../lib/buildableEnvelope/authoritativeSetbackSource";
 // P-340: the R-1 conflict row the resolver has returned since P-154 and this
 // payload never served — see `setbackSourceConflict.ts`.
 import { sourceConflictRowForResolution } from "../lib/buildableEnvelope/setbackSourceConflict";
-import { plannedDevelopmentSetbackRefusalFor } from "../lib/buildableEnvelope/plannedDevelopmentSetback";
-import {
-  cityStateFromSitus,
-  jurisdictionKeyFromParcelNode,
-} from "../lib/buildableEnvelope/envelopeJurisdiction";
+import { cityStateFromSitus } from "../lib/buildableEnvelope/envelopeJurisdiction";
 import { POST_BODY } from "../lib/buildableEnvelope/envelopePostBody";
 import {
-  labelEdges,
-  type RoadCandidate,
-} from "../lib/buildableEnvelope/edgeLabeling";
-import { fetchNearbyRoads, namedRoadsToCandidates } from "../lib/buildableEnvelope/roads";
-import {
-  resolveSpineZoningWhenGisAbsent,
   type SpineZoningResolution,
 } from "../lib/buildableEnvelope/spineZoningDistrict";
-import type { Ring } from "../lib/buildableEnvelope/geometry";
+import { openRing, type Ring } from "../lib/buildableEnvelope/geometry";
+// P-374: the ONE derivation both this route and the get_smart_site draw block
+// run — see that module's own doc comment for the drift this closed.
+import {
+  deriveEnvelopeDraw,
+  type EnvelopeDrawParcel,
+  type EnvelopeDrawnDerivation,
+} from "../lib/buildableEnvelope/envelopeDrawDerivation";
 // P-153 Step A: moved out of THIS file so the get_smart_site draw-block
 // orchestration (parcelDrawEnvelopeModel.ts) can reuse both without pulling
 // in this route's own resolvePlace/txgioAddressResolve/brokerageTxParcels/
 // txgioParcelStore import graph (all @workspace/db-coupled at module load —
-// see that lib file's own doc comment for why this move happened). Both
-// re-exported below so THIS file's own public surface (and its own
-// deriveLabelAndRespond call site, unchanged) still work exactly as before.
+// see that lib file's own doc comment for why this move happened). P-374 moved
+// the derivation itself to `envelopeDrawDerivation.ts`; both are re-exported
+// below so THIS file's own public surface still works exactly as before.
 import {
   composeBuildableEnvelopeDerivation,
   firstParcelRing,
@@ -191,12 +177,16 @@ interface EnvelopeContext {
    *   - "geocode-high" : Nominatim returned a hit for the full address.
    *   - "geocode-low"  : Nominatim only matched a coarser rung
    *                       (city/ZIP centroid) â€” the point is NOT rooftop.
+   *   - "parcel-identity": no point was sent; this is the representative
+   *                       point of the parcel the caller IDENTIFIED
+   *                       (`parcel_node_id`), used only for roads/labeling.
    */
   pointConfidence:
     | "coordinates"
     | "authoritative"
     | "geocode-high"
-    | "geocode-low";
+    | "geocode-low"
+    | "parcel-identity";
   /**
    * False ONLY on the F4e situs-hit path when the geocode MISSED, so
    * `(lat,lng)` is a `(0,0)` sentinel, not a real location. Edge labeling
@@ -410,13 +400,17 @@ async function resolveContext(
 }
 
 /**
- * The store county that owns a resolved prop id (for the provider label +
- * the geometry fetch-by-prop-id). The disambiguating resolver stamps the
- * county into the parcel node id (`{fips}:{propId}`), so recover the fips
- * from there and map it back to its `TxParcelCounty`.
+ * The supported county a resolved prop id belongs to (for the provider
+ * label + the geometry fetch-by-prop-id). Resolvers stamp the county into
+ * the parcel node id (`{fips}:{propId}`), so recover the fips from there
+ * and map it back to its `TxParcelCounty` — from the WHOLE registry, not
+ * just the store-backed counties (P-373: an address/identity resolve must
+ * be able to reach a live-ArcGIS county that the store cannot draw).
  */
-function storeCountyByFips(fips: string): TxParcelCounty | null {
-  return allStoreCounties().find((c) => c.fips === fips) ?? null;
+function txParcelCountyByFips(fips: string): TxParcelCounty | null {
+  const trimmed = fips.trim();
+  if (!trimmed) return null;
+  return TX_PARCEL_COUNTIES.find((c) => c.fips === trimmed) ?? null;
 }
 
 /**
@@ -454,14 +448,19 @@ async function resolveParcelBySitusAuthoritative(input: {
 > {
   if (txParcelProviderMode() !== "county-gis") return null;
 
-  // Candidate store counties: those whose routing bbox contains the point
-  // (item 2 â€” all containing, not nearest-centroid); ALL store counties when
-  // there is no point to route by (item 3 â€” a unique situs still resolves).
+  // Candidate counties: every registry county whose routing bbox contains
+  // the point — INCLUDING live-ArcGIS counties (P-373). The tag says where
+  // a county SERVES its polygons; it says nothing about where its address
+  // index lives, and the index is the store table (statewide). Scoping the
+  // situs search to store-tagged counties is what left a Caldwell address
+  // unconsulted and let a Hays no-coverage 404 stand in for a real match.
+  // With no point to route by, keep the store set (a no-point situs still
+  // resolves across the counties that can be served from the table).
   const counties =
     input.point &&
     Number.isFinite(input.point.latitude) &&
     Number.isFinite(input.point.longitude)
-      ? storeCountiesContainingPoint(input.point.latitude, input.point.longitude)
+      ? countiesContainingPoint(input.point.latitude, input.point.longitude)
       : allStoreCounties();
   if (counties.length === 0) return null;
 
@@ -486,15 +485,18 @@ async function resolveParcelBySitusAuthoritative(input: {
     return { decline: outcome };
   }
 
-  // Authoritative hit â€” recover the owning store county from the node id
-  // (`{fips}:{propId}`) to fetch geometry + label the provider.
+  // Authoritative hit â€” recover the owning county from the node id
+  // (`{fips}:{propId}`) and fetch that parcel's polygon BY IDENTITY from
+  // whichever source that county serves (P-373). The store is not always
+  // able to draw what its own index names (Caldwell's rows carry the situs
+  // and no polygon), so the fetch goes through the one function that knows
+  // both sources; a genuine miss falls through unchanged.
   const nodeCountyFips = outcome.hit.parcelNodeId.split(":")[0] ?? "";
-  const county = storeCountyByFips(nodeCountyFips);
+  const county = txParcelCountyByFips(nodeCountyFips);
   if (!county) return null;
 
-  const result = await queryTxgioParcelByPropId({
-    countyFips: county.fips,
-    countyName: county.name,
+  const result = await queryTxCountyParcelByPropId({
+    county,
     propId: outcome.hit.rawPropId,
   });
   if (!result) return null;
@@ -615,6 +617,188 @@ async function situsFirstPreResolve(input: {
 
 
 /**
+ * The parcel whose polygon CONTAINS a point, as this surface's own
+ * pin-query answer (`parcel_node_id`), or null when the point is in no
+ * parcel this build can serve. Never throws: a no-coverage upstream
+ * decline is "nothing there", not a conflict (P-373).
+ */
+async function parcelNodeIdAtPoint(point: {
+  latitude: number;
+  longitude: number;
+}): Promise<string | null> {
+  try {
+    const geo = await queryGisLayerGeoJson({
+      layer: "parcels",
+      latitude: point.latitude,
+      longitude: point.longitude,
+    });
+    return firstParcelRing(geo.geojson)?.parcelNodeId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A representative point for a ring the caller did not supply one for —
+ * the mean of its vertices. Used ONLY to drive the road lookup and edge
+ * labeling when a request identifies its parcel without a point; it is
+ * reported as `pointConfidence: "parcel-identity"`, never as a rooftop or
+ * a caller coordinate.
+ */
+function representativePointOfRing(
+  ring: Ring,
+): { latitude: number; longitude: number } | null {
+  const open = openRing(ring);
+  if (open.length === 0) return null;
+  let lng = 0;
+  let lat = 0;
+  for (const [x, y] of open) {
+    lng += x;
+    lat += y;
+  }
+  return { latitude: lat / open.length, longitude: lng / open.length };
+}
+
+/**
+ * P-373: RESOLVE A POSTED IDENTITY.
+ *
+ * `parcel_node_id` in the POST body is the CALLER's own identification of
+ * the subject — a card that is showing a parcel knows which parcel it is,
+ * and it must not have to re-derive that from a point. It is treated here
+ * as an AUTHORITY, not as the fallback hint it used to be: this route
+ * resolves THAT parcel by its identity, from whichever source its county
+ * serves, and never answers a different one.
+ *
+ * The refusal is the point of it. A point (or address) carried in the same
+ * request can DISAGREE with the identity — `48453:352594`'s record point
+ * sits in Hays County and pin-queries `48209:10757` — and answering the
+ * point's parcel for a card that named another parcel is the wrong-parcel
+ * defect itself. On a disagreement this declines with a NAMED reason and
+ * still returns the identity it was given, so the surface can see that the
+ * parcel it asked about is not the parcel its own point lands in.
+ *
+ * Outcomes:
+ *   - resolved : derive from this parcel (its geometry, not the point's).
+ *   - refused  : a finished response body + status; the caller sends it.
+ */
+async function resolvePostedParcelIdentity(input: {
+  parcelNodeId: string;
+  point: { latitude: number; longitude: number } | null;
+  placeKey: string;
+  log: typeof logger;
+}): Promise<
+  | {
+      kind: "resolved";
+      ctx: EnvelopeContext;
+      parcelGeo: { geojson: unknown; provider: string | null };
+    }
+  | { kind: "refused"; status: number; body: Record<string, unknown> }
+> {
+  const basePlaceKey = input.point
+    ? placeKeyFromCoords(
+        roundPlaceCoord(input.point.latitude),
+        roundPlaceCoord(input.point.longitude),
+      )
+    : input.placeKey;
+  const refuse = (status: number, body: Record<string, unknown>) =>
+    ({ kind: "refused" as const, status, body: { ...body, placeKey: basePlaceKey } });
+
+  const parsed = parseParcelNodeId(input.parcelNodeId);
+  if (!parsed) {
+    return refuse(400, {
+      error: "invalid_parcel_node_id",
+      message: `\`parcel_node_id\` must be "{countyFips}:{propId}" (received "${input.parcelNodeId}").`,
+    });
+  }
+  const canonical = parcelNodeId(parsed.countyFips, parsed.propId)!;
+  // The county sources are keyed on their OWN (normalized) prop id, so the
+  // fetch asks for the canonical suffix — a caller that posts
+  // `"48055:040428"` still reaches parcel 40428 rather than missing it on
+  // a leading zero the id space does not carry.
+  const canonicalPropId = canonical.slice(canonical.indexOf(":") + 1);
+  const county = txParcelCountyByFips(parsed.countyFips);
+  if (!county) {
+    input.log.info(
+      { parcelNodeId: canonical },
+      "buildable-envelope: identified parcel is in a county this build has no parcel source for",
+    );
+    return refuse(404, {
+      status: "no-parcel",
+      declineReason: "parcel-source-absent-in-county",
+      reason: `This parcel is identified in FIPS ${parsed.countyFips}, a county this build has no parcel source for, so a buildable envelope can't be derived.`,
+      parcel_node_id: canonical,
+    });
+  }
+
+  const parcelGeo = await queryTxCountyParcelByPropId({
+    county,
+    propId: canonicalPropId,
+  });
+  if (!parcelGeo) {
+    input.log.info(
+      { parcelNodeId: canonical, county: county.fips },
+      "buildable-envelope: identified parcel is not present in its county's source",
+    );
+    return refuse(404, {
+      status: "no-parcel",
+      declineReason: "parcel-identity-not-found",
+      reason: `${county.name} County has no parcel ${canonicalPropId}, so the identified parcel could not be resolved.`,
+      parcel_node_id: canonical,
+    });
+  }
+
+  // The caller's point, when it sent one, must AGREE with the identity. A
+  // point that pin-queries another parcel (classically in another county)
+  // is refused, never answered — the card asked about ITS parcel.
+  if (input.point) {
+    const atPoint = await parcelNodeIdAtPoint(input.point);
+    if (atPoint && atPoint !== canonical) {
+      const pointCounty = txParcelCountyByFips(atPoint.split(":")[0] ?? "");
+      input.log.info(
+        {
+          parcelNodeId: canonical,
+          pointParcelNodeId: atPoint,
+          pointCountyFips: pointCounty?.fips ?? null,
+        },
+        "buildable-envelope: point does not match the identified parcel; refusing rather than answering a stranger's parcel",
+      );
+      return refuse(404, {
+        status: "no-parcel",
+        declineReason: "parcel-identity-mismatch",
+        reason: `The point sent with this request falls in ${atPoint}${pointCounty ? ` (${pointCounty.name} County)` : ""}, not in the identified parcel ${canonical}${county.fips !== (pointCounty?.fips ?? "") ? ` (${county.name} County)` : ""}, so a buildable envelope can't be derived for this parcel from that point.`,
+        parcel_node_id: canonical,
+      });
+    }
+  }
+
+  const parcel = firstParcelRing(parcelGeo.geojson);
+  const ringPoint = input.point ?? representativePointOfRing(parcel?.ring ?? []);
+  const situsCityState = cityStateFromSitus(parcel?.situsAddress ?? null);
+  const ctx: EnvelopeContext = {
+    placeKey: ringPoint
+      ? placeKeyFromCoords(
+          roundPlaceCoord(ringPoint.latitude),
+          roundPlaceCoord(ringPoint.longitude),
+        )
+      : basePlaceKey,
+    lat: ringPoint?.latitude ?? 0,
+    lng: ringPoint?.longitude ?? 0,
+    city: situsCityState.city,
+    state: situsCityState.state,
+    address: parcel?.situsAddress ?? null,
+    pointConfidence: input.point ? "coordinates" : "parcel-identity",
+    hasPoint: ringPoint !== null,
+  };
+  return {
+    kind: "resolved",
+    ctx,
+    // The derive tail reports `provider` on the payload's parcel block, so the
+    // identity path names the source it read exactly as the pin/situs paths do.
+    parcelGeo: { geojson: parcelGeo.geojson, provider: txCountyProviderLabel(county) },
+  };
+}
+
+/**
  * The core derivation, shared by the GET (:placeKey) and POST (address) forms.
  * Resolves the place, fetches parcel + setbacks, labels edges, derives the
  * envelope, and sends the honesty-wrapped response (or an honest 404/pending).
@@ -645,6 +829,49 @@ async function handleBuildableEnvelope(
   //   - NO-MATCH  : fall through to the existing rooftop/geocode/pin path,
   //                 reusing the pre-pass geocode so we do not geocode twice.
   const { address: situsAddress, explicitPoint } = extractSitusInputs(input);
+
+  // === P-373: A POSTED IDENTITY WINS. ===
+  // The caller identifying its subject (`parcel_node_id`) is the strongest
+  // signal in the request — stronger than an address string or a point,
+  // both of which are ways of GUESSING at that identity. Resolve it by
+  // identity, and refuse (named) when the point the caller sent with it
+  // lands in a different parcel, rather than answering a stranger's parcel
+  // for a card that named its own.
+  const postedParcelNodeId =
+    "parcel_node_id" in input ? input.parcel_node_id ?? null : null;
+  let identityCtx: EnvelopeContext | null = null;
+  let identityParcelGeo: {
+    geojson: unknown;
+    provider: string | null;
+  } | null = null;
+  if (postedParcelNodeId) {
+    const identity = await resolvePostedParcelIdentity({
+      parcelNodeId: postedParcelNodeId,
+      point: explicitPoint,
+      placeKey: "placeKey" in input ? input.placeKey : "",
+      log,
+    });
+    if (identity.kind === "refused") {
+      res.status(identity.status).json(identity.body);
+      return;
+    }
+    identityCtx = identity.ctx;
+    identityParcelGeo = identity.parcelGeo;
+  }
+
+  if (identityCtx && identityParcelGeo) {
+    await deriveAndRespond({
+      req,
+      res,
+      ctx: identityCtx,
+      parcelGeo: identityParcelGeo,
+      skipRoad,
+      log,
+      postedParcelNodeId,
+    });
+    return;
+  }
+
   const { situs, geocode: pregeocode } = await situsFirstPreResolve({
     address: situsAddress,
     explicitPoint,
@@ -891,75 +1118,43 @@ async function handleBuildableEnvelope(
   });
 }
 
-async function deriveLabelAndRespond(args: {
+/**
+ * P-374: RENDERER ONLY. This used to derive — it fetched the roads, labeled the
+ * ring and composed the envelope, while `parcelDrawEnvelopeModel.ts` ran its own
+ * copy of the same sequence. Both now call `deriveEnvelopeDraw` (see
+ * `envelopeDrawDerivation.ts`) and this function only turns its `drawn` outcome
+ * into the route's response, field by field. Nothing here may re-derive.
+ */
+async function respondWithDrawnEnvelope(args: {
   res: Response;
   ctx: EnvelopeContext;
-  parcel: {
-    apn: string | null;
-    situsAddress: string | null;
-    zoningCode: string | null;
-    parcelNodeId: string | null;
-    ring: Ring;
-  };
+  parcel: EnvelopeDrawParcel;
   parcelGeo: { geojson: unknown; provider: string | null };
-  skipRoad: boolean;
   parcelNodeId: string | null;
   effectiveZoningCode: string;
   resolved: AuthoritativeSetbackResolution;
   atomChain: PropertyAtomChainWire | null;
   spineZoning: SpineZoningResolution | null;
+  derived: EnvelopeDrawnDerivation["derived"];
+  wireStatus: EnvelopeDrawnDerivation["wireStatus"];
+  honesty: EnvelopeDrawnDerivation["honesty"];
+  derivePath: EnvelopeDrawnDerivation["derivePath"];
 }): Promise<void> {
   const {
     res,
     ctx,
     parcel,
     parcelGeo,
-    skipRoad,
     parcelNodeId,
     effectiveZoningCode,
     resolved,
     atomChain,
     spineZoning,
+    derived,
+    wireStatus,
+    honesty,
+    derivePath,
   } = args;
-
-  const hasPoint = ctx.hasPoint !== false;
-  let roads: RoadCandidate[] = [];
-  if (!skipRoad && hasPoint) {
-    roads = namedRoadsToCandidates(
-      await fetchNearbyRoads({ lat: ctx.lat, lng: ctx.lng }),
-    );
-  }
-  const labeling = labelEdges({
-    ring: parcel.ring,
-    roads,
-    refPoint: hasPoint ? { lng: ctx.lng, lat: ctx.lat } : null,
-    situsAddress: parcel.situsAddress,
-  });
-  if (!labeling) {
-    res.status(422).json(
-      withPlace(
-        {
-          status: "ungeometric-parcel",
-          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
-          parcel_node_id: parcelNodeId,
-        },
-        ctx,
-      ),
-    );
-    return;
-  }
-
-  const { derived, wireStatus, honesty, derivePath } = composeBuildableEnvelopeDerivation({
-    ring: parcel.ring,
-    table: resolved.table,
-    district: resolved.district,
-    labeling,
-    atomChain,
-    spineZoning,
-    resolvedSourceKind: resolved.sourceKind,
-    resolvedSourceLabel: resolved.sourceLabel,
-    resolvedEffectiveDate: resolved.effectiveDate,
-  });
 
   const zoningAtomDid = atomChain?.zoningFact?.atomDid;
   const setbackAtomDid = atomChain?.setbackRule?.atomDid;
@@ -1080,11 +1275,19 @@ async function deriveLabelAndRespond(args: {
 
 /**
  * Shared derivation tail: given a resolved parcel `parcelGeo` (from EITHER
- * the authoritative situs path or the point pin-query) plus the context,
- * resolve setbacks, map district, label edges, derive the envelope, and send
- * the honesty-wrapped response (or an honest non-ok status). Extracted so the
- * F4e situs-hit path (which skips the geocode gate and pin-query) and the
- * legacy pin-query path share ONE derivation + honesty implementation.
+ * the authoritative situs path or the point pin-query) plus the context, run
+ * the ONE derivation (`deriveEnvelopeDraw`) and send the honesty-wrapped
+ * response (or an honest non-ok status).
+ *
+ * P-374: the body this function used to own — chain fetch, spine read, district
+ * signal order, jurisdiction key, table probe, planned-development gate — now
+ * lives in `lib/buildableEnvelope/envelopeDrawDerivation.ts` and is the SAME
+ * code the `get_smart_site` draw block runs. This function resolves the
+ * place-shaped inputs (ctx city/state/address, the point, `skipRoad`) and
+ * RENDERS the outcome; it must not derive anything of its own. The route's own
+ * throw contract is unchanged: the derivation returns a throw as
+ * `state: "threw"` and this function rethrows it, so the caller's provider
+ * failure handling sees exactly what it saw before.
  */
 async function deriveAndRespond(args: {
   req: Request;
@@ -1096,11 +1299,30 @@ async function deriveAndRespond(args: {
   postedParcelNodeId?: string | null;
 }): Promise<void> {
   const { res, ctx, parcelGeo, skipRoad, postedParcelNodeId } = args;
-  const parcel = firstParcelRing(parcelGeo.geojson);
-  if (!parcel) {
+  const hasPoint = ctx.hasPoint !== false;
+
+  const outcome = await deriveEnvelopeDraw({
+    parcelGeo,
+    jurisdictionCity: ctx.city,
+    jurisdictionState: ctx.state,
+    address: ctx.address,
+    point: hasPoint ? { lat: ctx.lat, lng: ctx.lng } : null,
+    skipRoad,
+    postedParcelNodeId: postedParcelNodeId ?? null,
+  });
+
+  if (outcome.state === "threw") {
+    // Unchanged contract: a throw in the chain/road/spine/composition reach is
+    // a provider failure to THIS route, handled by its callers as it always
+    // was. The draw block, which must never throw, catches the same value at
+    // its own call site.
+    throw outcome.error;
+  }
+
+  if (outcome.state === "no-parcel-ring") {
     // The query succeeded but returned no usable polygon at this point.
     // This is the honest "no parcel here" case (404), NOT a provider
-    // outage â€” the live county-GIS provider returns an empty collection
+    // outage — the live county-GIS provider returns an empty collection
     // rather than throwing for a point outside every parcel.
     res.status(404).json(
       withPlace(
@@ -1116,106 +1338,25 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  // The tile-matching subject-parcel id, populated whenever the containing
-  // parcel resolved (independent of setbacks). Threaded through every honest
-  // response below so the map can snap + glow regardless of envelope outcome.
-  const parcelNodeIdValue: string | null =
-    parcel.parcelNodeId ?? postedParcelNodeId ?? null;
+  if (outcome.state === "parcel-identity-mismatch") {
+    // Unreachable on this call site: the route passes no `expectedParcelNodeId`
+    // (the parcel it resolved IS the subject). Loud rather than silent if that
+    // ever changes.
+    throw new Error(
+      "deriveEnvelopeDraw: parcel-identity-mismatch on a route call, which never sets expectedParcelNodeId",
+    );
+  }
 
-  const atomChain = parcelNodeIdValue
-    ? await fetchPropertyAtomChain(parcelNodeIdValue)
-    : null;
+  const { parcel, parcelNodeId } = outcome;
 
-  const gisZoning = (parcel.zoningCode ?? "").trim();
-  let spineZoning: SpineZoningResolution | null = gisZoning
-    ? null
-    : await resolveSpineZoningWhenGisAbsent(parcelNodeIdValue, parcel.zoningCode);
-
-  /**
-   * The ordered district-code signals, most specific first — the same order
-   * this site has always used (the parcel's own GIS zoning stamp, then Spine's
-   * zoning fact, then the atom chain's zoning fact, then its setback rule).
-   */
-  const districtCodeSignals: Array<string | null> = [
-    gisZoning || null,
-    spineZoning?.district ?? null,
-    typeof atomChain?.zoningFact?.district === "string"
-      ? atomChain.zoningFact.district
-      : null,
-    typeof atomChain?.setbackRule?.districtCode === "string"
-      ? atomChain.setbackRule.districtCode
-      : null,
-  ];
-  const firstSignal = districtCodeSignals.find((c) => (c ?? "").trim() !== "") ?? "";
-
-  /**
-   * P-340 — read the engagement key BEFORE probing any table. The table probe
-   * below must run against the same jurisdiction key this site will resolve
-   * with, so a code that names no row can never move a parcel between
-   * jurisdictions. Hoisted above the no-zoning-stamp early return for that
-   * reason only; both helpers are pure string work.
-   */
-  const situsCityState = cityStateFromSitus(parcel.situsAddress);
-  const fromCityState = keyFromEngagementOrSynthesize({
-    jurisdictionCity: ctx.city ?? situsCityState.city,
-    jurisdictionState: ctx.state ?? situsCityState.state,
-    address: ctx.address ?? undefined,
-  });
-
-  const provisionalJurisdictionKey =
-    fromCityState ??
-    jurisdictionKeyFromParcelNode({
-      parcelNodeId: parcelNodeIdValue,
-      districtCode: firstSignal,
-    });
-
-  /**
-   * P-340 — A BASE CODE IS NOT A DISTRICT DETERMINATION.
-   *
-   * `parcel.zoningCode` (the county store's stamp) is sometimes a BASE code
-   * rather than a zoning district: Austin's `SF` is the base of `SF-1`..`SF-6`
-   * and `SF-4A`, and it names none of them. The first signal used to win
-   * outright, so the route looked `SF` up, crossed it into the longest prefix
-   * match (`SF-4A`, 15/3.5/5/10) and served that for two parcels whose own
-   * city layer and whose own setback-rule atom both say `SF-3`/`SF-2`
-   * (25/5/10/15) — the measured P-340 `48453:239852` / `48453:367134` defect,
-   * and the reason the panel and the drawing disagreed about a whole table
-   * rather than about one axis.
-   *
-   * `firstResolvableDistrictCode` takes the first signal that actually names a
-   * row in this jurisdiction's own table, falling back to the old first signal
-   * when none does. The jurisdiction key is the same one derived here from that
-   * first signal, so a code that names no row can never move a parcel between
-   * jurisdictions.
-   */
-  const effectiveZoningCode = firstResolvableDistrictCode(
-    districtCodeSignals,
-    provisionalJurisdictionKey,
-    (key, code) => getSetbackTableForZoning(key, code),
-  );
-
-  if (!effectiveZoningCode.trim()) {
-    const honesty: EngineHonesty = {
-      confidence: { value: 0, kind: "asserted" },
-      dataVintage: new Date().toISOString().slice(0, 10),
-      coverage: {
-        degraded: true,
-        reason:
-          "No zoning stamp on this parcel — honest absence; no district invented.",
-      },
-      source: {
-        adapter: "brokerage:buildable-envelope",
-        citationIds: [],
-      },
-    };
-
+  if (outcome.state === "no-zoning-stamp") {
     res.status(200).json(
       withPlace(
         {
           status: "declined",
           declineReason: NO_ZONING_STAMP_REASON,
           layer: "buildable-envelope",
-          parcel_node_id: parcelNodeIdValue,
+          parcel_node_id: parcelNodeId,
           ...wrapEngineEnvelope(
             {
               geojson: {
@@ -1230,14 +1371,16 @@ async function deriveAndRespond(args: {
                 apn: parcel.apn,
                 situsAddress: parcel.situsAddress,
                 zoningCode: parcel.zoningCode,
-                parcel_node_id: parcelNodeIdValue,
+                parcel_node_id: parcelNodeId,
                 provider: parcelGeo.provider ?? null,
                 notSurveyGrade: true,
               },
             },
-            honesty,
+            outcome.honesty,
           ),
-          readContract: readContractForWire(legacyHonestyToReadContract(honesty)),
+          readContract: readContractForWire(
+            legacyHonestyToReadContract(outcome.honesty),
+          ),
         },
         ctx,
       ),
@@ -1245,46 +1388,8 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  /**
-   * P-340: the SAME key the district signals were probed against above
-   * (`provisionalJurisdictionKey`, which read `fromCityState`) — this site must
-   * not re-derive it from the resolved district code, or the code the fallback
-   * picked could move the parcel to a different jurisdiction than the one its
-   * row was checked in.
-   */
-  const jurisdictionKey = provisionalJurisdictionKey;
-
-  const resolved = resolveAuthoritativeSetbacks({
-    jurisdictionKey,
-    districtCode: effectiveZoningCode,
-    atomRule: atomChain?.setbackRule ?? null,
-  });
-
-  if (!resolved) {
-    /**
-     * P-257 — say which kind of nothing this is.
-     *
-     * A planned-development code refuses a setback table for a REASON (its
-     * standards live in its own ordinance and development plan), and that
-     * reason has to reach the reader: the whole point of the refusal is that
-     * the code is not a district. The gate is asked here as well as inside the
-     * resolver because the resolver's `null` is deliberately shape-less and
-     * `jurisdictionKey` may be null (a parcel with no resolvable city key never
-     * reaches the resolver at all, so the district code is the only evidence
-     * left — and it is enough).
-     *
-     * hauska-map composes the identical sentence for the panel; the two are
-     * pinned byte-for-byte against each other's literals in both repos' suites.
-     */
-    const plannedDevelopment = plannedDevelopmentSetbackRefusalFor(
-      { jurisdictionKey, districtCode: effectiveZoningCode },
-      (code) => {
-        const table = jurisdictionKey
-          ? getSetbackTableForZoning(jurisdictionKey, code)
-          : null;
-        return !!table && districtCodeHasExactRow(table, code);
-      },
-    );
+  if (outcome.state === "no-district") {
+    const { plannedDevelopment } = outcome;
     res.status(404).json(
       withPlace(
         {
@@ -1298,8 +1403,8 @@ async function deriveAndRespond(args: {
                 reason:
                   "No authoritative setback source covers this district — geometry not derived.",
               }),
-          jurisdictionKey: jurisdictionKey ?? null,
-          parcel_node_id: parcelNodeIdValue,
+          jurisdictionKey: outcome.jurisdictionKey ?? null,
+          parcel_node_id: parcelNodeId,
         },
         ctx,
       ),
@@ -1307,17 +1412,34 @@ async function deriveAndRespond(args: {
     return;
   }
 
-  await deriveLabelAndRespond({
+  if (outcome.state === "ungeometric-parcel") {
+    res.status(422).json(
+      withPlace(
+        {
+          status: "ungeometric-parcel",
+          reason: "Parcel geometry is not a usable polygon for envelope derivation.",
+          parcel_node_id: parcelNodeId,
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
+  await respondWithDrawnEnvelope({
     res,
     ctx,
     parcel,
     parcelGeo,
-    skipRoad,
-    parcelNodeId: parcelNodeIdValue,
-    effectiveZoningCode,
-    resolved,
-    atomChain,
-    spineZoning,
+    parcelNodeId,
+    effectiveZoningCode: outcome.effectiveZoningCode,
+    resolved: outcome.resolved,
+    atomChain: outcome.atomChain,
+    spineZoning: outcome.spineZoning,
+    derived: outcome.derived,
+    wireStatus: outcome.wireStatus,
+    honesty: outcome.honesty,
+    derivePath: outcome.derivePath,
   });
 }
 
@@ -1343,10 +1465,10 @@ brokeragePlaceBuildableEnvelopeRouter.post("/buildable-envelope", (req, res) => 
     return;
   }
   const { address, lat, lng, skipRoad, parcel_node_id } = parsed.data;
-  if (!address && (lat == null || lng == null)) {
+  if (!address && (lat == null || lng == null) && !parcel_node_id) {
     res.status(400).json({
       error: "invalid_request",
-      message: "address or lat+lng required",
+      message: "address, lat+lng, or parcel_node_id required",
     });
     return;
   }

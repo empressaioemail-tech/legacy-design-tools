@@ -570,6 +570,69 @@ export async function fetchPublishedAccountPairExtracts(
   return { extracts, sourcesPresent, sourcesAbsent };
 }
 
+/**
+ * P-370 (2026-09-19). THE SAME PAIR, READ BY THE ACCOUNT.
+ *
+ * The read above answers "what account does this parcel-index prop_id name".
+ * Writer (b)'s membership test needs the mirror: "does any parcel-index prop_id
+ * this county's extracts publish name THIS account key". Same two tables, same
+ * three fail-closed rules (kept by handing the rows to
+ * `buildPublishedNodeKeyByAccountKey`, which delegates to the one builder), same
+ * chunked `= ANY($1)` shape so a 319,480-key county stays inside sane parameter
+ * bounds.
+ *
+ * NO COUNTY COLUMN, SO THE CALLER SCOPES IT. These extracts carry no
+ * `county_fips`; a numeric account in one county can carry the same number as a
+ * numeric account in another. The row is returned as the extract published it
+ * and the CALLER is what decides whether the named prop_id is a parcel THIS
+ * county publishes -- `isAccountKeyedNodeId`'s second arm tests the named key
+ * against the caller's own parcel-table index, which is the only scoping that
+ * cannot be forgotten here.
+ */
+export async function fetchPublishedAccountPairExtractsByAccount(
+  pool: QueryablePool,
+  accountKeys: readonly string[],
+): Promise<{
+  rows: Array<{ accountKey: string; nodeKey: string; source: string }>;
+  sourcesPresent: string[];
+  sourcesAbsent: string[];
+}> {
+  const rows: Array<{ accountKey: string; nodeKey: string; source: string }> = [];
+  const sourcesPresent: string[] = [];
+  const sourcesAbsent: string[] = [];
+  const keys = accountKeys.map((k) => k.trim()).filter((k) => k !== "");
+  if (keys.length === 0) return { rows, sourcesPresent, sourcesAbsent };
+
+  for (const src of PUBLISHED_ACCOUNT_PAIR_SOURCES) {
+    if (!(await tableExists(pool, src.table))) {
+      sourcesAbsent.push(src.table);
+      continue;
+    }
+    let read = 0;
+    for (let i = 0; i < keys.length; i += PAIR_READ_CHUNK) {
+      const chunk = keys.slice(i, i + PAIR_READ_CHUNK);
+      const r = await pool.query<{ prop_id: string | null; account: string | null }>(
+        `SELECT ${src.propIdColumn} AS prop_id,
+                ${src.accountColumn} AS account
+           FROM ${src.table}
+          WHERE ${src.accountColumn} = ANY($1::text[])
+            AND ${src.propIdColumn} IS NOT NULL
+            AND btrim(${src.propIdColumn}) <> ''`,
+        [chunk],
+      );
+      for (const row of r.rows) {
+        const accountKey = row.account?.trim() ?? "";
+        const nodeKey = row.prop_id?.trim() ?? "";
+        if (accountKey === "" || nodeKey === "") continue;
+        rows.push({ accountKey, nodeKey, source: src.table });
+        read += 1;
+      }
+    }
+    if (read > 0) sourcesPresent.push(src.table);
+  }
+  return { rows, sourcesPresent, sourcesAbsent };
+}
+
 function numericOrNull(v: unknown): number | null {
   if (v == null) return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : null;

@@ -1,21 +1,26 @@
 /**
- * P-153 Step B. `tryComposeEnvelopeModelForDraw` orchestrates the SAME I/O +
- * pure-composition sequence `deriveAndRespond`/`deriveLabelAndRespond` run
- * for the map/export route, seeded from a point the caller already resolved
- * (no geocode, no situs disambiguation). Mocks the three I/O boundaries
- * (`queryGisLayerGeoJson`, `fetchPropertyAtomChain`, `fetchNearbyRoads`) so
- * this is deterministic and offline; everything else (resolveAuthoritativeSetbacks,
- * jurisdiction resolution, labelEdges, composeBuildableEnvelopeDerivation) runs
- * for real, against the real Bastrop codified-ordinance setback table (the
- * same fixture `brokeragePlaceBuildableEnvelope.test.ts` and
- * `parcelDrawStub.test.ts`'s gold fixture both key off: Bastrop, TX / SF-1
- * shaped, mirroring the real 48021:34049 case).
+ * P-153 Step B, re-pointed by P-374. `tryComposeEnvelopeModelForDraw` runs the
+ * ONE derivation both this draw block and the map/export route use
+ * (`envelopeDrawDerivation.ts#deriveEnvelopeDraw`), seeded from a point the
+ * caller already resolved (no geocode, no situs disambiguation). Mocks the
+ * three I/O boundaries (`queryGisLayerGeoJson`, `fetchPropertyAtomChain`,
+ * `fetchNearbyRoads`) so this is deterministic and offline; everything else
+ * (resolveAuthoritativeSetbacks, jurisdiction resolution, labelEdges,
+ * composeBuildableEnvelopeDerivation) runs for real, against the real Bastrop
+ * codified-ordinance setback table (the same fixture
+ * `brokeragePlaceBuildableEnvelope.test.ts` and `parcelDrawStub.test.ts`'s gold
+ * fixture both key off: Bastrop, TX / SF-1 shaped, mirroring the real
+ * 48021:34049 case). The spine read (`./spineZoningDistrict`) is mocked to
+ * `null` — this environment has no baked node-facet store, and P-374 moved that
+ * read INTO the shared derivation, so an unmocked call here would be a live DB
+ * reach.
  *
- * `composeBuildableEnvelopeDerivation`/`firstParcelRing` are reused straight
- * off this same directory's `composeBuildableEnvelopeDerivation.ts` (moved
- * there in Step A specifically so importing them stays light — see that
- * file's own doc comment). The remaining unavoidable `@workspace/db`
- * coupling here is `@workspace/codes`'s `keyFromEngagementOrSynthesize`
+ * The draw block's own jurisdiction city/state are optional inputs (the route's
+ * equivalent is the request geocode); these tests exercise the situs-string
+ * fallback, which is the same fallback the route has always had.
+ *
+ * The remaining unavoidable `@workspace/db` coupling here is
+ * `@workspace/codes`'s `keyFromEngagementOrSynthesize`
  * (its package barrel couples it to a warmup-queue orchestrator that
  * imports `@workspace/db`, which throws at MODULE LOAD if `DATABASE_URL` is
  * unset) and `../brokerageGisLayers`'s real parcels-layer proxy (which
@@ -134,6 +139,18 @@ vi.mock("./roads", async () => {
   return { ...actual, fetchNearbyRoads: fetchNearbyRoadsMock };
 });
 
+/**
+ * P-374: the shared derivation reads the spine when the ring carries no zoning
+ * stamp. This environment has no baked node-facet store, so the read is pinned
+ * to `null` — the same posture `brokeragePlaceBuildableEnvelope.test.ts` takes
+ * for the same module.
+ */
+const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
+vi.mock("./spineZoningDistrict", () => ({
+  resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
+  spineZoningProvenanceNote: () => "",
+}));
+
 const { tryComposeEnvelopeModelForDraw } = await import(
   "./parcelDrawEnvelopeModel"
 );
@@ -146,6 +163,8 @@ afterEach(() => {
   parcelSitusAddress = "1209 Main St, Bastrop, TX 78602";
   parcelGeoThrows = null;
   atomChainResult = null;
+  resolveSpineZoningWhenGisAbsentMock.mockReset();
+  resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
   queryGisLayerGeoJsonMock.mockClear();
   fetchPropertyAtomChainMock.mockClear();
   fetchNearbyRoadsMock.mockClear();
@@ -155,7 +174,6 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
   it("resolves a real modelled envelope: closed-enough ring, applied setbacks, a disclosure string", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     // P-339: P-153's `null` collapse is gone; the positive arm is NAMED.
@@ -177,7 +195,6 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
   it("end-to-end: feeding the resolved model into assembleParcelDraw draws a present envelope overlay with real geom and no reason", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result.state).toBe("modelled");
@@ -212,31 +229,50 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
   });
 });
 
-describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shaped, no zoning code)", () => {
-  it("names the step, with no I/O, when there is no baked zoning code (the unincorporated / no-district case)", async () => {
+describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shaped, no district anywhere)", () => {
+  it("reads the ring and the chain, then names the ROUTE's own no-zoning-stamp — a decline, not an unreached attempt", async () => {
+    // P-374: this case used to be decided by the caller's own bake facet with
+    // NO I/O at all. It is now the shared derivation's terminal answer, which
+    // means the ring and the chain are read (the spine is read too, and mocked
+    // to null here) before the answer is named. That is the point: the answer
+    // is the route's, not a null handed back for "the caller's facet was
+    // empty".
+    parcelZoning = null;
+    // The ring must stamp the SAME node the draw block is for (the identity
+    // guard), which is what the real 48453:474034 case does.
+    parcelNodeIdStamped = "48453:474034";
+    // A chain that EXISTS and carries no rule: the shape that must never be
+    // reported as "no chain".
+    atomChainResult = { setbackRule: null };
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: "48453:474034",
-      zoningCode: null,
       queryPoint: { latitude: 30.5, longitude: -97.9 },
     });
     expect(result).toMatchObject({
-      state: "unreached",
-      refusal: { step: "no-zoning-code", chain: "unreached" },
+      state: "declined",
+      refusal: { step: "no-zoning-code", chain: "present" },
     });
-    expect(queryGisLayerGeoJsonMock).not.toHaveBeenCalled();
-    expect(fetchPropertyAtomChainMock).not.toHaveBeenCalled();
+    expect(queryGisLayerGeoJsonMock).toHaveBeenCalledTimes(1);
+    expect(fetchPropertyAtomChainMock).toHaveBeenCalledTimes(1);
+    // No district means nothing to resolve a table against, so the roads are
+    // never read.
     expect(fetchNearbyRoadsMock).not.toHaveBeenCalled();
   });
 
-  it("falsifier's other half: the no-district overlay now names the MISSING DISTRICT, not unruled setbacks", async () => {
+  it("falsifier's other half: the no-district overlay names the MISSING DISTRICT, not unruled setbacks", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = "48453:474034";
+    atomChainResult = { setbackRule: null };
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: "48453:474034",
-      zoningCode: null,
       queryPoint: { latitude: 30.5, longitude: -97.9 },
     });
-    expect(result.state).toBe("unreached");
-    if (result.state !== "unreached") throw new Error("unreachable");
 
+    expect(result).toMatchObject({
+      state: "declined",
+      refusal: { step: "no-zoning-code", chain: "present" },
+    });
+    if (result.state !== "declined") throw new Error("unreachable");
     const reason = envelopeDrawRefusalReason(result.refusal);
     // The defect, exactly: this used to be the bake's stored
     // `atom_path_pending`, which `envelopeHuman` renders "Withheld, setbacks
@@ -278,7 +314,6 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
   it("names `no-query-point` with no I/O", async () => {
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: null,
     });
     expect(result).toMatchObject({
@@ -292,7 +327,6 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     parcelGeoThrows = new Error("boom");
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result).toMatchObject({
@@ -305,7 +339,6 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     parcelNodeIdStamped = "48021:99999";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result).toMatchObject({
@@ -322,7 +355,6 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     atomChainResult = new Error("chain read blew up");
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "R-MD",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result).toMatchObject({
@@ -335,7 +367,6 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "Z-NOPE",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result).toMatchObject({
@@ -362,7 +393,6 @@ describe("P-339 — the route's own outcome decides the reason (falsifiers)", ()
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "Z-NOPE",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     expect(result).toMatchObject({
@@ -380,7 +410,6 @@ describe("P-339 — the route's own outcome decides the reason (falsifiers)", ()
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      zoningCode: "Z-NOPE",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     if (result.state !== "declined") throw new Error("unreachable");
@@ -414,5 +443,120 @@ describe("P-339 — the route's own outcome decides the reason (falsifiers)", ()
         declinedBy: null,
       }),
     ).toBe("geometry-validation-failed");
+  });
+});
+
+/**
+ * P-374 — THE DIVERGENCE TEST, at the call-site level.
+ *
+ * The mission is not "the draw block agrees with the route in the cases we
+ * thought of"; it is "there is ONE derivation, and a test fails when the two
+ * callers' answers differ". These two tests run the route's own call shape
+ * (`deriveEnvelopeDraw` with the request-geocode jurisdiction context, exactly
+ * as `deriveAndRespond` passes it) against the draw block's own call shape
+ * (`tryComposeEnvelopeModelForDraw`, no geocode, a city-less situs) on the SAME
+ * parcel fixture, and assert one answer: same resolved district, same axes,
+ * same polygon.
+ *
+ * The route's version of the same comparison runs in
+ * `src/__tests__/brokeragePlaceBuildableEnvelope.test.ts` (both surfaces over
+ * real HTTP and the real handler); this one is the fast, DB-free half, and the
+ * two together are the lane's divergence instrument.
+ *
+ * THE ONE INPUT THE TWO CALLERS CANNOT SHARE is the REQUEST GEOCODE: the route
+ * has the caller's address, the draw block has only the card. `propertyExplorer.ts`
+ * closes that by passing `resolveSitusCity(...)` — the card's own composed city,
+ * the value the label already serves — which is why the first test seeds exactly
+ * that and why every one of the five measured parcels (each carrying a card city)
+ * reaches the parity case. When a card carries NO city anywhere AND the parcel
+ * node's county wires more than one city with that district code, the draw block
+ * declines where a geocoded route drew. That residual INPUT gap is named in the
+ * close's `leave_behind`; it is not papered over here by weakening the reason
+ * rule, and it is what the second test proves the parity check can detect.
+ */
+describe("P-374 — the route's inputs and the draw block's inputs reach ONE answer", () => {
+  async function routeStyleDerivation() {
+    const { deriveEnvelopeDraw } = await import("./envelopeDrawDerivation");
+    const parcengeo = await queryGisLayerGeoJsonMock();
+    return deriveEnvelopeDraw({
+      parcelGeo: parcengeo,
+      // The route's own context, as `deriveAndRespond` passes it: the request's
+      // geocode city/state, the request address, and its point.
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+      address: "1209 Main St, Bastrop, TX 78602",
+      point: { lat: BASTROP_LAT, lng: BASTROP_LNG },
+      skipRoad: false,
+    });
+  }
+
+  it("parity: seeded with the CARD's own city (what propertyExplorer passes), the draw block draws what the route draws", async () => {
+    // The draw block's production input, byte for byte: `propertyExplorer.ts`
+    // passes `resolveSitusCity(...)`'s city — the same city the label already
+    // serves — as this call site's equivalent of the route's geocode city. The
+    // situs string here is deliberately city-LESS, so the city can only have
+    // come from that seeding.
+    parcelSitusAddress = "1209 Main St";
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = BASTROP_PARCEL_NODE_ID;
+
+    const route = await routeStyleDerivation();
+    expect(route.state).toBe("drawn");
+
+    const drawBlock = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      jurisdictionCity: "Bastrop",
+      jurisdictionState: "TX",
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+    expect(drawBlock.state).toBe("modelled");
+
+    if (route.state !== "drawn" || drawBlock.state !== "modelled") {
+      throw new Error("unreachable");
+    }
+    // The seeding reached the route's own jurisdiction key (the engagement
+    // resolver's underscore form; the setback adapter normalizes it, which is
+    // why the table resolves below). Asserted so a future change that silently
+    // drops the city seed fails HERE rather than as a district mismatch.
+    expect(route.jurisdictionKey).toBe("bastrop_tx");
+    // THE PARITY ASSERTION: district, the four axes, and the polygon.
+    expect(drawBlock.model.setbacks.district).toBe(route.effectiveZoningCode);
+    expect(drawBlock.model.setbacks).toEqual({
+      front_ft: route.resolved.scalars.front_ft,
+      side_ft: route.resolved.scalars.side_ft,
+      rear_ft: route.resolved.scalars.rear_ft,
+      ...(typeof route.resolved.scalars.side_corner_ft === "number"
+        ? { side_corner_ft: route.resolved.scalars.side_corner_ft }
+        : {}),
+      district: route.effectiveZoningCode,
+    });
+    const routeFeature = route.derived.geojson.features[0] as unknown as {
+      geometry: { coordinates: [number, number][][] };
+    };
+    expect(drawBlock.model.ringLngLat).toEqual(routeFeature.geometry.coordinates[0]);
+  });
+
+  it("THE PARITY CHECK CAN FAIL: a jurisdiction the route never used makes the two answers differ", async () => {
+    // The control. If the two callers could not disagree, the test above would
+    // prove nothing — so here is a case where they must not agree, and the
+    // equality the test above asserts is the thing that breaks.
+    parcelSitusAddress = "1209 Main St";
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = BASTROP_PARCEL_NODE_ID;
+
+    const route = await routeStyleDerivation();
+    const drawBlock = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      // A jurisdiction the parcel is not in.
+      jurisdictionCity: "Nowhere",
+      jurisdictionState: "XX",
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+
+    const routeDrew = route.state === "drawn";
+    const drawBlockDrew = drawBlock.state === "modelled";
+    expect(routeDrew).toBe(true);
+    expect(drawBlockDrew).toBe(false);
+    expect(drawBlockDrew === routeDrew).toBe(false);
   });
 });

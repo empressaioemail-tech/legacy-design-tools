@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountKeyedMembershipVerdict,
   ACCOUNT_KEYED_RETIREMENT_FORBIDDEN_FACT_KEYS,
   isAccountKeyedNodeId,
   partitionAccountKeyedWork,
@@ -10,7 +11,6 @@ import {
   type AccountKeyedWorkItem,
 } from "../accountKeyedWork";
 import { isEarnedRecordRetirement } from "../recordRetirement";
-
 /**
  * P-180 (2026-09-13). The bake work-list exclusion that makes P-177's
  * non-durable retirement marker durable. Live fixture: Hays 48209 production
@@ -39,6 +39,176 @@ describe("P-180 isAccountKeyedNodeId (bake work-list exclusion)", () => {
 
   it("excludes every id when the county publishes no TxGIO prop ids at all", () => {
     expect(isAccountKeyedNodeId("97658", new Set())).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-370 (2026-09-19). THE MEMBERSHIP TEST ASKS THE NODE'S OWN KEYSPACE.
+//
+// The defect: the rule above asks "is this key a `txgio_parcel` prop_id", which
+// is the right question only in a county whose served keys ARE that table's
+// keys. In Williamson the parcel table publishes R-prefixed ids and the work
+// list carries the 319,480 numeric keys the declared 2026 roll is keyed by, so
+// the bare-key test excluded a whole LIVE keyspace -- and writer (b)'s own
+// blast-radius refusal (P-351) then held the county unable to publish, which is
+// where the 2026-09-19 staging publish died.
+//
+// The second published identifier is the county's OWN pair read by the ACCOUNT,
+// and its PRESENCE is the trigger (`PublishedPairMembership`, not an empty map).
+// Four outcomes are asserted below, including the one that is neither a
+// retirement nor a pass: a key the pair does not reach is KEPT AND DECLARED.
+// Both directions: with the pair, nothing of a county's account-shaped keyspace
+// is retired; without it -- and for a key the pair names to a prop_id this
+// county's parcel table does not publish -- the verdict is the pre-P-370 one
+// exactly, which is what keeps Hays' measured hollow set unchanged key for key.
+// ---------------------------------------------------------------------------
+describe("P-370 the second published identifier: the county's own pair, read by the account", () => {
+  /**
+   * A PARCEL TABLE IN THE OTHER NUMBERING -- Williamson's shape. The keys it
+   * publishes are r-account-shaped and the work list's are numeric, which is
+   * what makes its absence from this table no evidence of hollowness.
+   */
+  const parcelIndex = new Set(["R97658", "R97651"]);
+  /** And the same table in the SAME numbering as the work keys -- Hays' shape. */
+  const haysParcelIndex = new Set(["97658", "97651"]);
+  const pair = (entries: Array<[string, string]>, shapes: string[] = ["r-account"]) => ({
+    nodeKeyByAccountKey: new Map(entries),
+    sources: ["tx_wcad_owner"],
+    parcelTableShapeClasses: new Set(shapes),
+  });
+
+  it("FOUR OUTCOMES, named, so no caller can read one as another", () => {
+    expect(accountKeyedMembershipVerdict("R97658", parcelIndex)).toBe("published-parcel-node");
+    expect(accountKeyedMembershipVerdict("84639", parcelIndex, pair([["84639", "R97658"]]))).toBe(
+      "reached-by-published-pair",
+    );
+    expect(accountKeyedMembershipVerdict("84639", parcelIndex, pair([["99999", "R97658"]]))).toBe(
+      "declared-no-published-identifier",
+    );
+    expect(accountKeyedMembershipVerdict("84639", parcelIndex)).toBe("hollow-account-keyed");
+  });
+
+  it("BOTH DIRECTIONS: a key the pair names to a published prop_id is not hollow; the same key with no pair is", () => {
+    expect(isAccountKeyedNodeId("84639", parcelIndex)).toBe(true);
+    expect(isAccountKeyedNodeId("84639", parcelIndex, pair([["84639", "R97658"]]))).toBe(false);
+  });
+
+  it("a key the pair names to a prop_id THIS county does not publish is NOT reached by it", () => {
+    // The extracts carry no county column, so this is the collision the pair can
+    // not be trusted about on its own: the named prop_id must be a parcel the
+    // caller's own parcel table publishes.
+    expect(
+      accountKeyedMembershipVerdict("84639", parcelIndex, pair([["84639", "R048816"]])),
+    ).toBe("declared-no-published-identifier");
+    // ...and in the SAME-numbering county it is not even that: a numeric parcel
+    // table judges a numeric key's absence as evidence, whatever the extract said.
+    expect(
+      accountKeyedMembershipVerdict("84639", haysParcelIndex, pair([["84639", "R048816"]], ["numeric"])),
+    ).toBe("hollow-account-keyed");
+  });
+
+  it("THE DECLARATION NEEDS BOTH FACTS: a pair present, and a parcel table that does not use this key's shape", () => {
+    // (1) No pair at all -> the pre-P-370 verdict, even in the disjoint-shape
+    // county. A county with a disjoint numbering and no published pair has NO
+    // identifier to declare with, and stopping its retirement without putting a
+    // declaration in its place would be a silent gap rather than a declared one.
+    expect(isAccountKeyedNodeId("84639", parcelIndex, undefined)).toBe(true);
+    expect(isAccountKeyedNodeId("84639", parcelIndex, null)).toBe(true);
+    // (2) A pair present, but this county's parcel table publishes keys OF THIS
+    // SHAPE, so the absence IS evidence -> the pre-P-370 verdict. This is Hays,
+    // and it is why a cross-county pair row cannot disarm it.
+    const haysShaped = pair([], ["numeric"]);
+    expect(isAccountKeyedNodeId("84639", haysParcelIndex, haysShaped)).toBe(true);
+    // (3) Both, and the key is declared -- kept in the fact build, not retired.
+    expect(isAccountKeyedNodeId("84639", parcelIndex, pair([]))).toBe(false);
+    expect(accountKeyedMembershipVerdict("84639", parcelIndex, pair([]))).toBe(
+      "declared-no-published-identifier",
+    );
+    // A parcel table that publishes NO keys at all is the empty case of (3):
+    // nothing about this table is evidence about any key.
+    expect(accountKeyedMembershipVerdict("84639", new Set(), pair([]))).toBe(
+      "declared-no-published-identifier",
+    );
+  });
+
+  it("the pre-P-370 verdicts are untouched when no pair is supplied", () => {
+    for (const id of ["84639", "84632", "84633", "84634", "84638", "97658", "97651", ""]) {
+      expect(isAccountKeyedNodeId(id, parcelIndex, undefined)).toBe(
+        isAccountKeyedNodeId(id, parcelIndex),
+      );
+      expect(accountKeyedMembershipVerdict(id, parcelIndex, undefined)).toBe(
+        accountKeyedMembershipVerdict(id, parcelIndex),
+      );
+    }
+    // An id the pass never read is kept, as it was before: excluding on an
+    // unparseable key is how a pass drops a row it cannot account for.
+    expect(isAccountKeyedNodeId("", parcelIndex, pair([["", "97658"]]))).toBe(false);
+  });
+
+  it("HAYS' GOLDEN HOLLOW LIST IS UNCHANGED KEY FOR KEY -- refused, not declared, because Hays' table uses its keys' numbering", () => {
+    const work = ["84639", "84632", "84633", "84634", "84638", "97658", "97651"].map((p) => ({
+      parcelNodeId: `48209:${p}`,
+      body: {},
+    }));
+    const golden = ["48209:84632", "48209:84633", "48209:84634", "48209:84638", "48209:84639"];
+    const bare = partitionAccountKeyedWork(work, haysParcelIndex);
+    expect(bare.excluded.map((w) => w.parcelNodeId).sort()).toEqual(golden);
+    expect(bare.declaredNoPublishedIdentifier).toBe(0);
+    // ...and the CLI's own rule (nothing read for this county -> pass NOTHING)
+    // changes nothing.
+    const nothing = partitionAccountKeyedWork(work, haysParcelIndex, undefined);
+    expect(nothing.excluded.map((w) => w.parcelNodeId).sort()).toEqual(golden);
+    expect(nothing.declaredNoPublishedIdentifier).toBe(0);
+    // ...AND THE HAZARD NAMED ABOVE, measured: a pair the caller DID read for
+    // Hays (the extracts have no county column, so a Hays account number can
+    // match a Williamson parcel) names two of these keys to Williamson prop_ids.
+    // Hays' own table publishes numeric keys, so a numeric key's absence from it
+    // is still evidence and the list does not move by one key.
+    const collided = partitionAccountKeyedWork(
+      work,
+      haysParcelIndex,
+      pair([["84639", "R048816"], ["84632", "R041604"]], ["numeric"]),
+    );
+    expect(collided.excluded.map((w) => w.parcelNodeId).sort()).toEqual(golden);
+    expect(collided.declaredNoPublishedIdentifier).toBe(0);
+    expect(collided.reachedByPublishedPair).toBe(0);
+  });
+
+  it("COUNTED, NOT INFERRED: the keys the pair reached and the keys that are declared", () => {
+    const work = ["84639", "99999", "97658"].map((p) => ({
+      parcelNodeId: `48491:${p}`,
+      body: {},
+    }));
+    const { kept, excluded, reachedByPublishedPair, declaredNoPublishedIdentifier } =
+      partitionAccountKeyedWork(
+        work,
+        parcelIndex,
+        pair([["84639", "R97658"], ["99999", "R048816"]]),
+      );
+    expect(kept.map((w) => w.parcelNodeId)).toEqual(["48491:84639", "48491:99999", "48491:97658"]);
+    expect(excluded).toEqual([]);
+    // 84639 is named to a prop_id this county publishes; 99999 IS named by the
+    // pair but to a prop_id it does not publish, so it is DECLARED and NOT
+    // counted as reached -- the counters measure the county's two numbering
+    // systems, not the extract's row count. 97658 is named by nothing.
+    expect(reachedByPublishedPair).toBe(1);
+    expect(declaredNoPublishedIdentifier).toBe(2);
+  });
+
+  it("NOTHING OF A COUNTY'S ACCOUNT-SHAPED KEYSPACE IS RETIRED WHEN IT PUBLISHES A PAIR", () => {
+    // The population end state, in one assertion: a pair that reaches 2 of 4 and
+    // names two to prop_ids this county does not publish leaves the exclusion
+    // EMPTY, and the keyspace it would have emptied is the one P-351's guard
+    // refuses.
+    const work = ["1", "2", "3", "4"].map((p) => ({ parcelNodeId: `48491:${p}`, body: {} }));
+    const delivered = partitionAccountKeyedWork(
+      work,
+      new Set(["R1", "R2"]),
+      pair([["1", "R1"], ["2", "R2"], ["3", "R9"], ["4", "R8"]]),
+    );
+    expect(delivered.excluded).toEqual([]);
+    expect(delivered.reachedByPublishedPair).toBe(2);
+    expect(delivered.declaredNoPublishedIdentifier).toBe(2);
   });
 });
 
@@ -240,5 +410,47 @@ describe("P-180 retirement payload (a retirement, not a bake)", () => {
     expect(first).not.toBe(second);
     // The scope names what was searched, so the absence is a positive determination.
     expect(payloads[0].recordRetirement.scopeSearched).toContain("txgio_parcel");
+  });
+
+  // -------------------------------------------------------------------------
+  // P-370 (2026-09-19). THE RETIREMENT TEXT IS UNCHANGED, AND THAT IS A RESULT.
+  //
+  // P-370 added a third verdict -- a key a county's OWN published pair does not
+  // reach is KEPT AND DECLARED, not retired. So a record is now written ONLY for
+  // the counties whose same record was already right (those that publish no pair
+  // over this run's keys), and this is the pinned proof rather than a claim: the
+  // exact string, character for character, of the record the pre-P-370 code
+  // wrote. A change here would mean P-370 had reworded somebody else's counties.
+  // -------------------------------------------------------------------------
+  it("THE RECORD'S BYTES ARE EXACTLY THE RECORD P-370's PREDECESSOR WROTE", () => {
+    const [p] = payloads;
+    expect(p.recordRetirement.scopeSearched).toBe(
+      "txgio_parcel (the county's published parcel index), county_fips 48209, prop_id = 84629",
+    );
+    expect(p.recordRetirement.basis).toBe(
+      "48209:84629: prop_id 84629 carries no row in the Hays County published parcel index " +
+        "(txgio_parcel) for county_fips 48209, so this node is ACCOUNT-KEYED, not a parcel node: " +
+        "it has no published geometry and no parcel facts; its own claim last carried tax_year 2025. " +
+        "Retired by the tier-1 bake's account-keyed exclusion (P-180); no facts are served for it.",
+    );
+    expect(p.recordRetirement.authority).toBe(
+      "Hays County GIS published parcel index (txgio_parcel) for county_fips 48209",
+    );
+    // And a county that DOES publish a pair writes no record at all through this
+    // pass: its unreached keys are kept, so nothing is excluded to retire.
+    const kept = partitionAccountKeyedWork(
+      [hollowItem("84629")],
+      new Set(),
+      undefined,
+    );
+    expect(kept.excluded).toHaveLength(1);
+    const declared = partitionAccountKeyedWork([hollowItem("84629")], new Set(), {
+      nodeKeyByAccountKey: new Map([["99999", "R000001"]]),
+      sources: ["tx_wcad_owner"],
+      parcelTableShapeClasses: new Set(["r-account"]),
+    });
+    expect(declared.excluded).toEqual([]);
+    expect(declared.declaredNoPublishedIdentifier).toBe(1);
+    expect(planFor(declared.excluded).writes).toEqual([]);
   });
 });

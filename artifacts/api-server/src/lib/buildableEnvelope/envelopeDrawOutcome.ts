@@ -71,7 +71,12 @@ export type EnvelopeModelledDraw = {
  * `null` return destroyed.
  */
 export type EnvelopeDrawStep =
-  /** No baked zoning district on the parcel: nothing to resolve against. */
+  /**
+   * Nothing — ring stamp, spine, atom chain — named a district, so nothing was
+   * resolved against. (P-374: this is the shared derivation's own terminal
+   * answer, `no-zoning-stamp`, not the absence of one caller's own facet; the
+   * route reaches it after reading all four signals, and a DECLINE.)
+   */
   | "no-zoning-code"
   /** No `snapshot.queryPoint`, so the derivation cannot be seeded. */
   | "no-query-point"
@@ -79,9 +84,14 @@ export type EnvelopeDrawStep =
   | "parcel-ring-unavailable"
   /** The live parcel at the point stamps a DIFFERENT parcel_node_id. */
   | "parcel-identity-mismatch"
-  /** `resolveAuthoritativeSetbacks` found no usable candidate on either side. */
+  /** No setback source covers the resolved district in this jurisdiction. */
   | "setbacks-unresolved"
-  /** `labelEdges` could not label the ring against the nearby roads. */
+  /**
+   * `labelEdges` could not label the ring against the nearby roads (the route's
+   * own 422 `ungeometric-parcel`; P-374). The old MCP copy of the derivation
+   * returned `edge-labeling-unavailable` here — an unreached attempt — for a
+   * condition the route had already answered.
+   */
   | "edge-labeling-unavailable"
   /** The derivation ran and answered: `wireStatus` was not "ok". */
   | "derivation-not-drawn"
@@ -127,6 +137,17 @@ export type EnvelopeDrawOutcome =
  * `no-buildable-area` is a MEASUREMENT (setbacks genuinely consume the lot) and
  * `geometry-validation-failed` is a GATE decline — P60b's split, which must not
  * be flattened back into one token here.
+ *
+ * P-374 DID NOT WIDEN THIS. The lane that made the two callers share one
+ * derivation was tempted to serve `setbacks-unresolved` for a null
+ * jurisdiction key too, on the reading that "we could not find the city" is a
+ * different claim from "nothing is ruled here". That reads well and is wrong
+ * HERE: P-339's two directions are a contract the probe grades (chain present
+ * -> `setbacks-unresolved`; chain ABSENT -> `atom_path_pending`), and a
+ * caller's own missing city is not evidence about the chain at all. Changing
+ * it broke both pre-registered falsifiers, which is how it was caught. The
+ * residual (a card with no city at all, where a geocoded route drew) is named
+ * in P-374's close as an INPUT gap, not patched over by weakening this rule.
  */
 export function envelopeDrawRefusalReason(refusal: EnvelopeDrawRefusal): string {
   switch (refusal.step) {
@@ -139,12 +160,18 @@ export function envelopeDrawRefusalReason(refusal: EnvelopeDrawRefusal): string 
     case "derivation-not-drawn":
       return refusal.declinedBy ?? "geometry-validation-failed";
     case "setbacks-unresolved":
-      // The ONE surviving use of the token, and the only case where its
+      // The route's own token when it reached one — P-257's
+      // `planned-development`, which names WHY the district refuses a table
+      // rather than leaving a shapeless "no source". Otherwise the ONE
+      // surviving use of `atom_path_pending`, and the only case where its
       // vocabulary meaning is literally true: with no property atom chain there
       // is no rule anywhere to report. With a chain present the honest answer is
       // that this call site did not resolve a table — a different claim, and the
       // one the surface was previously making silently.
-      return refusal.chain === "absent" ? "atom_path_pending" : "setbacks-unresolved";
+      return (
+        refusal.declinedBy ??
+        (refusal.chain === "absent" ? "atom_path_pending" : "setbacks-unresolved")
+      );
     case "parcel-ring-unavailable":
     case "parcel-identity-mismatch":
     case "edge-labeling-unavailable":

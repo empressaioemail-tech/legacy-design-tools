@@ -237,7 +237,6 @@ let situsOutcome: SitusOutcome = { hit: null, reason: "no-situs-match" };
 let rooftopHit:
   | { latitude: number; longitude: number; matchSource: "txgio-address" }
   | null = null;
-let byPropIdResult: unknown = null;
 vi.mock("../lib/txgioAddressResolve", async () => {
   const actual =
     await vi.importActual<typeof import("../lib/txgioAddressResolve")>(
@@ -249,16 +248,50 @@ vi.mock("../lib/txgioAddressResolve", async () => {
     resolveRooftopByAddress: vi.fn(async () => rooftopHit),
   };
 });
-vi.mock("../lib/txgioParcelStore", async () => {
+// P-373: the route resolves a parcel by IDENTITY through
+// `queryTxCountyParcelByPropId` (store-backed or live-ArcGIS, chosen from
+// the county's own registry entry) — the seam a posted `parcel_node_id`
+// and the authoritative situs hit both go through now. Mocked at that
+// boundary: by default it answers the per-test deterministic parcel,
+// stamped with the CANONICAL node id of the identity it was asked for
+// (which is exactly what the real county sources stamp).
+let identityFetchResult: unknown = null;
+let identityFetchMissing = false;
+let identityFetchThrow: unknown = null;
+let lastIdentityFetch: { fips: string; propId: string } | null = null;
+vi.mock("../lib/brokerageTxParcels", async () => {
   const actual =
-    await vi.importActual<typeof import("../lib/txgioParcelStore")>(
-      "../lib/txgioParcelStore",
+    await vi.importActual<typeof import("../lib/brokerageTxParcels")>(
+      "../lib/brokerageTxParcels",
     );
   return {
     ...actual,
-    queryTxgioParcelByPropId: vi.fn(async () => byPropIdResult),
+    queryTxCountyParcelByPropId: vi.fn(
+      async (input: { county: { fips: string }; propId: string }) => {
+        lastIdentityFetch = {
+          fips: input.county.fips,
+          propId: input.propId,
+        };
+        if (identityFetchThrow) throw identityFetchThrow;
+        if (identityFetchMissing) return null;
+        if (identityFetchResult) return identityFetchResult;
+        return {
+          geojson: rectParcel(
+            parcelZoning,
+            `${input.county.fips}:${input.propId}`,
+            parcelSitusAddress,
+          ),
+          featureCount: 1,
+          queryMode: "pin" as const,
+        };
+      },
+    ),
   };
 });
+
+// (P-373) The store reader is no longer called by the route directly: the
+// identity/situs paths go through `queryTxCountyParcelByPropId` above, which
+// chooses the county's source. No `txgioParcelStore` mock is needed here.
 
 // Nearest road: an E-W street just south of the lot -> HIGH-confidence front.
 vi.mock("../lib/buildableEnvelope/roads", async () => {
@@ -345,7 +378,10 @@ beforeEach(() => {
   lastPinQueryPoint = null;
   situsOutcome = { hit: null, reason: "no-situs-match" };
   rooftopHit = null;
-  byPropIdResult = null;
+  identityFetchResult = null;
+  identityFetchMissing = false;
+  identityFetchThrow = null;
+  lastIdentityFetch = null;
   geocodeOverride = null;
   geocodeMiss = false;
   parcelSitusAddress = "1209 Main St";
@@ -531,6 +567,137 @@ describe("POST /place/buildable-envelope — parcel_node_id (canvas-free map sna
   });
 });
 
+// ---------------------------------------------------------------------------
+// P-373 (2026-09-19) — the address/parcel match, fixed at its cause.
+//
+// Three subjects either matched NO parcel or a STRANGER's parcel, because the
+// only route to a parcel was a DERIVED point:
+//   - `48055:40428` / `48055:27929` (Caldwell): composed address never
+//     matched a parcel; the fall-through geocode's point sat in a neighbour.
+//   - `48453:352594` (Travis/Buda): answered from its record point, which
+//     pin-queries `48209:10757` — a Hays parcel in ANOTHER county.
+//
+// The fix is at the cause: a request that NAMES its subject
+// (`parcel_node_id`) is resolved BY THAT IDENTITY, from whichever source the
+// subject's county serves, and a point that DISAGREES with the identity is
+// refused with a named reason instead of answered with the point's parcel.
+// ---------------------------------------------------------------------------
+describe("POST /place/buildable-envelope — P-373 identity wins over the point", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  it("resolves the IDENTIFIED parcel by identity — no address, no point, no pin-query", async () => {
+    parcelZoning = "R-MD";
+    // A Caldwell parcel: the county whose store rows carry the situs but no
+    // polygon, so only the identity fetch can reach it at all.
+    const res = await postWith({ parcel_node_id: "48055:40428" });
+
+    // Caldwell has no codified setback table, so the derivation honestly ends
+    // in a decline — the IDENTITY is what must survive either way.
+    expect([200, 404]).toContain(res.status);
+    expect(res.body.parcel_node_id).toBe("48055:40428");
+    // The identity fetch asked Caldwell's source for THAT prop id...
+    expect(lastIdentityFetch).toEqual({ fips: "48055", propId: "40428" });
+    // ...and the point pin-query was never consulted, so no neighbour could
+    // be answered in its place.
+    expect(lastPinQueryPoint).toBeNull();
+  });
+
+  it("refuses (named) when the sent point falls in ANOTHER COUNTY's parcel", async () => {
+    // `48453:352594`'s record point sits in Hays: pin-querying it answers
+    // `48209:10757`. Answering that for a card that named the Travis parcel
+    // is the wrong-parcel defect itself.
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48209:10757";
+    const res = await postWith({
+      parcel_node_id: "48453:352594",
+      lat: 30.1003,
+      lng: -97.82734,
+    });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-parcel");
+    expect(res.body.declineReason).toBe("parcel-identity-mismatch");
+    // The identity it was asked about is returned — the surface can SEE that
+    // its own point lands elsewhere...
+    expect(res.body.parcel_node_id).toBe("48453:352594");
+    // ...and the reason names both parcels + the county the point landed in.
+    expect(res.body.reason).toContain("48209:10757");
+    expect(res.body.reason).toContain("Hays County");
+    expect(res.body.reason).toContain("48453:352594");
+    // Nothing is served for the stranger's parcel.
+    expect(JSON.stringify(res.body)).not.toContain("no-district");
+  });
+
+  it("carries on when the sent point AGREES with the identity (point still honored)", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48453:352594";
+    const res = await postWith({
+      parcel_node_id: "48453:352594",
+      lat: 30.1003,
+      lng: -97.82734,
+    });
+
+    expect(res.body.declineReason).not.toBe("parcel-identity-mismatch");
+    expect(res.body.parcel_node_id).toBe("48453:352594");
+    expect(lastPinQueryPoint).toEqual({
+      latitude: 30.1003,
+      longitude: -97.82734,
+    });
+  });
+
+  it("declines honestly when the identity's county has no parcel source in this build", async () => {
+    const res = await postWith({ parcel_node_id: "48999:1" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-parcel");
+    expect(res.body.declineReason).toBe("parcel-source-absent-in-county");
+    expect(res.body.parcel_node_id).toBe("48999:1");
+    // No county to ask -> no identity fetch was made.
+    expect(lastIdentityFetch).toBeNull();
+  });
+
+  it("declines honestly when the identified parcel is absent from its county's source", async () => {
+    identityFetchMissing = true;
+    const res = await postWith({ parcel_node_id: "48055:40428" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-parcel");
+    expect(res.body.declineReason).toBe("parcel-identity-not-found");
+    expect(res.body.reason).toContain("Caldwell County");
+    expect(res.body.parcel_node_id).toBe("48055:40428");
+  });
+
+  it("400s a parcel_node_id that is not an identity (never treated as a lookup key)", async () => {
+    const res = await postWith({ parcel_node_id: "40428" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_parcel_node_id");
+    expect(lastIdentityFetch).toBeNull();
+  });
+
+  it("a parceled identity with NO address and NO stamp still declines honestly (no district invented)", async () => {
+    // Situs-less, stamp-less parcel: the identity is honored (the node id is
+    // stated on the wire) and the district is honestly absent.
+    identityFetchResult = {
+      geojson: rectParcel(null, "48055:40428", ""),
+      featureCount: 1,
+      queryMode: "identity" as const,
+    };
+    const res = await postWith({ parcel_node_id: "48055:40428" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.declineReason).toBe("no-zoning-stamp");
+    expect(res.body.setbacks).toBeUndefined();
+    expect(res.body.parcel_node_id).toBe("48055:40428");
+  });
+});
+
 describe("POST /place/buildable-envelope — F4d authoritative resolution", () => {
   function postWith(body: Record<string, unknown>) {
     return request(getApp())
@@ -608,7 +775,10 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       },
       resolvedBy: "unique-situs",
     };
-    byPropIdResult = {
+    // P-373: the situs hit is fetched through the identity seam (one parcel,
+    // by its own prop id, from whichever source the county serves) — a Hays
+    // store read here.
+    identityFetchResult = {
       geojson: rectParcel("R-MD", "48209:193340"),
       featureCount: 1,
       queryMode: "pin" as const,
@@ -617,6 +787,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // Hays has no codified setback table for R-MD — honest no-district, not invented geometry.
     expect(res.status).toBe(404);
     expect(res.body.status).toBe("no-district");
+    expect(lastIdentityFetch).toEqual({ fips: "48209", propId: "193340" });
     expect(lastPinQueryPoint).toBeNull();
   });
 
@@ -895,5 +1066,140 @@ describe("POST /place/buildable-envelope — P-304 area figure withholding", () 
     expect(p.buildableAreaSqFt).toBe(7_777);
     expect(p.buildableAreaPct as number).toBeGreaterThan(0);
     expect(String(p.disclosure ?? "")).not.toContain("withheld");
+  });
+});
+
+/**
+ * P-374 — THE DIVERGENCE TEST.
+ *
+ * The mission is not "the draw block agrees with the route in the cases we
+ * thought of"; it is "there is one derivation, and a test fails when the two
+ * callers get different answers". This block runs BOTH callers against the
+ * SAME parcel fixture in the SAME process:
+ *
+ *   - the route, through its real HTTP handler (`brokeragePlaceBuildableEnvelopeRouter`);
+ *   - the draw block, through `tryComposeEnvelopeModelForDraw`.
+ *
+ * and asserts their answers are the SAME answer — the same resolved district,
+ * the same four axes, the same polygon, and (where neither draws) the same
+ * named reason. Neither caller is hand-seeded with a jurisdiction key: the
+ * route's city comes from the request geocode, the draw block's from the same
+ * ring's own situs string (the fallback that stands in for the card's composed
+ * city here), and the two must still reach the one table. That is what pins the
+ * jurisdiction-key equivalence the old copy got wrong.
+ */
+describe("POST /place/buildable-envelope — P-374: the draw block and the route are ONE derivation", () => {
+  const ADDRESS = "1209 Main St, Bastrop, TX 78602";
+  const NODE = "48021:33512";
+
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  async function drawBlock(args: {
+    jurisdictionCity?: string | null;
+    jurisdictionState?: string | null;
+  }) {
+    const { tryComposeEnvelopeModelForDraw } = await import(
+      "../lib/buildableEnvelope/parcelDrawEnvelopeModel"
+    );
+    return tryComposeEnvelopeModelForDraw({
+      parcelNodeId: NODE,
+      jurisdictionCity: args.jurisdictionCity ?? null,
+      jurisdictionState: args.jurisdictionState ?? null,
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+  }
+
+  it("parity: the same parcel draws the SAME district, the SAME axes and the SAME polygon on both paths", async () => {
+    // The ring's OWN situs names the city (the route gets the same city from
+    // the request geocode). No key is hand-seeded on either side.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = NODE;
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(res.body.effectiveZoningCode).toBeTruthy();
+
+    const mcp = await drawBlock({});
+    expect(mcp.state).toBe("modelled");
+    if (mcp.state !== "modelled") throw new Error("unreachable");
+
+    // The resolved district the route SERVES, not the raw code that seeded the
+    // probe: pre-P-374 the draw block named its own input here.
+    expect(mcp.model.setbacks.district).toBe(res.body.effectiveZoningCode);
+    const routeSetbacks = res.body.setbacks as Record<string, number>;
+    expect(mcp.model.setbacks).toEqual({
+      front_ft: routeSetbacks.front_ft,
+      side_ft: routeSetbacks.side_ft,
+      rear_ft: routeSetbacks.rear_ft,
+      ...(typeof routeSetbacks.side_corner_ft === "number"
+        ? { side_corner_ft: routeSetbacks.side_corner_ft }
+        : {}),
+      district: res.body.effectiveZoningCode,
+    });
+    // ...and the same polygon: the two surfaces are looking at one draw.
+    const routeRing = (
+      res.body.payload.geojson.features[0] as {
+        geometry: { coordinates: [number, number][][] };
+      }
+    ).geometry.coordinates[0];
+    expect(mcp.model.ringLngLat).toEqual(routeRing);
+  });
+
+  it("parity where the ring carries no stamp: both paths read the spine, and both draw (the FALSIFIER for the old draw block)", async () => {
+    // Pre-P-374 this case was the divergence: the route read the spine and
+    // drew; the draw block refused `no-zoning-code` on its caller's missing
+    // facet alone, and the overlay then said the setbacks were unruled beside
+    // a ruled table. Same mock, same parcel, one derivation — so both draw.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = null;
+    parcelNodeIdStamped = NODE;
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "R-MD",
+      source: "baked-snapshot",
+      snapshotAt: "2026-07-20T12:00:00.000Z",
+    });
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.body.effectiveZoningCode).toBe("R-MD");
+
+    const mcp = await drawBlock({});
+    expect(mcp.state).toBe("modelled");
+    if (mcp.state !== "modelled") throw new Error("unreachable");
+    expect(mcp.model.setbacks.district).toBe(res.body.effectiveZoningCode);
+  });
+
+  it("THE PARITY CHECK CAN FAIL: seed the draw block with a jurisdiction the route never used and the answers differ", async () => {
+    // The control for the two tests above. If the two callers could not
+    // disagree, "they agree" would prove nothing — so here is a case where they
+    // must not, and the assertion the parity tests make (equality) is the one
+    // that breaks.
+    parcelSitusAddress = ADDRESS;
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = NODE;
+
+    const res = await postWith({ address: ADDRESS });
+    expect(res.body.status).toBe("ok");
+
+    const mcp = await drawBlock({
+      jurisdictionCity: "Nowhere",
+      jurisdictionState: "XX",
+    });
+
+    // The parity predicate, stated explicitly: would a "the two agree"
+    // assertion pass here? No — the route drew and the draw block refuses,
+    // because their inputs name different jurisdictions. That is the control
+    // the parity tests above need.
+    const routeDrew = res.body.payload.geojson.features.length > 0;
+    const drawBlockDrew = mcp.state === "modelled";
+    expect(routeDrew).toBe(true);
+    expect(drawBlockDrew).toBe(false);
+    expect(drawBlockDrew === routeDrew).toBe(false);
   });
 });
