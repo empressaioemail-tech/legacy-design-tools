@@ -17,8 +17,17 @@
  *     these constants, so the pattern, the flags and the refusal sentence are
  *     asserted byte-for-byte against the identical literals that hauska-map's
  *     `setback-decline-wording.test.ts` asserts its own pinned copies against.
- *     Editing either side fails that side's suite and points at the other.
  *     Do not soften these to `toMatch`/`toContain` — the point is exact bytes.
+ *
+ *     WHAT THIS PROVES (P-331, 2026-09-18). A LOCAL pin: it fails when THIS
+ *     module's constant moves away from the literal typed below. It cannot fail
+ *     on drift with hauska-map, because both sides of the assertion live in this
+ *     repo — a one-sided edit with the literal here updated too passes both
+ *     CIs, which is the opposite of what this comment claimed until P-331. The
+ *     cross-repo half is now `scripts/check-cross-repo-literal-drift.mjs`
+ *     (workflow `.github/workflows/cross-repo-literal-drift.yml`), which reads
+ *     hauska-map's main from the defining modules and fails on disagreement.
+ *     Keep both: they fail on different things.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
