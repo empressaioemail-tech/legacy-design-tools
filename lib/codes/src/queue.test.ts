@@ -424,3 +424,20 @@ describe("drainQueue: lease reaper", () => {
     });
   });
 });
+
+// P-375 CONTROL at the fix head (1d8a5d57). Do not merge.
+//
+// This file is one of the `lib/codes` suites the `Test` job used to fail intermittently on --
+// from inside `lib/db`'s `dropTestSchema`, with Postgres 53200 "out of shared memory" -- on PRs
+// that did not touch it. With the lock table sized in pr-checks.yml, that infrastructure can no
+// longer produce the error, so the question this control answers is the one that matters next:
+// does the job still fail for a REAL reason, or has the fix bought green by hiding failures?
+//
+// A deliberately false assertion must fail `Test`. Read the whole job's conclusion, not just
+// this line: exactly one failure, in this describe, with ZERO `out of shared memory` lines.
+// A `success` here would mean the fix masks real regressions, and the deliverable must not merge.
+describe("P-375 control: a deliberately broken assertion must still fail Test", () => {
+  it("fails on purpose", () => {
+    expect(2 + 2).toBe(5);
+  });
+});
