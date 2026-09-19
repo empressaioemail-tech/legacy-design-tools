@@ -90,12 +90,20 @@ export type SitusDisposition = "present" | "unknown";
  *
  * THE LICENCE (the same rule as the map's `applyCityLimitsSitusLicence`, in
  * `hauska-map` `apps/property-explorer/api/_lib/pe-property-atoms.ts`, and as the
- * probe's `addressCarriesLedgerLine` in `scripts/surface-probe.mjs`; the three
- * are NAMED, not pinned — P-331's map half has merged but its LDT half has not
- * reached this repo's main, and the drift check reads the SIBLING'S MAIN, so a
- * row comparing the two declarations here would REFUSE on every PR until then;
- * the row and its prerequisites are written out in this lane's close). A city
- * is taken from the city-limits answer ONLY when BOTH hold:
+ * probe's `addressCarriesLedgerLine` in `scripts/surface-probe.mjs`).
+ * P-331's pin (`scripts/check-cross-repo-literal-drift.mjs`) has MERGED ON BOTH
+ * MAINS (this repo #725, hauska-map #425, 2026-09-19; the two copies of the check
+ * are byte-identical, sha256 b2755e6e), and this rule's three decision literals
+ * are therefore DECLARED with names a row can read — `SitusCityBasis` (the basis
+ * vocabulary), `DECLARED_ABSENCE_VERDICT` and `CITY_LIMITS_INCORPORATED_STATUS`
+ * below — with the same names on the map's side. The pin's ROWS are deliberately
+ * not in the table yet for an ORDERING reason, not an unmerged half: a row reads
+ * the SIBLING'S MAIN, so it can only go green once both declarations are on both
+ * mains, and landing the rows in this lane's two PRs would exit 2 (REFUSE) on
+ * whichever merges first — a red no single merge could clear. The rows and their
+ * prerequisites are written out in this lane's close. The probe's copy is a
+ * THIRD repository's copy, outside the pair P-331 can read: named, not pinned.
+ * A city is taken from the city-limits answer ONLY when BOTH hold:
  *
  *   1. the roll's own situs city is a DECLARED absence with verdict
  *      `absent-verified`. A bare null, a `lookup-failed`/`refused`, a
@@ -115,10 +123,32 @@ export type CityLimitsDetermination =
   | null
   | undefined;
 
+/**
+ * WHICH CITY THE LABEL'S CITY IS — the vocabulary this repo stamps and the map
+ * stamps, declared under one NAME so P-331's drift check can read it on both
+ * sides (`SitusCityBasis` there too, in `src/lib/situs-address.ts`). `"cad-roll"`
+ * = the roll's own city; `"city-limits"` = the containing city, licensed only
+ * from a declared-absent roll city; `null` = no city named.
+ */
+export type SitusCityBasis = "cad-roll" | "city-limits" | null;
+
+/**
+ * THE TWO WORDS THE LICENCE READS, declared here for the pin's sake: the verdict
+ * that makes the roll's silence licensable, and the city-limits answer that may
+ * then be named. The same names exist on the map's side
+ * (`src/lib/situs-address.ts`). Both words appear inline at many OTHER sites in
+ * this repo (the program-wide absence vocabulary and the jurisdiction
+ * vocabulary, neither of which P-270 owns) — what is pinned is the LICENCE's
+ * reading of them, not every copy in either repo, and that limit is stated here
+ * rather than implied.
+ */
+export const DECLARED_ABSENCE_VERDICT = "absent-verified";
+export const CITY_LIMITS_INCORPORATED_STATUS = "incorporated";
+
 export type SitusCityResolution = {
   city: string | null;
   /** `"cad-roll"` = the roll's own city; `"city-limits"` = the containing city. Null = no city named. */
-  basis: "cad-roll" | "city-limits" | null;
+  basis: SitusCityBasis;
 };
 
 /** The roll's own situs city as the payload carries it — a string, or a declaration object, or nothing. */
@@ -143,14 +173,14 @@ export function rollSitusCityIsDeclaredAbsent(value: unknown): boolean {
   const r = value as Record<string, unknown>;
   const word = (v: unknown) =>
     typeof v === "string" && v.trim() ? v.trim() : null;
-  return (word(r.verdict) ?? word(r.status)) === "absent-verified";
+  return (word(r.verdict) ?? word(r.status)) === DECLARED_ABSENCE_VERDICT;
 }
 
 /** The licence's own gate: an INCORPORATED answer that actually names a city. */
 export function incorporatedCityLimitsCity(
   fact: CityLimitsDetermination,
 ): string | null {
-  if (!fact || fact.status !== "incorporated") return null;
+  if (!fact || fact.status !== CITY_LIMITS_INCORPORATED_STATUS) return null;
   return typeof fact.cityName === "string" && fact.cityName.trim()
     ? fact.cityName.trim()
     : null;
