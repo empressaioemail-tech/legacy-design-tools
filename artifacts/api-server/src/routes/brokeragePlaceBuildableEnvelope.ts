@@ -617,24 +617,123 @@ async function situsFirstPreResolve(input: {
 
 
 /**
- * The parcel whose polygon CONTAINS a point, as this surface's own
- * pin-query answer (`parcel_node_id`), or null when the point is in no
- * parcel this build can serve. Never throws: a no-coverage upstream
- * decline is "nothing there", not a conflict (P-373).
+ * P-382 — THE POINT THE FALL-THROUGH PATH WOULD HAVE SERVED.
+ *
+ * THE MECHANISM, MEASURED (`_scratch/p382-mechanism.mjs` + `p382-geocode-repro.mjs`,
+ * and the CP1 artifact):
+ *
+ *   - `resolveRooftopAcrossCounties` (the situs pre-pass's rooftop lookup) is
+ *     bounded to `allStoreCounties()`, so for an address whose rooftop lives
+ *     in a LIVE-ArcGIS county (Caldwell, Bastrop) it MISSES and the pre-pass
+ *     falls to the geocode.
+ *   - P-373 widened the situs candidate set from `storeCountiesContainingPoint`
+ *     to `countiesContainingPoint` (see `resolveParcelBySitusAuthoritative`),
+ *     so an address in a live-ArcGIS county now HITS the authoritative situs
+ *     path — which is the parcel fix the lane wanted (measured: the store's
+ *     own situs index answers all five canary addresses with their OWN node
+ *     id).
+ *   - But this branch builds the place point from the pre-pass GEOCODE
+ *     (`pregeocode`), while the fall-through path UPGRADES that geocode to the
+ *     owning county's authoritative `txgio_address` rooftop first. Serving the
+ *     geocode is the 2026-09-19 canary's five `placeKey` regressions (measured:
+ *     48055:130676 moved 5,061 m off its parcel, onto the 78648 ZIP centroid).
+ *
+ * The dispatch's proposed mechanism — the new live-service probe in
+ * `resolvePointCountyByPip` returning a DIFFERENT county so the rooftop lookup
+ * stops being served — is REFUTED BY MEASUREMENT: at every one of the five
+ * canary points the pre-change county (store PIP, else nearest centroid) and
+ * the post-change live-PIP return the SAME county, and it is the county that
+ * owns the subject (4 via `live-pip`, 1 via the centroid fallback; 0 changed).
+ * With the same county, the same address and an address index that production
+ * proves holds the rooftop, that upgrade would still have run. The route
+ * simply never reaches it any more.
+ *
+ * So: a situs hit whose OWNING COUNTY is not reachable by the pre-P-373
+ * candidate set (a live-ArcGIS county — exactly the set P-373's widening newly
+ * made reachable) asks that county's own address index for the rooftop, which
+ * is the same source, same county and same code path the pre-P-373
+ * `resolveContext` upgrade used (`resolveRooftopByAddress`; county-scoped, so
+ * the registry tag never filters a live county out). A hit in a STORE-tagged
+ * county was reachable before P-373 too and keeps this branch's own point
+ * (this returns null), which is what makes "nothing else moves" structural
+ * rather than hopeful.
+ *
+ * Best-effort, like the path it mirrors: a store hiccup falls back to the
+ * geocode point (never sinks the request).
  */
+async function authoritativeRooftopForSitusHit(input: {
+  owningCountyFips: string;
+  address: string | null;
+  log: typeof logger;
+}): Promise<{ latitude: number; longitude: number } | null> {
+  const owning = txParcelCountyByFips(input.owningCountyFips);
+  if (!owning || owning.source === "txgio-store") return null;
+  if (!input.address) return null;
+  if (txParcelProviderMode() !== "county-gis") return null;
+  try {
+    const rooftop = await resolveRooftopByAddress({
+      countyFips: owning.fips,
+      address: input.address,
+    });
+    return rooftop
+      ? { latitude: rooftop.latitude, longitude: rooftop.longitude }
+      : null;
+  } catch (err) {
+    // Authoritative lookup is best-effort; a store hiccup must not sink the
+    // request — fall through to the geocode point, exactly as the
+    // fall-through path does.
+    input.log.warn(
+      { err, address: input.address, county: owning.fips },
+      "buildable-envelope: authoritative rooftop lookup failed on a situs hit in a live county; serving the geocode point",
+    );
+    return null;
+  }
+}
+
+
+/**
+ * The parcel whose polygon CONTAINS a point, as this surface's own
+ * pin-query answer (`parcel_node_id`) — THREE values, never two (P-382).
+ *
+ *   - `{ state: "measured" }` : the layer ANSWERED. `parcelNodeId` is the
+ *     parcel at the point, or null when the point is in no parcel this
+ *     build can serve. That includes the upstream's own DECLARED empty
+ *     coverage (`AdapterRunError` code `no-coverage`), which this route
+ *     already classifies as an honest "no parcel here" 404 and NOT as an
+ *     outage (see the pin-query catch below) — the same classification is
+ *     used here, so "nothing there" stays a positive answer.
+ *   - `{ state: "unknown" }`  : the lookup did not run. `reason` NAMES the
+ *     failure. P-373 collapsed this into `null`, so a parcels layer that was
+ *     down or slow read as "the point is in no parcel" — an UNKNOWN
+ *     answering as agreement with whatever identity the caller posted.
+ */
+type PointParcelLookup =
+  | { state: "measured"; parcelNodeId: string | null }
+  | { state: "unknown"; reason: string };
+
 async function parcelNodeIdAtPoint(point: {
   latitude: number;
   longitude: number;
-}): Promise<string | null> {
+}): Promise<PointParcelLookup> {
   try {
     const geo = await queryGisLayerGeoJson({
       layer: "parcels",
       latitude: point.latitude,
       longitude: point.longitude,
     });
-    return firstParcelRing(geo.geojson)?.parcelNodeId ?? null;
-  } catch {
-    return null;
+    return { state: "measured", parcelNodeId: firstParcelRing(geo.geojson)?.parcelNodeId ?? null };
+  } catch (err) {
+    if (err instanceof AdapterRunError && err.code === "no-coverage") {
+      return { state: "measured", parcelNodeId: null };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    const code =
+      err instanceof AdapterRunError
+        ? err.code
+        : err instanceof Error
+          ? err.name
+          : "Error";
+    return { state: "unknown", reason: `${code}: ${message}` };
   }
 }
 
@@ -676,6 +775,15 @@ function representativePointOfRing(
  * defect itself. On a disagreement this declines with a NAMED reason and
  * still returns the identity it was given, so the surface can see that the
  * parcel it asked about is not the parcel its own point lands in.
+ *
+ * A point that could not be CHECKED AT ALL is a third case, and it is not
+ * agreement: the parcels layer being down, slow or unparseable used to
+ * collapse to "no parcel at the point" (P-373), which silently skipped the
+ * check and served the request with `pointConfidence: "coordinates"` — a
+ * point the response presents as verified when nothing verified it. An
+ * unmade check now declines with `point-verification-unavailable` (P-382);
+ * an upstream's DECLARED empty coverage ("no parcel here") still carries on,
+ * because that is an answer.
  *
  * Outcomes:
  *   - resolved : derive from this parcel (its geometry, not the point's).
@@ -749,15 +857,29 @@ async function resolvePostedParcelIdentity(input: {
 
   // The caller's point, when it sent one, must AGREE with the identity. A
   // point that pin-queries another parcel (classically in another county)
-  // is refused, never answered — the card asked about ITS parcel.
+  // is refused, never answered — the card asked about ITS parcel. A point
+  // whose check could not be MADE is refused too (P-382): serving it would
+  // report the point as verified when nothing verified it.
   if (input.point) {
     const atPoint = await parcelNodeIdAtPoint(input.point);
-    if (atPoint && atPoint !== canonical) {
-      const pointCounty = txParcelCountyByFips(atPoint.split(":")[0] ?? "");
+    if (atPoint.state === "unknown") {
+      input.log.warn(
+        { parcelNodeId: canonical, reason: atPoint.reason },
+        "buildable-envelope: the point could not be checked against the identified parcel; refusing rather than serving it unverified",
+      );
+      return refuse(502, {
+        status: "parcel-unavailable",
+        declineReason: "point-verification-unavailable",
+        reason: `The point sent with this request could not be checked against the identified parcel ${canonical} (${atPoint.reason}), so a buildable envelope can't be derived for this parcel from that point. Re-send the request with the parcel_node_id alone (no point) to derive from the parcel's own geometry.`,
+        parcel_node_id: canonical,
+      });
+    }
+    if (atPoint.parcelNodeId && atPoint.parcelNodeId !== canonical) {
+      const pointCounty = txParcelCountyByFips(atPoint.parcelNodeId.split(":")[0] ?? "");
       input.log.info(
         {
           parcelNodeId: canonical,
-          pointParcelNodeId: atPoint,
+          pointParcelNodeId: atPoint.parcelNodeId,
           pointCountyFips: pointCounty?.fips ?? null,
         },
         "buildable-envelope: point does not match the identified parcel; refusing rather than answering a stranger's parcel",
@@ -765,7 +887,7 @@ async function resolvePostedParcelIdentity(input: {
       return refuse(404, {
         status: "no-parcel",
         declineReason: "parcel-identity-mismatch",
-        reason: `The point sent with this request falls in ${atPoint}${pointCounty ? ` (${pointCounty.name} County)` : ""}, not in the identified parcel ${canonical}${county.fips !== (pointCounty?.fips ?? "") ? ` (${county.name} County)` : ""}, so a buildable envelope can't be derived for this parcel from that point.`,
+        reason: `The point sent with this request falls in ${atPoint.parcelNodeId}${pointCounty ? ` (${pointCounty.name} County)` : ""}, not in the identified parcel ${canonical}${county.fips !== (pointCounty?.fips ?? "") ? ` (${county.name} County)` : ""}, so a buildable envelope can't be derived for this parcel from that point.`,
         parcel_node_id: canonical,
       });
     }
@@ -928,13 +1050,25 @@ async function handleBuildableEnvelope(
     // resolve with no geocode at all).
     const parcel0 = firstParcelRing(situs.parcelGeo.geojson);
     const fromSitus = cityStateFromSitus(parcel0?.situsAddress ?? null);
-    const pt =
-      explicitPoint ??
-      (pregeocode &&
+    const geocodePoint =
+      pregeocode &&
       Number.isFinite(pregeocode.latitude) &&
       Number.isFinite(pregeocode.longitude)
         ? { latitude: pregeocode.latitude, longitude: pregeocode.longitude }
-        : null);
+        : null;
+    // P-382: on a hit P-373's widening newly made reachable (a live-ArcGIS
+    // county), serve the point the fall-through path would have served — the
+    // owning county's authoritative rooftop — so the address keeps the point
+    // it had before P-373. Store-tagged hits (reachable before too) are
+    // untouched.
+    const rooftopPoint = explicitPoint
+      ? null
+      : await authoritativeRooftopForSitusHit({
+          owningCountyFips: situs.nodeCountyFips,
+          address: situsAddress,
+          log,
+        });
+    const pt = explicitPoint ?? rooftopPoint ?? geocodePoint;
     ctx = {
       placeKey: pt
         ? placeKeyFromCoords(roundPlaceCoord(pt.latitude), roundPlaceCoord(pt.longitude))
@@ -947,7 +1081,20 @@ async function handleBuildableEnvelope(
       city: pregeocode?.jurisdictionCity ?? fromSitus.city,
       state: pregeocode?.jurisdictionState ?? fromSitus.state,
       address: situsAddress,
-      pointConfidence: explicitPoint ? "coordinates" : "authoritative",
+      // Name the TRUE authority of the point (P-382). This branch used to
+      // claim "authoritative" for every non-explicit point, but a geocode
+      // point is not a `txgio_address` rooftop: "authoritative" is only
+      // earned by a rooftop. The rung label mirrors `resolveContext`'s own
+      // (`matchRung !== "street"` is a coarse locality/ZIP centroid).
+      pointConfidence: explicitPoint
+        ? "coordinates"
+        : rooftopPoint
+          ? "authoritative"
+          : geocodePoint
+            ? pregeocode?.matchRung && pregeocode.matchRung !== "street"
+              ? "geocode-low"
+              : "geocode-high"
+            : "geocode-low",
       // No real point when the geocode missed AND no explicit coords â€” edge
       // labeling must not treat the (0,0) sentinel as a reference point.
       hasPoint: pt !== null,
