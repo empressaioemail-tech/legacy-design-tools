@@ -23,6 +23,8 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 interface NominatimAddress {
+  house_number?: string;
+  road?: string;
   city?: string;
   town?: string;
   village?: string;
@@ -37,6 +39,14 @@ interface NominatimResult {
   lat: string;
   lon: string;
   display_name: string;
+  /**
+   * Nominatim's own feature class/type for the hit ("place"/"house",
+   * "place"/"postcode", "boundary"/"administrative", …). Read by
+   * {@link effectiveMatchRung}: the hit's OWN precision decides the rung
+   * the caller is told about (P-393).
+   */
+  class?: string;
+  type?: string;
   address?: NominatimAddress;
 }
 
@@ -77,11 +87,63 @@ export interface GeocodeLadderRung {
 }
 
 /**
+ * The precision of a geocode is a property of the ANSWER, not of the QUERY
+ * (P-393).
+ *
+ * `buildQueryLadderLabelled` labels each rung from the SHAPE of its query —
+ * "starts with a house number" ⇒ `"street"`. Nominatim, however, is free to
+ * answer a house-number query with a COARSER feature: when the house is not
+ * in its index it falls back to the street, the locality, or — as measured
+ * for `8459 ROCK CREEK RD, WACO, TX 76708` — the POSTCODE node
+ * (`class:"place"`, `type:"postcode"`). Stamping that answer with the
+ * query's rung told every consumer "rooftop-grade" about a point that is the
+ * ZIP centroid, so `brokeragePlaceBuildableEnvelope`'s geocode-centroid gate
+ * (`pointConfidence === "geocode-low"`) could not fire and a point ~3.5 km
+ * from the parcel was used as the front-edge reference. The answer's own
+ * precision therefore caps the rung — it can only ever LOWER it, never raise
+ * it, so a coarser query can never be relabelled as a precise one.
+ *
+ * Callers see the honest rung; the coordinates are unchanged (a re-walk
+ * would return the same coarse centroid from an even coarser query).
+ */
+export function effectiveMatchRung(
+  queriedRung: GeocodeMatchRung,
+  hit: Pick<NominatimResult, "class" | "type" | "address">,
+): GeocodeMatchRung {
+  // Coarser rungs are already honest about themselves.
+  if (queriedRung !== "street") return queriedRung;
+  // A house-number-grade answer keeps the street claim: either Nominatim's
+  // own class/type says it is a building, or it hands back a house number.
+  const houseGrade =
+    hit.type === "house" ||
+    (typeof hit.address?.house_number === "string" &&
+      hit.address.house_number.trim() !== "");
+  if (houseGrade) return "street";
+  // A ROAD-CLASS answer is still a street match, and it is a DIFFERENT claim
+  // from a centroid: the query named a street and Nominatim found that street
+  // (`class:"highway"`). It is not rooftop-grade, but it is the address's own
+  // frontage, and the drawing side already bounds what a road may be (see
+  // `ROAD_TRUST_MAX_M` in the buildable-envelope edge labeling). Downgrading
+  // it here would decline draws whose street rung answered with the road —
+  // measured at 4 of the 33 corpus addresses on 2026-09-20 — for no honesty
+  // gain, so it keeps the label it earns.
+  if (hit.class === "highway") return "street";
+  // Everything else answered a street query with a CENTROID — a postcode
+  // node is the ZIP centroid (measured 3,512 m from parcel 48309:103015),
+  // anything else is locality-grade at best. Those cannot be this parcel, so
+  // the caller's centroid gate must be able to see them.
+  return hit.type === "postcode" ? "zip" : "locality";
+}
+
+/**
  * Labelled ladder — each rung carries its {@link GeocodeMatchRung} so a
  * hit can report whether it was a rooftop-grade street match or a coarser
  * locality/ZIP centroid. The full street address is the only "street"
  * rung; a trailing "City ST ZIP" line is "locality"; the bare ZIP is
- * "zip". Callers that only want the strings use {@link buildQueryLadder}.
+ * "zip". This label is the QUERY's shape: what the caller is told is the
+ * hit's own precision, which can only lower it — see
+ * {@link effectiveMatchRung}. Callers that only want the strings use
+ * {@link buildQueryLadder}.
  */
 export function buildQueryLadderLabelled(
   rawAddress: string,
@@ -158,7 +220,10 @@ async function queryNominatim(
       jurisdictionFips: null, // Nominatim does not provide FIPS
       source: "nominatim",
       geocodedAt: new Date().toISOString(),
-      matchRung: rung,
+      // The ANSWER's precision caps the label the query's shape asked for
+      // (P-393) — a street query answered with the ZIP centroid must not be
+      // reported as rooftop-grade.
+      matchRung: effectiveMatchRung(rung, hit),
       raw: hit,
     };
   });
