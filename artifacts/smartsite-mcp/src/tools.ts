@@ -674,7 +674,14 @@ function briefSectionValue(section: BriefSection): string {
  * compact cited-value table, per the Claude-view design of record. The FULL
  * record moves to structuredContent, unchanged, so nothing the panel needs
  * (geometry, edges, footprint, every *Fact rail) is dropped -- it is
- * relocated, not deleted. A resource_link to the app board tells any
+ * relocated, not deleted. **P-399 amendment (2026-09-21):** "moved to
+ * structuredContent" turned out to be the defect, not the design. Measured on
+ * the wire, the record existed ONLY in structuredContent while content[0]
+ * asserted it was attached; a consumer that renders content parts and does not
+ * read structuredContent got the claim and no record. structuredContent is
+ * unchanged and still carries it, but the record is now ALSO emitted as
+ * content[1] -- see the note at the return.
+ * A resource_link to the app board tells any
  * spec-compliant client that a panel exists for this result, which is the
  * literal gap the dispatch measured (no content-array reference to
  * ui://smartsite/app-p562.html anywhere). skipStandingVocab is set because
@@ -773,11 +780,30 @@ export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
     }
   }
 
-  const text = `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nFull record, geometry, and the map panel are attached to this result; owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`;
+  const text = `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nThe full record and geometry summarised above follow in this same result, so this summary stands in for nothing. The interactive Smart Site board is referenced by a resource link, which a client that does not render widgets cannot open (open the parcel URL from the record instead). Owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`;
+
+  // P-399. The record, in the channel every client reads.
+  //
+  // Measured on the wire 2026-09-21 (_inbox/2026-09-21_p399_wireread_surface_probe.json,
+  // 7 get_smart_site calls at depth node, all identical in shape): content was
+  // exactly ["text", "resource_link"] and the record existed ONLY in
+  // structuredContent. A consumer that surfaces content parts without reading
+  // structuredContent -- the widget-capable path -- therefore received the
+  // summary above and no record, while that summary asserted the record was
+  // attached. `structuredContent` is a field a host may simply not read; `content`
+  // is the part every MCP client renders. So the record travels in both: it is
+  // relocated nowhere, duplicated, and the sentence above describes only what is
+  // actually present in this array.
+  //
+  // Appended as content[1], not content[0]: content[0] is the Claude-view prose
+  // P-243 designed and callers/tests read the first text part, so the record is
+  // added after it and no existing reader of content[0] changes behaviour.
+  const recordPart = { type: "text" as const, text: rawText };
 
   return {
     content: [
       { type: "text" as const, text },
+      recordPart,
       {
         type: "resource_link" as const,
         uri: APP_RESOURCE_URI,
