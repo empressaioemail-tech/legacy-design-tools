@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   insetPerEdge,
   ringAreaSqFt,
+  ringContainsPoint,
   projectRing,
   feetToMeters,
   metersToFeet,
@@ -638,5 +639,76 @@ describe("insetPerEdge — P-372 parcel-minus-strips clip (Kyle 48209:145880)", 
       projectRing(PARCEL_714_SPRING_33512)!.points.map(() => 15),
     );
     expect(spring.clipRepair).toBeUndefined();
+  });
+});
+
+describe("ringContainsPoint (P-339/P-366 residual: the point the identity already answers for)", () => {
+  // A 1-degree square, closed (first vertex repeated). The test point is well
+  // inside it; every probe below moves exactly one thing.
+  const square: Ring = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [0, 0],
+  ];
+  const inside = { latitude: 0.5, longitude: 0.5 };
+
+  it("true inside, false outside, and a point past every edge is outside", () => {
+    expect(ringContainsPoint(square, inside)).toBe(true);
+    expect(ringContainsPoint(square, { latitude: 2, longitude: 2 })).toBe(false);
+    expect(ringContainsPoint(square, { latitude: 0.5, longitude: -0.5 })).toBe(false);
+    expect(ringContainsPoint(square, { latitude: -0.5, longitude: 0.5 })).toBe(false);
+  });
+
+  it("a closed ring and the same ring open agree (the repeated first vertex is not a crossing)", () => {
+    const open = square.slice(0, -1);
+    expect(ringContainsPoint(open, inside)).toBe(ringContainsPoint(square, inside));
+    expect(ringContainsPoint(open, inside)).toBe(true);
+  });
+
+  it("vertex order does not matter (a reversed ring answers the same)", () => {
+    const reversed = [...square].reverse() as Ring;
+    expect(ringContainsPoint(reversed, inside)).toBe(true);
+    expect(ringContainsPoint(reversed, { latitude: 2, longitude: 2 })).toBe(false);
+  });
+
+  it("accepts a lng/lat tuple as well as a {latitude, longitude} point", () => {
+    expect(ringContainsPoint(square, [0.5, 0.5])).toBe(true);
+    expect(ringContainsPoint(square, [2, 2])).toBe(false);
+  });
+
+  it("THE COUNTY-LINE CASE: a point inside BOTH of two overlapping rings answers true for each", () => {
+    // Two counties' parcel geometries overlap at the line: the Travis parcel's
+    // record point lies inside its own ring AND inside a Hays parcel's ring
+    // (measured on 48453:352594). Neither ring can be read as evidence against
+    // the other from geometry alone, which is why the identity decides.
+    const travis: Ring = [
+      [-97.83, 30.09],
+      [-97.82, 30.09],
+      [-97.82, 30.11],
+      [-97.83, 30.11],
+      [-97.83, 30.09],
+    ];
+    const haysOverlap: Ring = [
+      [-97.828, 30.099],
+      [-97.818, 30.099],
+      [-97.818, 30.101],
+      [-97.828, 30.101],
+      [-97.828, 30.099],
+    ];
+    const recordPoint = { latitude: 30.1003, longitude: -97.82734 };
+    expect(ringContainsPoint(travis, recordPoint)).toBe(true);
+    expect(ringContainsPoint(haysOverlap, recordPoint)).toBe(true);
+  });
+
+  it("degenerate and unusable rings answer false rather than throwing", () => {
+    expect(ringContainsPoint(null, inside)).toBe(false);
+    expect(ringContainsPoint(undefined, inside)).toBe(false);
+    expect(ringContainsPoint([], inside)).toBe(false);
+    expect(ringContainsPoint([[0, 0], [1, 1]], inside)).toBe(false);
+    expect(
+      ringContainsPoint(square, { latitude: Number.NaN, longitude: 0.5 }),
+    ).toBe(false);
   });
 });

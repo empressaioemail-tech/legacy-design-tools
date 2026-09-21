@@ -87,6 +87,7 @@ import {
 } from "./plannedDevelopmentSetback";
 import { fetchNearbyRoads, namedRoadsToCandidates } from "./roads";
 import {
+  recordJurisdictionKeyForDistrict,
   resolveSpineZoningWhenGisAbsent,
   type SpineZoningResolution,
 } from "./spineZoningDistrict";
@@ -283,7 +284,63 @@ export async function deriveEnvelopeDraw(
       jurisdictionState: input.jurisdictionState ?? situsCityState.state,
       address: input.address ?? undefined,
     });
+
+    /**
+     * P-339/P-366 residual (OPS-24, 2026-09-21) — THE JURISDICTION THAT STAMPED
+     * THE DISTRICT LEADS.
+     *
+     * THE DEFECT. The key below is the one both the district probe and the table
+     * lookup run against, and it was derived from the situs city, then a
+     * geocoded city, then the county's unique district hit — never from the
+     * source that stamped the district. On `48491:R415488` (Williamson) those
+     * two disagree: the zoning stamp is `SF-S` off Pflugerville's own zoning
+     * layer (`pflugerville-tx`, served by the record rail beside the district
+     * code), while the situs/geocode city resolves to Round Rock. The route
+     * probed Round Rock's table for a Pflugerville district, found no row, and
+     * refused `no-district` — while its own card served that district's
+     * Pflugerville row (25/7.5/20/15) at the same time. Same shape on
+     * `48453:352594` (Buda): the stamp is `R2`/`buda-tx` and the derivation fell
+     * through to a district-uniqueness guess in another city.
+     *
+     * THE RULE. A setback table belongs to the jurisdiction whose ordinance
+     * stamped the district. When the source that held the district also names
+     * that jurisdiction (`SpineZoningResolution.jurisdictionKey`, read beside
+     * the district off the same cell — the ledger is the serving path), it is
+     * the key. A situs city is a postal place name and a geocoded city is where
+     * a pin landed; neither is an authority, so they keep their place BELOW the
+     * stamp rather than above it. Where no source names a jurisdiction (an
+     * atom-chain stamp, or GIS's own `zoningCode`), the derivation is unchanged:
+     * city/state, then the county's unique district hit.
+     *
+     * P-340's rule is kept, and this is the same rule applied to the key's
+     * source: the key is read BEFORE any table is probed and is the one both the
+     * probe and the lookup use, so a code that names no row can never move a
+     * parcel between jurisdictions.
+     *
+     * SECOND SOURCE FOR THE SAME PAIR (same lane, same day). The county parcel
+     * sources DO stamp a `zoningCode` (`payload.parcel.zoningCode: "SF"` on
+     * `48453:367134`, `"SF-S"` on `48453:280210`), and a GIS stamp suppresses
+     * `resolveSpineZoningWhenGisAbsent` entirely — so on those parcels the
+     * record cell was never read and the key fell to the situs city (absent on
+     * CAD lines like `1006 WISTERIA CIR`) or to the county-wide
+     * district-uniqueness guess. Measured live on the identity path the map
+     * sends after P-383, four buckets that PASS today answered `no-district`:
+     * `48453:239852` (record: SF-3 / austin-tx), `48453:523600`
+     * (SU / cedar-park-tx), `48055:40428` (P / san-marcos-tx) and `48055:27929`
+     * (R1 / martindale-tx) — each with its corpus row present and its card
+     * drawing. `recordJurisdictionKeyForDistrict` therefore reads the pair
+     * whenever the spine did not already carry one, and returns it only for the
+     * district being probed. It reads a value beside the district; it never
+     * searches jurisdictions for one that answers.
+     */
+    const fromDistrictStamp =
+      (spineZoning?.jurisdictionKey ?? "").trim().toLowerCase() || null;
+    const fromRecordCell = fromDistrictStamp
+      ? null
+      : await recordJurisdictionKeyForDistrict(parcelNodeIdValue, firstSignal);
     const provisionalJurisdictionKey =
+      fromDistrictStamp ??
+      fromRecordCell ??
       fromCityState ??
       jurisdictionKeyFromParcelNode({
         parcelNodeId: parcelNodeIdValue,

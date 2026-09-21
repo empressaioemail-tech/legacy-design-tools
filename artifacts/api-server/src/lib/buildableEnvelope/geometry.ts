@@ -149,6 +149,43 @@ export function ringAreaSqFt(ring: Ring): number {
   return m2 * FEET_PER_METER * FEET_PER_METER;
 }
 
+/**
+ * Is a lng/lat point inside a lng/lat ring? Even-odd (ray-cast) crossing test,
+ * the standard for a simple ring; a closed ring (first vertex repeated) and an
+ * open one give the same answer, and a vertex-order reversal does not matter.
+ *
+ * P-339/P-366 residual (OPS-24, 2026-09-21). Added for the drawing route's
+ * identity check: a posted point that pin-queries into a NEIGHBOURING envelope
+ * is not evidence against the parcel the caller named when the point is also
+ * inside that parcel's own ring. Measured on `48453:352594`: its record point
+ * sits in a parcel of the Hays store while lying inside its own Travis ring,
+ * because the two counties' parcel geometries overlap at the county line.
+ */
+export function ringContainsPoint(
+  ring: Ring | null | undefined,
+  point: { latitude: number; longitude: number } | LngLat,
+): boolean {
+  if (!ring || !ring.length) return false;
+  const [lng, lat] = Array.isArray(point)
+    ? point
+    : [point.longitude, point.latitude];
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
+  const open = openRing(ring);
+  if (open.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = open.length - 1; i < open.length; j = i++) {
+    const xi = open[i]![0]!;
+    const yi = open[i]![1]!;
+    const xj = open[j]![0]!;
+    const yj = open[j]![1]!;
+    const straddles = yi > lat !== yj > lat;
+    if (!straddles) continue;
+    const crossingLng = ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (lng < crossingLng) inside = !inside;
+  }
+  return inside;
+}
+
 /** Project ring vertices into an existing parcel frame (metres). */
 function projectRingInFrame(ring: Ring, frame: ProjectedRing): XY[] | null {
   const open = openRing(ring);
