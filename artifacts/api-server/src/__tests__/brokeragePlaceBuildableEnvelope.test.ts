@@ -325,8 +325,10 @@ vi.mock("../lib/buildableEnvelope/roads", async () => {
 });
 
 const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
+const recordJurisdictionKeyForDistrictMock = vi.hoisted(() => vi.fn());
 vi.mock("../lib/buildableEnvelope/spineZoningDistrict", () => ({
   resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
+  recordJurisdictionKeyForDistrict: recordJurisdictionKeyForDistrictMock,
   spineZoningProvenanceNote: (resolution: {
     district: string;
     source: string;
@@ -389,6 +391,8 @@ beforeEach(() => {
   parcelSitusAddress = "1209 Main St";
   resolveSpineZoningWhenGisAbsentMock.mockReset();
   resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
+  recordJurisdictionKeyForDistrictMock.mockReset();
+  recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
   fetchPropertyAtomChainMock.mockReset();
   fetchPropertyAtomChainMock.mockResolvedValue(null);
 });
@@ -652,6 +656,46 @@ describe("POST /place/buildable-envelope — P-373 identity wins over the point"
     });
   });
 
+  it("serves a point inside the IDENTIFIED parcel's own ring, even when its pin-query lands in another county (paired control)", async () => {
+    // P-339/P-366 residual (2026-09-21) — THE POINT THE IDENTITY ALREADY
+    // ANSWERS FOR. `48453:352594` is a Travis parcel whose record point ALSO
+    // falls inside a Hays parcel (`48209:10757`), because the two counties'
+    // geometries overlap at the county line and the pin-query resolves through
+    // the nearest county source rather than the id's. Before this, a card that
+    // named its own parcel and its own record point was refused on the evidence
+    // of that same record point.
+    //
+    // The stub models the overlap faithfully: the PIN-QUERY parcel is stamped
+    // `48209:10757` while the identified parcel's ring is the one the point is
+    // inside. Same request both times — only the point moves — so the pair is a
+    // control on the ring check itself, not on any other input.
+    parcelSitusAddress = "OLD SAN ANTONIO RD";
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48209:10757";
+
+    const inside = await postWith({
+      parcel_node_id: "48453:352594",
+      lat: BASTROP_LAT,
+      lng: BASTROP_LNG,
+    });
+    expect(inside.body.declineReason).not.toBe("parcel-identity-mismatch");
+    expect(inside.body.parcel_node_id).toBe("48453:352594");
+    // The identity's own ring answered the check, so no neighbour lookup ran.
+    expect(lastPinQueryPoint).toBeNull();
+
+    const outside = await postWith({
+      parcel_node_id: "48453:352594",
+      lat: 30.1003,
+      lng: -97.82734,
+    });
+    expect(outside.status).toBe(404);
+    expect(outside.body.declineReason).toBe("parcel-identity-mismatch");
+    expect(lastPinQueryPoint).toEqual({
+      latitude: 30.1003,
+      longitude: -97.82734,
+    });
+  });
+
   it("declines honestly when the identity's county has no parcel source in this build", async () => {
     const res = await postWith({ parcel_node_id: "48999:1" });
 
@@ -723,6 +767,156 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       latitude: 30.04667,
       longitude: -97.81298,
     });
+  });
+
+  it("P-339/P-366 residual: the STAMPED jurisdiction leads the situs/geocode city for the setback table", async () => {
+    // `48491:R415488`'s district is SF-S off Pflugerville's own zoning layer —
+    // the stamp names `pflugerville-tx` — while its situs/geocoded city is
+    // Round Rock. Probing Round Rock's table for a Pflugerville district found
+    // no row and refused `no-district`, for a district whose own city codifies
+    // it, at the same moment the card served that row (25/7.5/20/15). Here the
+    // stubbed geocode city is Bastrop: the same disagreement, measured on the
+    // real pair of keys.
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "SF-S",
+      source: "parcel-record",
+      jurisdictionKey: "pflugerville-tx",
+    });
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.effectiveZoningCode).toBe("SF-S");
+    expect(res.body.setbackSource).toBe("codified-ordinance");
+  });
+
+  it("the control: a stamped jurisdiction with NO row for the district still declines no-district (the key is an authority, not a search)", async () => {
+    // Without this direction, "the stamp's jurisdiction draws" could pass by the
+    // derivation hunting other jurisdictions until some table answered a code —
+    // the move P-340 forbids. A key that owns no row refuses, named.
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "SF-S",
+      source: "parcel-record",
+      jurisdictionKey: "nowhere-tx",
+    });
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-district");
+  });
+
+  // -------------------------------------------------------------------------
+  // P-339/P-366 residual — the SECOND source of the same pair: the record cell.
+  //
+  // The map's request after P-383 posts the parcel id beside the address, and
+  // the identity path answers by identity (P-373) — so on those requests
+  // NOTHING but the parcel's own cells can key the table. Travis' and Caldwell's
+  // parcel sources stamp a `zoningCode` (measured live 2026-09-21:
+  // `payload.parcel.zoningCode: "SF"` on `48453:367134`, `"SF-S"` on
+  // `48453:280210`) and a stamp suppresses the spine read entirely, so the
+  // record's cell — the only source that names a jurisdiction at all, and the
+  // cell the card is served from — was never read by the draw path. Measured on
+  // the same day, the identity path answered `no-district` for `48453:239852`
+  // (record: SF-3 / austin-tx), `48453:523600` (SU / cedar-park-tx),
+  // `48055:40428` (P / san-marcos-tx) and `48055:27929` (R1 / martindale-tx) —
+  // four buckets that PASS the customer leg today, each with its corpus row
+  // present and its own card drawing.
+  // -------------------------------------------------------------------------
+
+  it("identity path: the record's own pair keys the table when no city names that district", async () => {
+    // `48453:523600`: the county store stamps `SU` and names no jurisdiction,
+    // the CAD situs carries no city, and the county-wide uniqueness scan for
+    // `SU` in Travis answers NOTHING (measured in this repo's own corpus:
+    // `jurisdictionKeyFromParcelNode({parcelNodeId: "48453:523600",
+    // districtCode: "SU"})` -> null), so the district's own city was never
+    // probed at all. The record's cell names `cedar-park-tx` BESIDE that
+    // district, and that is the key the table probe must run against.
+    parcelZoning = "SU";
+    parcelNodeIdStamped = null;
+    // A city-less CAD situs (`1006 WISTERIA CIR`): no postal city to key with.
+    parcelSitusAddress = "1006 WISTERIA CIR";
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue("cedar-park-tx");
+
+    const res = await postWith({ parcel_node_id: "48453:523600" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.effectiveZoningCode).toBe("SU");
+    expect(res.body.setbackSource).toBe("codified-ordinance");
+    // The read is asked about the district being probed, never about some other
+    // code the record happens to hold.
+    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
+      "48453:523600",
+      "SU",
+    );
+  });
+
+  it("CONTROL (the same request with NO record key): `SU` declines exactly as it did — the read is what moved it", async () => {
+    // Without this direction, "the record's key resolves it" could pass by the
+    // citation of a key nothing read, or by a grader softened under it.
+    parcelZoning = "SU";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "1006 WISTERIA CIR";
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
+
+    const res = await postWith({ parcel_node_id: "48453:523600" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-district");
+    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
+      "48453:523600",
+      "SU",
+    );
+  });
+
+  it("identity path: a BASE code takes the record's key, and the row still comes from the signal that names one", async () => {
+    // `48453:239852`: the county store's base code `SF` is the value the route
+    // reads as that parcel's district code (P-340's own note), and P-340 refuses
+    // to cross it into `SF-4A` — so the ROW has to come from the layer that
+    // names a district, here the atom chain's `SF-3`. What was missing was the
+    // KEY: the uniqueness scan for `SF` answers nothing (measured), so no
+    // jurisdiction's table was ever probed for this parcel's signals.
+    parcelZoning = "SF";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "1006 WISTERIA CIR";
+    fetchPropertyAtomChainMock.mockResolvedValue({ zoningFact: { district: "SF-3" } });
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue("austin-tx");
+
+    const res = await postWith({ parcel_node_id: "48453:239852" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.effectiveZoningCode).toBe("SF-3");
+    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbacks?.front_ft).toBe(25);
+    // The key is read for the district the route is probing (the base code the
+    // stamp carries); the record's own pair answers it, `SF-3` being the
+    // widening of `SF`.
+    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
+      "48453:239852",
+      "SF",
+    );
+  });
+
+  it("CONTROL (the same request with NO record key): the base code names no row and declines no-district (P-340 preserved)", async () => {
+    // Without this direction the base-code test above could pass by the key
+    // resurrecting the exact crossing P-340 refuses: `SF` begins six Austin
+    // rows and therefore names none of them, key or no key.
+    parcelZoning = "SF";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "1006 WISTERIA CIR";
+    fetchPropertyAtomChainMock.mockResolvedValue({ zoningFact: { district: "SF-3" } });
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
+
+    const res = await postWith({ parcel_node_id: "48453:239852" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-district");
+    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
+      "48453:239852",
+      "SF",
+    );
   });
 
   it("classifies an empty-coverage throw as an honest 404 no-parcel (NOT a 502)", async () => {

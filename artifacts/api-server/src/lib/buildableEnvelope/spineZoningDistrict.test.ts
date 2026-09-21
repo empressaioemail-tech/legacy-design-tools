@@ -11,6 +11,7 @@ vi.mock("../zoningFactServeCutover", () => ({
 import { loadBakedNodeFacetSnapshot } from "../../routes/brokerageNodeFacets";
 import { loadZoningFactForServe } from "../zoningFactServeCutover";
 import {
+  recordJurisdictionKeyForDistrict,
   resolveSpineZoningWhenGisAbsent,
   spineZoningProvenanceNote,
 } from "./spineZoningDistrict";
@@ -67,8 +68,35 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
       provenance: "https://maps.roundrocktexas.gov/arcgis/rest/services/Planning/Planning_Multi/MapServer/12",
     } as never);
     const result = await resolveSpineZoningWhenGisAbsent("48453:482441", null);
-    expect(result).toEqual({ district: "SF2", source: "parcel-record" });
+    // P-339/P-366 residual (2026-09-21): the rail's `zoningJurisdictionKey`
+    // cell is read BESIDE the district and travels with it, because the
+    // district's own source city is the jurisdiction whose setback table
+    // governs it. Without this, the derivation keyed the table off the situs or
+    // geocoded city — which on `48491:R415488` is Round Rock's, not
+    // Pflugerville's, and refused `no-district` for a district Pflugerville
+    // codifies.
+    expect(result).toEqual({
+      district: "SF2",
+      source: "parcel-record",
+      jurisdictionKey: "round-rock-tx",
+    });
     // The record answers first: the bake is never needed to reach a district.
+    expect(loadBaked).not.toHaveBeenCalled();
+  });
+
+  it("a source that names NO jurisdiction resolves with null, never a guess", async () => {
+    loadRecordZoning.mockResolvedValue({
+      state: "present",
+      district: "R-MD",
+      jurisdictionKey: null,
+      provenance: null,
+    } as never);
+    const result = await resolveSpineZoningWhenGisAbsent("48055:40428", null);
+    expect(result).toEqual({
+      district: "R-MD",
+      source: "parcel-record",
+      jurisdictionKey: null,
+    });
     expect(loadBaked).not.toHaveBeenCalled();
   });
 
@@ -87,7 +115,11 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
       envelopeBriefRefusal: testEnvelopeBriefRefusal,
     });
     const result = await resolveSpineZoningWhenGisAbsent("48453:482441", "");
-    expect(result).toEqual({ district: "SF2", source: "parcel-record" });
+    expect(result).toEqual({
+      district: "SF2",
+      source: "parcel-record",
+      jurisdictionKey: "round-rock-tx",
+    });
   });
 
   it("falls through to the bake when the record cell is absent", async () => {
@@ -109,6 +141,7 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
     expect(result).toEqual({
       district: "P-5",
       source: "baked-snapshot",
+      jurisdictionKey: "bastrop_city_tx",
       snapshotAt: "2026-07-20T12:00:00.000Z",
     });
   });
@@ -227,7 +260,14 @@ describe("P-366 falsifier F5 — the atom-chain read is live on the PRODUCTION c
     process.env.BRIEF_RETRIEVAL_API_KEY = "brief-key";
     const fetchMock = stubFetchOk("SF-2");
     const result = await resolveSpineZoningWhenGisAbsent("48209:150937", null);
-    expect(result).toEqual({ district: "SF-2", source: "atom-chain" });
+    // The atom-chain wire this build reads names no jurisdiction, so none is
+    // carried and the caller keeps its own derivation — nothing is guessed for
+    // a rail that does not state it.
+    expect(result).toEqual({
+      district: "SF-2",
+      source: "atom-chain",
+      jurisdictionKey: null,
+    });
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toContain("/property-nodes/48209%3A150937/atom-chain");
     expect((init?.headers as Record<string, string>).Authorization).toBe(
@@ -240,5 +280,81 @@ describe("P-366 falsifier F5 — the atom-chain read is live on the PRODUCTION c
     const result = await resolveSpineZoningWhenGisAbsent("48209:150937", null);
     expect(result).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordJurisdictionKeyForDistrict — the record's pair, for the district being probed", () => {
+  beforeEach(() => {
+    loadRecordZoning.mockReset();
+    loadRecordZoning.mockResolvedValue(null);
+  });
+
+  it("returns the record's jurisdiction when it names the SAME district the caller will probe", async () => {
+    // `48453:239852`'s shape: the county stamp names SF-3 and no jurisdiction,
+    // the record cell names the pair (`zoningDistrict` + `zoningJurisdictionKey`
+    // are written together off one city's zoning layer).
+    loadRecordZoning.mockResolvedValue({
+      state: "present",
+      district: "SF-3",
+      jurisdictionKey: "austin-tx",
+      provenance: "https://services.arcgis.com/0L95CJ0VTaxqcmED/arcgis/rest/services/Publish_Zoning_AGOL/FeatureServer/0",
+    } as never);
+    await expect(
+      recordJurisdictionKeyForDistrict("48453:239852", "SF-3"),
+    ).resolves.toBe("austin-tx");
+  });
+
+  it("reads the pair for a BASE code too, when the record names that district's own widening", async () => {
+    // P-340's shape: Austin's base `SF` resolves to the parcel's own `SF-3`
+    // inside the jurisdiction's table, so the pair still has to be read.
+    loadRecordZoning.mockResolvedValue({
+      state: "present",
+      district: "SF-3",
+      jurisdictionKey: "austin-tx",
+      provenance: "x",
+    } as never);
+    await expect(
+      recordJurisdictionKeyForDistrict("48453:239852", "SF"),
+    ).resolves.toBe("austin-tx");
+  });
+
+  it("returns null for a DIFFERENT district — it reads a value beside the district, it never searches jurisdictions", async () => {
+    loadRecordZoning.mockResolvedValue({
+      state: "present",
+      district: "SU",
+      jurisdictionKey: "cedar-park-tx",
+      provenance: "x",
+    } as never);
+    await expect(
+      recordJurisdictionKeyForDistrict("48453:239852", "SF-3"),
+    ).resolves.toBeNull();
+  });
+
+  it("returns null when the record names no jurisdiction, or holds no present cell", async () => {
+    loadRecordZoning.mockResolvedValue({
+      state: "present",
+      district: "SF-3",
+      jurisdictionKey: null,
+      provenance: "x",
+    } as never);
+    await expect(
+      recordJurisdictionKeyForDistrict("48453:239852", "SF-3"),
+    ).resolves.toBeNull();
+
+    loadRecordZoning.mockResolvedValue({
+      state: "refused",
+      district: "",
+      jurisdictionKey: null,
+      reason: "unaccounted",
+    } as never);
+    await expect(
+      recordJurisdictionKeyForDistrict("48453:239852", "SF-3"),
+    ).resolves.toBeNull();
+  });
+
+  it("makes no read at all without an identity or a district to prob", async () => {
+    await expect(recordJurisdictionKeyForDistrict(null, "SF-3")).resolves.toBeNull();
+    await expect(recordJurisdictionKeyForDistrict("48453:239852", "")).resolves.toBeNull();
+    expect(loadRecordZoning).not.toHaveBeenCalled();
   });
 });

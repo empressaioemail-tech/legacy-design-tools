@@ -74,7 +74,7 @@ import { POST_BODY } from "../lib/buildableEnvelope/envelopePostBody";
 import {
   type SpineZoningResolution,
 } from "../lib/buildableEnvelope/spineZoningDistrict";
-import { openRing, type Ring } from "../lib/buildableEnvelope/geometry";
+import { openRing, ringContainsPoint, type Ring } from "../lib/buildableEnvelope/geometry";
 // P-374: the ONE derivation both this route and the get_smart_site draw block
 // run — see that module's own doc comment for the drift this closed.
 import {
@@ -769,12 +769,22 @@ function representativePointOfRing(
  * serves, and never answers a different one.
  *
  * The refusal is the point of it. A point (or address) carried in the same
- * request can DISAGREE with the identity — `48453:352594`'s record point
- * sits in Hays County and pin-queries `48209:10757` — and answering the
- * point's parcel for a card that named another parcel is the wrong-parcel
- * defect itself. On a disagreement this declines with a NAMED reason and
- * still returns the identity it was given, so the surface can see that the
- * parcel it asked about is not the parcel its own point lands in.
+ * request can DISAGREE with the identity — a point in a lot two streets away,
+ * or an address that resolves to another parcel — and answering the point's
+ * parcel for a card that named another parcel is the wrong-parcel defect
+ * itself. On a disagreement this declines with a NAMED reason and still
+ * returns the identity it was given, so the surface can see that the parcel it
+ * asked about is not the parcel its own point lands in.
+ *
+ * A point can also LOOK like disagreement without being any (P-339/P-366
+ * residual, 2026-09-21). `48453:352594`'s record point sits in a Hays parcel
+ * (`48209:10757`) while lying inside its own Travis ring, because the two
+ * counties' parcel geometries overlap at the county line, and the point lookup
+ * resolves through the nearest county source rather than the id's. The point is
+ * therefore checked against the IDENTIFIED parcel's own ring first: inside it,
+ * the point agrees with the identity and the request is served from that
+ * parcel's own geometry; outside it, the two refusals below apply exactly as
+ * they did.
  *
  * A point that could not be CHECKED AT ALL is a third case, and it is not
  * agreement: the parcels layer being down, slow or unparseable used to
@@ -783,7 +793,9 @@ function representativePointOfRing(
  * point the response presents as verified when nothing verified it. An
  * unmade check now declines with `point-verification-unavailable` (P-382);
  * an upstream's DECLARED empty coverage ("no parcel here") still carries on,
- * because that is an answer.
+ * because that is an answer. A point inside the identified parcel's own ring is
+ * not an unmade check either: it is a verification against the identity itself,
+ * and it is served on that basis.
  *
  * Outcomes:
  *   - resolved : derive from this parcel (its geometry, not the point's).
@@ -860,9 +872,31 @@ async function resolvePostedParcelIdentity(input: {
   // is refused, never answered — the card asked about ITS parcel. A point
   // whose check could not be MADE is refused too (P-382): serving it would
   // report the point as verified when nothing verified it.
+  //
+  // P-339/P-366 residual (OPS-24, 2026-09-21) — THE POINT THE IDENTITY ALREADY
+  // ANSWERS FOR. The check above resolves the point through the NEAREST county
+  // source, which is the parcel layer that OWNS the point's neighbourhood and
+  // not necessarily the parcel's identity. At a county line the two disagree:
+  // `48453:352594` is a Travis parcel (its id says so, and its own ring is
+  // served by the Travis store) whose record point ALSO falls inside a Hays
+  // parcel, because the two counties' geometries overlap there. Reading that as
+  // disagreement made the card's own record point evidence against the card's
+  // own parcel, and refused a request that named the parcel it meant.
+  //
+  // The identity is the authority it always was (P-373). So the point is
+  // checked against the IDENTIFIED parcel's own ring first: a point inside the
+  // parcel the caller named agrees with that identity by definition, whatever
+  // else its neighbourhood contains, and the derivation below uses the
+  // identified parcel's geometry anyway. Only a point that is NOT in the
+  // identified parcel can disagree with it, and only then do the two refusals
+  // above apply, unchanged.
+  const parcel = firstParcelRing(parcelGeo.geojson);
   if (input.point) {
-    const atPoint = await parcelNodeIdAtPoint(input.point);
-    if (atPoint.state === "unknown") {
+    const pointAgreesWithIdentity = ringContainsPoint(parcel?.ring, input.point);
+    const atPoint = pointAgreesWithIdentity
+      ? null
+      : await parcelNodeIdAtPoint(input.point);
+    if (atPoint && atPoint.state === "unknown") {
       input.log.warn(
         { parcelNodeId: canonical, reason: atPoint.reason },
         "buildable-envelope: the point could not be checked against the identified parcel; refusing rather than serving it unverified",
@@ -874,7 +908,7 @@ async function resolvePostedParcelIdentity(input: {
         parcel_node_id: canonical,
       });
     }
-    if (atPoint.parcelNodeId && atPoint.parcelNodeId !== canonical) {
+    if (atPoint?.parcelNodeId && atPoint.parcelNodeId !== canonical) {
       const pointCounty = txParcelCountyByFips(atPoint.parcelNodeId.split(":")[0] ?? "");
       input.log.info(
         {
@@ -893,7 +927,6 @@ async function resolvePostedParcelIdentity(input: {
     }
   }
 
-  const parcel = firstParcelRing(parcelGeo.geojson);
   const ringPoint = input.point ?? representativePointOfRing(parcel?.ring ?? []);
   const situsCityState = cityStateFromSitus(parcel?.situsAddress ?? null);
   const ctx: EnvelopeContext = {

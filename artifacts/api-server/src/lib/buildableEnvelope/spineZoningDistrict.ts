@@ -19,6 +19,17 @@ export type SpineZoningSource = "parcel-record" | "baked-snapshot" | "atom-chain
 export interface SpineZoningResolution {
   district: string;
   source: SpineZoningSource;
+  /**
+   * The setback jurisdiction the SAME source names as the district's own, when
+   * it names one (P-339/P-366 residual, 2026-09-21). The ledger's zoning cell
+   * carries a jurisdiction key beside the district because the two are written
+   * together, from one city's zoning layer: `pflugerville-tx` + `SF-S` come off
+   * Pflugerville's `Zoning_Districts/0`, and the setback row for `SF-S` lives in
+   * that jurisdiction's table, not in whichever city the situs or a geocode
+   * names. Absent — never invented — when the source that held the district
+   * does not name one, so the derivation keeps its own city-state derivation.
+   */
+  jurisdictionKey?: string | null;
   /** Present when `source === "baked-snapshot"`. */
   snapshotAt?: string | null;
 }
@@ -26,14 +37,28 @@ export interface SpineZoningResolution {
 const DEFAULT_RETRIEVAL =
   "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
 
-function districtFromFacets(facets: unknown): string | null {
+/** A trimmed, non-empty string, or null. Never widens a value into existence. */
+function readKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed || null;
+}
+
+function districtFromFacets(facets: unknown): {
+  district: string;
+  jurisdictionKey: string | null;
+} | null {
   if (!facets || typeof facets !== "object") return null;
   const zoning = (facets as Record<string, unknown>).zoning;
   if (!zoning || typeof zoning !== "object") return null;
   const district = (zoning as Record<string, unknown>).district;
   if (typeof district !== "string") return null;
   const trimmed = district.trim();
-  return trimmed || null;
+  if (!trimmed) return null;
+  return {
+    district: trimmed,
+    jurisdictionKey: readKey((zoning as Record<string, unknown>).jurisdictionKey),
+  };
 }
 
 async function districtFromAtomChain(
@@ -97,17 +122,75 @@ async function districtFromAtomChain(
  * draw path honours the (county, rail) slate and never opens a second,
  * ungated read. `null` when the pair is unslated, when the cell is absent or
  * refused, or when a present cell's value is unreadable — never invented.
+ *
+ * The rail's `zoningJurisdictionKey` cell is read BESIDE the district and
+ * travels with it (P-339/P-366 residual): the district's own source city is the
+ * jurisdiction whose setback table governs it.
  */
 async function districtFromParcelRecord(
   parcelNodeId: string,
-): Promise<string | null> {
+): Promise<{ district: string; jurisdictionKey: string | null } | null> {
   const { loadZoningFactForServe } = await import(
     "../zoningFactServeCutover.js"
   );
   const read = await loadZoningFactForServe(parcelNodeId);
   if (!read || read.state !== "present") return null;
   const trimmed = read.district.trim();
-  return trimmed || null;
+  if (!trimmed) return null;
+  return {
+    district: trimmed,
+    jurisdictionKey: readKey(read.jurisdictionKey),
+  };
+}
+
+/** Comparison form for a district code: trimmed, lowercased, inner runs collapsed. */
+function districtCompareForm(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The jurisdiction the RECORD names beside the district it stamps — read for the
+ * district the derivation is about to probe, and only when the two are the SAME
+ * district (P-339/P-366 residual, 2026-09-21).
+ *
+ * WHY THIS EXISTS BESIDE `resolveSpineZoningWhenGisAbsent`. That function reads
+ * the record rail only when the county parcel source carries NO `zoningCode` —
+ * and the Travis/Caldwell parcel sources DO carry one ("Travis County parcels
+ * (TxGIO/StratMap)" answered `payload.parcel.zoningCode: "SF"` for
+ * `48453:367134` and `"SF-S"` for `48453:280210`, measured live 2026-09-21). So
+ * on those parcels the record's cell — the one the CARD is served from, and the
+ * only source that names a jurisdiction at all — was never read by the draw
+ * path, and the key fell to the situs city (absent on CAD lines like
+ * `1006 WISTERIA CIR`) or to the county-wide district-uniqueness guess, which
+ * answers nothing when two cities in the county share a code. Measured live on
+ * the identity path: `48453:239852` (record: SF-3 / austin-tx) `no-district`,
+ * `48453:523600` (SU / cedar-park-tx) `no-district`, `48055:40428`
+ * (P / san-marcos-tx) `no-district`, `48055:27929` (R1 / martindale-tx)
+ * `no-district` — while the card drew all four and the corpus carries each row.
+ *
+ * THE RULE. The jurisdiction belongs to the district, and the record names the
+ * two together. When the record's own district IS the district that will be
+ * probed — exactly, or the widening of a base code that the district table
+ * resolves (`SF` -> `SF-3`, the shape P-340 names) — its `jurisdictionKey` keys
+ * the table. When the record's district is a DIFFERENT district, this returns
+ * null and the caller's derivation is unchanged: this reads a value beside the
+ * district, it never searches jurisdictions for one that answers.
+ */
+export async function recordJurisdictionKeyForDistrict(
+  parcelNodeId: string | null,
+  districtSignal: string | null | undefined,
+): Promise<string | null> {
+  if (!parcelNodeId) return null;
+  const signal = districtCompareForm(districtSignal ?? "");
+  if (!signal) return null;
+  const pair = await districtFromParcelRecord(parcelNodeId);
+  if (!pair || !pair.jurisdictionKey) return null;
+  const recordDistrict = districtCompareForm(pair.district);
+  if (!recordDistrict) return null;
+  const sameDistrict =
+    recordDistrict === signal ||
+    (signal.length > 1 && recordDistrict.startsWith(signal));
+  return sameDistrict ? pair.jurisdictionKey : null;
 }
 
 /**
@@ -115,6 +198,11 @@ async function districtFromParcelRecord(
  * (the ledger stamp, preferred), then the baked facets, then the atom-chain
  * zoningFact. Returns null when GIS already carries a code or when no source
  * holds a district.
+ *
+ * `jurisdictionKey` is carried from whichever source held the district. The
+ * atom-chain rail is the one source that does not name one on the wire this
+ * build reads, so a district from there resolves its table the way it always
+ * has (the caller's own city-state derivation); nothing is guessed for it.
  */
 export async function resolveSpineZoningWhenGisAbsent(
   parcelNodeId: string | null,
@@ -127,11 +215,12 @@ export async function resolveSpineZoningWhenGisAbsent(
   // Record first: this is the same precedence the card composes with
   // (structuralFactToFacetsWire applies parcelRecordZoningFact OVER the baked
   // stamp), so a parcel's district is the same value on the card and the route.
-  const recordDistrict = await districtFromParcelRecord(parcelNodeId);
-  if (recordDistrict) {
+  const recordZoning = await districtFromParcelRecord(parcelNodeId);
+  if (recordZoning) {
     return {
-      district: recordDistrict,
+      district: recordZoning.district,
       source: "parcel-record",
+      jurisdictionKey: recordZoning.jurisdictionKey,
     };
   }
 
@@ -139,11 +228,12 @@ export async function resolveSpineZoningWhenGisAbsent(
     "../../routes/brokerageNodeFacets.js"
   );
   const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
-  const bakedDistrict = districtFromFacets(snapshot?.facets);
-  if (bakedDistrict) {
+  const bakedZoning = districtFromFacets(snapshot?.facets);
+  if (bakedZoning) {
     return {
-      district: bakedDistrict,
+      district: bakedZoning.district,
       source: "baked-snapshot",
+      jurisdictionKey: bakedZoning.jurisdictionKey,
       snapshotAt: snapshot?.snapshotAt ?? null,
     };
   }
@@ -153,6 +243,7 @@ export async function resolveSpineZoningWhenGisAbsent(
     return {
       district: chainDistrict,
       source: "atom-chain",
+      jurisdictionKey: null,
     };
   }
 

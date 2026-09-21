@@ -144,10 +144,23 @@ vi.mock("./roads", async () => {
  * stamp. This environment has no baked node-facet store, so the read is pinned
  * to `null` — the same posture `brokeragePlaceBuildableEnvelope.test.ts` takes
  * for the same module.
+ *
+ * P-339/P-366 residual (2026-09-21): the shared derivation now also reads the
+ * spine through `recordJurisdictionKeyForDistrict` — the jurisdiction the
+ * RECORD names beside the district it stamped, read for the district being
+ * probed — whenever the spine did not already carry a key. That is a second
+ * export of the SAME module and therefore part of the same mock boundary: a
+ * module mocked at the boundary must export everything the code under test
+ * calls, or the call is `undefined` and the derivation throws. Pinned to `null`
+ * for the same reason the other read is: no node-facet store here. The branch
+ * it exercises IS covered — with a real key, in `brokeragePlaceBuildableEnvelope.test.ts`
+ * (`the record's own jurisdiction key keys the table`).
  */
 const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
+const recordJurisdictionKeyForDistrictMock = vi.hoisted(() => vi.fn());
 vi.mock("./spineZoningDistrict", () => ({
   resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
+  recordJurisdictionKeyForDistrict: recordJurisdictionKeyForDistrictMock,
   spineZoningProvenanceNote: () => "",
 }));
 
@@ -165,6 +178,8 @@ afterEach(() => {
   atomChainResult = null;
   resolveSpineZoningWhenGisAbsentMock.mockReset();
   resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
+  recordJurisdictionKeyForDistrictMock.mockReset();
+  recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
   queryGisLayerGeoJsonMock.mockClear();
   fetchPropertyAtomChainMock.mockClear();
   fetchNearbyRoadsMock.mockClear();
