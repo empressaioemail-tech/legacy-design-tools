@@ -56,6 +56,7 @@
  */
 
 import { getSetbackTableForZoning } from "@workspace/adapters";
+import { canonicalZoningJurisdictionKey } from "@workspace/cad-ingest/zoning-layers";
 import { keyFromEngagementOrSynthesize } from "@workspace/codes";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
@@ -332,12 +333,34 @@ export async function deriveEnvelopeDraw(
      * whenever the spine did not already carry one, and returns it only for the
      * district being probed. It reads a value beside the district; it never
      * searches jurisdictions for one that answers.
+     *
+     * P-406 (OPS-25, 2026-09-22) — AND THE STAMP IS RESOLVED THROUGH THE
+     * REGISTRY'S OWN `cityKey`. Both values below are whatever the source
+     * wrote, and a source that writes the NAME of a zoning-layer ENTRY instead
+     * of the `cityKey` that entry declares is accepted by every comparison in
+     * this site — the two strings are identical for 23 of the registry's 26
+     * entries, and `ZONING_LAYERS` resolves either. They are not identical for
+     * the three entries that carry one city across several counties, and that
+     * is exactly the indirection those entries exist to perform:
+     * `elgin-tx-travis` (48453) declares `cityKey: "elgin-tx"`, the one string
+     * `isElginCityJurisdiction` routes the ratified Elgin table on. Measured
+     * live: the record cell for `48453:959606` (Elgin, Travis side) carries
+     * `elgin-tx-travis`, so the rule above shipped the entry name as the key,
+     * the Elgin table was never reached, and the parcel refused `no-district`
+     * while PROD drew it R-3. Reading the value through
+     * `canonicalZoningJurisdictionKey` is what the registry's own comment says
+     * `cityKey` is for; it fixes all three entries at once and is a no-op for
+     * every other key, including table-owning keys like
+     * `elgin-development-code`.
      */
-    const fromDistrictStamp =
-      (spineZoning?.jurisdictionKey ?? "").trim().toLowerCase() || null;
+    const fromDistrictStamp = canonicalZoningJurisdictionKey(
+      spineZoning?.jurisdictionKey,
+    );
     const fromRecordCell = fromDistrictStamp
       ? null
-      : await recordJurisdictionKeyForDistrict(parcelNodeIdValue, firstSignal);
+      : canonicalZoningJurisdictionKey(
+          await recordJurisdictionKeyForDistrict(parcelNodeIdValue, firstSignal),
+        );
     const provisionalJurisdictionKey =
       fromDistrictStamp ??
       fromRecordCell ??

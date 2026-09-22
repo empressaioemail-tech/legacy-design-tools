@@ -919,6 +919,114 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     );
   });
 
+  // -------------------------------------------------------------------------
+  // P-406 (OPS-25, 2026-09-22) — THE STAMPED KEY RESOLVES THROUGH THE REGISTRY
+  // ENTRY'S OWN `cityKey`.
+  //
+  // `ZONING_LAYERS` is keyed by ENTRY NAME and an entry's `cityKey` is the
+  // jurisdiction it serves. The strings are identical for 23 of the 26 entries
+  // and differ for the three that carry one city over several counties
+  // (`elgin-tx-travis` -> `elgin-tx`, `austin-tx-williamson` / `austin-tx-hays`
+  // -> `austin-tx`). The Travis-side Elgin entry exists to perform exactly that
+  // indirection — its own comment says `cityKey` is the literal `elgin-tx` so
+  // the stamp persists the string `isElginCityJurisdiction` routes the ratified
+  // Elgin table on — and the P-339/P-366 rule shipped the ENTRY NAME as the key
+  // instead, walking straight past it. Measured live: `48453:959606` (Elgin,
+  // Travis side) refused `no-district` on the canary while PROD drew R-3.
+  // -------------------------------------------------------------------------
+
+  it("P-406: the record's key names the registry ENTRY and resolves through its cityKey (48453:959606)", async () => {
+    // The record cell carries the ENTRY NAME, exactly as the canary shipped it.
+    parcelZoning = "R-3";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "18529 SPOTTED EAGLE LN";
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue("elgin-tx-travis");
+
+    const res = await postWith({ parcel_node_id: "48453:959606" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.effectiveZoningCode).toBe("R-3");
+    expect(res.body.setbackSource).toBe("codified-ordinance");
+    // PROD's own answer for this parcel, and the ratified Elgin R-3 row:
+    // 15 / 7.5 / 10 / 15. No new table is introduced to make this pass — this
+    // is `elgin-development-code`, the table the Bastrop-side cohort serves.
+    expect(res.body.setbacks).toMatchObject({
+      front_ft: 15,
+      side_ft: 7.5,
+      rear_ft: 10,
+      side_corner_ft: 15,
+    });
+    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
+      "48453:959606",
+      "R-3",
+    );
+  });
+
+  it("P-406: the same rule reaches the OTHER branch — a spine stamp that names the entry", async () => {
+    // The regression is the RULE, not one branch: whichever source held the
+    // district and named the entry beside it, the key must resolve the same way.
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+      district: "R-3",
+      source: "parcel-record",
+      jurisdictionKey: "elgin-tx-travis",
+    });
+
+    const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbacks?.front_ft).toBe(15);
+  });
+
+  it("P-406 CONTROL: a key that names NO entry is echoed BYTE-IDENTICAL — the fix is not a fuzzy match", async () => {
+    // The direction that would have caught a fix which "restores Elgin by
+    // loosening key resolution generally": `elgin-travis-tx` is one reordered
+    // token away from the entry name and must NOT become `elgin-tx`, and the
+    // four keys the change exists to protect must come back unaltered in the
+    // refusal's own echo. A key that names no entry is a key, and the route
+    // reports the one it was given.
+    parcelZoning = "QQ-9";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "1006 WISTERIA CIR";
+    for (const key of [
+      "elgin-travis-tx",
+      "lakeway-tx",
+      "robinson-tx",
+      "luling-tx",
+      "smithville-tx",
+      "waco_tx",
+      "austin_tx",
+    ]) {
+      recordJurisdictionKeyForDistrictMock.mockResolvedValue(key);
+      const res = await postWith({ parcel_node_id: "48453:959606" });
+      expect(res.status, key).toBe(404);
+      expect(res.body.status, key).toBe("no-district");
+      expect(res.body.jurisdictionKey, key).toBe(key);
+    }
+  });
+
+  it("P-406 CONTROL: the Elgin key itself, with a district the ratified table has no row for, still declines", async () => {
+    // The rule translates the KEY; it never grows the table. `QQ-9` is not an
+    // Elgin row, so resolving `elgin-tx-travis` to `elgin-tx` must not make it
+    // serveable — otherwise the fix would be a licence to answer anything.
+    parcelZoning = "QQ-9";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "18529 SPOTTED EAGLE LN";
+    recordJurisdictionKeyForDistrictMock.mockResolvedValue("elgin-tx-travis");
+
+    const res = await postWith({ parcel_node_id: "48453:959606" });
+
+    expect(res.status).toBe(404);
+    expect(res.body.status).toBe("no-district");
+    // ...and the refusal names the JURISDICTION, which is what the entry's
+    // cityKey was for. The entry name is no longer a key anywhere.
+    expect(res.body.jurisdictionKey).toBe("elgin-tx");
+  });
+
   it("classifies an empty-coverage throw as an honest 404 no-parcel (NOT a 502)", async () => {
     parcelZoning = "R-MD";
     parcelNodeIdStamped = null;
