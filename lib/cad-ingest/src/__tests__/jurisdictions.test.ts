@@ -20,11 +20,13 @@ import { CAD_COUNTIES } from "../counties";
 import { CAD_BULK_SOURCES } from "../sources";
 import {
   ZONING_LAYERS,
+  canonicalZoningJurisdictionKey,
   resolveZoningJurisdiction,
   wiredZoningCityKeys,
 } from "../txgio/zoning-layers";
 import {
   getSetbackTable,
+  getSetbackTableForZoning,
   SETBACK_JURISDICTION_KEYS,
 } from "@workspace/adapters/setbacks";
 
@@ -414,6 +416,146 @@ describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
       expect(key).toBe("austin-tx");
       expect(seen).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-406 (OPS-25, 2026-09-22) — A STAMPED VALUE RESOLVES THROUGH THE REGISTRY'S
+// OWN `cityKey`, NOT THROUGH THE ENTRY'S NAME.
+//
+// `ZONING_LAYERS` is keyed by ENTRY NAME. An entry's `cityKey` is the
+// jurisdiction it serves. The two strings are identical for 23 of the 26
+// entries — which is what made the difference invisible — and differ for the
+// three that carry one city across several counties:
+//
+//   elgin-tx-travis      -> elgin-tx      (Elgin:  48021 Bastrop + 48453 Travis)
+//   austin-tx-williamson -> austin-tx     (Austin: 48453 Travis + 48491 Williamson)
+//   austin-tx-hays       -> austin-tx     (        + 48209 Hays)
+//
+// The Travis Elgin entry exists precisely to perform that indirection (its own
+// comment: `cityKey` is set to the literal `elgin-tx` so `stampCountyZoning`
+// persists the string `isElginCityJurisdiction` routes on). A consumer that
+// received the ENTRY NAME instead shipped it as the table key, walked past the
+// indirection, and refused `no-district` on `48453:959606` while PROD drew it
+// R-3 — measured live 2026-09-22.
+//
+// The rule is one registry read, in the registry's own module: the value's own
+// form first, its hyphen form second, the entry's `cityKey` out, same
+// separator convention back. Everything that names no entry returns
+// byte-identically, so this cannot re-key a parcel that works today.
+// ---------------------------------------------------------------------------
+describe("canonicalZoningJurisdictionKey — a stamped value resolves through the entry's cityKey (P-406)", () => {
+  it("maps EVERY registry entry name to that entry's own cityKey — no entry name can leak out as a key", () => {
+    expect(Object.keys(ZONING_LAYERS).length).toBeGreaterThan(20);
+    for (const [entryName, config] of Object.entries(ZONING_LAYERS)) {
+      expect(canonicalZoningJurisdictionKey(entryName), entryName).toBe(
+        config.cityKey,
+      );
+    }
+  });
+
+  it("is NOT VACUOUS: exactly three entry names name a jurisdiction other than themselves", () => {
+    // If this set ever empties, the translation above becomes a no-op that
+    // proves nothing — so the three entries it exists for are named here, and
+    // a fourth multi-county entry is welcome (it is covered by the invariant
+    // above) but must arrive with its own county wiring, not silently.
+    const translated = Object.entries(ZONING_LAYERS)
+      .filter(([entryName, config]) => entryName !== config.cityKey)
+      .map(([entryName, config]) => [entryName, config.cityKey])
+      .sort((a, b) => a[0]!.localeCompare(b[0]!));
+    expect(translated).toEqual([
+      ["austin-tx-hays", "austin-tx"],
+      ["austin-tx-williamson", "austin-tx"],
+      ["elgin-tx-travis", "elgin-tx"],
+    ]);
+  });
+
+  it("VERIFY BY VIOLATION: the entry name reaches no table, the resolved cityKey reaches the ratified Elgin one", () => {
+    // `48453:959606` (Elgin, Travis side), district R-3. The pre-fix key is the
+    // entry name exactly as the canary shipped it:
+    expect(getSetbackTableForZoning("elgin-tx-travis", "R-3")).toBeNull();
+
+    const resolved = canonicalZoningJurisdictionKey("elgin-tx-travis");
+    expect(resolved).toBe("elgin-tx");
+    // The cityKey is what the Elgin route in lib/adapters checks for...
+    const table = getSetbackTableForZoning(resolved!, "R-3");
+    expect(table).not.toBeNull();
+    // ...and it lands on the ratified Elgin development-code table — the same
+    // table the Bastrop-side cohort serves.
+    expect(table).toBe(getSetbackTableForZoning("elgin-tx", "R-3"));
+    expect(table).toBe(getSetbackTable("elgin-development-code"));
+    // PROD's own answer for 48453:959606: R-3 -> 15 / 7.5 / 10 / 15.
+    const r3 = table!.districts.find((d) => d.district_name.startsWith("R-3 "));
+    expect(r3).toMatchObject({
+      front_ft: 15,
+      side_ft: 7.5,
+      rear_ft: 10,
+      side_corner_ft: 15,
+    });
+  });
+
+  it("carries the same rule to the other two multi-county entries", () => {
+    for (const [entryName, cityKey] of [
+      ["austin-tx-williamson", "austin-tx"],
+      ["austin-tx-hays", "austin-tx"],
+      // The Bastrop-side Elgin entry is already the literal cityKey, so the
+      // rule must leave it exactly where it is.
+      ["elgin-tx", "elgin-tx"],
+      ["austin-tx", "austin-tx"],
+    ] as const) {
+      expect(canonicalZoningJurisdictionKey(entryName), entryName).toBe(cityKey);
+    }
+    // Williamson's Travis-adjacent Austin row is reached through the shared
+    // key, so the translation lands the parcel on the same table as Austin.
+    expect(
+      getSetbackTableForZoning(
+        canonicalZoningJurisdictionKey("austin-tx-williamson")!,
+        "SF-3",
+      ),
+    ).toBe(getSetbackTableForZoning("austin-tx", "SF-3"));
+  });
+
+  it("also reads an entry name written underscore-normalized, in that same convention", () => {
+    // No current writer emits this — `resolveZoningJurisdiction` hyphenates
+    // before it returns — but the record-rail reader (`readKey`) does not
+    // normalize separators, so the spelling is accepted rather than dropped.
+    // A LOOKUP falling back to the hyphen form must never re-spell a value
+    // that already named an entry, which is why the fallback runs one way only.
+    expect(canonicalZoningJurisdictionKey("elgin_tx_travis")).toBe("elgin_tx");
+    expect(getSetbackTableForZoning("elgin_tx_travis", "R-3")).toBeNull();
+    expect(
+      getSetbackTableForZoning(
+        canonicalZoningJurisdictionKey("elgin_tx_travis")!,
+        "R-3",
+      ),
+    ).toBe(getSetbackTable("elgin-development-code"));
+  });
+
+  it("is a NO-OP for every key that names no entry — every table key, and every cityKey", () => {
+    // The whole setback-table namespace: each one must come back byte-identical,
+    // which is what makes this fix unable to re-key a parcel that works today.
+    for (const tableKey of SETBACK_JURISDICTION_KEYS) {
+      expect(canonicalZoningJurisdictionKey(tableKey), tableKey).toBe(tableKey);
+    }
+    // And every cityKey already declared, including the three shared ones.
+    for (const config of Object.values(ZONING_LAYERS)) {
+      expect(canonicalZoningJurisdictionKey(config.cityKey), config.cityKey).toBe(
+        config.cityKey,
+      );
+    }
+    // Cities with no layer at all, and the shapes a situs city can synthesise.
+    for (const key of ["nowhere-tx", "lakeway-tx", "robinson-tx", "elgin_tx"]) {
+      expect(canonicalZoningJurisdictionKey(key), key).toBe(key);
+    }
+  });
+
+  it("trims, lowercases, and invents nothing", () => {
+    expect(canonicalZoningJurisdictionKey("  Elgin-TX-Travis  ")).toBe("elgin-tx");
+    expect(canonicalZoningJurisdictionKey("ELGIN-TX")).toBe("elgin-tx");
+    expect(canonicalZoningJurisdictionKey(null)).toBeNull();
+    expect(canonicalZoningJurisdictionKey(undefined)).toBeNull();
+    expect(canonicalZoningJurisdictionKey("")).toBeNull();
+    expect(canonicalZoningJurisdictionKey("   ")).toBeNull();
   });
 });
 
