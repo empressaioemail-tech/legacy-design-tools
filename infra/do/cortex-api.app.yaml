@@ -1,0 +1,208 @@
+# cortex-api — DigitalOcean App Platform spec, AS CODE. D-21 (OPS-25), wave 1.
+#
+# Drafted from the capture-derived draft at `P:/tmp/DO migration/current/cortex-api.yaml`
+# and CORRECTED against the register (`_inbox/2026-09-23_restoration_to_launch_REGISTER.md`
+# sections 2.1, 2.3, 2.4) wherever the two disagree. The register is the authority;
+# the differences are called out inline below, each with its reason.
+#
+# NOT DEPLOYED BY THIS LANE. This file is committed so the spec is reviewable and
+# so `doctl apps spec validate` can judge it before an app exists. D-6 applies it.
+#
+# WHAT IS DELIBERATE HERE, and each of these is a thing a reader might "fix":
+#
+# 1. IMAGE, NOT SOURCE. App Platform deploys the digest that `.github/workflows/do-image.yml`
+#    pushed to the DigitalOcean registry `hauska` (D-21). Never a source build:
+#    promote-by-digest needs a digest, and a rebuild from the same SHA is a
+#    different artifact that has not been graded (register 2.1, D-6).
+#    `digest:` below is OWED from that workflow's run artifact. An unbuildable or
+#    absent digest fails the deploy visibly; it cannot silently serve an old
+#    build, which is the failure the register names in its section 7 item 4.
+#
+# 2. NO `vpc:` BLOCK, and the draft's is dropped on purpose. The draft attached
+#    default-nyc1 only to reach overpass-tx privately at 10.116.0.6 through
+#    `OVERPASS_URL`. That variable is ABSENT here (item 4 below: the roads path
+#    falls back to the public Overpass instance, verified), so the VPC attached
+#    nothing F1 needs. D-24 (Overpass on a VPC droplet, bake path only) is QUEUED
+#    and reopens this when it lands. Its `id:` was also marked UNVERIFIED.
+#
+# 3. NO `domains:` BLOCK. `api.empressa.io` is added to this spec only AFTER the
+#    CNAME exists at GoDaddy and resolves; adding it earlier fires DOMAIN_FAILED
+#    at the operator for a name that cannot validate (register 2.3, wave 3 step 1
+#    is the operator's CNAME). The value IS set on the env var below, which is a
+#    different thing and is deliberate: `BROKERAGE_BILLING_PUBLIC_BASE_URL` is a
+#    NAME cortex hands to Stripe, and it is correct before the record resolves.
+#
+# 4. THREE GROUPS OF VARIABLES ARE ABSENT, NOT EMPTY AND NOT PLACEHOLDERED, and
+#    the reason is D-25 one level up. The code now refuses BY NAME where a
+#    variable is unset (this lane's Part 1), so an absent variable produces a
+#    named refusal; a placeholder or a guessed host produces a runtime failure
+#    that reads as a product defect. ABSENT is the safe state; the "OWED" block
+#    below names every one, its owner, and what its absence costs.
+#
+# `doctl apps spec validate` output is recorded in this lane's close.
+
+name: cortex-api
+region: nyc
+
+services:
+  - name: cortex-api
+    image:
+      registry_type: DOCR
+      registry: hauska
+      repository: api-server
+      # OWED: the digest from `.github/workflows/do-image.yml` (service=api-server).
+      # Full form `sha256:...`. Replace the token below with it; a wrong digest
+      # fails the pull rather than deploying something else.
+      digest: OWED_FROM_DO_IMAGE_WORKFLOW
+    http_port: 8080
+    instance_size_slug: apps-d-2vcpu-4gb
+    instance_count: 1
+    autoscaling:
+      min_instance_count: 1
+      max_instance_count: 3
+      metrics:
+        cpu:
+          percent: 80
+    # `/api/healthz` is the path the register's section 2.1 table names for this
+    # service, and it is what dispatches D-6 and D-22 expect to fire. Recorded
+    # precisely, because the code does NOT make it a functional check:
+    #   - `routes/health.ts:8` `healthHandler` answers 200 `{status:"ok"}` for
+    #     BOTH `/api/healthz` and the `/api/health` alias. It cannot fail while
+    #     the process serves, so it satisfies the register's own gate ("stop the
+    #     process, the check goes red within its interval", section 7 item 3) and
+    #     DETECTS NOTHING ELSE -- not an unset DATABASE_URL, not an unreachable
+    #     engine, not an unset retrieval URL.
+    #   - `routes/health.ts:86` `readinessHandler` at `/api/health/ready` is the
+    #     functional check: it 503s when the database query fails OR when a
+    #     dependency's URL is UNSET (`checkDependency` returns `error` with
+    #     "URL is not configured", `health.ts:47-54`).
+    # The register's health-check column says "uptime check on a functional route,
+    # fired once ... same, on /api/healthz" -- and `/api/healthz` is not that
+    # route. One word of this spec changes it to `/api/health/ready`, and that
+    # flip is D-6's or D-22's to make deliberately, not a spec-as-code lane's:
+    # it is only safe once `ENGINE_API_URL` and the retrieval URL are set and
+    # those services answer `/health`, which the dependency ORDER guarantees at
+    # cortex's first deploy (retrieval, then engine, then cortex).
+    health_check:
+      http_path: /api/healthz
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    envs:
+      # ---- SECRET, BY NAME ONLY (the operator's vault holders fill these) ----
+      # No value is carried and none may be: register section 3 forbids a secret
+      # value in a lane artifact. The capture's count was 39 secret names, of
+      # which 6 were Cotality's and are dead (item 4c below), leaving 33.
+      - { key: AI_INTEGRATIONS_ANTHROPIC_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: ATOMS_DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: BIM_MODEL_SHARED_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: BRIEF_RETRIEVAL_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: BROKERAGE_EXTENSION_PUBLIC_KEY, scope: RUN_TIME, type: SECRET }
+      # DATABASE_URL is the UNPOOLED `_DIRECT` endpoint, not the pooler. The
+      # pooled string was injected read-only for thirteen hours on 2026-08-31
+      # (register section 3) and cortex writes.
+      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: ENGINE_API_GATE_TOKEN, scope: RUN_TIME, type: SECRET }
+      - { key: FACTORY_DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: GATE_CONTEXT_SIGNING_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: GOHIGHLEVEL_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: GOHIGHLEVEL_LOCATION_ID, scope: RUN_TIME, type: SECRET }
+      - { key: PE_SESSION_EXCHANGE_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: PIPEDRIVE_API_TOKEN, scope: RUN_TIME, type: SECRET }
+      - { key: PLAN_REVIEW_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: RESEND_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: RETRIEVAL_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: SERVICE_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: SNAPSHOT_SECRET, scope: RUN_TIME, type: SECRET }
+      # All thirteen Stripe values (register 2.1). STRIPE_WEBHOOK_SECRET moves
+      # from a vendor reissue to a HARVEST: the existing endpoint's signing secret
+      # is revealed in the dashboard, its URL edited in place (ruling 5).
+      - { key: STRIPE_MAX_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_PE_UNLOCK_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_PRO_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_PUBLISHABLE_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_SECRET_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_SOLO_ANNUAL_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_SOLO_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_STUDIO_ANNUAL_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_STUDIO_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_TEAM_ANNUAL_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_TEAM_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_TEAM_SEAT_PRICE_ID, scope: RUN_TIME, type: SECRET }
+      - { key: STRIPE_WEBHOOK_SECRET, scope: RUN_TIME, type: SECRET }
+
+      # ---- GENERAL, carried over from the capture unchanged ----
+      - { key: AIR_FINDING_LLM_MODE, scope: RUN_TIME, type: GENERAL, value: "anthropic" }
+      - { key: AIR_FINDING_ORCHESTRATED, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: AI_INTEGRATIONS_ANTHROPIC_BASE_URL, scope: RUN_TIME, type: GENERAL, value: "https://api.anthropic.com" }
+      - { key: BRIEFING_LLM_MODE, scope: RUN_TIME, type: GENERAL, value: "anthropic" }
+      - { key: BROKERAGE_FEDERAL_DATA_DIR, scope: RUN_TIME, type: GENERAL, value: "/app/var/brokerage-federal-data" }
+      - { key: CLASSIFICATION_LLM_MODE, scope: RUN_TIME, type: GENERAL, value: "anthropic" }
+      - { key: CORTEX_USER_DAILY_API_LIMIT, scope: RUN_TIME, type: GENERAL, value: "50000" }
+      - { key: DXF_CONVERTER_MODE, scope: RUN_TIME, type: GENERAL, value: "mock" }
+      - { key: ENGINE_SPINE_BRIEFING, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: ENGINE_SPINE_FINDINGS, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: ENGINE_SPINE_FINDINGS_ORCHESTRATED, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: ENGINE_SPINE_HYDROLOGY, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: ENGINE_SPINE_TOPOGRAPHY, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: FINDINGS_ICC_MODEL_CODE_SUPPLEMENT, scope: RUN_TIME, type: GENERAL, value: "true" }
+      - { key: GATE_CONTEXT_MODE, scope: RUN_TIME, type: GENERAL, value: "enforce" }
+      - { key: HYDROLOGY_PYSHEDS_INSTALLED, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: ICC_ES_REPORT_URL_TEMPLATE, scope: RUN_TIME, type: GENERAL, value: "https://icc-es.org/report-listing/?search_api_fulltext={ESR}" }
+      - { key: LOG_LEVEL, scope: RUN_TIME, type: GENERAL, value: "info" }
+      - { key: MNML_RENDER_MODE, scope: RUN_TIME, type: GENERAL, value: "mock" }
+      - { key: NODE_ENV, scope: RUN_AND_BUILD_TIME, type: GENERAL, value: "production" }
+      - { key: PRECEDENCE_ENGINE_PRODUCTION, scope: RUN_TIME, type: GENERAL, value: "1" }
+      - { key: RENDERS_PROD_ENABLED, scope: RUN_TIME, type: GENERAL, value: "false" }
+
+      # ---- SET BY RULING, because production never set them (register 2.4) ----
+      # The capture records only what production SET, so this variable is
+      # invisible to a capture-derived spec and the code fell back to a dead
+      # Google host. It is set here deliberately: it is the origin Stripe returns
+      # a paying customer to, and a wrong-or-absent value fails AFTER the charge.
+      # D-25 Part 1 removed the code default, so an unset value now refuses by
+      # name at the route; this line is what makes it not unset.
+      - { key: BROKERAGE_BILLING_PUBLIC_BASE_URL, scope: RUN_TIME, type: GENERAL, value: "https://api.empressa.io" }
+
+      # ---- ABSENT BY RULING: the code refuses by name, verified ----
+      # OVERPASS_URL: unset. The roads path falls back to the PUBLIC Overpass
+      #   instance (verified on origin/main 2026-09-23, register 2.1). A dead
+      #   value (`http://10.128.0.2:8080/api/interpreter`, the old GCP internal
+      #   IP) would have been a runtime failure reading as a product defect. Its
+      #   removal is also why this spec carries no VPC attachment (item 2 above).
+      # PLAN_REVIEW_BACKEND_URL: unset. The plan-review tool refuses by name per
+      #   call until D-29 lands (register 2.1, verified). Its old value was on
+      #   the dead Cloud Run estate. D-29 adds it, with its own host.
+
+      # ---- OWED: names this spec must carry, values that do not exist yet ----
+      # These are NOT omitted by oversight. Each value belongs to a service that
+      # had not been created when this lane ran, and guessing one would be the
+      # D-25 defect in a new costume (a host that is plausible and wrong). The
+      # variable is absent so the code's named refusal is what happens, and the
+      # owner below fills it in the same change that creates the service:
+      #
+      #   ENGINE_API_URL             <- D-4 (engine droplet).   cortex reads engine.
+      #   HAUSKA_RETRIEVAL_API_URL   <- D-3 (retrieval droplet). Register 2.1 says
+      #   RETRIEVAL_API_URL             SET every retrieval URL name on cortex;
+      #   BRIEF_RETRIEVAL_API_URL       the VALUE is the droplet's address. D-25
+      #                                 Part 1 removed all three defaults, so
+      #                                 whichever the owner sets is the one used,
+      #                                 and an unset one refuses by name.
+      #   RECORDS_REQUEST_WORKER_URL <- records-request-worker is QUEUED ("when
+      #                                 the Records tool goes live", register 2.1).
+      #                                 Absent, so the enqueue path is its own
+      #                                 documented no-op.
+      #   PRIVATE_OBJECT_DIR         <- D-34 (Spaces adapter). Both were
+      #   PUBLIC_OBJECT_SEARCH_PATHS    GCS-backed object paths; the storage
+      #                                 platform move is D-34's, which is QUEUED.
+      #
+      # ---- ABSENT: vendor dead, and nothing waits on it ----
+      # The six Cotality secrets (PROPERTY/RISKMETER/SPATIALTILE key+secret) were
+      # Secret Manager references in the capture. Cotality is struck from the
+      # program (CANON preamble 2026-09-16/09-17): every rail that wanted it ships
+      # as a DECLARED absence, and the credential is never rotated. Carrying them
+      # as PENDING_OPERATOR, as the draft did, would keep six names with no holder.
