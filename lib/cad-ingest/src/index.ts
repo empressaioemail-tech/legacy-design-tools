@@ -137,6 +137,7 @@ export type {
 export {
   ZONING_LAYERS,
   resolveZoningLayer,
+  canonicalZoningJurisdictionKey,
   wiredZoningCityKeys,
   resolveZoningJurisdiction,
 } from "./txgio/zoning-layers";

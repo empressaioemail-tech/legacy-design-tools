@@ -759,6 +759,57 @@ export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined
 }
 
 /**
+ * The jurisdiction key a stamped value resolves to, read through this registry's
+ * own `cityKey` field — so a value naming an ENTRY resolves to the jurisdiction
+ * that entry declares, and every other value passes through unchanged.
+ *
+ * WHY THIS EXISTS (P-406, 2026-09-22). This map is keyed by ENTRY NAME; an
+ * entry's `cityKey` is the jurisdiction that entry serves. For 23 of its 26
+ * entries the two strings are identical, which makes the distinction invisible.
+ * For the three entries that carry ONE city across SEVERAL counties it is not:
+ *
+ *     elgin-tx-travis      -> elgin-tx     (Elgin:  48021 Bastrop + 48453 Travis)
+ *     austin-tx-williamson -> austin-tx    (Austin: 48453 Travis + 48491 Williamson
+ *     austin-tx-hays       -> austin-tx             + 48209 Hays)
+ *
+ * A stamped value is *meant* to be a jurisdiction key, and `elgin-tx-travis`
+ * exists precisely so the Travis Elgin cohort stamps `elgin-tx` (see that
+ * entry's own comment). But the entry name is structurally indistinguishable
+ * from a key to any consumer that only compares strings, both spellings resolve
+ * in `ZONING_LAYERS` itself, and a writer that stamps the name instead of the
+ * `cityKey` is accepted silently. Measured live on the serving path 2026-09-22:
+ * the record cell for `48453:959606` (Elgin, Travis side) carries
+ * `elgin-tx-travis`; `isElginCityJurisdiction` accepts only `elgin-tx` and
+ * `elgin-development-code`; so the ratified Elgin development-code table was
+ * never reached and the parcel refused `no-district` while PROD drew it R-3.
+ *
+ * A value that names no entry is returned unchanged — trimmed and lowercased,
+ * which is the form every table key in this site is already in, and in its OWN
+ * separator convention — so every single-county key, every table-owning key
+ * (`elgin-development-code`, `bastrop-development-code`) and every
+ * unregistered city passes through byte-identically. The lookup tries the
+ * value's own form first and its hyphen form second, never the reverse, so the
+ * hyphen fallback cannot re-spell a value that already named an entry; it only
+ * reaches entry names written underscore-normalized (`elgin_tx_travis`), which
+ * is the spelling `resolveZoningJurisdiction` normalizes away before returning
+ * and no current writer emits, but which `readKey` on the record rail would
+ * pass through untouched. Nothing is invented: null/blank in, null out.
+ */
+export function canonicalZoningJurisdictionKey(
+  value: string | null | undefined,
+): string | null {
+  const key = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!key) return null;
+  const entry = ZONING_LAYERS[key] ?? ZONING_LAYERS[key.replace(/_/g, "-")];
+  if (!entry) return key;
+  // Same separator convention back out: the two forms reach the same setback
+  // table (`normalizeJurisdictionKey` hyphenates), and the derivation echoes
+  // the key it refused on, so a key that is not a multi-county entry name
+  // must not change spelling here.
+  return key.includes("_") ? entry.cityKey.replace(/-/g, "_") : entry.cityKey;
+}
+
+/**
  * All wired cityKeys for a county FIPS. Always a Set — never assume one.
  * Empty set means no zoning layer is registered for that county.
  */
