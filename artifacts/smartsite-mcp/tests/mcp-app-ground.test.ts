@@ -28,7 +28,6 @@ import {
   GROUND_VINTAGE_NOTE,
   GROUND_ZOOM_MAX,
   GROUND_ZOOM_MIN,
-  RESOURCE_CSP_DOMAINS,
   US_SURVEY_FOOT_M,
   buildAppHtml,
   edgeDoor,
@@ -46,6 +45,7 @@ import {
   htmlContractViolations,
   registerMcpApp,
   renderParcelDraw,
+  resourceCspDomains,
   ringFit,
   ringPixel,
   ringSvg,
@@ -225,7 +225,12 @@ describe("M-2 tile path order is z / y / x", () => {
 
   it("the template is the single source of the declared origin", () => {
     expect(GROUND_TILE_ORIGIN).toBe(new URL(GROUND_TILE_URL_TEMPLATE).origin);
-    expect(RESOURCE_CSP_DOMAINS).toContain(GROUND_TILE_ORIGIN);
+    /* D-42 (2026-09-23): `RESOURCE_CSP_DOMAINS` is now `resourceCspDomains()`.
+     * It cannot be a module-level const any more: the parcel-tile origin is read
+     * from `PARCEL_TILES_ORIGIN` when the page is built, so a const would have to
+     * either resolve at import (crash the connector on an unset variable) or
+     * silently omit the entry (a dark parcel ground with nothing saying why). */
+    expect(resourceCspDomains()).toContain(GROUND_TILE_ORIGIN);
     expect(GROUND_TILE_URL_TEMPLATE).toContain("/tile/{z}/{y}/{x}");
     expect(GROUND_TILE_URL_TEMPLATE).not.toContain("/tile/{z}/{x}/{y}");
   });

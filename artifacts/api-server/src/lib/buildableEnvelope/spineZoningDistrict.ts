@@ -14,6 +14,8 @@
  * applies the record's zoning over the baked stamp, and so does this module.
  */
 
+import { requireRetrievalBaseUrl } from "../retrievalEndpoint";
+
 export type SpineZoningSource = "parcel-record" | "baked-snapshot" | "atom-chain";
 
 export interface SpineZoningResolution {
@@ -33,9 +35,6 @@ export interface SpineZoningResolution {
   /** Present when `source === "baked-snapshot"`. */
   snapshotAt?: string | null;
 }
-
-const DEFAULT_RETRIEVAL =
-  "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
 
 /** A trimmed, non-empty string, or null. Never widens a value into existence. */
 function readKey(value: unknown): string | null {
@@ -64,12 +63,6 @@ function districtFromFacets(facets: unknown): {
 async function districtFromAtomChain(
   parcelNodeId: string,
 ): Promise<string | null> {
-  const baseUrl = (
-    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
-    process.env.RETRIEVAL_API_URL?.trim() ||
-    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
-    DEFAULT_RETRIEVAL
-  ).replace(/\/$/, "");
   const key =
     process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
     process.env.RETRIEVAL_API_KEY?.trim() ||
@@ -79,6 +72,13 @@ async function districtFromAtomChain(
     // reason as parcelRecordReaderClient.ts and placeCoverageSource.ts.
     process.env.BRIEF_RETRIEVAL_API_KEY?.trim();
   if (!key) return null;
+
+  // D-25: no default host, and the refusal is raised OUTSIDE the try below so
+  // it is never laundered into the `null` this function returns for "the source
+  // names no district" -- a caller turns that `null` into "district not
+  // resolved", which is a claim about the parcel and must not be fabricated
+  // from a deployment that never named the service address.
+  const baseUrl = requireRetrievalBaseUrl();
 
   type AtomChainZoningWire = {
     zoningFact?: {

@@ -27,9 +27,17 @@ const pg = require("pg");
 const apply = process.argv.includes("--apply");
 const dryRun = process.argv.includes("--dry-run") || !apply;
 
-const WORKER_URL =
-  process.env.RECORDS_REQUEST_WORKER_URL?.trim() ||
-  "https://records-request-worker-1062716564162.us-central1.run.app/run";
+// D-25: no default worker URL. This used to fall back to the retired Google
+// Cloud Run records-request-worker host, so a rerun would POST against a corpse
+// and report the job as failed. Name it, or refuse by name.
+const WORKER_URL = process.env.RECORDS_REQUEST_WORKER_URL?.trim();
+if (!WORKER_URL) {
+  console.error(
+    "RECORDS_REQUEST_WORKER_URL required and there is no default (D-25): the\n" +
+      "  retired Google Cloud Run records-request-worker host is dead.",
+  );
+  process.exit(2);
+}
 
 const DATABASE_URL = process.env.DATABASE_URL?.trim();
 if (!DATABASE_URL) {

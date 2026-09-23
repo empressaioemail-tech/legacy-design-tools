@@ -5,6 +5,12 @@
  * and an imported binding would not exist in that scope. The compile time link
  * that keeps the two shapes in step is PANEL_ANCHOR_ACCEPTS_WIRE below. */
 import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
+/* D-42: a VALUE import, and deliberately confined to this module's server-side
+ * build path (`probeNetTargets` / `probeCspDomains`, both called from
+ * `buildAppHtml` and `registerMcpApp`). It must never be reached from a function
+ * listed in INLINE_SHARED: those are embedded into the served page by source and
+ * an imported binding does not exist in that scope. See the file-header note. */
+import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 
 /*
  * P-167 (OPS-23 R-6). These ten were this module's own literals until this
@@ -64,18 +70,54 @@ export const APP_MIME = "text/html;profile=mcp-app";
  * Read-only; results paint into the boot strip and change no behavior. */
 export const PROBE_RESOURCE_URI = "ui://smartsite/probe-p559.txt";
 export const PROBE_RESOURCE_TEXT = "probe-ok";
-export const PROBE_NET_TARGETS = [
-  { key: "esri", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0" },
-  { key: "gcs", url: "https://storage.googleapis.com/hauska-map-tiles/parcels" },
-  { key: "svc7", url: "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83?f=json" },
-  { key: "self", url: "https://mcp.smartsite.cloud/health" },
-] as const;
-export const PROBE_CSP_DOMAINS = [
-  "https://server.arcgisonline.com",
-  "https://storage.googleapis.com",
-  "https://services7.arcgis.com",
-  "https://mcp.smartsite.cloud",
-] as const;
+
+/*
+ * D-42 (OPS-25, 2026-09-23). THE PARCEL TILE ORIGIN WAS A LITERAL HERE.
+ *
+ * Both the probe channel and the CSP entry below used to name the closed Google
+ * Cloud object-store host -- the bucket the parcel tiles were baked into, which
+ * answers 403 and has since the outage. It is
+ * deleted rather than repointed, and NOT defaulted: D-42 moves the tiles to
+ * DigitalOcean Spaces and its origin is created by that lane, so this lane
+ * cannot know it. `PARCEL_TILES_ORIGIN` supplies it (see
+ * `parcel-tiles-origin.ts`), and an unset value REFUSES BY NAME at the moment
+ * the page is built and the CSP is declared.
+ *
+ * These are functions rather than module-level consts for exactly that reason: a
+ * const would have to be built at import, so an unset variable would either
+ * crash the connector at boot or -- the tempting, wrong fix -- quietly omit the
+ * entry, which is a dark parcel ground with nothing saying why.
+ */
+
+/** The p559 map-ground net channels, as they are embedded into the served page. */
+export function probeNetTargets(): Array<{ key: string; url: string }> {
+  const tilesOrigin = requireParcelTilesOrigin();
+  return [
+    { key: "esri", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0" },
+    /* The tiles channel probes the ORIGIN, not a path: D-42 owns the Spaces
+     * layout, and a path guessed here would be this lane inventing it. */
+    { key: "tiles", url: tilesOrigin },
+    { key: "svc7", url: "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83?f=json" },
+    { key: "self", url: "https://mcp.smartsite.cloud/health" },
+  ];
+}
+
+/**
+ * The origins the page CONNECTS to, declared in the app's CSP. Kept as a list
+ * parallel to {@link probeNetTargets} rather than derived from it, because the
+ * p559 measurement is precisely whether the host honours what we DECLARE --
+ * `mcp-app-probe.test.ts` asserts the two agree, and deriving one from the other
+ * would make that assertion vacuous.
+ */
+export function probeCspDomains(): string[] {
+  const tilesOrigin = requireParcelTilesOrigin();
+  return [
+    "https://server.arcgisonline.com",
+    tilesOrigin,
+    "https://services7.arcgis.com",
+    "https://mcp.smartsite.cloud",
+  ];
+}
 export const APP_HOST_TOOLS = [
   "create_screen",
   "list_screens",
@@ -893,14 +935,14 @@ export const GROUND_TILE_ORIGIN = new URL(GROUND_TILE_URL_TEMPLATE).origin;
  * derived from the template rather than written a second time, so a template
  * pointed at another host declares that host or declares nothing, never the
  * wrong one. The p559 probe origins already include the imagery host, so today
- * this list equals PROBE_CSP_DOMAINS; it stops equalling it the moment the
+ * this list equals {@link probeCspDomains}; it stops equalling it the moment the
  * template moves, which is the point of deriving it.
  */
-export const RESOURCE_CSP_DOMAINS: readonly string[] = ((): string[] => {
-  const out: string[] = PROBE_CSP_DOMAINS.slice();
+export function resourceCspDomains(): string[] {
+  const out: string[] = probeCspDomains();
   if (out.indexOf(GROUND_TILE_ORIGIN) < 0) out.push(GROUND_TILE_ORIGIN);
   return out;
-})();
+}
 
 export const GROUND_TILE_PX = 256;
 
@@ -3715,7 +3757,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
     glText=glc.getContext("webgl2")?"gl=webgl2":(glc.getContext("webgl")||glc.getContext("experimental-webgl"))?"gl=webgl1":"gl=none";
   }catch(eGl){glText="gl=err"}
   paintBoot();
-  var PROBE_NET=${JSON.stringify(PROBE_NET_TARGETS)};
+  var PROBE_NET=${JSON.stringify(probeNetTargets())};
   var PROBE_URI=${JSON.stringify(PROBE_RESOURCE_URI)};
   var netParts=Object.create(null);
   var probeIds=Object.create(null);
@@ -4486,10 +4528,10 @@ export function registerMcpApp(server: {
             /* p559: declare the probe origins so the run measures the DECLARED case.
              * Empty arrays measured nothing; whether the host honors this is the question. */
             csp: {
-              connectDomains: [...PROBE_CSP_DOMAINS],
+              connectDomains: [...probeCspDomains()],
               /* M-2: the ground LOADS tiles, it does not connect; its origin is
                * derived from the tile template, never a second copy. */
-              resourceDomains: [...RESOURCE_CSP_DOMAINS],
+              resourceDomains: [...resourceCspDomains()],
             },
           },
         },

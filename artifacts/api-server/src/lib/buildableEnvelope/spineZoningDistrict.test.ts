@@ -258,6 +258,11 @@ describe("P-366 falsifier F5 — the atom-chain read is live on the PRODUCTION c
 
   it("reads the atom chain when only BRIEF_RETRIEVAL_API_KEY is mounted", async () => {
     process.env.BRIEF_RETRIEVAL_API_KEY = "brief-key";
+    // D-25 (2026-09-23): the ADDRESS is named here too. It used to come from the
+    // module's hardcoded Google Cloud default, so this test proved the BRIEF_
+    // credential-name fallback by riding a production default it never named.
+    // `retrievalEndpoint.test.ts` asserts the unset-address refusal directly.
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://brief.example.com";
     const fetchMock = stubFetchOk("SF-2");
     const result = await resolveSpineZoningWhenGisAbsent("48209:150937", null);
     // The atom-chain wire this build reads names no jurisdiction, so none is

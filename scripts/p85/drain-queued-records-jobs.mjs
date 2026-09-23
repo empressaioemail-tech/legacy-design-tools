@@ -5,9 +5,17 @@
  */
 import pg from "pg";
 
-const WORKER_URL =
-  process.env.RECORDS_REQUEST_WORKER_URL?.trim() ||
-  "https://records-request-worker-1062716564162.us-central1.run.app/run";
+// D-25: no default worker URL. The retired Google Cloud Run
+// records-request-worker host is dead; a drain against it reported every queued
+// job as failed. Name it, or refuse by name.
+const WORKER_URL = process.env.RECORDS_REQUEST_WORKER_URL?.trim();
+if (!WORKER_URL) {
+  console.error(
+    "RECORDS_REQUEST_WORKER_URL required and there is no default (D-25): the\n" +
+      "  retired Google Cloud Run records-request-worker host is dead.",
+  );
+  process.exit(2);
+}
 const DATABASE_URL = process.env.DATABASE_URL?.trim();
 const dryRun = process.argv.includes("--dry-run");
 

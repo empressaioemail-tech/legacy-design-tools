@@ -5,14 +5,20 @@ import { describe, expect, it } from "vitest";
 import {
   APP_MIME,
   APP_RESOURCE_URI,
-  PROBE_CSP_DOMAINS,
-  PROBE_NET_TARGETS,
   PROBE_RESOURCE_TEXT,
   PROBE_RESOURCE_URI,
   buildAppHtml,
   htmlContractViolations,
+  probeCspDomains,
+  probeNetTargets,
   registerMcpApp,
 } from "../src/mcp-app.js";
+import { PARCEL_TILES_ORIGIN_ENV_NAME } from "../src/parcel-tiles-origin.js";
+
+/* D-42: the tiles origin is config now. The suite runs under the
+ * `PARCEL_TILES_ORIGIN` set in vitest.config.ts; the unset refusal has its own
+ * suite in `parcel-tiles-origin.test.ts`. */
+const TILES_ORIGIN = process.env[PARCEL_TILES_ORIGIN_ENV_NAME]!;
 
 describe("p559 probe vs the direct_network contract", () => {
   const html = buildAppHtml();
@@ -47,16 +53,26 @@ describe("p559 probe constants", () => {
   });
 
   it("declares every probe target origin in the CSP domains (derived, not copied)", () => {
-    for (const t of PROBE_NET_TARGETS) {
+    for (const t of probeNetTargets()) {
       const origin = new URL(t.url).origin;
-      expect(PROBE_CSP_DOMAINS, `origin ${origin} for key ${t.key}`).toContain(origin);
+      expect(probeCspDomains(), `origin ${origin} for key ${t.key}`).toContain(origin);
     }
   });
 
   it("probes four distinct origins including our own", () => {
-    const origins = new Set(PROBE_NET_TARGETS.map((t) => new URL(t.url).origin));
+    const origins = new Set(probeNetTargets().map((t) => new URL(t.url).origin));
     expect(origins.size).toBe(4);
     expect(origins).toContain("https://mcp.smartsite.cloud");
+  });
+
+  it("D-42: the tiles channel and the CSP both carry the CONFIGURED origin, not a literal", () => {
+    const tiles = probeNetTargets().find((t) => t.key === "tiles");
+    expect(tiles?.url).toBe(TILES_ORIGIN);
+    expect(probeCspDomains()).toContain(TILES_ORIGIN);
+    /* The retired bucket must appear nowhere: not in the channels, not in the
+     * declared CSP, not in the served page. */
+    expect(JSON.stringify(probeNetTargets())).not.toContain("storage.googleapis.com");
+    expect(probeCspDomains()).not.toContain("https://storage.googleapis.com");
   });
 });
 
@@ -77,7 +93,7 @@ describe("p559 probe in the served page", () => {
   });
 
   it("carries each probe URL verbatim", () => {
-    for (const t of PROBE_NET_TARGETS) {
+    for (const t of probeNetTargets()) {
       expect(html).toContain(t.url);
     }
   });
@@ -133,8 +149,8 @@ describe("p559 registration", () => {
     expect(calls[0].config.mimeType).toBe(APP_MIME);
     expect(calls[1].config.mimeType).toBe("text/plain");
     const ui = (boardMeta as { ui?: { csp?: { connectDomains?: string[]; resourceDomains?: string[] } } })?.ui;
-    expect(ui?.csp?.connectDomains).toEqual([...PROBE_CSP_DOMAINS]);
-    expect(ui?.csp?.resourceDomains).toEqual([...PROBE_CSP_DOMAINS]);
+    expect(ui?.csp?.connectDomains).toEqual([...probeCspDomains()]);
+    expect(ui?.csp?.resourceDomains).toEqual([...probeCspDomains()]);
     expect(probeText).toBe(PROBE_RESOURCE_TEXT);
   });
 });

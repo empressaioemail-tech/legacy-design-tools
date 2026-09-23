@@ -66,6 +66,13 @@ describe("parcelRecordReaderClient", () => {
     // exercise the cache itself. Coalescing is real production behavior in
     // the un-injected path, so it must be proven against that path: mock
     // global fetch, not this module's own test seam.
+    // D-25 (2026-09-23): the ADDRESS is stubbed explicitly. It used to be
+    // omitted and the module supplied it from a hardcoded Google Cloud default,
+    // so this test rode a production default it never named. With the default
+    // deleted, an unset address is a named refusal and this call never reaches
+    // the stubbed fetch -- see `retrievalEndpoint.test.ts` for that contract
+    // asserted directly.
+    vi.stubEnv("RETRIEVAL_API_URL", "https://retrieval.test.invalid");
     vi.stubEnv("RETRIEVAL_API_KEY", "test-key");
     let calls = 0;
     vi.stubGlobal(
