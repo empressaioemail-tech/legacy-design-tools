@@ -31,12 +31,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Require SIBLING_REPO_READ_TOKEN (A-30)
+        # hauska-map is PRIVATE (made private 2026-09-22 after 12:38Z). The workflow's
+        # default GITHUB_TOKEN cannot read another repository, so the sibling checkout
+        # fails with `repository '...' not found` — which reads like a missing repo
+        # rather than a missing credential, and sent a reader hunting the wrong thing.
+        # Fail by NAME instead, before anything tries the checkout.
+        #
+        # Fork PRs never receive secrets, which is correct: this step failing on a fork
+        # PR is the honest state, not a regression.
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$SIBLING_REPO_READ_TOKEN" ]; then
+            echo "FAIL: SIBLING_REPO_READ_TOKEN is not set."
+            echo "  It is a fine-grained, read-only token carrying contents:read on"
+            echo "  hauska-map and hauska-engine, set as a legacy-design-tools Actions"
+            echo "  secret by the operator (OPS-25 A-30). Without it every sibling"
+            echo "  checkout in this workflow fails closed and reads as 'not found'."
+            exit 1
+          fi
+          echo "SIBLING_REPO_READ_TOKEN is present"
       - name: checkout hauska-map main (the sibling copy)
         uses: actions/checkout@v4
         with:
           repository: empressaioemail-tech/hauska-map
           ref: main
           path: map-main
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
           sparse-checkout: |
             apps/property-explorer/api/_lib/planned-development-district.ts
             apps/property-explorer/api/_lib/setback-citation-vintage.ts

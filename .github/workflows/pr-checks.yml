@@ -239,11 +239,29 @@ jobs:
         # checked-in fixture will be stale and integration tests would
         # silently miss new columns/tables. Fail the PR loudly instead.
         run: pnpm --filter @workspace/db run test:fixture:drift
+      - name: Require SIBLING_REPO_READ_TOKEN (A-30)
+        # hauska-engine is PRIVATE. The default GITHUB_TOKEN cannot read another
+        # repository, so this checkout fails with `Not Found` — which reads like a
+        # missing repo rather than a missing credential. Fail by NAME instead.
+        # Fork PRs receive no secrets; that is correct and this step says so.
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$SIBLING_REPO_READ_TOKEN" ]; then
+            echo "FAIL: SIBLING_REPO_READ_TOKEN is not set."
+            echo "  A fine-grained read-only token carrying contents:read on"
+            echo "  hauska-map and hauska-engine, set as a legacy-design-tools Actions"
+            echo "  secret by the operator (OPS-25 A-30)."
+            exit 1
+          fi
+          echo "SIBLING_REPO_READ_TOKEN is present"
       - name: Checkout hauska-engine (writer disk probe)
         uses: actions/checkout@v4
         with:
           repository: empressaioemail-tech/hauska-engine
           path: hauska-engine-checkout
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
           sparse-checkout: |
             packages/engine-core/scripts
       - name: Run tests
@@ -763,6 +781,62 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Authenticate the canonical-copy fetch (A-30)
+        # A-30 (OPS-25, 2026-09-23). hauska-engine is PRIVATE, so the canonical copy
+        # this check fetches is only readable under an Authorization header; without
+        # one the fetch returns 404 and the check REFUSEs with CANONICAL_UNREADABLE on
+        # every run. Unreadable is not a pass, so the control is correct — it is the
+        # credential that was missing.
+        #
+        # WHY CURL_HOME RATHER THAN AN EDIT TO THE SCRIPT, which is what A-30 named.
+        # scripts/check-tagged-revision-env.mjs and tools/check-tagged-revision-env.mjs
+        # in hauska-engine are BYTE-IDENTICAL ON PURPOSE, and that byte-identity is
+        # this very job's control (DEV_PROCESS 2.4). Editing the fetch in one copy
+        # changes its sha256, so the pair diverges and this check goes red until an
+        # identical change lands in hauska-engine — a lock-step cross-repo merge whose
+        # intermediate state is a broken main, in a repo this lane does not own. The
+        # script's contract is "curl this canonical URL"; supplying the credential to
+        # curl keeps both copies byte-identical and makes the read authenticated, which
+        # is the outcome A-30 asked for.
+        #
+        # The read is not silent: the next step PROVES the token can read the canonical
+        # copy before the check depends on it, so a later CANONICAL_UNREADABLE is
+        # genuinely about the copy rather than about a missing credential.
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$SIBLING_REPO_READ_TOKEN" ]; then
+            echo "FAIL: SIBLING_REPO_READ_TOKEN is not set."
+            echo "  A fine-grained read-only token carrying contents:read on"
+            echo "  hauska-engine, set as a legacy-design-tools Actions secret by the"
+            echo "  operator (OPS-25 A-30). Fork PRs receive no secrets by design."
+            exit 1
+          fi
+          # curl reads $CURL_HOME/.curlrc on every invocation. Scoped to a temp dir so
+          # the header is not left on the runner's home. 600: the token is a secret.
+          CURL_DIR="$RUNNER_TEMP/p279-curl"
+          mkdir -p "$CURL_DIR"
+          printf 'header = "Authorization: Bearer %s"\n' "$SIBLING_REPO_READ_TOKEN" > "$CURL_DIR/.curlrc"
+          chmod 600 "$CURL_DIR/.curlrc"
+          echo "CURL_HOME=$CURL_DIR" >> "$GITHUB_ENV"
+          echo "canonical fetch authenticated via curlrc (token not printed)"
+      - name: Positive control - the token can actually read the canonical copy
+        # DEV_PROCESS 2.2: a gating indicator is proven able to FIRE before it is
+        # trusted, and here the negative case matters more. A token that cannot read
+        # the canonical copy would leave the divergence step REFUSing for an
+        # unstated reason, so the read is proven here and the failure names itself.
+        env:
+          CANONICAL_URL: https://raw.githubusercontent.com/empressaioemail-tech/hauska-engine/main/tools/check-tagged-revision-env.mjs
+        run: |
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$CANONICAL_URL")
+          echo "canonical copy HTTP $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "FAIL: the canonical copy is unreadable with SIBLING_REPO_READ_TOKEN (HTTP $CODE)."
+            echo "  The token is missing a contents:read grant on hauska-engine, or the"
+            echo "  canonical path moved. The divergence check below cannot judge either"
+            echo "  way, and an unjudgeable control is not a pass."
+            exit 1
+          fi
       - name: P-279 canonical divergence byte-compare
         # DEV_PROCESS 2.4. scripts/check-tagged-revision-env.mjs here and
         # tools/check-tagged-revision-env.mjs in hauska-engine are byte-identical on
@@ -770,12 +844,10 @@ jobs:
         # compares them and REFUSES (never passes) on any byte difference, or when
         # the canonical copy cannot be read at all.
         #
-        # EXPECTED RED UNTIL THE ENGINE PR MERGES. canonicalRef is the hauska-engine
-        # main branch and this file does not exist there until that PR lands, so the
-        # first failure reads CANONICAL_UNREADABLE with the URL. A commit-SHA pin was
-        # rejected deliberately: a squash-merge can make a branch commit unreachable,
-        # which would read as a broken gate rather than as drift, and a SHA pin would
-        # need re-pinning by hand on every canonical edit.
+        # canonicalRef is the hauska-engine main branch. A commit-SHA pin was rejected
+        # deliberately: a squash-merge can make a branch commit unreachable, which
+        # would read as a broken gate rather than as drift, and a SHA pin would need
+        # re-pinning by hand on every canonical edit.
         run: |
           set +e
           node scripts/check-tagged-revision-env.mjs --check-divergence
