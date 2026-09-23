@@ -1,0 +1,142 @@
+# smartsite-mcp — DigitalOcean App Platform spec, AS CODE. D-21 (OPS-25), wave 1.
+#
+# Drafted from `P:/tmp/DO migration/current/smartsite-mcp.yaml` and CORRECTED
+# against the register (`_inbox/2026-09-23_restoration_to_launch_REGISTER.md`
+# sections 2.1, 2.3, 2.4) and OPS-25 D-30. The register is the authority.
+#
+# NOT DEPLOYED BY THIS LANE. D-30 applies it.
+#
+# WHAT IS DELIBERATE HERE:
+#
+# 1. IMAGE, NOT SOURCE — the digest `.github/workflows/do-image.yml` pushed to the
+#    DigitalOcean registry `hauska` (service=smartsite-mcp). This replaces
+#    `cloud-run-deploy-smartsite-mcp.yml`, which is disabled (D-30 says so in as
+#    many words) and is NOT edited by this lane. `digest:` below is OWED from that
+#    workflow's run artifact.
+#
+# 2. SIZE AND COUNT ARE UNCHANGED from the capture and from D-30: shared
+#    1 vCPU / 1 GiB, fixed 2 instances. No autoscaling block, deliberately —
+#    `apps-s-*` shared instances do not autoscale, so an autoscaling block here
+#    would be a claim the platform cannot keep.
+#
+# 3. NO `domains:` BLOCK. `mcp.smartsite.cloud` moves here in D-30, and the move is
+#    a DNS cutover at the registrar (it currently answers on `ghs.googlehosted.com`).
+#    Adding the domain to the spec before the record is repointed fires
+#    DOMAIN_FAILED for a name that cannot validate — the same ordering rule the
+#    register states for `api.empressa.io` (2.3). D-30 adds it when the record moves.
+#    The `SMARTSITE_MCP_PUBLIC_URL` / `_RESOURCE` values below are NOT that: they are
+#    the identity this server presents to WorkOS and in its own metadata, and they
+#    are correct before the cutover.
+#
+# 4. HEALTH CHECK IS THE SERVICE'S OWN EXISTING ROUTE, `/health`
+#    (`artifacts/smartsite-mcp/src/app.ts:92`), because the dispatch says to find it
+#    and not invent one. FINDING, recorded rather than papered over: `/health`
+#    ALWAYS ANSWERS 200 — it reports `status: "degraded"` in the body when WorkOS
+#    auth is unconfigured or when `CORTEX_API_BASE_URL`/`SERVICE_API_KEY` are
+#    missing (`src/health.ts` `buildHealthReport`), and `res.json(...)` sends 200.
+#    So an App Platform HTTP health check on this path cannot fail on
+#    misconfiguration, and D-22's "must fail when the service is functionally down"
+#    is NOT satisfied by this spec as written. Left as-is deliberately: changing the
+#    status code is a behaviour change to a customer-facing route that belongs to
+#    D-22's row, not to a spec-as-code lane.
+#
+# 5. THREE VARIABLE NAMES ARE ABSENT, NOT PLACEHOLDERED, and the "OWED" block below
+#    names each with its owner and its cost. The reason is D-25 one level up: the
+#    code refuses BY NAME on an unset variable (this lane's Part 1 and Part 2), so
+#    absent produces a named refusal while a guessed host produces a runtime failure
+#    that reads as a product defect. `PARCEL_TILES_ORIGIN` is the sharpest case:
+#    OPS-25 D-42 puts the parcel PMTiles on the Spaces bucket `hauska-artifacts`
+#    behind its CDN, and the register records THIS lane as waiting on that origin
+#    "for the CSP value only". The bucket name is known; the ORIGIN is not, and
+#    guessing it is what D-42's own note forbids.
+#
+# `doctl apps spec validate` output is recorded in this lane's close.
+
+name: smartsite-mcp
+region: nyc
+
+services:
+  - name: smartsite-mcp
+    image:
+      registry_type: DOCR
+      registry: hauska
+      repository: smartsite-mcp
+      # OWED: the digest from `.github/workflows/do-image.yml` (service=smartsite-mcp).
+      # Full form `sha256:...`. A wrong digest fails the pull rather than deploying
+      # something else.
+      digest: OWED_FROM_DO_IMAGE_WORKFLOW
+    http_port: 8080
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 2
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    envs:
+      # ---- SECRET, BY NAME ONLY (5; the operator's vault holders fill these) ----
+      # DATABASE_URL is the UNPOOLED `_DIRECT` endpoint, not the pooler, for the
+      # same reason as cortex: the pooled string was injected read-only on
+      # 2026-08-31 (register section 3) and this service writes.
+      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: HAUSKA_ENGINE_API_KEY, scope: RUN_TIME, type: SECRET }
+      # HAUSKA_MCP_SERVICE_KEY is its OWN value, not the engine key and not
+      # SERVICE_API_KEY (register 2.1, D-30). The four-way split
+      # (ENGINE_API_GATE_TOKEN / RETRIEVAL_API_KEY / SERVICE_API_KEY /
+      # HAUSKA_MCP_SERVICE_KEY) is four distinct values; two variables sharing one
+      # value in a new spec is P-405 returning.
+      - { key: HAUSKA_MCP_SERVICE_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: SERVICE_API_KEY, scope: RUN_TIME, type: SECRET }
+      - { key: WORKOS_CLIENT_ID, scope: RUN_TIME, type: SECRET }
+
+      # ---- GENERAL, carried over from the capture unchanged ----
+      - { key: NODE_ENV, scope: RUN_AND_BUILD_TIME, type: GENERAL, value: "production" }
+      - { key: SMARTSITE_MCP_PUBLIC_URL, scope: RUN_TIME, type: GENERAL, value: "https://mcp.smartsite.cloud" }
+      - { key: SMARTSITE_MCP_RESOURCE, scope: RUN_TIME, type: GENERAL, value: "https://mcp.smartsite.cloud/mcp" }
+      - { key: WORKOS_ISSUER, scope: RUN_TIME, type: GENERAL, value: "https://happy-asteroid-26.authkit.app" }
+      - { key: WORKOS_JWKS_URI, scope: RUN_TIME, type: GENERAL, value: "https://happy-asteroid-26.authkit.app/oauth2/jwks" }
+
+      # ---- REPOINTED to a name the register sanctions ----
+      # Was the dead Cloud Run cortex host. `api.empressa.io` is cortex-api's public
+      # name in front of the App Platform app: the register sets cortex's own
+      # BROKERAGE_BILLING_PUBLIC_BASE_URL to it (2.4, wave 3 step 2) and edits the
+      # Stripe endpoint onto it (2.3). smartsite-mcp deploys fifth, after cortex, so
+      # the record exists and resolves by the time this value is first read.
+      - { key: CORTEX_API_BASE_URL, scope: RUN_TIME, type: GENERAL, value: "https://api.empressa.io" }
+
+      # ---- OWED: names this spec must carry, values that do not exist yet ----
+      # Not omitted by oversight, and NOT a silent gap: each is a dependency with an
+      # owner, and each is absent so the code's named refusal is what happens.
+      #
+      #   PARCEL_TILES_ORIGIN   <- D-42 (the Spaces origin for the parcel PMTiles,
+      #                            bucket `hauska-artifacts` behind its CDN). The app
+      #                            CSP and the p559 network probe read this and
+      #                            NOTHING ELSE; D-25 Part 2/this lane's Part 2 removed
+      #                            the dead-bucket literal and made an unset value a
+      #                            named refusal (`parcel_tiles_origin_unset`), so the
+      #                            parcel ground is declared broken rather than
+      #                            silently dark. The register records this lane as
+      #                            waiting on this one value for the CSP.
+      #
+      #   HAUSKA_ENGINE_API_URL <- D-4 (engine droplet).
+      #   HAUSKA_MCP_BASE_URL   <- D-7 (hauska-mcp-server on App Platform). Both
+      #                            variables' old values were Cloud Run hosts on
+      #                            the dead estate; they are not retyped here, so
+      #                            a `*.run.app` grep on this repo stays clean and
+      #                            any future hit is a real value rather than a
+      #                            note about one.
+      #
+      # Both of the last two have a PROPOSED name in OPS-25 D-25 —
+      # `engine.hauska.dev` and `mcp.hauska.dev` — and it is deliberately NOT used
+      # here. D-25's own text calls them "Proposed names (D-16 ratifies)", D-7
+      # records `mcp.hauska.dev` as still NXDOMAIN at 2026-09-18, and the
+      # restoration register names neither (it names only `api.empressa.io` and
+      # `mcp.smartsite.cloud`). The capture-derived draft carries them as
+      # "RESOLVED via stable hostnames (OPS-25 D-25)"; that draft is an input, not
+      # authority, and a spec that pins an unratified name gets a DNS failure that
+      # reads as a product defect. A NAME the owner can fill in the same change that
+      # creates the service is the honest state; a plausible host that does not
+      # resolve is not.
