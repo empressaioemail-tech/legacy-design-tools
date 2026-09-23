@@ -13,6 +13,16 @@ name: Cross-repo literal drift (P-331)
 #
 # WHAT FAILS: the drift step's exit code (1 = disagreement, 2 = a declaration
 # could not be read; 2 is never a pass). The selftest runs FIRST.
+#
+# A-30 (OPS-25, 2026-09-23). hauska-map went PRIVATE on 2026-09-22, and the
+# default GITHUB_TOKEN of this PUBLIC repo cannot read another private repo, so
+# this job began failing closed with `repository
+# 'https://github.com/empressaioemail-tech/hauska-map/' not found` on every PR.
+# The check stays and keeps failing closed: the checkout below passes
+# `SIBLING_REPO_READ_TOKEN` (a fine-grained read-only token the operator creates,
+# `contents: read` on hauska-map and hauska-engine only), and a missing secret
+# fails a step above it BY NAME rather than as a 404 that reads like a missing
+# repo. A fork PR never receives secrets, which is correct and intended.
 
 on:
   push:
@@ -31,10 +41,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Require the sibling-read token, by name
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::This job cannot read the sibling repo hauska-map, which is PRIVATE (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No drift was measured."
+            exit 1
+          fi
+          echo "Sibling-read credential present (value never printed)."
       - name: checkout hauska-map main (the sibling copy)
         uses: actions/checkout@v4
         with:
           repository: empressaioemail-tech/hauska-map
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
           ref: main
           path: map-main
           sparse-checkout: |
