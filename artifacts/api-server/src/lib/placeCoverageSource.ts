@@ -44,7 +44,17 @@
  * this verdict is turned into a `find_parcel` response.
  */
 
-const DEFAULT_RETRIEVAL = "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
+/*
+ * D-25 (2026-09-23): there was a `DEFAULT_RETRIEVAL` host literal here, the
+ * retired Google Cloud Run retrieval-api address, and it is deleted rather than
+ * repointed. A default aimed at the replacement host is the same defect at the
+ * next move: a deployment that never sets the variable must not be able to
+ * reach ANY host silently. The literal is not retyped here or in
+ * `retrievalEndpoint.ts`, deliberately, so a repo-wide grep for the dead host
+ * stays clean and any future hit is a real default rather than a note about one.
+ */
+
+import { retrievalBaseUrlFromEnv, retrievalBaseUrlUnsetReason } from "./retrievalEndpoint";
 
 /**
  * Three states, not two, deliberately mirroring `ParcelGateVerdictWire`'s
@@ -72,15 +82,6 @@ export interface CoverageCheckInput {
 
 export interface CoverageSource {
   checkCoverage(input: CoverageCheckInput): Promise<CoverageVerdict>;
-}
-
-function resolveBaseUrl(): string {
-  return (
-    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
-    process.env.RETRIEVAL_API_URL?.trim() ||
-    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
-    DEFAULT_RETRIEVAL
-  ).replace(/\/$/, "");
 }
 
 function resolveApiKey(): string | undefined {
@@ -127,13 +128,21 @@ async function fetchCoverageFromRetrievalApi(
   if (!key) {
     return { status: "indeterminate", reason: "retrieval-api key not configured" };
   }
+  // D-25: no default host, and this refusal is stated as itself rather than
+  // folded into the generic "coverage endpoint call failed" below -- no call was
+  // attempted, and that difference is exactly what a reader needs. It stays
+  // `indeterminate`: never `covered`, never `not-covered`.
+  const baseUrl = retrievalBaseUrlFromEnv();
+  if (!baseUrl) {
+    return { status: "indeterminate", reason: retrievalBaseUrlUnsetReason() };
+  }
   const params = new URLSearchParams();
   if (input.city) params.set("city", input.city);
   if (input.state) params.set("state", input.state);
   if (input.zip) params.set("zip", input.zip);
   try {
     const res = await fetch(
-      `${resolveBaseUrl()}/parcel-record-gate-verdict/coverage/check?${params.toString()}`,
+      `${baseUrl}/parcel-record-gate-verdict/coverage/check?${params.toString()}`,
       { method: "GET", headers: { Authorization: `Bearer ${key}`, Accept: "application/json" } },
     );
     if (!res.ok) {

@@ -17,11 +17,16 @@
  * transient network blip should not force every rail to refuse for the
  * full TTL window) and resolve to `null`, matching the fail-closed
  * contract `parcelRecordCellRead.ts` already had for "store not configured".
+ *
+ * D-25 (2026-09-23) narrows that: `null` is now reserved for real failures and
+ * for a deployment that never armed the reader at all. A deployment that armed
+ * the key but left the ADDRESS unset REFUSES BY NAME (`RetrievalBaseUrlUnsetError`)
+ * rather than resolving to `null`, because every caller reads `null` as a
+ * statement about the store -- and a misconfiguration is not one.
  */
 
 import type { ParcelGateVerdictKind } from "./parcelGateVerdictVocabulary";
-
-const DEFAULT_RETRIEVAL = "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
+import { requireRetrievalBaseUrl } from "./retrievalEndpoint";
 
 /** Coalescing/cache window. Generous enough to cover one facets request's rail fan-out, short enough that staleness is negligible against a read-replica of already-committed values. */
 const CACHE_TTL_MS = 3000;
@@ -94,15 +99,6 @@ export function resetParcelRecordFetcherForTests(): void {
  * production either (same dead code path, same missing names) -- flagged
  * for the operator/overseer, out of this dispatch's scope to fix there.
  */
-function resolveBaseUrl(): string {
-  return (
-    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
-    process.env.RETRIEVAL_API_URL?.trim() ||
-    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
-    DEFAULT_RETRIEVAL
-  ).replace(/\/$/, "");
-}
-
 function resolveApiKey(): string | undefined {
   return (
     process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
@@ -114,9 +110,15 @@ function resolveApiKey(): string | undefined {
 async function fetchFromRetrievalApi(placeKey: string): Promise<ParcelRecordWire | null> {
   const key = resolveApiKey();
   if (!key) return null;
+  // D-25: no default host. Raised before the try so the refusal cannot be
+  // laundered into the `null` this function returns for a real failure --
+  // `parcelRecordCellRead.ts` turns that `null` into "the retrieval service
+  // failed", a claim about the store, which must not be invented from a
+  // deployment that never named the service address.
+  const baseUrl = requireRetrievalBaseUrl();
   try {
     const res = await fetch(
-      `${resolveBaseUrl()}/property-nodes/${encodeURIComponent(placeKey)}/record`,
+      `${baseUrl}/property-nodes/${encodeURIComponent(placeKey)}/record`,
       {
         method: "GET",
         headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
@@ -141,7 +143,12 @@ export async function fetchParcelRecord(placeKey: string): Promise<ParcelRecordW
   const cached = cache.get(placeKey);
   if (cached && cached.expiresAt > now) return cached.promise;
 
-  const promise = fetchFromRetrievalApi(placeKey);
+  const promise = fetchFromRetrievalApi(placeKey).catch((error: unknown) => {
+    // D-25: keep this module's "failures are never cached" invariant for the
+    // named refusal too, and never let it resolve into `null`.
+    cache.delete(placeKey);
+    throw error;
+  });
   cache.set(placeKey, { expiresAt: now + CACHE_TTL_MS, promise });
   const result = await promise;
   if (result === null) {
@@ -193,9 +200,14 @@ export async function fetchGateVerdict(
   }
   const key = resolveApiKey();
   if (!key) return undefined;
+  // D-25: no default host, and hoisted OUT of the try below. Inside it, a
+  // misconfiguration would be caught by the same `catch` that returns
+  // `undefined` for a failed query, which callers read as "the read failed" --
+  // true enough, but it names the wrong cause. Here it throws by name.
+  const baseUrl = requireRetrievalBaseUrl();
   try {
     const res = await fetch(
-      `${resolveBaseUrl()}/parcel-record-gate-verdict/${encodeURIComponent(countyFips)}/${encodeURIComponent(railKey)}`,
+      `${baseUrl}/parcel-record-gate-verdict/${encodeURIComponent(countyFips)}/${encodeURIComponent(railKey)}`,
       { method: "GET", headers: { Authorization: `Bearer ${key}`, Accept: "application/json" } },
     );
     if (!res.ok) return undefined;

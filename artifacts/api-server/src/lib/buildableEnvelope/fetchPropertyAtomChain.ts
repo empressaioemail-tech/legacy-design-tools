@@ -2,8 +2,7 @@
  * Retrieval property atom-chain fetch for buildable-envelope derive.
  */
 
-const DEFAULT_RETRIEVAL =
-  "https://hauska-retrieval-api-h7gvu7rgcq-uc.a.run.app";
+import { requireRetrievalBaseUrl } from "../retrievalEndpoint";
 
 export type PropertyAtomChainWire = {
   zoningFact?: {
@@ -65,12 +64,6 @@ export type PropertyAtomChainWire = {
 export async function fetchPropertyAtomChain(
   parcelNodeId: string,
 ): Promise<PropertyAtomChainWire | null> {
-  const baseUrl = (
-    process.env.HAUSKA_RETRIEVAL_API_URL?.trim() ||
-    process.env.RETRIEVAL_API_URL?.trim() ||
-    process.env.BRIEF_RETRIEVAL_API_URL?.trim() ||
-    DEFAULT_RETRIEVAL
-  ).replace(/\/$/, "");
   const key =
     process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() ||
     process.env.RETRIEVAL_API_KEY?.trim() ||
@@ -79,6 +72,16 @@ export async function fetchPropertyAtomChain(
     // same reason as parcelRecordReaderClient.ts and placeCoverageSource.ts.
     process.env.BRIEF_RETRIEVAL_API_KEY?.trim();
   if (!key) return null;
+
+  // D-25: no default host. The key gate above keeps its existing meaning --
+  // "this reader is not armed on this deployment", a soft skip -- while a
+  // deployment that armed the key and left the ADDRESS unset now refuses by
+  // name instead of calling the retired GCP host. Deliberately placed after the
+  // key gate and before the try: after, so the unarmed-reader contract is
+  // unchanged; before, so the refusal is never laundered into `null`, which
+  // callers read as "the service says this parcel has no atom chain" -- a
+  // fabricated absence.
+  const baseUrl = requireRetrievalBaseUrl();
 
   try {
     const upstream = await fetch(

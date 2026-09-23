@@ -8,9 +8,15 @@
  * Simulated (no Stripe secrets): checkout -> complete-simulated -> entitlement proActive
  * Live test mode: prints checkout URL for manual 4242 completion + webhook note
  */
-const BASE =
-  process.argv[2]?.trim() ||
-  "https://canary---cortex-api-tds7av26va-uc.a.run.app";
+// D-25: no default base URL (the Cloud Run canary host is dead). Name it, or refuse.
+const BASE = process.argv[2]?.trim();
+if (!BASE) {
+  console.error(
+    "base URL required (argv[2]) and there is no default (D-25). Usage:\n" +
+      "  BROKERAGE_EXTENSION_PUBLIC_KEY=... node scripts/_stripe-billing-smoke.mjs <baseUrl>",
+  );
+  process.exit(1);
+}
 const KEY = process.env.BROKERAGE_EXTENSION_PUBLIC_KEY?.trim();
 if (!KEY) {
   console.error("BROKERAGE_EXTENSION_PUBLIC_KEY required");

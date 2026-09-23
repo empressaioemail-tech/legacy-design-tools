@@ -14,9 +14,18 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const BASE =
-  process.argv[2]?.trim() ||
-  "https://canary---cortex-api-tds7av26va-uc.a.run.app";
+// D-25: no default base URL. This used to fall back to a Cloud Run canary host
+// that no longer resolves, so a smoke run against a corpse reported failures
+// that read as product failures. Name the base URL as argv[2] or refuse here.
+const BASE = process.argv[2]?.trim();
+if (!BASE) {
+  console.error(
+    "base URL required (argv[2]) and there is no default (D-25): the retired\n" +
+      "  Google Cloud Run canary host is dead. Usage:\n" +
+      "    node scripts/_deepdive-attachment-map-smoke.mjs <baseUrl>",
+  );
+  process.exit(1);
+}
 const EXT_KEY = process.env.BROKERAGE_EXTENSION_PUBLIC_KEY?.trim();
 const OP_KEY = process.env.BROKERAGE_OPERATOR_KEY?.trim();
 if (!EXT_KEY) {

@@ -37,6 +37,14 @@ setupRouteTests((g) => {
 
 beforeAll(async () => {
   process.env.SERVICE_API_KEY = SERVICE_KEY;
+  // D-25: `brokerageBillingPublicBaseUrl()` no longer has a default, so the
+  // checkout route refuses by name (`billing_public_base_url_unset`) unless a
+  // public origin is configured. Every deployed spec sets it -- cortex-api sets
+  // `BROKERAGE_BILLING_PUBLIC_BASE_URL=https://api.empressa.io`. These tests are
+  // about the Stripe seam, not the resolver, so they run configured. The unset
+  // case is proven by name in `src/lib/retrievalEndpoint.test.ts`.
+  process.env.BROKERAGE_BILLING_PUBLIC_BASE_URL =
+    "https://cortex-api-test.example";
   delete process.env.PIPEDRIVE_API_TOKEN;
   delete process.env.STRIPE_SECRET_KEY;
 

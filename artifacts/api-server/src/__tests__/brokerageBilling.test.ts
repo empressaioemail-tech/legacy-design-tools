@@ -60,6 +60,11 @@ beforeEach(async () => {
   delete process.env.STRIPE_PUBLISHABLE_KEY;
   delete process.env.STRIPE_WEBHOOK_SECRET;
   delete process.env.STRIPE_PRO_PRICE_ID;
+  // D-25: there is no default origin any more. Set it here rather than inside a
+  // single test, so every checkout in this file runs configured and none of them
+  // passes by inheriting the variable from an earlier test's leftovers.
+  process.env.BROKERAGE_BILLING_PUBLIC_BASE_URL =
+    "https://cortex-api-test.example";
   process.env.BROKERAGE_API_KEYS = BROKERAGE_KEY;
   resetBrokerageApiKeysForTests();
 
@@ -98,9 +103,6 @@ describe("brokerage billing (simulated)", () => {
   });
 
   it("POST /billing/checkout defaults success/cancel URLs to cortex-api landing pages", async () => {
-    process.env.BROKERAGE_BILLING_PUBLIC_BASE_URL =
-      "https://cortex-api-test.example";
-
     const res = await request(getApp())
       .post("/api/brokerage/v1/billing/checkout")
       .set(authHeaders)
