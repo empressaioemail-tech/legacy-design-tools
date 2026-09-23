@@ -239,10 +239,27 @@ jobs:
         # checked-in fixture will be stale and integration tests would
         # silently miss new columns/tables. Fail the PR loudly instead.
         run: pnpm --filter @workspace/db run test:fixture:drift
+      # A-30 (OPS-25, 2026-09-23). hauska-engine went PRIVATE on 2026-09-22 and this
+      # repo is PUBLIC, so the default GITHUB_TOKEN cannot read it: this step failed
+      # `Not Found` on every legacy-design-tools PR. It keeps failing closed, now
+      # through the sibling-read token, and a missing secret fails the step ABOVE it
+      # by name rather than as a 404 that reads like a missing repository.
+      - name: Require the sibling-read token, by name
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::This job cannot read the sibling repo hauska-engine, which is PRIVATE (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No tests were run against the engine checkout."
+            exit 1
+          fi
+          echo "Sibling-read credential present (value never printed)."
       - name: Checkout hauska-engine (writer disk probe)
         uses: actions/checkout@v4
         with:
           repository: empressaioemail-tech/hauska-engine
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
           path: hauska-engine-checkout
           sparse-checkout: |
             packages/engine-core/scripts
@@ -770,17 +787,70 @@ jobs:
         # compares them and REFUSES (never passes) on any byte difference, or when
         # the canonical copy cannot be read at all.
         #
-        # EXPECTED RED UNTIL THE ENGINE PR MERGES. canonicalRef is the hauska-engine
-        # main branch and this file does not exist there until that PR lands, so the
-        # first failure reads CANONICAL_UNREADABLE with the URL. A commit-SHA pin was
-        # rejected deliberately: a squash-merge can make a branch commit unreachable,
-        # which would read as a broken gate rather than as drift, and a SHA pin would
-        # need re-pinning by hand on every canonical edit.
+        # A-30 (OPS-25, 2026-09-23): hauska-engine is PRIVATE and `fetchCanonical`
+        # reads it over raw.githubusercontent.com, so an anonymous read now 404s
+        # (`CANONICAL_UNREADABLE`) — measured 2026-09-23 on legacy-design-tools #742,
+        # and reproduced locally at exit 2. A-30 rules that the copy is read through
+        # an AUTHENTICATED request. It is not read by editing the script: this file
+        # is byte-pinned in
+        # `scripts/fixtures/tagged-revision-env/canonical.json` (sha256
+        # edbcf318f225c97770c3eaa30b0bca5785f49d399065c2ff47aff649eb942d14) and
+        # byte-COMPARED with hauska-engine's copy, so any edit here is a
+        # SELF_HASH_MISMATCH and a divergence from the sibling, and would need the
+        # same edit carried into a repo this lane must not touch. Instead the
+        # credential is handed to curl through `CURL_HOME`: curl reads its default
+        # config from `$CURL_HOME/.curlrc` and adds the header to the script's own
+        # `curl -fsSL` call, with the script's bytes and both hashes untouched.
+        # THE LEADING DOT IS LOAD-BEARING AND WAS MEASURED BOTH WAYS on this host
+        # on 2026-09-23: with `$CURL_HOME/.curlrc` the private read answers 200;
+        # with `$CURL_HOME/curlrc` (no dot) it answers 404 and the check exits 2,
+        # because curl never opens that file. Order per curl's own documentation
+        # (everything.curl.dev/cmdline/configfile.html): `$CURL_HOME/.curlrc`,
+        # then `$XDG_CONFIG_HOME/curlrc`, then `$HOME/.curlrc`; on Windows
+        # `_curlrc` is also accepted with `.curlrc` preferred. This is the first
+        # thing to suspect if this step ever fails at the proof below.
+        #
+        # VERIFIED BOTH WAYS on 2026-09-23: unauthenticated the check exits 2 with
+        # CANONICAL_UNREADABLE and the raw URL in the detail; with this curlrc it
+        # PASSES and prints canonicalSha256 = the local hash. The canonical copy
+        # DOES exist on hauska-engine main — the header comment above that reads
+        # "EXPECTED RED UNTIL THE ENGINE PR MERGES ... this file does not exist
+        # there until that PR lands" is STALE (the file is there and byte-identical),
+        # so the read, not the engine, was the whole defect.
+        #
+        # A missing secret fails by name before the check runs. A fork PR receives no
+        # secrets and this job will fail closed for it, which is intended (A-30).
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
         run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::The canonical copy lives in the PRIVATE hauska-engine repo and cannot be read anonymously (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No divergence was measured."
+            exit 1
+          fi
+          AUTH_HOME="${RUNNER_TEMP}/curl-auth"
+          mkdir -p "${AUTH_HOME}"
+          # `.curlrc` (dot), NOT `curlrc`: curl's documented first location is
+          # `$CURL_HOME/.curlrc`. Written under both names that curl accepts on
+          # Windows (`_curlrc`) so an ancient Windows curl build cannot silently
+          # arrive unauthenticated either -- but the dot name is the one that
+          # works on the ubuntu runner this job uses.
+          printf 'header = "Authorization: Bearer %s"\n' "${SIBLING_REPO_READ_TOKEN}" > "${AUTH_HOME}/.curlrc"
+          cp "${AUTH_HOME}/.curlrc" "${AUTH_HOME}/_curlrc"
+          # Prove the credential actually arrives before judging the comparison:
+          # an unauthenticated read of a private repo is a 404, and a 404 here has
+          # already been mistaken for drift once.
+          CURL_HOME="${AUTH_HOME}" curl -sS -o /dev/null -w '%{http_code}\n' \
+            "https://raw.githubusercontent.com/empressaioemail-tech/hauska-engine/main/tools/check-tagged-revision-env.mjs" \
+            | grep -qx 200 || {
+              echo "::error title=CANONICAL READ UNAUTHENTICATED::the credential did not reach curl (expected HTTP 200 from raw.githubusercontent for the private repo's canonical copy). The divergence check would have reported CANONICAL_UNREADABLE, which is not a pass. No divergence was measured."
+              exit 1
+            }
           set +e
-          node scripts/check-tagged-revision-env.mjs --check-divergence
+          CURL_HOME="${AUTH_HOME}" node scripts/check-tagged-revision-env.mjs --check-divergence
           CODE=$?
           set -e
+          rm -f "${AUTH_HOME}/.curlrc" "${AUTH_HOME}/_curlrc"
           case "$CODE" in
             0) echo "p279-canonical-divergence: RESULT=clean" ;;
             2) echo "p279-canonical-divergence: RESULT=refused (the two copies differ, or the canonical copy could not be read - see the message above; this is NOT a pass)"; exit 1 ;;
