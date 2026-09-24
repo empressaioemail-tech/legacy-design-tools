@@ -12,8 +12,9 @@
  *     with distinct, honest statuses
  *   - a successful verification creates a real session: same response
  *     shape, same `users` row, same entitlement bootstrap as OAuth
- *   - the GHL new-signup hook fires exactly once, on the first verification
- *     of a brand-new address, and never again on a returning sign-in
+   *   - the GHL new-signup hook upserts Explorer + ss_src_direct on the
+   *     first verification of a brand-new address, and never again on a
+   *     returning sign-in. Retired `source-*` / `tier-*` tags are not written.
  *   - no password anywhere: no password column exists on the new table,
  *     and nothing in this flow ever reads/writes `user_auth_credentials`
  */
@@ -40,6 +41,8 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 const { createMagicLinkToken } = await import("../lib/peMagicLink");
+const { mockGhlFetch } = await import("../lib/peGhlCatalog.test");
+const { resetGhlCatalogCache } = await import("../lib/peGhlCatalog");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -70,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetGhlCatalogCache();
   delete process.env["RESEND_API_KEY"];
 });
 
@@ -332,17 +336,11 @@ describe("verify -> GHL new-signup hook", () => {
   });
 
   it("fires exactly once on a brand-new magic-link signup, with no tier-* tag", async () => {
-    const ghlCalls: { url: string; init: RequestInit }[] = [];
+    const { fetchImpl, calls } = mockGhlFetch();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      const u = String(url);
-      if (u.includes("leadconnectorhq.com")) {
-        ghlCalls.push({ url: u, init: init as RequestInit });
-        return new Response(
-          JSON.stringify({ new: true, contact: { id: "ghl_contact_ml_1" } }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        );
+      if (String(url).includes("leadconnectorhq.com")) {
+        return fetchImpl(url, init);
       }
-      // Resend
       return new Response(JSON.stringify({ id: "resend_msg" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -366,25 +364,26 @@ describe("verify -> GHL new-signup hook", () => {
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: rawToken });
     expect(verifyRes.status).toBe(201);
+    expect(verifyRes.body.lifecycleEventId).toMatch(
+      /^[0-9a-f-]{36}$/i,
+    );
 
-    expect(ghlCalls).toHaveLength(1);
-    const body = JSON.parse(String(ghlCalls[0]!.init.body)) as Record<string, unknown>;
+    const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
+    expect(upsert).toBeTruthy();
+    const body = upsert!.body as Record<string, unknown>;
     expect(body["email"]).toBe(email);
     const tags = body["tags"] as string[];
-    expect(tags).toEqual(["source-organic"]);
-    expect(tags.some((t) => t.startsWith("tier-"))).toBe(false);
+    expect(tags).toEqual(["ss_explorer", "ss_src_direct"]);
+    expect(tags.some((t) => t.startsWith("tier-") || t.startsWith("source-"))).toBe(
+      false,
+    );
   });
 
   it("does not fire again for a returning magic-link sign-in", async () => {
-    const ghlCalls: unknown[] = [];
+    const { fetchImpl, calls } = mockGhlFetch();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      const u = String(url);
-      if (u.includes("leadconnectorhq.com")) {
-        ghlCalls.push(url);
-        return new Response(
-          JSON.stringify({ new: true, contact: { id: "ghl_contact_ml_2" } }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        );
+      if (String(url).includes("leadconnectorhq.com")) {
+        return fetchImpl(url, init);
       }
       return new Response(JSON.stringify({ id: "resend_msg" }), {
         status: 200,
@@ -394,16 +393,16 @@ describe("verify -> GHL new-signup hook", () => {
 
     const email = "ghl-magic-link-returning@example.com";
 
-    // First sign-in: new user, GHL fires once.
     const first = await createMagicLinkToken(email);
     if (!first.ok) throw new Error("unreachable");
     const firstVerify = await exchangeAuth(
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: first.rawToken });
     expect(firstVerify.status).toBe(201);
-    expect(ghlCalls).toHaveLength(1);
+    const afterFirst = calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(calls.some((c) => c.url.includes("/contacts/upsert"))).toBe(true);
 
-    // Second sign-in, same address, a fresh token: returning user.
     const second = await createMagicLinkToken(email);
     if (!second.ok) throw new Error("unreachable");
     const secondVerify = await exchangeAuth(
@@ -411,7 +410,8 @@ describe("verify -> GHL new-signup hook", () => {
     ).send({ token: second.rawToken });
     expect(secondVerify.status).toBe(200);
     expect(secondVerify.body.userId).toBe(firstVerify.body.userId);
+    expect(secondVerify.body.lifecycleEventId).toBeUndefined();
 
-    expect(ghlCalls).toHaveLength(1);
+    expect(calls).toHaveLength(afterFirst);
   });
 });

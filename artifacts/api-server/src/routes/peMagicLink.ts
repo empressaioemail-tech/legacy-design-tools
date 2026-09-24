@@ -106,6 +106,12 @@ router.post("/auth/email/request", async (req: Request, res: Response) => {
 const VerifyBodySchema = z.object({
   token: z.string().min(1).max(512),
   installId: z.string().min(8).max(256).optional(),
+  /**
+   * First-touch campaign set. The BFF still has it at verify time when the
+   * visitor requested the link from the same browser that landed on the ad.
+   * Absent means `ss_src_direct`, not a guessed tag.
+   */
+  campaign: z.string().max(512).optional(),
 });
 
 router.post("/auth/email/verify", async (req: Request, res: Response) => {
@@ -138,7 +144,10 @@ router.post("/auth/email/verify", async (req: Request, res: Response) => {
       subject: consumed.email,
       email: consumed.email,
     });
-    const body = await completePeSignIn(req, res, identity, parsed.data.installId);
+    const body = await completePeSignIn(req, res, identity, {
+      ...(parsed.data.installId ? { installId: parsed.data.installId } : {}),
+      ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
+    });
     res.status(identity.isNewUser ? 201 : 200).json(body);
   } catch (err) {
     logger.error({ err }, "pe magic-link verify: sign-in completion failed");

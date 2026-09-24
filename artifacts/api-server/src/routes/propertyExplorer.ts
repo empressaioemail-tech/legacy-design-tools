@@ -18,6 +18,8 @@ import {
   type Screen,
   type ScreenSaveRefuse,
 } from "../lib/peScreenSave";
+import { emitLotSaved, emitShareSent } from "../lib/peLifecycleHooks";
+import { LIFECYCLE_EVENT_ID_FIELD } from "../lib/peLifecycleTypes";
 import { createDrizzleScreenSaveStore } from "../lib/peScreenSaveDb";
 import { cortexNodeLookup, cortexQueryResolver } from "../lib/peScreenSaveResolve";
 import type { NodeLookup } from "../lib/peScreenSave";
@@ -1039,10 +1041,12 @@ router.post(
       res.status(screenSaveHttpStatus(result.error.error)).json(result.error);
       return;
     }
+    const lifecycleEventId = await emitLotSaved(scope.ownerUserId);
     res.json({
       parcelNodeId: result.parcelNodeId,
       status: result.status,
       note: result.note,
+      ...(lifecycleEventId ? { [LIFECYCLE_EVENT_ID_FIELD]: lifecycleEventId } : {}),
     });
   },
 );
@@ -2127,7 +2131,11 @@ router.post(
       res.status(503).json({ error: "grant_persist_failed" });
       return;
     }
-    res.status(200).json(shareGrantJson(row));
+    const lifecycleEventId = await emitShareSent(row.grantorUserId, row.id);
+    res.status(200).json({
+      ...shareGrantJson(row),
+      ...(lifecycleEventId ? { [LIFECYCLE_EVENT_ID_FIELD]: lifecycleEventId } : {}),
+    });
   },
 );
 

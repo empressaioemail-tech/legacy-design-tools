@@ -15,7 +15,10 @@ import { getPeAccessTier, type PeIdentityResult } from "./peIdentity";
 import { installIdFromRequest } from "./brokerageInstallId";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
 import { notifyGhlOfNewPeSignup } from "./peGhlContact";
+import { dispatchLifecycleEvent } from "./peLifecycleDispatch";
+import { e6IdempotencyKey } from "./peLifecycleOutbox";
 import { logger } from "./logger";
+import { LIFECYCLE_EVENT_ID_FIELD } from "./peLifecycleTypes";
 
 function applicantSession(userId: string) {
   return {
@@ -43,6 +46,8 @@ export type PeSignInCompletionBody = {
   displayName: string;
   entitlement: { tier: "free" | "paid" };
   claimedInstallHistory: boolean;
+  /** Present on a new signup when E1 was enqueued. P-414's pixel uses this id. */
+  [LIFECYCLE_EVENT_ID_FIELD]?: string;
 };
 
 /**
@@ -53,11 +58,25 @@ export type PeSignInCompletionBody = {
  * response-body shape `POST /auth/session-exchange` has always returned,
  * so callers on either path get an identical contract.
  */
+/**
+ * The last parameter is an OPTIONS OBJECT, not two positional strings. Both
+ * `installId` and `campaign` are `string | undefined`, so a positional
+ * signature would let a caller transpose them and type-check clean.
+ */
+export type PeSignInOptions = {
+  installId?: string;
+  /**
+   * First-touch campaign set, as the compact query string the BFF forwarded
+   * from the sealed OIDC state or the magic-link verify body.
+   */
+  campaign?: string;
+};
+
 export async function completePeSignIn(
   req: Request,
   res: Response,
   identity: PeIdentityResult,
-  installIdFromBody?: string,
+  opts: PeSignInOptions = {},
 ): Promise<PeSignInCompletionBody> {
   const token = mintSessionToken(applicantSession(identity.userId));
   const tier = await getPeAccessTier(identity.userId);
@@ -66,16 +85,23 @@ export async function completePeSignIn(
   // Real signup only (WDLL/decision-doc signal: isNewUser === a brand-new
   // `users` row was just created by upsertPeOidcIdentity, not a returning
   // sign-in). Best-effort, fail-open — see peGhlContact.ts.
+  //
+  // MEASURED 2026-09-24: a `users` row is created only in
+  // `upsertPeOidcIdentity` (Google/Microsoft session-exchange and magic-link
+  // verify). `saveProperty` and notes require `requirePeAuthenticated`.
+  // E1 therefore fires here, including a Google sign-in before any save
+  // (A-253 default).
+  let lifecycleEventId: string | undefined;
   if (identity.isNewUser && identity.email) {
     try {
-      await notifyGhlOfNewPeSignup({
+      const eventId = await notifyGhlOfNewPeSignup({
+        userId: identity.userId,
         email: identity.email,
         displayName: identity.displayName,
+        ...(opts.campaign ? { campaign: opts.campaign } : {}),
       });
+      if (eventId) lifecycleEventId = eventId;
     } catch (err) {
-      // notifyGhlOfNewPeSignup already swallows its own failures; this is a
-      // last-resort backstop so a truly unexpected throw here can never
-      // turn a successful sign-up into a 500.
       logger.error(
         { err },
         "pe sign-in: GHL contact hook threw unexpectedly (swallowed, fail-open)",
@@ -83,11 +109,29 @@ export async function completePeSignIn(
     }
   }
 
+  if (identity.email) {
+    try {
+      await dispatchLifecycleEvent({
+        userId: identity.userId,
+        email: identity.email,
+        event: "e6_last_active",
+        idempotencyKey: e6IdempotencyKey(identity.userId, new Date()),
+        apply: {
+          email: identity.email,
+          event: "e6_last_active",
+          lastActive: new Date().toISOString().slice(0, 10),
+        },
+      });
+    } catch (err) {
+      logger.info({ err }, "pe sign-in: E6 enqueue failed (fail-open)");
+    }
+  }
+
   // Anonymous claim (WDLL 2026-08-05 item 6): the header wins over a body
   // field so the BFF's own install-id plumbing (X-Hauska-Install-Id) is
   // authoritative when both are present. Claim failures never fail sign-in
   // — this is best-effort data recovery, not an auth precondition.
-  const installId = installIdFromRequest(req) ?? installIdFromBody ?? null;
+  const installId = installIdFromRequest(req) ?? opts.installId ?? null;
   let claimedInstallHistory = false;
   if (installId) {
     const claim = await claimInstallHistoryForUser(installId, identity.userId);
@@ -107,5 +151,6 @@ export async function completePeSignIn(
     displayName: identity.displayName,
     entitlement: { tier },
     claimedInstallHistory,
+    ...(lifecycleEventId ? { [LIFECYCLE_EVENT_ID_FIELD]: lifecycleEventId } : {}),
   };
 }
