@@ -1328,8 +1328,8 @@ CREATE TABLE @@SCHEMA@@.pe_lifecycle_outbox (
     last_error text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     sent_at timestamp with time zone,
-    CONSTRAINT pe_lifecycle_outbox_event_type_chk CHECK ((event_type <> ''::text)),
     CONSTRAINT pe_lifecycle_outbox_email_chk CHECK ((email <> ''::text)),
+    CONSTRAINT pe_lifecycle_outbox_event_type_chk CHECK ((event_type <> ''::text)),
     CONSTRAINT pe_lifecycle_outbox_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text])))
 );
 
@@ -3055,16 +3055,17 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
 ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
     ADD CONSTRAINT pe_activation_events_pkey PRIMARY KEY (id);
 
--- Name: pe_lifecycle_outbox pe_lifecycle_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
-    ADD CONSTRAINT pe_lifecycle_outbox_pkey PRIMARY KEY (id);
-
 
 -- Name: pe_chat_message_counts pe_chat_message_counts_owner_user_id_parcel_node_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, parcel_node_id);
+
+
+-- Name: pe_lifecycle_outbox pe_lifecycle_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
+    ADD CONSTRAINT pe_lifecycle_outbox_pkey PRIMARY KEY (id);
 
 
 -- Name: pe_magic_link_tokens pe_magic_link_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4086,18 +4087,6 @@ CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_acti
 
 CREATE INDEX pe_activation_events_owner_user_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (owner_user_id, created_at);
 
--- Name: pe_lifecycle_outbox_idempotency_uidx; Type: INDEX; Schema: public; Owner: -
-
-CREATE UNIQUE INDEX pe_lifecycle_outbox_idempotency_uidx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (idempotency_key);
-
--- Name: pe_lifecycle_outbox_status_created_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX pe_lifecycle_outbox_status_created_idx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (status, created_at);
-
--- Name: pe_lifecycle_outbox_owner_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX pe_lifecycle_outbox_owner_idx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (owner_user_id, created_at);
-
 
 -- Name: pe_ai_connections_owner_client_uidx; Type: INDEX; Schema: public; Owner: -
 
@@ -4107,6 +4096,21 @@ CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_conn
 -- Name: pe_ai_connections_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
+
+
+-- Name: pe_lifecycle_outbox_idempotency_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_lifecycle_outbox_idempotency_uidx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (idempotency_key);
+
+
+-- Name: pe_lifecycle_outbox_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_lifecycle_outbox_owner_idx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (owner_user_id, created_at);
+
+
+-- Name: pe_lifecycle_outbox_status_created_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_lifecycle_outbox_status_created_idx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (status, created_at);
 
 
 -- Name: pe_magic_link_tokens_email_created_idx; Type: INDEX; Schema: public; Owner: -
@@ -4938,11 +4942,6 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
 ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
     ADD CONSTRAINT pe_activation_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
--- Name: pe_lifecycle_outbox pe_lifecycle_outbox_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
-    ADD CONSTRAINT pe_lifecycle_outbox_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
-
 
 -- Name: pe_ai_connections pe_ai_connections_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
@@ -4954,6 +4953,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_ai_connections
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_lifecycle_outbox pe_lifecycle_outbox_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
+    ADD CONSTRAINT pe_lifecycle_outbox_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_property_unlocks pe_property_unlocks_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
