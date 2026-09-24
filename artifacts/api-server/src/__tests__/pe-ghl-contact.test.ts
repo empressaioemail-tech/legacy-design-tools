@@ -3,7 +3,7 @@
  *
  * Decision `_decisions/2026-08-31_gohighlevel_supersedes_pipedrive.md`,
  * 2026-09-04 addendum: `POST /api/auth/session-exchange` upserts a GHL
- * contact (name + email + `source-organic` tag only) exactly when
+ * contact (name + email + Explorer + one `ss_src_*` tag) exactly when
  * `upsertPeOidcIdentity` reports `isNewUser: true` — a brand-new `users`
  * row, i.e. a real signup, not a returning sign-in. See
  * `../lib/peGhlContact.ts` for the fail-open implementation this covers.
