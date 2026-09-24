@@ -23,6 +23,12 @@ const ExchangeBodySchema = z.object({
   displayName: z.string().max(256).optional(),
   /** Anonymous pre-auth install to claim (WDLL 2026-08-05 item 6). Header takes precedence when both present. */
   installId: z.string().min(8).max(256).optional(),
+  /**
+   * First-touch campaign set, forwarded by the BFF from the sealed OIDC
+   * state (hauska-map `api/_lib/campaign.ts`). Absent when the visitor
+   * arrived with no parameters; absence is `ss_src_direct` downstream.
+   */
+  campaign: z.string().max(512).optional(),
 });
 
 router.post("/auth/session-exchange", async (req: Request, res: Response) => {
@@ -37,7 +43,10 @@ router.post("/auth/session-exchange", async (req: Request, res: Response) => {
   }
   try {
     const identity = await upsertPeOidcIdentity(parsed.data);
-    const body = await completePeSignIn(req, res, identity, parsed.data.installId);
+    const body = await completePeSignIn(req, res, identity, {
+      ...(parsed.data.installId ? { installId: parsed.data.installId } : {}),
+      ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
+    });
     res.status(identity.isNewUser ? 201 : 200).json(body);
   } catch (err) {
     logger.error({ err }, "pe session-exchange failed");

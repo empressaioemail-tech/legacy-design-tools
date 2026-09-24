@@ -321,6 +321,9 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // requested before any account exists — the verify path is also how a
   // brand-new signup is created), so nothing else's CASCADE clears it.
   "pe_magic_link_tokens",
+  // P-413 lifecycle outbox. FK to users — listed so a leftover pending
+  // send cannot leak into the next test's GHL assertions.
+  "pe_lifecycle_outbox",
 ];
 
 /**

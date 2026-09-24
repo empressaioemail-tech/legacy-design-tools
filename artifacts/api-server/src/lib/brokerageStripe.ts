@@ -22,6 +22,7 @@ import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
 import { setPeAccessTierFromStripe } from "./peIdentity";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+import { emitPaidFromStripeWebhook } from "./peLifecycleHooks";
 import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
 import {
   configuredExtraSeatPriceId,
@@ -505,6 +506,7 @@ export async function handleStripeWebhook(
   }
 
   let event: {
+    id?: string;
     type: string;
     data: { object: Record<string, unknown> };
   };
@@ -547,6 +549,15 @@ export async function handleStripeWebhook(
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
       }
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `unlock:${peMeta.peUserId}:${peMeta.parcelNodeId ?? "none"}`,
+        kind: "unlock",
+        plan: "unlock",
+        billing: "none",
+        value: stripeAmount(obj) ?? 15,
+        currency: stripeCurrency(obj),
+      });
       return {
         handled: true,
         eventType: "pe_property_unlock",
@@ -602,6 +613,15 @@ export async function handleStripeWebhook(
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
       }
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `plan:${peMeta.peUserId}:${grantTier}`,
+        kind: "plan",
+        plan: grantTier,
+        billing: billing.billingInterval === "year" ? "annual" : billing.billingInterval === "month" ? "monthly" : "none",
+        value: stripeAmount(obj),
+        currency: stripeCurrency(obj),
+      });
       return {
         handled: true,
         eventType: "pe_subscription_active",
@@ -681,6 +701,21 @@ export async function handleStripeWebhook(
         seatsPurchased: billing.seatsPurchased,
         billingInterval: billing.billingInterval,
       });
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `subupd:${peMeta.peUserId}:${status}`,
+        kind: "plan",
+        plan: active && grantTier ? grantTier : "free",
+        billing: active
+          ? billing.billingInterval === "year"
+            ? "annual"
+            : billing.billingInterval === "month"
+              ? "monthly"
+              : "none"
+          : "none",
+        value: active ? stripeAmount(obj) : undefined,
+        currency: stripeCurrency(obj),
+      });
       return {
         handled: true,
         eventType: active ? "pe_subscription_active" : "pe_churned",
@@ -733,6 +768,13 @@ export async function handleStripeWebhook(
         tier: "free",
         subscriptionTier: null,
         source: "stripe_sub",
+      });
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `subdel:${peMeta.peUserId}`,
+        kind: "plan",
+        plan: "free",
+        billing: "none",
       });
       return { handled: true, eventType: "pe_churned", peUserId: peMeta.peUserId };
     }
@@ -920,11 +962,26 @@ async function installIdFromStripeSubscription(
 }
 
 /** Minimal Stripe webhook signature verification (v1). */
+function stripeAmount(obj: Record<string, unknown>): number | undefined {
+  const cents =
+    typeof obj.amount_total === "number"
+      ? obj.amount_total
+      : typeof obj.amount_paid === "number"
+        ? obj.amount_paid
+        : null;
+  if (cents === null) return undefined;
+  return cents / 100;
+}
+
+function stripeCurrency(obj: Record<string, unknown>): string {
+  return typeof obj.currency === "string" ? obj.currency.toUpperCase() : "USD";
+}
+
 function parseStripeEvent(
   rawBody: Buffer,
   signatureHeader: string,
   secret: string,
-): { type: string; data: { object: Record<string, unknown> } } {
+): { id?: string; type: string; data: { object: Record<string, unknown> } } {
   const parts = signatureHeader.split(",").map((p) => p.trim());
   const tPart = parts.find((p) => p.startsWith("t="));
   const v1Parts = parts.filter((p) => p.startsWith("v1="));
@@ -947,6 +1004,7 @@ function parseStripeEvent(
   if (!valid) throw new Error("stripe_signature_mismatch");
 
   const parsed = JSON.parse(rawBody.toString("utf8")) as {
+    id?: string;
     type: string;
     data: { object: Record<string, unknown> };
   };
