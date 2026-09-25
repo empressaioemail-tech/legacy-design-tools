@@ -187,3 +187,62 @@ export async function wireFindParcelsForMap(
   const view = cardViewFromToolPayload("find_parcels", merged);
   return injectCardContract(JSON.stringify(merged), view).text;
 }
+
+function parcelIdsFromNearestParcels(parcels: unknown): string[] {
+  if (!Array.isArray(parcels)) return [];
+  const out: string[] = [];
+  for (const raw of parcels) {
+    const row = asRecord(raw);
+    const id = row && typeof row.parcelNodeId === "string" ? row.parcelNodeId : "";
+    if (id.length > 0) out.push(id);
+  }
+  return out;
+}
+
+/** Merge nearest-parcels JSON with node-depth draw for map panel (capped). */
+export async function wireFindNearestParcelsForMap(
+  config: CortexClientConfig,
+  userId: string,
+  bodyText: string,
+  canSeeOwner: boolean,
+): Promise<string> {
+  if (!mapWireEnabled()) return bodyText;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+  const rec = asRecord(parsed);
+  if (!rec) return bodyText;
+
+  const ids = parcelIdsFromNearestParcels(rec.parcels);
+  if (ids.length === 0) {
+    const merged = withMapNote(rec, "map_no_parcel_hits");
+    const view = cardViewFromToolPayload("find_nearest_parcels", merged);
+    return injectCardContract(JSON.stringify(merged), view).text;
+  }
+
+  const wired = await fetchNodeBriefWire(config, userId, ids, canSeeOwner);
+  if (!wired.ok) {
+    const merged = withMapNote({ ...rec, mapWiring: "failed" }, wired.reason);
+    const view = cardViewFromToolPayload("find_nearest_parcels", merged);
+    return injectCardContract(JSON.stringify(merged), view).text;
+  }
+
+  let briefRec: Record<string, unknown>;
+  try {
+    briefRec = JSON.parse(wired.text) as Record<string, unknown>;
+  } catch {
+    const merged = withMapNote({ ...rec, mapWiring: "failed" }, "map_wiring_failed");
+    return injectCardContract(JSON.stringify(merged), "none").text;
+  }
+  const merged = {
+    ...rec,
+    ...briefRec,
+    nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
+    nearestNeighbors: rec.parcels,
+  };
+  const view = cardViewFromToolPayload("find_nearest_parcels", merged);
+  return injectCardContract(JSON.stringify(merged), view).text;
+}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { pgQueryResult } from "./__tests__/pgQueryResult";
 import {
   NEAREST_PARCELS_DEFAULT_CAP,
   NEAREST_PARCELS_MAX_CAP,
@@ -54,7 +55,7 @@ describe("searchNearestParcels refusals", () => {
   it("refuses an out-of-scope county by name", async () => {
     const result = await searchNearestParcels({
       parcelNodeId: "48113:1",
-      db: { query: async () => ({ rows: [] }) },
+      db: { query: async () => pgQueryResult([]) },
     });
     expect(result).toMatchObject({
       refused: true,
@@ -65,7 +66,7 @@ describe("searchNearestParcels refusals", () => {
   it("refuses when the subject has no geometry row", async () => {
     const result = await searchNearestParcels({
       parcelNodeId: "48021:34137",
-      db: { query: async () => ({ rows: [] }) },
+      db: { query: async () => pgQueryResult([]) },
     });
     expect(result).toMatchObject({
       refused: true,

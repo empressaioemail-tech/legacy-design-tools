@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { pgQueryResult } from "../../lib/__tests__/pgQueryResult";
 import {
   dedupeNearestKnnRows,
   searchNearestParcels,
@@ -13,7 +14,7 @@ describe("nearest parcels geometry + policy", () => {
   it("refuses Dallas (48113) by name, never an empty list", async () => {
     const result = await searchNearestParcels({
       parcelNodeId: "48113:12345",
-      db: { query: async () => ({ rows: [] }) },
+      db: { query: async () => pgQueryResult([]) },
     });
     expect(result).toMatchObject({
       refused: true,
