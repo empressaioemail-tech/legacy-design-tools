@@ -65,7 +65,11 @@ import {
   STANDING_VOCAB_CONTENT_PART,
 } from "./vocabulary.js";
 import { LIST_NODE_DEPTH_CAP } from "./map-reliability.js";
-import { wireFindParcelForMap, wireFindParcelsForMap } from "./map-tool-wire.js";
+import {
+  wireFindNearestParcelsForMap,
+  wireFindParcelForMap,
+  wireFindParcelsForMap,
+} from "./map-tool-wire.js";
 import {
   recordMapRenderEvent,
   type MapRenderOutcome,
@@ -126,6 +130,8 @@ const FIND_PARCEL_STREET_CAP_MAX = 50;
  * the measurement, not in a package that cannot verify it.
  */
 const FIND_PARCELS_CAP_MAX = 200;
+/** Matches NEAREST_PARCELS_MAX_CAP in api-server txgioNearestParcels.ts. */
+const FIND_NEAREST_CAP_MAX = 50;
 
 /**
  * The filter grammar, closed at the tool boundary. Every member is strict, so
@@ -317,6 +323,33 @@ function upstreamErrorResult(httpStatus: number, bodyText: string): ToolResult {
  * screen_id_not_accepted); `extra` carries any additional declared fields
  * (e.g. the parcelNodeId and anchorRead a near centre-point miss names).
  */
+/**
+ * P-452 serve_refused bodies from research/nearest-parcels (codes not in the
+ * place-search vocabulary table).
+ */
+function declareNearestParcelsServeRefusal(
+  bodyText: string,
+): { status: "refused"; reason: string; message: string; reasonDisplayText: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const body = parsed as Record<string, unknown>;
+  if (body.errorClass !== "serve_refused") return null;
+  const code = body.error;
+  if (typeof code !== "string" || !code.startsWith("nearest_")) return null;
+  if (typeof body.message !== "string" || body.message.length === 0) return null;
+  return {
+    status: "refused",
+    reason: code,
+    message: body.message,
+    reasonDisplayText: body.message,
+  };
+}
+
 function declaredRefusalResult(
   reason: string,
   message: string,
@@ -478,6 +511,13 @@ async function resolveNearCenterPoint(
 
 function inputSchemaFor(name: SmartsiteToolName) {
   switch (name) {
+    case "find_nearest_parcels":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          cap: z.number().int().min(1).max(FIND_NEAREST_CAP_MAX).optional(),
+        })
+        .strict();
     case "find_parcels":
       // P-106. countyFips and filters are OPTIONAL at the schema and required
       // in the handler, on purpose and for the same reason find_parcel's three
@@ -924,6 +964,65 @@ export function registerTools(server: McpServer): void {
         }
 
         switch (tool.name) {
+          case "find_nearest_parcels": {
+            const { parcelNodeId, cap } = args as {
+              parcelNodeId?: string;
+              cap?: number;
+            };
+            const subject = parcelNodeId?.trim() ?? "";
+            if (!subject) {
+              return declaredRefusalResult(
+                "nearest_invalid_node",
+                "parcelNodeId is required — the subject parcel you want neighbours for.",
+              );
+            }
+            return withCortex(async (config) => {
+              const payload: { parcelNodeId: string; cap?: number } = {
+                parcelNodeId: subject,
+              };
+              if (cap !== undefined) payload.cap = cap;
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/research/nearest-parcels`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify(payload),
+                },
+              );
+              const body = await res.text();
+              if (!res.ok) {
+                if (res.status === 422 || res.status === 404) {
+                  const refusal =
+                    declarePlaceSearchRefusal(body) ??
+                    declareNearestParcelsServeRefusal(body);
+                  if (refusal) {
+                    return {
+                      content: [{ type: "text" as const, text: JSON.stringify(refusal) }],
+                      isError: true,
+                    };
+                  }
+                }
+                const declared = mapGetSmartSiteNonOk(res.status, body, [subject]);
+                if (declared !== null) {
+                  return {
+                    content: [{ type: "text" as const, text: declared }],
+                    isError: false,
+                  };
+                }
+                return upstreamErrorResult(res.status, body);
+              }
+              const host = hostKeyFromAuth(auth.userId);
+              const canSeeOwner = canRunStudioReport(entitlement);
+              const wired = await wireFindNearestParcelsForMap(
+                config,
+                auth.userId,
+                body,
+                canSeeOwner,
+              );
+              return enrichAppToolJsonText("find_nearest_parcels", wired, host);
+            });
+          }
           case "find_parcels": {
             const { countyFips, filters, cap, query } = args as {
               countyFips?: string;
