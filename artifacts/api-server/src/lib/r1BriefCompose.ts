@@ -27,6 +27,8 @@ import type {
 } from "./parcelRecordFactRead";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
+import type { EnvelopeDrawOutcome } from "./buildableEnvelope/envelopeDrawOutcome";
+import { envelopeDrawRefusalReason } from "./buildableEnvelope/envelopeDrawOutcome";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 import type { LandUseFactRead } from "./landUseFactRead";
@@ -60,6 +62,8 @@ export type R1BriefSection = {
   reason?: string;
   /** Present when the section carries a determination but no http citation URL. */
   citationsDegraded?: boolean;
+  /** P-445: required whenever citationsDegraded — why source+vintage cannot be attached. Never blank. */
+  citationsUnavailableReason?: string;
   /** Flood-only: clarifies Zone X + outside-SFHA misreads. Withheld while citationsDegraded (F2). */
   zoneExposureSummary?: string | null;
   /** Setbacks-envelope-only: MCP guard when data is refused. */
@@ -93,9 +97,10 @@ function urlsFrom(value: unknown): string[] {
       }
       if (
         key &&
-        (key === "sourceCitation" ||
+        (        key === "sourceCitation" ||
           key === "citationUrl" ||
-          key === "sourceUrl") &&
+          key === "sourceUrl" ||
+          key === "provenance") &&
         /^https?:\/\//i.test(candidate)
       ) {
         urls.add(candidate);
@@ -362,6 +367,8 @@ function composeFloodBriefSectionFromParcelRecord(
       citations: [],
       asOf: fact.sourceVintage,
       disposition: "present",
+      citationsUnavailableReason:
+        "parcel_record flood companion carries method and vintage, not an http citation URL",
     });
     return {
       ...posture,
@@ -392,17 +399,28 @@ type BriefSectionParts = Pick<
   | "disposition"
   | "reason"
   | "citationsDegraded"
+  | "citationsUnavailableReason"
   | "zoneExposureSummary"
   | "agentGuidance"
 >;
 
 function withCitationPosture(
-  parts: Pick<BriefSectionParts, "data" | "citations" | "asOf" | "disposition">,
+  parts: Pick<BriefSectionParts, "data" | "citations" | "asOf" | "disposition"> & {
+    citationsUnavailableReason?: string;
+  },
 ): BriefSectionParts {
+  const degraded =
+    parts.disposition === "present" && parts.citations.length === 0;
   return {
     ...parts,
-    citationsDegraded:
-      parts.disposition === "present" && parts.citations.length === 0,
+    citationsDegraded: degraded,
+    ...(degraded
+      ? {
+          citationsUnavailableReason:
+            parts.citationsUnavailableReason?.trim() ||
+            "present determination has no http citation URL; vintage is the section asOf or undeclared",
+        }
+      : {}),
   };
 }
 
@@ -567,18 +585,25 @@ export function composeZoningBriefSectionFromParcelRecord(
       jurisdictionKey: fact.jurisdictionKey,
       provenance: fact.provenance,
     };
+    const citations = urlsFrom(data);
     return withCitationPosture({
       data,
-      citations: urlsFrom(data),
-      asOf: fact.evaluatedAt ?? bakedAt,
+      citations,
+      asOf: fact.sourceVintage ?? fact.evaluatedAt ?? bakedAt,
       disposition: "present",
+      citationsUnavailableReason:
+        citations.length === 0
+          ? fact.sourceVintage
+            ? `zoning provenance is not an http URL; vintage is ${fact.sourceVintage}`
+            : "zoning provenance is not an http URL and the cell carries no vintage"
+          : undefined,
     });
   }
   // absent (absent-verified / not-applicable)
   return {
     data: fact,
     citations: [],
-    asOf: null,
+    asOf: fact.sourceVintage,
     disposition: "absent",
   };
 }
@@ -605,6 +630,8 @@ export function composeSetbacksBriefSectionFromParcelRecord(
       citations: [],
       asOf: fact.evaluatedAt ?? bakedAt,
       disposition: "present",
+      citationsUnavailableReason:
+        "parcel_record setbacks cell has no citation URL; vintage is the cell evaluatedAt",
     });
   }
   // absent (absent-verified / not-applicable)
@@ -641,6 +668,9 @@ export function composeLandUseBriefSectionFromAtom(
       citations: [],
       asOf: fact.evaluatedAt ?? bakedAt,
       disposition: "present",
+      citationsUnavailableReason: fact.sourceVintage
+        ? `CAD land-use atom has no ordinance citation URL; vintage is ${fact.sourceVintage}`
+        : "CAD land-use atom has no ordinance citation URL and no vintage",
     });
   }
   // absent
@@ -652,12 +682,55 @@ export function composeLandUseBriefSectionFromAtom(
   };
 }
 
+function composeSetbacksFromEnvelopeOutcome(
+  outcome: EnvelopeDrawOutcome,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (outcome.state === "modelled") {
+    const data = {
+      frontFt: outcome.model.setbacks.front_ft,
+      sideFt: outcome.model.setbacks.side_ft,
+      rearFt: outcome.model.setbacks.rear_ft,
+      cornerFt: outcome.model.setbacks.side_corner_ft ?? null,
+      district: outcome.model.setbacks.district,
+      disclosure: outcome.model.disclosure,
+    };
+    return withCitationPosture({
+      data,
+      citations: urlsFrom(data),
+      asOf: bakedAt,
+      disposition: "present",
+      citationsUnavailableReason:
+        "live envelope derivation carries disclosure, not an http citation URL",
+    });
+  }
+  const reason = envelopeDrawRefusalReason(outcome.refusal);
+  return {
+    data: null,
+    refusal: {
+      state: "refused",
+      code: outcome.refusal.step,
+      reason,
+    },
+    citations: [],
+    asOf: bakedAt,
+    disposition: "refused",
+    reason,
+    agentGuidance:
+      "Setbacks and buildable envelope were refused by the same derivation the draw uses. Do not invent setback distances or a buildable polygon.",
+  };
+}
+
 function composeSetbacksEnvelopeBriefSection(
   envelope: unknown,
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null,
   bakedAt?: string | null,
   parcelRecordSetbacksFact?: SetbacksFactRead | null,
+  envelopeOutcome?: EnvelopeDrawOutcome | null,
 ): BriefSectionParts {
+  if (envelopeOutcome) {
+    return composeSetbacksFromEnvelopeOutcome(envelopeOutcome, bakedAt ?? null);
+  }
   if (parcelRecordSetbacksFact) {
     // P-297 / A-193: a refused setbacks cell is a declared refusal with the
     // cell's reason, never the bake-derived envelope section. Pre-ruling this
@@ -778,6 +851,9 @@ function sectionFromParts(
     disposition: parts.disposition,
     ...(parts.reason != null ? { reason: parts.reason } : {}),
     ...(parts.citationsDegraded ? { citationsDegraded: true } : {}),
+    ...(parts.citationsUnavailableReason
+      ? { citationsUnavailableReason: parts.citationsUnavailableReason }
+      : {}),
     ...(parts.zoneExposureSummary != null
       ? { zoneExposureSummary: parts.zoneExposureSummary }
       : {}),
@@ -800,6 +876,8 @@ export function buildR1Brief(
     parcelRecordSetbacksFact?: SetbacksFactRead | null;
     /** PE/MCP-vs-facets parity audit (2026-09-07, D2). Unconditional (no allowlist/gate cutover) -- see landUseFactRead.ts. */
     landUseFact?: LandUseFactRead | null;
+    /** P-445: the same live envelope outcome the draw overlay uses. When present it owns the brief section. */
+    envelopeOutcome?: EnvelopeDrawOutcome | null;
   },
 ): {
   sections: R1BriefSection[];
@@ -843,6 +921,7 @@ export function buildR1Brief(
     options?.envelopeBriefRefusal,
     bakedAt,
     options?.parcelRecordSetbacksFact,
+    options?.envelopeOutcome,
   );
   const floodSection = composeFloodBriefSection(
     tier2,

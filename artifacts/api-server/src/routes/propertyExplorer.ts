@@ -94,6 +94,12 @@ import {
   atomPathPending,
 } from "../lib/parcelDrawFromReads";
 import { tryComposeEnvelopeModelForDraw } from "../lib/buildableEnvelope/parcelDrawEnvelopeModel";
+import {
+  lookUpEnvelopeTableRow,
+  reconcileMaxFootprintSqFtFact,
+  reconcileMaxHeightFtFact,
+  reconcileMaxLotCoveragePctFact,
+} from "../lib/envelopeDerivedFactCoherence";
 import { resolveSitusCity } from "../lib/situsCompose";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
@@ -322,6 +328,19 @@ async function assembleNodeBriefBody(
   const root = asRecord(snapshot.facets);
   const bakedAt =
     typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
+  // P-445: one envelope decision. Compute the live outcome BEFORE the brief
+  // so brief and draw cannot disagree. Same call that used to sit after brief.
+  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
+    ? await tryComposeEnvelopeModelForDraw({
+        parcelNodeId,
+        jurisdictionCity: resolveSitusCity({
+          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
+          cityLimits: cityLimitsFact,
+        }).city,
+        jurisdictionState: null,
+        queryPoint: snapshot.queryPoint ?? null,
+      })
+    : null;
   const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
     floodHazardFact,
     parcelRecordFloodFact,
@@ -329,6 +348,7 @@ async function assembleNodeBriefBody(
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
     landUseFact,
+    envelopeOutcome,
   });
   // PARCEL-B-SLATE2 dollar rails: merge the live overlay onto the offline-
   // baked baseFacts.cadRoll (item 3, A-104) — previously discarded here
@@ -346,35 +366,6 @@ async function assembleNodeBriefBody(
       yearBuilt: null,
     },
   );
-  // P-153: the polygon-only reversal of Ruling B, re-pointed by P-339, made
-  // ONE derivation by P-374. When the baked envelope carries the bake's
-  // atom-pending marker (the same test the refused overlay already uses),
-  // attempt the SAME derivation the map/export route runs (real extra I/O --
-  // see parcelDrawEnvelopeModel.ts's own doc comment) and let ITS OWN OUTCOME
-  // decide the overlay. P-339 dropped the old `&& bakedZoningCode` gate: a
-  // parcel with no district now gets the route's own `no-zoning-stamp` instead
-  // of falling through to the bake's `atom_path_pending` and telling the
-  // customer its setbacks were unruled when the real gap was a missing
-  // district. P-374 dropped the `zoningCode` ARGUMENT for the same reason one
-  // layer down: the bake's single facet is not the derivation's district
-  // signal order (that is the ring's stamp, then Spine, then the atom chain),
-  // and seeding this call with it let the draw block probe a different row than
-  // the route did. The jurisdiction city/state passed here are the card's own
-  // composed situs city (`resolveSitusCity` — the value the label already
-  // serves), which is this call site's equivalent of the route's request
-  // geocode; the derivation falls back to the ring's situs, then to the
-  // parcel-node FIPS, exactly as it does for the route.
-  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
-    ? await tryComposeEnvelopeModelForDraw({
-        parcelNodeId,
-        jurisdictionCity: resolveSitusCity({
-          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
-          cityLimits: cityLimitsFact,
-        }).city,
-        jurisdictionState: null,
-        queryPoint: snapshot.queryPoint ?? null,
-      })
-    : null;
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
     facets: facetsWithCadRollOverlay,
@@ -389,7 +380,32 @@ async function assembleNodeBriefBody(
     specialDistrict: specialDistrictFact,
     structural: structuralFact,
     grantsCadRollValuation,
+    buildingFootprint: buildingFootprintFact,
   });
+  const zoningPresent = parcelRecordZoningFact?.state === "present";
+  const envelopeRow = lookUpEnvelopeTableRow(
+    parcelRecordZoningFact?.state === "present"
+      ? parcelRecordZoningFact.jurisdictionKey
+      : null,
+    parcelRecordZoningFact?.state === "present"
+      ? parcelRecordZoningFact.district
+      : null,
+  );
+  const maxHeightFtFactOut = reconcileMaxHeightFtFact(
+    maxHeightFtFact,
+    zoningPresent,
+    envelopeRow,
+  );
+  const maxLotCoveragePctFactOut = reconcileMaxLotCoveragePctFact(
+    maxLotCoveragePctFact,
+    zoningPresent,
+    envelopeRow,
+  );
+  const maxFootprintSqFtFactOut = reconcileMaxFootprintSqFtFact(
+    maxFootprintSqFtFact,
+    zoningPresent,
+    envelopeRow,
+  );
   return {
     runId: buildR1RunId(parcelNodeId, bakedAt),
     reportFamily: "R1",
@@ -443,10 +459,16 @@ async function assembleNodeBriefBody(
     // resolve to a typed not-cut-over refusal until a future lane slates
     // them.
     setbackRulesFact,
-    parcelAreaSqFtFact,
-    maxHeightFtFact,
-    maxLotCoveragePctFact,
-    maxFootprintSqFtFact,
+    parcelAreaSqFtFact:
+      parcelAreaSqFtFact.state === "present"
+        ? {
+            ...parcelAreaSqFtFact,
+            sourceLabel: "computed parcel geometry (txgio ST_Area)",
+          }
+        : parcelAreaSqFtFact,
+    maxHeightFtFact: maxHeightFtFactOut,
+    maxLotCoveragePctFact: maxLotCoveragePctFactOut,
+    maxFootprintSqFtFact: maxFootprintSqFtFactOut,
     // PE/MCP-vs-facets parity audit (2026-09-07, D4): these four were
     // already being fetched above (Promise.all) to feed `draw` but were
     // never exposed as their own typed fields the way

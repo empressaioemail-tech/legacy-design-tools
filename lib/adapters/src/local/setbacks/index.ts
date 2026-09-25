@@ -331,18 +331,18 @@ function isRepealedB3PlaceType(code: string): boolean {
   );
 }
 
-/** BDC districts whose scalars live on layer 23 only (not ordinance chart). */
+/** BDC districts whose scalars live on layer 23 only (not ordinance chart). PI left this set in P-445: Sec. 14.02.003 H has a chart row. */
 function isBdcPerParcelDistrictCode(code: string): boolean {
   return (
-    /^(MU|GC|PDD|PI|IND|OS)(?:$|[-_\s])/.test(code) ||
+    /^(MU|GC|PDD|IND|OS)(?:$|[-_\s])/.test(code) ||
     /^P\/OS(?:$|[-_\s])/.test(code) ||
     /^P-OS(?:$|[-_\s])/.test(code)
   );
 }
 
-/** BDC Euclidean districts with ordinance-text scalar rows in bastrop-development-code. */
+/** BDC districts with ordinance-text scalar rows in bastrop-development-code. */
 function isBdcEuclideanCode(code: string): boolean {
-  return /^(SF-[123]|RR)(?:$|[-_\s])/.test(code);
+  return /^(SF-[123]|RR|PI)(?:$|[-_\s])/.test(code);
 }
 
 /**
@@ -388,6 +388,7 @@ export function getSetbackTable(jurisdictionKey: string): SetbackTable | null {
  *
  * City of Bastrop (current law = BDC Sec. 14.02.003, WDLL STEP 3):
  *   - SF-1 / SF-2 / SF-3 / RR → bastrop-development-code (ordinance scalars).
+ *   - PI → bastrop-development-code (P-445: Sec. 14.02.003 H chart row).
  *   - MU / GC / PDD (layer 23 only): route to bastrop-development-code but
  *     chart has no rows → mapDistrict honest-decline.
  *   - Repealed B3 Place Types (P-1..P-5, P-CS, P-EC) → null

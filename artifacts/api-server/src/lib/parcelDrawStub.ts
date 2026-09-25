@@ -42,6 +42,9 @@ export type DrawOverlay = {
   vintage?: string;
   citations?: string[];
   citationsDegraded?: boolean;
+  /** P-445: why source+vintage cannot be attached. Declared, never blank. */
+  citationsUnavailableReason?: string;
+  vintageDeclaredWhy?: string;
 };
 
 export type DrawFrameAnchor = { lat: number; lng: number };
@@ -144,6 +147,15 @@ export type AssembleParcelDrawInput = {
     v: number;
     source: "cad_property";
     sourceVintage: string | null;
+  } | null;
+  /**
+   * P-445: the building-footprint fact this overlay must read. Absent keeps
+   * today's hardcoded unmeasured overlay so existing callers stay byte-identical.
+   */
+  buildingFootprint?: {
+    state: "present" | "absent" | "refused";
+    source?: string | null;
+    sourceVintage?: string | null;
   } | null;
   /** Absolute centroid of the local-ENU frame. Null if unknown. */
   anchor: DrawFrameAnchor | null;
@@ -333,9 +345,10 @@ export function httpCitationUrls(value: unknown): string[] {
     if (typeof candidate === "string") {
       if (
         key &&
-        (key === "sourceCitation" ||
+        (          key === "sourceCitation" ||
           key === "citationUrl" ||
           key === "sourceUrl" ||
+          key === "provenance" ||
           /(?:citation|source).*url|url.*(?:citation|source)/i.test(key)) &&
         isHttpCitation(candidate)
       ) {
@@ -367,10 +380,16 @@ export function httpCitationUrls(value: unknown): string[] {
 function citationPosture(citations: string[]): {
   citations: string[];
   citationsDegraded?: boolean;
+  citationsUnavailableReason?: string;
 } {
   const http = citations.filter(isHttpCitation).map((url) => url.trim());
   if (http.length > 0) return { citations: http };
-  return { citations: [], citationsDegraded: true };
+  return {
+    citations: [],
+    citationsDegraded: true,
+    citationsUnavailableReason:
+      "present overlay has no http citation URL; vintage is the overlay vintage or undeclared",
+  };
 }
 
 function presentCitationDishonest(rail: {
@@ -552,6 +571,46 @@ function floodOverlay(
  * hardcoded refused overlay, byte-for-byte unchanged (regression guard: see
  * parcelDrawStub.test.ts).
  */
+function footprintOverlay(
+  yearBuilt: AssembleParcelDrawInput["yearBuilt"],
+  footprint: AssembleParcelDrawInput["buildingFootprint"],
+): DrawOverlay {
+  if (footprint?.state === "present") {
+    const year =
+      yearBuilt && Number.isFinite(yearBuilt.v) ? yearBuilt.v : null;
+    const vintage = knownVintage(footprint.sourceVintage);
+    return {
+      id: "footprint",
+      label:
+        year != null
+          ? `Structure of record (${year})`
+          : "Building footprint",
+      geom: "none",
+      draw: "hatch-interior",
+      state: "present",
+      basis: "measured-fact",
+      provenance: footprint.source ?? "building-footprint",
+      ...(vintage
+        ? { vintage }
+        : {
+            vintageDeclaredWhy:
+              "building-footprint atom is present but sourceVintage is unknown or blank",
+          }),
+    };
+  }
+  const yearLabel =
+    yearBuilt && Number.isFinite(yearBuilt.v)
+      ? `Structure of record (${yearBuilt.v}), footprint unmeasured`
+      : "Structure footprint unmeasured";
+  return {
+    id: "footprint",
+    label: yearLabel,
+    geom: "none",
+    draw: "hatch-interior",
+    state: "unknown",
+  };
+}
+
 function envelopeOverlay(
   envelopeRefusalReason: string,
   envelopeModelled: AssembleParcelDrawInput["envelopeModelled"],
@@ -747,17 +806,7 @@ export function assembleParcelDraw(
 
   overlays.push(floodOverlay(input.flood));
 
-  const yearLabel =
-    input.yearBuilt && Number.isFinite(input.yearBuilt.v)
-      ? `Structure of record (${input.yearBuilt.v}), footprint unmeasured`
-      : "Structure footprint unmeasured";
-  overlays.push({
-    id: "footprint",
-    label: yearLabel,
-    geom: "none",
-    draw: "hatch-interior",
-    state: "unknown",
-  });
+  overlays.push(footprintOverlay(input.yearBuilt, input.buildingFootprint));
 
   overlays.push(
     envelopeOverlay(input.envelopeRefusalReason, input.envelopeModelled, input.anchor),
