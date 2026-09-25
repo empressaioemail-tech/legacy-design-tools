@@ -257,6 +257,10 @@ import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCu
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
 import { gateValueHistoryFactValuation } from "../lib/valueHistoryFactRead";
+import {
+  applyExemptionTypesServeToNodeFacetsResponse,
+  exemptionDetailLevelForOwnerCoGate,
+} from "../lib/exemptionTypesServe";
 import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
 import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
 import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
@@ -950,7 +954,8 @@ brokerageNodeFacetsRouter.get(
     }
 
     res.json(
-      enrichFacetsResponseWithRegistry({
+      applyExemptionTypesServeToNodeFacetsResponse(
+        enrichFacetsResponseWithRegistry({
       parcelNodeId,
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
@@ -1080,6 +1085,9 @@ brokerageNodeFacetsRouter.get(
       // maxLotCoveragePct's own block.
       maxFootprintSqFtFact,
       }),
+      ) as Record<string, unknown>,
+        exemptionDetailLevelForOwnerCoGate(grantsOwnerFact),
+      ),
     );
   },
 );

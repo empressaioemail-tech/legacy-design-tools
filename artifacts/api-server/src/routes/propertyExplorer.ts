@@ -79,6 +79,10 @@ import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCu
 import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
 import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
 import { gateValueHistoryFactValuation } from "../lib/valueHistoryFactRead";
+import {
+  applyExemptionTypesServeToResearchBriefBody,
+  exemptionDetailLevelForOwnerCoGate,
+} from "../lib/exemptionTypesServe";
 import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
 import { loadParcelAreaSqFtFactForServe } from "../lib/parcelAreaSqFtFactServeCutover";
 import { loadMaxHeightFtFactForServe } from "../lib/maxHeightFtFactServeCutover";
@@ -397,7 +401,8 @@ async function assembleNodeBriefBody(
     zoningPresent,
     envelopeRow,
   );
-  return {
+  return applyExemptionTypesServeToResearchBriefBody(
+    {
     runId: buildR1RunId(parcelNodeId, bakedAt),
     reportFamily: "R1",
     mode: "baked-facet-intel-v1",
@@ -485,11 +490,18 @@ async function assembleNodeBriefBody(
     bakedAt,
     source: "baked-snapshot",
     ...(draw ? { draw } : {}),
-  };
+  },
+    exemptionDetailLevelForOwnerCoGate(grantsCadRollValuation),
+  );
 }
 
 async function assembleStubBody(parcelNodeId: string) {
-  return assembleSmartSiteStubBody(parcelNodeId);
+  const stub = await assembleSmartSiteStubBody(parcelNodeId);
+  if (!stub) return null;
+  return applyExemptionTypesServeToResearchBriefBody(
+    stub as Record<string, unknown>,
+    "none",
+  );
 }
 
 /**
