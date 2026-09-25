@@ -13,6 +13,7 @@ import type { PipelineFactRead } from "./pipelineFactRead";
 import type { SpecialDistrictFactRead } from "./specialDistrictFactRead";
 import type { StructuralFactRead } from "./structuralFactResolve";
 import type { WellFactRead } from "./wellFactRead";
+import type { BuildingFootprintFactRead } from "./buildingFootprintFactRead";
 import {
   assembleParcelDraw,
   httpCitationUrls,
@@ -259,6 +260,8 @@ export function tryAssembleParcelDrawFromReads(args: {
    * ungated dollar value.
    */
   grantsCadRollValuation: boolean;
+  /** P-445: the footprint overlay reads this fact. */
+  buildingFootprint?: BuildingFootprintFactRead | null;
 }): ParcelDrawStub | undefined {
   const root = asRecord(args.facets) ?? {};
   const baseFacts = asRecord(root.baseFacts) ?? {};
@@ -294,6 +297,9 @@ export function tryAssembleParcelDrawFromReads(args: {
       pipeline: pipelineInput(args.pipeline),
       well: wellInput(args.well),
       specialDistrict: specialDistrictInput(args.specialDistrict),
+      buildingFootprint: args.buildingFootprint
+        ? { state: args.buildingFootprint.state, source: args.buildingFootprint.source, sourceVintage: "sourceVintage" in args.buildingFootprint ? args.buildingFootprint.sourceVintage : null }
+        : null,
     });
     return mergeOnRecordAttrs(
       draw,

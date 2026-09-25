@@ -3,7 +3,7 @@ import { VOCABULARY_RESOURCE_URI } from "./vocabulary.js";
 /** P-437: catalog points models at the vocabulary resource for full rules. */
 export const TOOL_RULES_LINK = VOCABULARY_RESOURCE_URI;
 
-/** WDLL P-91 / P-92 — eight live tools plus five screen/save tools, plus P-106 find_parcels (14), plus P-113 list_purchased_records / read_purchased_record (16). */
+/** WDLL P-91 / P-92 — eight live tools plus five screen/save tools, plus P-106 find_parcels (14), plus P-113 list_purchased_records / read_purchased_record (16), plus P-452 find_nearest_parcels (17). */
 export const SMARTSITE_MCP_TOOLS = [
   {
     name: "find_parcel",
@@ -19,6 +19,13 @@ export const SMARTSITE_MCP_TOOLS = [
     title: "Find parcels by constraint",
     description:
       "PLURAL. Ask a question ACROSS parcels in one county: \"Bastrop County, two acres or more, outside the floodplain\". Requires countyFips (one of 48021 Bastrop, 48055 Caldwell, 48209 Hays, 48309 McLennan, 48453 Travis, 48491 Williamson) plus a non-empty filters array; a request with no county, or one whose text reads as a single street address, is refused and routed to find_parcel. This is NOT the tool for looking up an address, a bare street, or a radius; that is find_parcel, singular. Filters are {rail, op, value} over rails acreage, landUse, cityLimits, etj, zoningDistrict, flood, specialDistrict, marketValue, landValue, improvementValue, yearBuilt. ops: gte/lte/eq on an ordered rail, eq/in on a categorical one, absent (matches ONLY a positive verified absence, never an unmeasured cell), is_true/is_false on flood's SFHA flag. THE RESULT IS THREE SETS AND ALL THREE ARE ALWAYS PRESENT: matched (the parcels, capped, with truncated true when more matched than cap allowed), excluded (parcels that definitively failed a filter, broken down byRail), and notEvaluated (parcels whose qualification turns on a rail nobody measured on them, broken down byRail). A parcel that fails a measured filter is EXCLUDED even when another rail is unmeasured, because it fails whatever that rail turns out to be. Never report matched alone: notEvaluated is where the caller's own diligence is still owed. byRail counts parcels per rail and a parcel missing two rails increments both, so byRail sums exceed the set count by design. unmeasuredPctByRail carries each filtered rail's unmeasured share of the whole county. projection.builtAt is when the cache was built, projection.stale says whether it is past its budget, and neither is the time of this call. A filter on a rail unmeasured beyond the configured ceiling comes back status refused, reason constraint_rail_unmeasured, carrying the measured percentage; other declared refusals are constraint_bound_missing, constraint_county_out_of_scope, constraint_single_address, constraint_filters_missing, constraint_rail_unknown, constraint_op_unsupported and constraint_projection_missing. A refusal is a declared answer, not an error. Returns no owner data, no listings, no sales, and no ranking: it returns parcels that satisfy stated constraints and says nothing about which is better. Pass the returned parcelNodeId values straight to create_screen as queries to build a screen from the result.",
+    readiness: "live" as const,
+  },
+  {
+    name: "find_nearest_parcels",
+    title: "Find nearest parcels",
+    description:
+      "SINGULAR SUBJECT, PLURAL NEIGHBORS. Given one parcelNodeId, returns the N closest other parcels in the same county by boundary distance on Smart Site's parcel map store, each with stub facts (situs label, acreage, zoning, land use, flood) and distanceFt. Use this for comparables and neighbours — never search the web for nearby parcels. Default cap 20, max 50. Requires the same entitlement as get_smart_site on the subject parcel (Solo or above, or a 30-day unlock on that parcel). Out-of-scope counties refuse with nearest_county_out_of_scope rather than an empty list. A subject with no geometry in the store refuses with nearest_subject_not_in_store. Returns no owner data and no dollar values. Pass returned parcelNodeId values to get_smart_site for a deeper read or create_screen to build a board.",
     readiness: "live" as const,
   },
   {

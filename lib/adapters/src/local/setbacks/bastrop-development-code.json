@@ -3,7 +3,7 @@
   "jurisdictionKey": "bastrop-development-code",
   "jurisdictionDisplayName": "City of Bastrop, TX (Bastrop Development Code / Ord. 2026-06)",
   "effectiveDate": "2026-04-14",
-  "note": "WDLL 2026-07-29 BDC STEP 3 item 1. AUTHORITATIVE setback VALUES for City of Bastrop Euclidean districts — ordinance TEXT Sec. 14.02.003 (CORRECTION A), not the GIS card. Ord. 2026-06 repealed B3 Place Types (P-1..P-5) effective 2026-04-14. Rows ONLY for scalar Euclidean districts SF-1/SF-2/SF-3/RR. MU/GC/PI/IND/P/OS/PDD intentionally ABSENT (CORRECTION C honest-decline: conditional/contextual standards the flat model cannot hold). Min-lot notes: SF-1 1/3 ac; SF-2 7,500 sf; SF-3 5,000 sf; RR 1 ac. Do not invent scalars for omitted districts.",
+  "note": "WDLL 2026-07-29 BDC STEP 3 item 1. AUTHORITATIVE setback VALUES for City of Bastrop from ordinance TEXT Sec. 14.02.003 (CORRECTION A), not the GIS card. Ord. 2026-06 repealed B3 Place Types (P-1..P-5) effective 2026-04-14. Rows for SF-1/SF-2/SF-3/RR and, P-445 2026-09-25, PI Public Institutional — Sec. 14.02.003 H chart scalars read from the adopted ordinance PDF (front 25, side 15, corner-side 20, rear 20, height 55 ft, impervious 65%; urban-frontage front reduction to 10 ft is quoted, not modeled as a second row). MU/GC/IND/P/OS/PDD remain ABSENT (conditional/contextual charts the flat model cannot hold). Min-lot notes: SF-1 1/3 ac; SF-2 7,500 sf; SF-3 5,000 sf; RR 1 ac; PI 1 ac. Do not invent scalars for omitted districts.",
   "districts": [
     {
       "district_name": "SF-1 Single-Family Residential",
@@ -252,6 +252,69 @@
           "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
           "section_number": "14.02.003",
           "quote": "BDC Sec. 14.02.003 dimensional standards (Ord. 2026-06): RR maximum impervious cover 50%. Min lot size 1 acre.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        }
+      }
+    },
+    {
+      "district_name": "PI Public Institutional",
+      "front_ft": 25,
+      "rear_ft": 20,
+      "side_ft": 15,
+      "side_corner_ft": 20,
+      "max_height_ft": 55,
+      "max_lot_coverage_pct": 0,
+      "max_impervious_pct": 65,
+      "citation_url": "https://www.cityofbastrop.org/page/open/18744/0/ORDINANCE%20NO.%202026-06%20B3%20Code%20Repeal%20and%20Bastrop%20Development%20Code%20Adoption.pdf",
+      "provenance": {
+        "front_ft": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Front Setback 25 feet (may be reduced to 10 feet for urban frontage, provided fire access and pedestrian circulation are maintained). The scalar is the chart base 25 ft; the urban-frontage reduction is not a second row.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "rear_ft": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Rear Setback 20 feet.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_ft": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Side Setback 15 feet.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "side_corner_ft": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Corner Side Street Setback 20 feet.",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_height_ft": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Maximum Building Height 55 feet (5 stories).",
+          "confidence": 0.95,
+          "verification_state": "human-verified"
+        },
+        "max_lot_coverage_pct": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional states Maximum Impervious Coverage; a separate lot-coverage percentage is not modeled as a distinct scalar here.",
+          "confidence": 0.8,
+          "verification_state": "human-verified",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "atom_did": "bastrop_tx/bdc-2026-adopted/14.02.003",
+          "section_number": "14.02.003",
+          "quote": "BDC Sec. 14.02.003 H Public Institutional (Ord. 2026-06): Maximum Impervious Coverage 65%. Min lot size 1 acre.",
           "confidence": 0.95,
           "verification_state": "human-verified"
         }
