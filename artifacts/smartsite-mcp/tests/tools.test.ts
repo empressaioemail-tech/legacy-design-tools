@@ -1299,6 +1299,34 @@ describe("P-91 Wave B screen/save tools", () => {
     expect(JSON.parse(init.body ?? "{}")).not.toHaveProperty("snapshot");
   });
 
+  it("create_screen map-selection passes the schema and reaches cortex", async () => {
+    mockCortexFetch.mockResolvedValue(
+      new Response(JSON.stringify({ screen: { id: "scr-map", rows: [] } }), {
+        status: 200,
+      }),
+    );
+    await withTestClient(async (client) => {
+      const result = await client.callTool({
+        name: "create_screen",
+        arguments: {
+          queries: ["48021:34137", "48021:34138"],
+          source: "map-selection",
+        },
+      });
+      expect(result.isError).toBe(false);
+      expect(mockCortexFetch).toHaveBeenCalledTimes(1);
+      const [, path, init] = mockCortexFetch.mock.calls[0] as [
+        unknown,
+        string,
+        { body?: string },
+      ];
+      expect(path).toContain("/screens");
+      expect(JSON.parse(init.body ?? "{}")).toMatchObject({
+        source: "map-selection",
+      });
+    });
+  });
+
   it("create_screen chrome is refused at the schema and never reaches cortex", async () => {
     mockCortexFetch.mockResolvedValue(
       new Response(JSON.stringify({ error: "intake_not_implemented" }), {
@@ -1617,7 +1645,10 @@ describe("schemas as types (P-91 S2 item 5)", () => {
   it("tools/list publishes the enums", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(propertySchema(tools, "create_screen", "source")?.enum).toEqual(["pasted"]);
+      expect(propertySchema(tools, "create_screen", "source")?.enum).toEqual([
+        "pasted",
+        "map-selection",
+      ]);
       expect(propertySchema(tools, "add_to_screen", "source")?.enum).toEqual([
         "walk",
         "saved",

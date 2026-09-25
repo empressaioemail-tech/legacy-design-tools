@@ -78,6 +78,8 @@ function batchCapFor(depth: ImplementedDepth): number {
 }
 const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
 const SCREEN_ROW_SOURCES = ["walk", "saved", "pasted"] as const;
+/** P-436: map multi-select create_screen provenance (not used on add_to_screen). */
+const CREATE_SCREEN_SOURCES = ["pasted", "map-selection"] as const;
 
 /**
  * P-91 v3 Q1. Mirrors PARCEL_NODE_ID_RE in
@@ -506,7 +508,7 @@ function inputSchemaFor(name: SmartsiteToolName) {
         .object({
           name: z.string().optional(),
           queries: z.array(z.string()),
-          source: z.enum(["pasted"]),
+          source: z.enum(CREATE_SCREEN_SOURCES),
         })
         .strict();
     case "add_to_screen":

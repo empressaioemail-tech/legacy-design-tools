@@ -30,6 +30,7 @@ export const SCREEN_SOURCES = [
   "file",
   "walk",
   "saved",
+  "map-selection",
 ] as const;
 export type ScreenSource = (typeof SCREEN_SOURCES)[number];
 
@@ -60,7 +61,7 @@ export const SCREEN_STUB_CONCURRENCY = 8;
  * its end. Nothing about the stub pass is stored.
  */
 export const SCREEN_STUB_BUDGET_MS = 6_000;
-export const CREATE_SCREEN_V1_SOURCES = ["pasted"] as const;
+export const CREATE_SCREEN_V1_SOURCES = ["pasted", "map-selection"] as const;
 export const ADD_TO_SCREEN_V1_SOURCES = ["walk", "saved", "pasted"] as const;
 export const V2_INTAKE_SOURCES = ["chrome", "gmail", "file"] as const;
 
