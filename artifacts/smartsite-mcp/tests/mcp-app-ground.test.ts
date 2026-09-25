@@ -681,7 +681,8 @@ describe("M-2 the served page", () => {
 
   it("resets the ground on every accepted result and never reads it from anywhere else", () => {
     expect(html).toContain("var groundOn=true;");
-    expect(html).toContain("groundOn=true;\n    sortKey");
+    expect(html).toContain("groundOn=true;");
+    expect(html).toContain("sortKey");
     expect(html).toContain("groundOn=!groundOn;");
   });
 

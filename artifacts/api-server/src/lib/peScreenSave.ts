@@ -85,7 +85,10 @@ export const STUB_READ_STATES = ["ok", "error", "skipped"] as const;
 export type StubReadState = (typeof STUB_READ_STATES)[number];
 
 /** The six rails in the five-state vocabulary `composeSmartSiteStub` serves. */
-export type ScreenRowStub = Record<SmartSiteStubRail, SmartSiteRailState>;
+/** Optional situs label from the stub assembler (P-437 board QUERY column). */
+export type ScreenRowStub = Record<SmartSiteStubRail, SmartSiteRailState> & {
+  label?: string;
+};
 
 /**
  * The stub read for one resolved row. A body carries the six rails (any
@@ -858,6 +861,8 @@ function projectRails(
     if (!isRailState(value)) return { ok: false, rail, value };
     stub[rail] = value;
   }
+  const label = typeof body.label === "string" && body.label.trim().length > 0 ? body.label.trim() : undefined;
+  if (label) stub.label = label;
   return { ok: true, stub };
 }
 

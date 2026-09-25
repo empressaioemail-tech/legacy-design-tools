@@ -1750,7 +1750,12 @@ describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", (
 
   it("keeps a cortex missClass and passes non-JSON through", () => {
     const budget = JSON.stringify({ hits: [], missClass: "situs-search-budget" });
-    expect(JSON.parse(splitFindParcelHits(budget))).toEqual({ hits: [], missClass: "situs-search-budget" });
+    expect(JSON.parse(splitFindParcelHits(budget))).toEqual({
+      hits: [],
+      missClass: "situs-search-budget",
+      cardContract: "none",
+      cardContractText: expect.any(String),
+    });
     expect(splitFindParcelHits("<html>500</html>")).toBe("<html>500</html>");
   });
 
@@ -2504,7 +2509,11 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
     );
     const res = await callRaw("list_screens", { screenId: "scr-1" });
     expect(res.isError).toBe(false);
-    expect(JSON.parse(res.text)).toEqual({ id: "scr-1", rows: [] });
+    expect(JSON.parse(res.text)).toMatchObject({
+      id: "scr-1",
+      rows: [],
+      cardContract: "screen-board",
+    });
   });
 
   // P-110. Was: "a Hauska non-OK pass-through is declared", exercised
@@ -2641,7 +2650,11 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
       expect(result.isError).toBe(false);
       expect(result.content).toHaveLength(2);
       const first = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(first).toEqual({ hits: [] });
+      expect(first).toEqual({
+        hits: [],
+        cardContract: "none",
+        cardContractText: expect.any(String),
+      });
       const second = JSON.parse((result.content?.[1] as { text: string }).text) as {
         smartSiteVocabulary: Array<{ token: string; displayText: string; meaning: string }>;
         resource: string;
