@@ -18,7 +18,22 @@ export type TwinOnRecordAcreage = {
   value: number;
   sqft: number;
   method: AcreageMethod;
+  /** P-445: same value as method, named so a customer can tell CAD from geometry. */
+  source: AcreageMethod;
+  sourceLabel: string;
 } | null;
+
+export type TwinOnRecordAreaHeadline = {
+  sqft: number;
+  source: AcreageMethod;
+  sourceLabel: string;
+} | null;
+
+export function acreageSourceLabel(method: AcreageMethod): string {
+  return method === "cad-roll-land-acres"
+    ? "county appraisal district roll (land acres)"
+    : "computed parcel geometry (shoelace WGS84)";
+}
 
 /** Gated wire: the four dollar keys may carry a studio-gated refusal in
  *  place of a value; livingAreaSqft is always the plain wire (not gated). */
@@ -33,6 +48,8 @@ export type TwinOnRecordCadRoll = {
 export type TwinOnRecordBlock = {
   apn: string | null;
   acreage: TwinOnRecordAcreage;
+  /** P-445: the headline area is acreage, named. parcelAreaSqFtFact is the other labelled source. */
+  areaHeadline: TwinOnRecordAreaHeadline;
   countyFips: string | null;
   countyName: string | null;
   situsState: string | null;
@@ -66,7 +83,13 @@ function acreageFromBase(base: Record<string, unknown>): TwinOnRecordAcreage {
   ) {
     return null;
   }
-  return { value, sqft, method };
+  return {
+    value,
+    sqft,
+    method,
+    source: method,
+    sourceLabel: acreageSourceLabel(method),
+  };
 }
 
 /**
@@ -93,10 +116,18 @@ export function serializeTwinOnRecord(
       ? root.bakedAt.trim()
       : null;
   const cadRoll = asRecord(baseFacts.cadRoll) as CadRollBaked | null;
+  const acreage = acreageFromBase(baseFacts);
 
   return {
     apn: strOrNull(baseFacts.apn),
-    acreage: acreageFromBase(baseFacts),
+    acreage,
+    areaHeadline: acreage
+      ? {
+          sqft: acreage.sqft,
+          source: acreage.source,
+          sourceLabel: acreage.sourceLabel,
+        }
+      : null,
     countyFips: strOrNull(root.countyFips),
     countyName: strOrNull(root.countyName),
     situsState: strOrNull(baseFacts.situsState),
