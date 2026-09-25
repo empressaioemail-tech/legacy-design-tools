@@ -62,7 +62,7 @@ export type R1BriefSection = {
   reason?: string;
   /** Present when the section carries a determination but no http citation URL. */
   citationsDegraded?: boolean;
-  /** P-445: required whenever citationsDegraded — why source+vintage cannot be attached. Never blank. */
+  /** P-445: required whenever citationsDegraded: why source+vintage cannot be attached. Never blank. */
   citationsUnavailableReason?: string;
   /** Flood-only: clarifies Zone X + outside-SFHA misreads. Withheld while citationsDegraded (F2). */
   zoneExposureSummary?: string | null;
