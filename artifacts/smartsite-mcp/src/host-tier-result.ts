@@ -18,17 +18,9 @@ import {
   injectCardPageLink,
 } from "./reading-layout.js";
 import { recordMapRenderEvent, type MapRenderOutcome } from "./render-metrics.js";
+import type { ToolResult } from "./tools-types.js";
 
-type ContentPart = { type: string; [key: string]: unknown };
-
-export type TieredToolResult = {
-  content: ContentPart[];
-  structuredContent?: unknown;
-  isError?: boolean;
-  skipStandingVocab?: boolean;
-};
-
-function firstJsonText(content: ContentPart[]): string | null {
+function firstJsonText(content: ToolResult["content"]): string | null {
   for (const part of content) {
     if (part.type !== "text" || typeof part.text !== "string") continue;
     try {
@@ -54,10 +46,10 @@ function outcomeForView(view: CardView, uiCapable: boolean): MapRenderOutcome {
 
 export function applyHostTierToResult(
   tool: SmartsiteToolName,
-  result: TieredToolResult,
+  result: ToolResult,
   session: HostSessionSnapshot,
   userId: string,
-): TieredToolResult {
+): ToolResult {
   const host = hostKeyFromSession(session, userId);
   const jsonText = firstJsonText(result.content);
   if (!jsonText) return result;
@@ -93,7 +85,7 @@ export function applyHostTierToResult(
       openInBrowser: isChromeSidePanel(session),
     });
     const withoutResourceLinks = result.content.filter((p) => p.type !== "resource_link");
-    const nextContent: ContentPart[] = [{ type: "text", text: reading }];
+    const nextContent: ToolResult["content"] = [{ type: "text", text: reading }];
     for (const part of withoutResourceLinks) {
       if (part.type === "text" && part.text === jsonText) continue;
       nextContent.push(part);
@@ -102,18 +94,22 @@ export function applyHostTierToResult(
     return {
       ...result,
       content: nextContent,
-      structuredContent: result.structuredContent ?? data,
+      structuredContent: (result.structuredContent ?? data) as Record<string, unknown>,
     };
   }
 
   if (link) {
-    const replaced = result.content.map((part) => {
+    const replaced: ToolResult["content"] = result.content.map((part) => {
       if (part.type === "text" && part.text === jsonText) {
-        return { type: "text", text: JSON.stringify(data) };
+        return { type: "text" as const, text: JSON.stringify(data) };
       }
       return part;
     });
-    return { ...result, content: replaced, structuredContent: result.structuredContent ?? data };
+    return {
+      ...result,
+      content: replaced,
+      structuredContent: (result.structuredContent ?? data) as Record<string, unknown>,
+    };
   }
 
   return result;
