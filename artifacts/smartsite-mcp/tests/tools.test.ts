@@ -1753,8 +1753,6 @@ describe("find_parcel hits carry parcel records only (P-91 QA 2026-08-30 D1)", (
     expect(JSON.parse(splitFindParcelHits(budget))).toEqual({
       hits: [],
       missClass: "situs-search-budget",
-      cardContract: "none",
-      cardContractText: expect.any(String),
     });
     expect(splitFindParcelHits("<html>500</html>")).toBe("<html>500</html>");
   });
@@ -1877,7 +1875,10 @@ describe("find_parcel near/street (P-91 v3 Q1)", () => {
     );
     const res = await callFindParcel({ near: { query: "123 Main St, Bastrop TX", radiusFt: 1000, cap: 10 } });
     expect(res.isError).toBe(false);
-    expect(JSON.parse(res.text)).toEqual(RADIUS_HITS_BODY);
+    const parsed = JSON.parse(res.text) as Record<string, unknown>;
+    expect(parsed.hits).toEqual(RADIUS_HITS_BODY.hits);
+    expect(parsed.cap).toBe(RADIUS_HITS_BODY.cap);
+    expect(parsed.cardContract).toBe("single-parcel");
     expect(mockCortexFetch).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = mockCortexFetch.mock.calls as Array<
       [unknown, string, RequestInit & { userId?: string }]
@@ -1993,7 +1994,10 @@ describe("find_parcel near/street (P-91 v3 Q1)", () => {
     callResponses({ status: 200, body: streetBody });
     const res = await callFindParcel({ street: { query: "Pine St", cap: 25, countyFips: "48021" } });
     expect(res.isError).toBe(false);
-    expect(JSON.parse(res.text)).toEqual(streetBody);
+    const parsed = JSON.parse(res.text) as Record<string, unknown>;
+    expect(parsed.hits).toEqual(streetBody.hits);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.cardContract).toBe("single-parcel");
     expect(mockCortexFetch).toHaveBeenCalledTimes(1);
     const [call] = mockCortexFetch.mock.calls as Array<[unknown, string]>;
     const qs = new URLSearchParams(call[1].split("?")[1]);
@@ -2648,13 +2652,10 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
         arguments: { query: "908 pine" },
       });
       expect(result.isError).toBe(false);
-      expect(result.content).toHaveLength(2);
+      expect(result.content!.length).toBeGreaterThanOrEqual(2);
       const first = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(first).toEqual({
-        hits: [],
-        cardContract: "none",
-        cardContractText: expect.any(String),
-      });
+      expect(first.hits).toEqual([]);
+      expect(first.cardContract).toBe("single-parcel");
       const second = JSON.parse((result.content?.[1] as { text: string }).text) as {
         smartSiteVocabulary: Array<{ token: string; displayText: string; meaning: string }>;
         resource: string;

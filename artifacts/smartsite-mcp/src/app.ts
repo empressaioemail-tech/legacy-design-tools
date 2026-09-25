@@ -25,6 +25,7 @@ import {
   oauthProtectedResourceMetadata,
 } from "./oauth-metadata.js";
 import { registerTools } from "./tools.js";
+import { snapshotMapRenderMetrics } from "./render-metrics.js";
 
 /**
  * The Implementation every /mcp session announces on initialize. Exported so a
@@ -97,6 +98,11 @@ export function createSmartsiteMcpApp(
 
   app.get("/health/dependencies", async (_req, res) => {
     res.json(await buildDependenciesHealthReport());
+  });
+
+  /** P-446: per-host MCP map render / fallback counts for this instance. */
+  app.get("/internal/map-render-metrics", (_req, res) => {
+    res.json({ hosts: snapshotMapRenderMetrics() });
   });
 
   app.get("/llms.txt", (_req, res) => {

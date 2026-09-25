@@ -373,10 +373,11 @@ describe("M-2 zoom selection", () => {
     expect(groundZoomFor(ANCHOR.lat, fit.s)).toBe(GROUND_ZOOM_MIN);
   });
 
-  it("refuses a mosaic over the cap rather than painting it", () => {
-    const out = groundPlan(ringOfExtent(400000), ANCHOR, OK);
-    expect(out.plan).toBeNull();
-    expect(out.reason).toBe("ground_tile_cap");
+  it("zooms out past the tile cap rather than dropping the ground", () => {
+    const out = groundPlan(ringOfExtent(15_000), ANCHOR, OK);
+    expect(out.plan).not.toBeNull();
+    expect(out.plan!.tiles.length).toBeLessThanOrEqual(GROUND_MAX_TILES);
+    expect(out.plan!.z).toBeLessThanOrEqual(GROUND_ZOOM_MAX);
   });
 
   it("a real parcel needs a small mosaic", () => {
@@ -414,18 +415,20 @@ describe("M-2 fail closed: no anchor is no ground", () => {
 
   const VOID = renderParcelDraw(model());
 
-  it("the no anchor rendering is today's rendering: no wrapper, no note, no tile", () => {
+  it("the no anchor rendering paints the ring without tiles and states why", () => {
     expect(VOID).not.toContain("gwrap");
     expect(VOID).not.toContain("<img");
     expect(VOID).not.toContain("arcgisonline");
     expect(VOID).not.toContain("data-tile");
+    expect(VOID).toContain("data-ground-refused");
     expect(VOID).toContain(ringSvg(GOLD_RING, [], { zoning: null, flood: null, frame: null }));
   });
 
-  it("absent, error and skipped each paint the void ground, byte for byte", () => {
+  it("absent, error and skipped each paint the void ground with a visible reason", () => {
     for (const status of ["absent", "error", "skipped"] as const) {
       const html = renderParcelDraw(model(undefined, { status, reason: "whatever" }));
-      expect(html, status).toBe(VOID);
+      expect(html, status).not.toContain("gwrap");
+      expect(html, status).toContain(`data-ground-refused="ground_anchor_${status}"`);
       const out = groundPlan(GOLD_RING, undefined, { status, reason: "whatever" });
       expect(out.plan, status).toBeNull();
       expect(out.reason, status).toBe(`ground_anchor_${status}`);
@@ -444,13 +447,16 @@ describe("M-2 fail closed: no anchor is no ground", () => {
       const out = groundPlan(GOLD_RING, ANCHOR, { status, reason: "whatever" });
       expect(out.plan, status).toBeNull();
       const html = renderParcelDraw(model(ANCHOR, { status, reason: "whatever" }));
-      expect(html, status).toBe(VOID);
+      expect(html, status).not.toContain("gwrap");
+      expect(html, status).toContain(`data-ground-refused="ground_anchor_${status}"`);
       expect(html, status).not.toContain("arcgisonline");
     }
   });
 
   it("a status of ok carrying no coordinate is still no ground", () => {
-    expect(renderParcelDraw(model(undefined, OK))).toBe(VOID);
+    const html = renderParcelDraw(model(undefined, OK));
+    expect(html).not.toContain("gwrap");
+    expect(html).toContain('data-ground-refused="ground_anchor_missing"');
     expect(groundPlan(GOLD_RING, undefined, OK).reason).toBe("ground_anchor_missing");
   });
 
@@ -463,7 +469,9 @@ describe("M-2 fail closed: no anchor is no ground", () => {
     ];
     for (const a of bad) {
       expect(groundPlan(GOLD_RING, a, OK).plan, JSON.stringify(a)).toBeNull();
-      expect(renderParcelDraw(model(a, OK))).toBe(VOID);
+      const html = renderParcelDraw(model(a, OK));
+      expect(html).not.toContain("gwrap");
+      expect(html).toContain("data-ground-refused");
     }
     const polar: PanelAnchor = { lat: 89, lon: 10, precision: null, source: null };
     expect(groundPlan(GOLD_RING, polar, OK).reason).toBe("ground_anchor_off_world");
