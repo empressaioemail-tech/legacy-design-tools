@@ -196,7 +196,7 @@ function resolveChromeExecutable() {
 const exe = resolveChromeExecutable();
 if (!exe) {
   console.error(
-    "Run `pnpm exec playwright install chromium` or set CHROME_PATH for the prod-bundle harness",
+    "Run `pnpm exec playwright-core install chromium` or set CHROME_PATH for the prod-bundle harness",
   );
   process.exit(2);
 }
