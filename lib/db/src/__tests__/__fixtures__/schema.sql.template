@@ -1473,7 +1473,7 @@ CREATE TABLE @@SCHEMA@@.pe_screen_rows (
     CONSTRAINT pe_screen_rows_query_present_chk CHECK ((char_length(btrim(query)) > 0)),
     CONSTRAINT pe_screen_rows_resolution_chk CHECK ((resolution = ANY (ARRAY['resolved'::text, 'ambiguous'::text, 'unresolved'::text]))),
     CONSTRAINT pe_screen_rows_resolved_node_chk CHECK (((resolution = 'resolved'::text) = (parcel_node_id IS NOT NULL))),
-    CONSTRAINT pe_screen_rows_source_chk CHECK ((source = ANY (ARRAY['pasted'::text, 'chrome'::text, 'gmail'::text, 'file'::text, 'walk'::text, 'saved'::text])))
+    CONSTRAINT pe_screen_rows_source_chk CHECK ((source = ANY (ARRAY['pasted'::text, 'chrome'::text, 'gmail'::text, 'file'::text, 'walk'::text, 'saved'::text, 'map-selection'::text])))
 );
 
 
