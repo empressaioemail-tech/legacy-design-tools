@@ -2134,8 +2134,24 @@ export function whyControlHtml(
   return `<button type="button" class="${inner ? "cell" : "ask"}" data-act="why" data-why-kind="${kind}"${attrs} onclick="window.__ss&&window.__ss.why(this)">${inner ? inner : WHY_LABEL}</button>`;
 }
 
+/** P-458. Embedded in the served page (INLINE_SHARED); must not close over imports. */
+export function customerBriefReasonInline(raw: string | null | undefined): string | null {
+  if (!raw || !raw.trim()) return null;
+  const trimmed = raw.trim();
+  if (/taxYear=\d{4}/.test(trimmed) || (/\bcad_property\b/.test(trimmed) && /\d{5}:\d+/.test(trimmed)) || /vintage-gap/i.test(trimmed)) {
+    const declared = trimmed.match(/taxYear=(\d{4})/)?.[1];
+    if (declared) return `Not on the ${declared} roll yet (an earlier year on file)`;
+    return "Not on the declared appraisal roll yet (another year on file)";
+  }
+  if (/\bENVELOPE_ROUTER_[A-Z0-9_]+\b/.test(trimmed) || /\bSETBACK_ROUTER_[A-Z0-9_]+\b/.test(trimmed)) {
+    return "Not available for this parcel under current rules.";
+  }
+  return trimmed;
+}
+
 export function reasonLineHtml(key: string, text: string, attr?: string): string {
-  return `<span class="why"${attr ? ` ${attr}` : ""}><span class="key">${escapeHtml(key)}</span> <span class="reason">${escapeHtml(text)}</span></span>`;
+  const face = customerBriefReasonInline(text) ?? text;
+  return `<span class="why"${attr ? ` ${attr}` : ""}><span class="key">${escapeHtml(key)}</span> <span class="reason">${escapeHtml(face)}</span></span>`;
 }
 
 /** F6: as-of (date only) and source when the wire carries them; vintage and provenance for an overlay. */
@@ -3277,6 +3293,7 @@ export function parseToolContent(result: unknown): PanelModel {
  */
 const INLINE_SHARED: ReadonlyArray<Function> = [
   envelopeHumanReason,
+  customerBriefReasonInline,
   singleGroundNoteHtml,
   asRecord,
   railState,
