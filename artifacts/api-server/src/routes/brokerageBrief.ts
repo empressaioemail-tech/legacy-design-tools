@@ -140,6 +140,7 @@ import {
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
 import { brokeragePlaceSitusSearchRouter } from "./brokeragePlaceSitusSearch";
+import { brokeragePlaceJurisdictionBoundariesRouter } from "./brokeragePlaceJurisdictionBoundaries";
 import { brokeragePlaceRadiusSearchRouter } from "./brokeragePlaceRadiusSearch";
 import { brokeragePlaceStreetSearchRouter } from "./brokeragePlaceStreetSearch";
 import { brokeragePlaceConstraintSearchRouter } from "./brokeragePlaceConstraintSearch";
@@ -348,6 +349,7 @@ brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
 brokerageV1.use("/place", brokeragePlaceSitusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceJurisdictionBoundariesRouter);
 brokerageV1.use("/place", brokeragePlaceRadiusSearchRouter);
 brokerageV1.use("/place", brokeragePlaceStreetSearchRouter);
 /**
