@@ -20,6 +20,7 @@ import {
   GROUND_EQUATOR_MPP,
   GROUND_MAX_TILES,
   GROUND_SOURCE_LABEL,
+  GROUND_MAPBOX_HOLD_NOTE,
   GROUND_SUPERSAMPLE,
   GROUND_TILE_ORIGIN,
   GROUND_TILE_PX,
@@ -527,6 +528,11 @@ describe("M-2 the painted ground", () => {
     expect(on).toContain(GROUND_SOURCE_LABEL);
     expect(on).toContain(GROUND_VINTAGE_NOTE);
     expect(on).not.toMatch(/\b(19|20)\d\d\b/);
+  });
+
+  it("labels the Mapbox hold on the Esri aerial, so the choice is not silent", () => {
+    expect(on).toContain(GROUND_MAPBOX_HOLD_NOTE);
+    expect(on).not.toContain("api.mapbox.com");
   });
 
   it("carries a toggle that reads its own state", () => {

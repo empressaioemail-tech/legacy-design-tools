@@ -989,6 +989,14 @@ export const GROUND_SUPERSAMPLE = 2;
 export const GROUND_MAX_TILES = 36;
 
 export const GROUND_SOURCE_LABEL = "Aerial: Esri World Imagery";
+/**
+ * P-444: Mapbox Satellite stays off this iframe until a single stable origin
+ * is measured. The public token is URL-restricted to smartsite.cloud and
+ * mcp.smartsite.cloud; Claude's host Referer is not that origin (or is blank),
+ * and wildcards are refused. Never use MAPBOX_SERVER_TOKEN to go around it.
+ */
+export const GROUND_MAPBOX_HOLD_NOTE =
+  "Mapbox held: Claude iframe origin is {32-hex}.claudemcpcontent.com (not mcp.smartsite.cloud); URL restrictions refuse wildcards; no-Referer is 403 and iOS omits Referer.";
 /** Esri publishes no per tile capture date, so we state that we do not know it. */
 export const GROUND_VINTAGE_NOTE = "capture date unstated";
 export const GROUND_TOGGLE_LABEL = "Aerial";
@@ -1199,7 +1207,8 @@ export function groundLayerHtml(plan: GroundPlan): string {
 /** Source and vintage, then the toggle. The vintage is stated as unknown, never implied. */
 export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
   if (!plan) return "";
-  const label = GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE;
+  const label =
+    GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE + ". " + GROUND_MAPBOX_HOLD_NOTE;
   return (
     `<div class="gnote" data-ground-note="1"><span data-ground-source="1">${escapeHtml(label)}</span>` +
     `<button type="button" class="btn${on ? " on" : ""}" data-act="ground" data-ground-on="${on ? "1" : "0"}"` +
@@ -3539,7 +3548,8 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("function groundPlan") ||
     !html.includes("function groundWrapHtml") ||
     !html.includes(GROUND_TILE_URL_TEMPLATE) ||
-    !html.includes(GROUND_VINTAGE_NOTE)
+    !html.includes(GROUND_VINTAGE_NOTE) ||
+    !html.includes(GROUND_MAPBOX_HOLD_NOTE)
   ) {
     violations.push("ground_unbound");
   }
@@ -4080,6 +4090,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var GROUND_SUPERSAMPLE=${JSON.stringify(GROUND_SUPERSAMPLE)};
   var GROUND_MAX_TILES=${JSON.stringify(GROUND_MAX_TILES)};
   var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
+  var GROUND_MAPBOX_HOLD_NOTE=${JSON.stringify(GROUND_MAPBOX_HOLD_NOTE)};
   var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
   var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
   /* M-4 multi parcel canvas. Same rule as the ground constants above: the served
