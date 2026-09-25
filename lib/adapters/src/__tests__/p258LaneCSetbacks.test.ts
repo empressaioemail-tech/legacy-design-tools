@@ -353,7 +353,7 @@ describe("P-258 lane-c — Bastrop stays an honest decline (withdrawn rows)", ()
     // bastrop-development-code (a cross-repo hash-locked table that asserts
     // their absence), so rows in this file would never be served. The values
     // are recorded as evidence in this file's note instead.
-    for (const code of ["GC", "MU", "PI", "IND", "P/OS"] as const) {
+    for (const code of ["GC", "MU", "IND", "P/OS"] as const) {
       const routed = getSetbackTableForZoning("bastrop-tx", code)!;
       expect(routed.jurisdictionKey, code).toBe("bastrop-development-code");
       expect(
@@ -363,6 +363,13 @@ describe("P-258 lane-c — Bastrop stays an honest decline (withdrawn rows)", ()
         code,
       ).toBe(false);
     }
+    const pi = getSetbackTableForZoning("bastrop-tx", "PI")!;
+    expect(pi.jurisdictionKey).toBe("bastrop-development-code");
+    expect(
+      pi.districts.some(
+        (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === "PI",
+      ),
+    ).toBe(true);
     const legacy = getSetbackTable("bastrop-tx")!;
     expect(legacy.districts).toHaveLength(10);
     expect(legacy.districts.some((d) => d.district_name.startsWith("GC"))).toBe(false);

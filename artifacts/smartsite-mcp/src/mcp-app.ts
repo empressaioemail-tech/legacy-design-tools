@@ -133,6 +133,7 @@ export const APP_HOST_TOOLS = [
   "get_smart_site",
   "find_parcel",
   "find_parcels",
+  "find_nearest_parcels",
 ] as const;
 
 export const RAILS = [

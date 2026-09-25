@@ -94,6 +94,12 @@ import {
   atomPathPending,
 } from "../lib/parcelDrawFromReads";
 import { tryComposeEnvelopeModelForDraw } from "../lib/buildableEnvelope/parcelDrawEnvelopeModel";
+import {
+  lookUpEnvelopeTableRow,
+  reconcileMaxFootprintSqFtFact,
+  reconcileMaxHeightFtFact,
+  reconcileMaxLotCoveragePctFact,
+} from "../lib/envelopeDerivedFactCoherence";
 import { resolveSitusCity } from "../lib/situsCompose";
 import { serializeTwinOnRecord } from "../lib/twinOnRecordSerialize";
 import type { EnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
@@ -105,11 +111,11 @@ import {
   rollSitusCityIsDeclaredAbsent,
 } from "../lib/situsCompose";
 import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
-import {
-  composeSmartSiteStub,
-  type RailReadInput,
-} from "../lib/smartSiteStub";
-import type { FloodHazardFactRead } from "../lib/floodHazardFactRead";
+import { assembleSmartSiteStubBody } from "../lib/smartSiteStubServe";
+import { resolveNearestParcelsQueryable } from "../lib/nearestParcelsDb";
+import { searchNearestParcels } from "../lib/txgioNearestParcels";
+import { loadNearestParcelFactRow } from "../lib/nearestParcelFacts";
+import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
@@ -173,15 +179,6 @@ function parcelNodeIdFromR1RunId(runId: string): string | null {
   } catch {
     return null;
   }
-}
-
-function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
-  return {
-    attempted: true,
-    state: flood.state,
-    code: flood.state === "refused" ? flood.code : undefined,
-    kind: "flood",
-  };
 }
 
 /**
@@ -322,6 +319,19 @@ async function assembleNodeBriefBody(
   const root = asRecord(snapshot.facets);
   const bakedAt =
     typeof root?.bakedAt === "string" ? root.bakedAt : snapshot.snapshotAt;
+  // P-445: one envelope decision. Compute the live outcome BEFORE the brief
+  // so brief and draw cannot disagree. Same call that used to sit after brief.
+  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
+    ? await tryComposeEnvelopeModelForDraw({
+        parcelNodeId,
+        jurisdictionCity: resolveSitusCity({
+          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
+          cityLimits: cityLimitsFact,
+        }).city,
+        jurisdictionState: null,
+        queryPoint: snapshot.queryPoint ?? null,
+      })
+    : null;
   const brief = buildR1Brief(snapshot.facets, snapshot.tier2, {
     floodHazardFact,
     parcelRecordFloodFact,
@@ -329,6 +339,7 @@ async function assembleNodeBriefBody(
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
     landUseFact,
+    envelopeOutcome,
   });
   // PARCEL-B-SLATE2 dollar rails: merge the live overlay onto the offline-
   // baked baseFacts.cadRoll (item 3, A-104) — previously discarded here
@@ -346,35 +357,6 @@ async function assembleNodeBriefBody(
       yearBuilt: null,
     },
   );
-  // P-153: the polygon-only reversal of Ruling B, re-pointed by P-339, made
-  // ONE derivation by P-374. When the baked envelope carries the bake's
-  // atom-pending marker (the same test the refused overlay already uses),
-  // attempt the SAME derivation the map/export route runs (real extra I/O --
-  // see parcelDrawEnvelopeModel.ts's own doc comment) and let ITS OWN OUTCOME
-  // decide the overlay. P-339 dropped the old `&& bakedZoningCode` gate: a
-  // parcel with no district now gets the route's own `no-zoning-stamp` instead
-  // of falling through to the bake's `atom_path_pending` and telling the
-  // customer its setbacks were unruled when the real gap was a missing
-  // district. P-374 dropped the `zoningCode` ARGUMENT for the same reason one
-  // layer down: the bake's single facet is not the derivation's district
-  // signal order (that is the ring's stamp, then Spine, then the atom chain),
-  // and seeding this call with it let the draw block probe a different row than
-  // the route did. The jurisdiction city/state passed here are the card's own
-  // composed situs city (`resolveSitusCity` — the value the label already
-  // serves), which is this call site's equivalent of the route's request
-  // geocode; the derivation falls back to the ring's situs, then to the
-  // parcel-node FIPS, exactly as it does for the route.
-  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
-    ? await tryComposeEnvelopeModelForDraw({
-        parcelNodeId,
-        jurisdictionCity: resolveSitusCity({
-          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
-          cityLimits: cityLimitsFact,
-        }).city,
-        jurisdictionState: null,
-        queryPoint: snapshot.queryPoint ?? null,
-      })
-    : null;
   const draw = tryAssembleParcelDrawFromReads({
     parcelNodeId,
     facets: facetsWithCadRollOverlay,
@@ -389,7 +371,32 @@ async function assembleNodeBriefBody(
     specialDistrict: specialDistrictFact,
     structural: structuralFact,
     grantsCadRollValuation,
+    buildingFootprint: buildingFootprintFact,
   });
+  const zoningPresent = parcelRecordZoningFact?.state === "present";
+  const envelopeRow = lookUpEnvelopeTableRow(
+    parcelRecordZoningFact?.state === "present"
+      ? parcelRecordZoningFact.jurisdictionKey
+      : null,
+    parcelRecordZoningFact?.state === "present"
+      ? parcelRecordZoningFact.district
+      : null,
+  );
+  const maxHeightFtFactOut = reconcileMaxHeightFtFact(
+    maxHeightFtFact,
+    zoningPresent,
+    envelopeRow,
+  );
+  const maxLotCoveragePctFactOut = reconcileMaxLotCoveragePctFact(
+    maxLotCoveragePctFact,
+    zoningPresent,
+    envelopeRow,
+  );
+  const maxFootprintSqFtFactOut = reconcileMaxFootprintSqFtFact(
+    maxFootprintSqFtFact,
+    zoningPresent,
+    envelopeRow,
+  );
   return {
     runId: buildR1RunId(parcelNodeId, bakedAt),
     reportFamily: "R1",
@@ -443,10 +450,16 @@ async function assembleNodeBriefBody(
     // resolve to a typed not-cut-over refusal until a future lane slates
     // them.
     setbackRulesFact,
-    parcelAreaSqFtFact,
-    maxHeightFtFact,
-    maxLotCoveragePctFact,
-    maxFootprintSqFtFact,
+    parcelAreaSqFtFact:
+      parcelAreaSqFtFact.state === "present"
+        ? {
+            ...parcelAreaSqFtFact,
+            sourceLabel: "computed parcel geometry (txgio ST_Area)",
+          }
+        : parcelAreaSqFtFact,
+    maxHeightFtFact: maxHeightFtFactOut,
+    maxLotCoveragePctFact: maxLotCoveragePctFactOut,
+    maxFootprintSqFtFact: maxFootprintSqFtFactOut,
     // PE/MCP-vs-facets parity audit (2026-09-07, D4): these four were
     // already being fetched above (Promise.all) to feed `draw` but were
     // never exposed as their own typed fields the way
@@ -476,44 +489,7 @@ async function assembleNodeBriefBody(
 }
 
 async function assembleStubBody(parcelNodeId: string) {
-  const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
-  if (!snapshot) return null;
-  /**
-   * P-270 CITY HALF (2026-09-19). The MCP label's city-limits licence: the
-   * label's city comes from `situsCompose.resolveSitusCity`, which may name the
-   * city whose limits contain the parcel where the payload's own roll city is a
-   * DECLARED `absent-verified` absence.
-   *
-   * The determination is read ONLY for exactly that shape, so this path pays for
-   * a city-limits read only where the read can change the answer — a screen of
-   * stubs whose payloads state their own roll city reads nothing extra, and the
-   * label is byte-identical to before. The read itself is the same call the
-   * brief body above already makes (`loadCityLimitsFactForServe`, the snapshot's
-   * own query point), not a second mechanism.
-   */
-  const needsCityLimits = rollSitusCityIsDeclaredAbsent(
-    rollSitusCityFromFacets(snapshot.facets),
-  );
-  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact, cityLimitsFact] =
-    await Promise.all([
-      loadFloodHazardFactForServe(parcelNodeId),
-      // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
-      loadZoningFactForServe(parcelNodeId),
-      loadSetbacksFactForServe(parcelNodeId),
-      needsCityLimits
-        ? loadCityLimitsFactForServe(parcelNodeId, snapshot.queryPoint ?? null)
-        : Promise.resolve(null),
-    ]);
-  return composeSmartSiteStub({
-    parcelNodeId,
-    facets: snapshot.facets,
-    flood: floodReadToRail(floodHazardFact),
-    drainage: { attempted: false },
-    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-    parcelRecordZoningFact,
-    parcelRecordSetbacksFact,
-    cityLimitsFact,
-  });
+  return assembleSmartSiteStubBody(parcelNodeId);
 }
 
 /**
@@ -1428,6 +1404,70 @@ router.post(
       else notFound.push(item.id);
     }
     res.json({ parcels, notFound });
+  },
+);
+
+const NearestParcelsBodySchema = z
+  .object({
+    parcelNodeId: z.string().trim().min(1).max(128),
+    cap: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+
+/**
+ * N nearest parcels by boundary distance in the txgio parcel store, with stub
+ * facts under the same entitlement gate as research/brief. No owner or dollar
+ * fields (stub depth only).
+ */
+router.post(
+  "/property-explorer/v1/research/nearest-parcels",
+  requirePeAuthenticated,
+  requirePePaidOrPropertyUnlocked((req) => {
+    const body = req.body as { parcelNodeId?: unknown };
+    return typeof body?.parcelNodeId === "string" ? body.parcelNodeId.trim() : null;
+  }),
+  async (req: Request, res: Response) => {
+    const parsed = NearestParcelsBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const db = resolveNearestParcelsQueryable();
+    const geom = await searchNearestParcels({
+      parcelNodeId: parsed.data.parcelNodeId,
+      cap: parsed.data.cap,
+      db,
+    });
+    if ("refused" in geom) {
+      const status =
+        geom.code === "nearest_store_not_configured"
+          ? 503
+          : geom.code === "nearest_subject_not_in_store"
+            ? 404
+            : 422;
+      res.status(status).json(gtmErrorBody("serve_refused", geom.code, geom.reason));
+      return;
+    }
+    const parcels: unknown[] = [];
+    const notFound: string[] = [];
+    for (const hit of geom.neighbors) {
+      const row = await loadNearestParcelFactRow({
+        parcelNodeId: hit.parcelNodeId,
+        distanceFt: hit.distanceFt,
+      });
+      if (row) parcels.push(row);
+      else notFound.push(hit.parcelNodeId);
+    }
+    res.json({
+      subjectParcelNodeId: geom.subjectParcelNodeId,
+      cap: geom.cap,
+      received: parcels.length,
+      truncated: geom.truncated,
+      distanceMethod: geom.distanceMethod,
+      spatialIndex: geom.spatialIndex,
+      parcels,
+      notFound,
+    });
   },
 );
 

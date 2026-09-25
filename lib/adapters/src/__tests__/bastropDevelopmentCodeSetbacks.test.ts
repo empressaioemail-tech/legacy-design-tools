@@ -50,6 +50,23 @@ describe("bastrop-development-code setback router (WDLL STEP 3)", () => {
     }
   });
 
+  it("P-445: PI routes to BDC and has the Sec. 14.02.003 H chart row", () => {
+    const table = getSetbackTableForZoning("bastrop-tx", "PI");
+    expect(table).not.toBeNull();
+    expect(table!.jurisdictionKey).toBe("bastrop-development-code");
+    const d = table!.districts.find(
+      (row) => (row.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === "PI",
+    );
+    expect(d).toBeDefined();
+    expect(d!.front_ft).toBe(25);
+    expect(d!.side_ft).toBe(15);
+    expect(d!.side_corner_ft).toBe(20);
+    expect(d!.rear_ft).toBe(20);
+    expect(d!.max_height_ft).toBe(55);
+    expect(d!.max_impervious_pct).toBe(65);
+    expect(d!.citation_url).toMatch(/ORDINANCE%20NO\.%202026-06/);
+  });
+
   it("repealed P-3 does NOT route to bastrop-city-tx as current", () => {
     expect(getSetbackTableForZoning("bastrop-tx", "P-3")).toBeNull();
     expect(getSetbackTableForZoning("bastrop-city-tx", "P-3")).toBeNull();
