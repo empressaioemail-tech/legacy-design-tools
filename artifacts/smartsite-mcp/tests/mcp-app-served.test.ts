@@ -3231,6 +3231,53 @@ describe("P-428 served board reads tool results by shape", () => {
     expect(f.text()).toContain("Newest");
   });
 
+  it("P-456: after tool-call, shaped get_smart_site for 48021:34809 draws (not loading)", async () => {
+    const { shapeSmartSiteNodeResult } = await import("../src/tools.js");
+    const record = JSON.stringify({
+      ...clone(GOLD_FACTS),
+      parcelNodeId: "48021:34809",
+      draw: {
+        ...(clone(GOLD_FACTS).draw as Json),
+        label: "1004 PINE ST , BASTROP, TX 78602",
+      },
+      anchorRead: { status: "ok", reason: null },
+      anchor: { lat: 30.11092, lon: -97.31528, precision: "1e-5-deg", source: "bake-latlng-index" },
+    });
+    const shaped = shapeSmartSiteNodeResult(record);
+    const f = fresh();
+    f.init();
+    f.deliver({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-call",
+      params: { toolName: "get_smart_site" },
+    });
+    expect(f.text()).toContain(COPY.loading);
+    notifyToolResult(f, shaped);
+    expect(f.text()).not.toContain("Reading this tool result");
+    expect(f.text()).toContain("48021:34809");
+    expect(f.root.innerHTML).toContain('aria-label="parcel ring"');
+  });
+
+  it("P-456: host sends prose-only content but structuredContent carries the record", async () => {
+    const { shapeSmartSiteNodeResult } = await import("../src/tools.js");
+    const record =
+      '{"parcelNodeId":"48021:34809","draw":{"label":"1004 PINE ST , BASTROP, TX 78602","ring":[[48.6,83.94],[-50.37,83.7],[-49.07,-84.28],[50.84,-83.36]],"overlays":[]}}';
+    const shaped = shapeSmartSiteNodeResult(record);
+    const f = fresh();
+    f.init();
+    f.deliver({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-call",
+      params: { toolName: "get_smart_site" },
+    });
+    notifyToolResult(f, {
+      content: shaped.content.filter((p) => p.type !== "text" || !p.text.startsWith("{")),
+      structuredContent: shaped.structuredContent,
+    });
+    expect(f.text()).not.toContain("Reading this tool result");
+    expect(f.text()).toContain("48021:34809");
+  });
+
   it("P-437: a node read with brief sections but no draw paints the parcel panel, not the empty board", () => {
     const f = fresh();
     f.init();

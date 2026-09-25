@@ -4212,6 +4212,9 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var PREVIEW_EMPTY=${JSON.stringify(PREVIEW_EMPTY)};
   var PREVIEW_BUSY=${JSON.stringify(PREVIEW_BUSY)};
   var PREVIEW_UNSTATED=${JSON.stringify(PREVIEW_UNSTATED)};
+  /* P-437 loadingPanelSubtitle (INLINE_SHARED) reads these; inject or the tool-call path throws. */
+  var LOADING_PANEL_BODY=${JSON.stringify(LOADING_PANEL_BODY)};
+  var LOADING_SUBTITLE_BY_TOOL=${JSON.stringify(LOADING_SUBTITLE_BY_TOOL)};
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
