@@ -849,10 +849,11 @@ describe("4.3 rails at first paint: attachScreenStubs", () => {
       flood: "unknown",
       drainage: "unread",
       envelope: "refused",
+      label: "910 PINE, BASTROP, TX 78602",
     });
-    // Only the six rails travel; label/url/parcelNodeId from the body do not.
+    // Six rails plus optional label; url/parcelNodeId from the body do not travel.
     expect(Object.keys(ok.stub!).sort()).toEqual(
-      ["drainage", "envelope", "flood", "landUse", "situs", "zoning"],
+      ["drainage", "envelope", "flood", "label", "landUse", "situs", "zoning"],
     );
 
     const down = byNode.get(DOWN_NODE)!;

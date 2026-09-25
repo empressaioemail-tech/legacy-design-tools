@@ -154,6 +154,8 @@ export type BoardRow = {
   parcelNodeId: string | null;
   resolution: "resolved" | "ambiguous" | "unresolved";
   rails: Record<RailName, CellState>;
+  /** P-437: situs label from stub.label when the paste query was a node id. */
+  stubLabel?: string;
   /** B1: present only on an ambiguous row that carries candidates. */
   candidates?: ScreenCandidate[];
   /** B2: present when the wire states it; error and skipped force every rail to unread. */
@@ -334,6 +336,8 @@ export type DeclaredBody = {
 export type PanelModel = {
   kind: PanelKind;
   screenId?: string;
+  /** P-437: screening board title when the wire carries a screen name. */
+  screenName?: string;
   rows: BoardRow[];
   parcelNodeId?: string;
   label?: string;
@@ -551,6 +555,13 @@ function rowFromUnknown(raw: unknown): BoardRow | null {
   const candidates = candidatesFrom(rec.candidates);
   if (candidates.length > 0) row.candidates = candidates;
   if (stubRead) row.stubRead = stubRead;
+  const stubLabel =
+    stub && typeof stub.label === "string" && stub.label.trim().length > 0
+      ? stub.label.trim()
+      : typeof rec.label === "string" && rec.label.trim().length > 0
+        ? rec.label.trim()
+        : undefined;
+  if (stubLabel) row.stubLabel = stubLabel;
   return row;
 }
 
@@ -2334,6 +2345,104 @@ export function stubReadNoteHtml(row: Pick<BoardRow, "stubRead">): string {
   return reasonLineHtml(STUB_READ_NOTE, row.stubRead, `data-stub-read="${row.stubRead}"`);
 }
 
+/** P-437: human situs leads; node id is secondary in the query cell. */
+export function boardRowPrimaryLabel(row: Pick<BoardRow, "query" | "resolution" | "stubLabel" | "parcelNodeId">): string {
+  if (row.resolution !== "resolved") return row.query;
+  const stubLabel = row.stubLabel?.trim();
+  if (stubLabel && (looksLikeParcelNodeId(row.query) || stubLabel !== row.query)) return stubLabel;
+  return row.query;
+}
+
+export function boardQueryCellHtml(row: BoardRow): string {
+  if (row.resolution === "resolved") {
+    const primary = boardRowPrimaryLabel(row);
+    const secondary =
+      row.parcelNodeId && primary !== row.parcelNodeId
+        ? `<div class="pn atom">${escapeHtml(row.parcelNodeId)}</div>`
+        : row.parcelNodeId && looksLikeParcelNodeId(row.query) && primary !== row.query
+          ? `<div class="pn atom">${escapeHtml(row.query)}</div>`
+          : "";
+    return `<div class="pl">${escapeHtml(primary)}</div>${secondary}${stubReadNoteHtml(row)}`;
+  }
+  if (row.resolution === "ambiguous") {
+    return `<div class="unres">${AMBIGUOUS_CAPTION}</div><div class="pn">${escapeHtml(row.query)}</div>${candidateControlsHtml(row)}`;
+  }
+  const cap = unresolvedCaption(row.query);
+  return `<div class="unres">${cap}</div><div class="pn">${escapeHtml(row.query)}</div>`;
+}
+
+export function boardCardTitle(screenName?: string | null): string {
+  const name = screenName?.trim();
+  return name ? `Screening · ${name}` : "Screening board";
+}
+
+export function parcelCardTitle(model: Pick<PanelModel, "label" | "parcelNodeId">): string {
+  return model.label?.trim() || model.parcelNodeId || "parcel";
+}
+
+/** P-437: zoning · land use · flood one line (present values only). */
+export function parcelFactSubheadHtml(sections: BriefSection[]): string {
+  function lineValue(section: BriefSection): string | null {
+    if (section.paint !== "present" || !section.data) return null;
+    const d = section.data;
+    switch (section.id) {
+      case "zoning":
+        return typeof d.district === "string" ? d.district : null;
+      case "land-use":
+        return typeof d.landUseLabel === "string"
+          ? d.landUseLabel
+          : typeof d.landUseCode === "string"
+            ? d.landUseCode
+            : null;
+      case "flood":
+        return typeof d.floodZone === "string" ? d.floodZone : null;
+      default:
+        return null;
+    }
+  }
+  const parts: string[] = [];
+  for (const id of ["zoning", "land-use", "flood"] as const) {
+    const s = sections.find((sec) => sec.id === id);
+    if (!s) continue;
+    const val = lineValue(s);
+    if (!val) continue;
+    const title = id === "land-use" ? "Land use" : s.title || id;
+    parts.push(`${title} ${val}`);
+  }
+  if (parts.length === 0) return "";
+  return `<p class="subhead" data-parcel-subhead="1">${escapeHtml(parts.join(" · "))}</p>`;
+}
+
+export function reportHtmlPartialDefault(sections: BriefSection[], open: boolean): string {
+  const always = sections.filter((s) => s.id === "zoning" || s.id === "flood");
+  const rest = sections.filter((s) => s.id !== "zoning" && s.id !== "flood");
+  const render = (list: BriefSection[]) =>
+    list
+      .map((s) => {
+        const i = sections.indexOf(s);
+        const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+        const cites = citationHtml(s.citations, s.citationsDegraded);
+        const ask = whyControlHtml("section", s.paint, { i: String(i) });
+        const note = s.paintReason
+          ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`)
+          : "";
+        const guide = s.agentGuidance
+          ? `<div class="guide" data-agent-guidance="1">${escapeHtml(s.agentGuidance)}</div>`
+          : "";
+        const subtype =
+          s.id === "flood" && s.paint === "present" ? stringOrNull(s.data ? s.data.zoneSubtype : null) : null;
+        const subtypeHtml = subtype
+          ? ` <span class="fsub" data-flood-subtype="${escapeHtml(subtype)}">${escapeHtml(subtype)}</span>`
+          : "";
+        return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
+      })
+      .join("");
+  if (sections.length === 0) return `<div class="report" data-report="1"><p class="empty">${NO_BRIEF}</p></div>`;
+  const head = always.length ? `<div class="report-default" data-report-default="1">${render(always)}</div>` : "";
+  const tail = open && rest.length ? `<div class="report-more" data-report-more="1">${render(rest)}</div>` : "";
+  return `<div class="report" data-report="1"><div class="req">${REPORT_TOGGLE}</div>${head}${tail}</div>`;
+}
+
 /** B2: one note per declared duplicate and per timed-out query. Every slot is the wire's; the sentence is the panel's. */
 export function degradedNotesHtml(degraded: ScreenDegraded | null | undefined): string {
   if (!degraded) return "";
@@ -2925,8 +3034,14 @@ export function parseToolResult(text: string): PanelModel {
   if (rows.length > 0) {
     const screenId =
       typeof rec.id === "string" ? rec.id : typeof screen.id === "string" ? screen.id : undefined;
+    const screenName =
+      typeof screen.name === "string"
+        ? screen.name
+        : typeof rec.name === "string"
+          ? rec.name
+          : undefined;
     const degraded = typeof rec.stubsDegraded === "boolean" ? rec.stubsDegraded : screen.stubsDegraded;
-    const model: PanelModel = { kind: "board", screenId, rows, overlays: [], ring: [], edges: [] };
+    const model: PanelModel = { kind: "board", screenId, screenName, rows, overlays: [], ring: [], edges: [] };
     if (typeof degraded === "boolean") model.stubsDegraded = degraded;
     /* B2: the create_screen response's declared duplicates and timeouts */
     const declaredDegradation = degradedFrom(rec.degraded !== undefined ? rec.degraded : screen.degraded);
@@ -3136,6 +3251,7 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   sectionsFromBrief,
   /* S8 board */
   looksLikeParcelNodeId,
+  unresolvedCaption,
   stubReadOf,
   candidatesFrom,
   degradedFrom,
@@ -3154,6 +3270,13 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   candidateControlsHtml,
   lookupControlHtml,
   stubReadNoteHtml,
+  boardRowPrimaryLabel,
+  boardQueryCellHtml,
+  boardCardTitle,
+  parcelCardTitle,
+  parcelFactSubheadHtml,
+  reportHtmlPartialDefault,
+  loadingPanelSubtitle,
   degradedNotesHtml,
   screensListHtml,
   declaredLineHtml,
@@ -3198,11 +3321,21 @@ export const OPEN_TURN_OPENER = "Open this parcel";
 export const OPEN_TURN_INSTRUCTION =
   "Call get_smart_site once with depth node for this id. Do not call save_property. Do not search the web.";
 
-export const EMPTY_BOARD_TITLE = "No screen yet";
-export const EMPTY_BOARD_BODY = "Paste addresses in the chat. This panel does not search.";
+export const EMPTY_BOARD_TITLE = "No parcels on this screen yet";
+export const EMPTY_BOARD_BODY = "Paste addresses in the chat to add rows.";
 /** Shown before the host delivers the first tool result; not the screening-board empty state. */
-export const LOADING_PANEL_TITLE = "Loading Smart Site";
+export const LOADING_PANEL_TITLE = "Smart Site";
 export const LOADING_PANEL_BODY = "Reading this tool result.";
+export const LOADING_SUBTITLE_BY_TOOL: Record<string, string> = {
+  get_smart_site: "Loading this parcel…",
+  create_screen: "Opening screening board…",
+  list_screens: "Opening screening board…",
+};
+
+export function loadingPanelSubtitle(toolName: string | null | undefined): string {
+  if (!toolName) return LOADING_PANEL_BODY;
+  return LOADING_SUBTITLE_BY_TOOL[toolName] ?? LOADING_PANEL_BODY;
+}
 export const NOTHING_TO_OPEN = "Nothing to open until this resolves";
 /** Host silence after Open click. Late tool results still replace this. */
 export const OPEN_DEAD_MS = 12000;
@@ -3671,10 +3804,14 @@ html[data-debug="1"] .boot{display:block}
 .req{font-size:var(--ss-fs-meta);color:var(--ss-t5);margin:0 0 8px}
 table{width:100%;border-collapse:collapse}
 th{font:var(--ss-fs-meta)/1.2 ui-monospace,Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:0 6px 8px;border-bottom:1px solid var(--ss-line-06);color:var(--ss-t5);cursor:pointer}
-td{padding:7px 6px;border-bottom:1px solid var(--ss-line-06);vertical-align:middle}
+td{padding:10px 8px;border-bottom:1px solid var(--ss-line-06);vertical-align:middle}
 tr.row{cursor:pointer}
 tr.row:hover td{background:var(--ss-raised)}
 .pl{font-weight:500}
+.subhead{color:var(--ss-t5);font-size:var(--ss-fs-meta);margin:0 0 8px}
+.card,.well{transition:opacity 150ms ease}
+@media (prefers-reduced-motion:reduce){.card,.well{transition:none}}
+.btn:focus-visible,.sortc:focus-visible{outline:2px solid var(--ss-blue);outline-offset:2px}
 .pn,.unres,.why,.mono,.reason{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace}
 .pn,.mono{color:var(--ss-t5)}
 .pn.atom{color:var(--ss-atom)}
@@ -3797,7 +3934,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 </head>
 <body>
 <div id="boot" class="boot" data-script="off">script-off</div>
-<div id="root"><p class="empty"><b>${LOADING_PANEL_TITLE}</b>${LOADING_PANEL_BODY}</p></div>
+<div id="root"><p class="empty"><b>${LOADING_PANEL_TITLE}</b><span data-loading-sub="1">${LOADING_PANEL_BODY}</span></p></div>
 <script>
 (function(){
   var showDebug=/[?&]debug=1(?:&|$)/.test(typeof location!=="undefined"&&location.search?location.search:"");
@@ -4005,6 +4142,7 @@ ${inlineSharedSource()}
   var pinnedEl=null;
   /* R1: local view state (I8). Reset on every accepted result; never read from anywhere. */
   var reportOpen=false;
+  var pendingToolName=null;
   /* M-2: local view state, same rule. On whenever a ground exists; the toggle turns it off. */
   var groundOn=true;
   var rpcId=1;
@@ -4234,12 +4372,7 @@ ${inlineSharedSource()}
   }
   function looksNode(q){return NODE_RE.test(String(q||"").trim())}
   /* B1 B2: a resolved row carries its read state; an ambiguous row keeps the typed query and offers its candidates; an unresolved row stays as typed */
-  function queryCell(r){
-    if(r.resolution==="resolved") return '<div class="pl">'+esc(r.query)+"</div>"+stubReadNoteHtml(r);
-    if(r.resolution==="ambiguous") return '<div class="unres">'+AMBIGUOUS_CAPTION+'</div><div class="pn">'+esc(r.query)+"</div>"+candidateControlsHtml(r);
-    var cap=looksNode(r.query)?"node unresolved":"situs unresolved";
-    return '<div class="unres">'+cap+'</div><div class="pn">'+esc(r.query)+"</div>";
-  }
+  function queryCell(r){ return boardQueryCellHtml(r); }
   function glyph(state){
     var s=railState(state);
     return '<span class="g g-'+esc(s)+'" title="'+esc(s)+'"></span>';
@@ -4268,7 +4401,7 @@ ${inlineSharedSource()}
     if(model.kind==="board"){
       /* B4 B5: groups by county prefix when there is more than one; each group in the local sort order; Open only on a resolved row */
       var grouping=boardGroups(model.rows);
-      var head='<tr><th data-k="query">Query</th><th data-k="id">Node</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
+      var head='<tr><th data-k="query">Address / query</th><th data-k="id">Parcel</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
       var pos=0;
       var body=grouping.groups.map(function(grp){
         var hdr=grouping.grouped?'<tr class="grp" data-county-group="'+esc(grp.fips||"unresolved")+'"><th colspan="'+(RAILS.length+3)+'">'+esc(grp.title)+"</th></tr>":"";
@@ -4285,7 +4418,7 @@ ${inlineSharedSource()}
         }).join("");
       }).join("");
       var note=model.stubsDegraded===true?'<p class="note">'+${JSON.stringify(RAILS_PARTLY_UNREAD)}+"</p>":"";
-      root.innerHTML=card("screen board",stateLines()+'<div class="well"><div class="req">Rows <span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+note+
+      root.innerHTML=card(esc(boardCardTitle(model.screenName)),stateLines()+'<div class="well"><div class="req">Rows <span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+note+
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>");
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
@@ -4299,11 +4432,12 @@ ${inlineSharedSource()}
       var secs=model.sections||[];
       var floodFacts="";
       for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi); break; } }
-      var report=reportOpen?reportHtml(secs):"";
+      var subhead=parcelFactSubheadHtml(secs);
+      var report=reportHtmlPartialDefault(secs,reportOpen);
       /* M-5: what this panel did NOT draw, whenever the result carried more than
        * one parcel. Not conditional on a canvas: the canvas is exactly what this
        * branch does not have. */
-      root.innerHTML=card(esc(model.label||model.parcelNodeId||"parcel"),stateLines()+'<div class="well">'+node+drawn+tip+edgeList+ov+floodFacts+report+offCanvasHtml(model)+"</div>"+
+      root.innerHTML=card(esc(parcelCardTitle(model)),stateLines()+'<div class="well">'+subhead+node+drawn+tip+edgeList+ov+floodFacts+report+offCanvasHtml(model)+"</div>"+
         '<div class="acts">'+saveChooserHtml()+'<button type="button" class="btn'+(reportOpen?" on":"")+'" data-act="report" data-report-open="'+(reportOpen?"1":"0")+'" onclick="window.__ss&&window.__ss.report()">'+REPORT_TOGGLE+'</button><button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>'+(listingAck?'<div class="ack" data-listing-chars="'+esc(listingAck.chars)+'">Posted '+esc(listingAck.chars)+" chars</div>":""));
       var listing=root.querySelector('[data-act="listing"]');
       if(listing&&listingAck){
@@ -4328,7 +4462,7 @@ ${inlineSharedSource()}
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+${JSON.stringify(RESULT_NOT_READABLE)}+"</b>"+${JSON.stringify(RESULT_NOT_READABLE_BODY)}+"</p>");
     } else if(!hasToolResult){
-      root.innerHTML=card("panel",stateLines()+'<p class="empty"><b>'+${JSON.stringify(LOADING_PANEL_TITLE)}+"</b>"+${JSON.stringify(LOADING_PANEL_BODY)}+"</p>");
+      root.innerHTML=card("panel",stateLines()+'<p class="empty"><b>'+${JSON.stringify(LOADING_PANEL_TITLE)}+'</b><span data-loading-sub="1">'+esc(loadingPanelSubtitle(pendingToolName))+'</span></p>');
     } else {
       root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+${JSON.stringify(EMPTY_BOARD_TITLE)}+"</b>"+${JSON.stringify(EMPTY_BOARD_BODY)}+"</p>");
     }
@@ -4463,6 +4597,7 @@ ${inlineSharedSource()}
     openSent=null;
     reportOpen=false;
     groundOn=true;
+    pendingToolName=null;
     sortKey="completeness";
     sortDir=1;
     /* M-5: a new result is a new panel instance, so the per neighbour once
@@ -4570,7 +4705,16 @@ ${inlineSharedSource()}
       paintBoot();
       return;
     }
-    if(d.method==="ui/notifications/tool-result"&&d.params) accept(d.params);
+    if(d.method==="ui/notifications/tool-call"&&d.params&&d.params.toolName){
+      pendingToolName=String(d.params.toolName);
+      if(!hasToolResult) render();
+      return;
+    }
+    if(d.method==="ui/notifications/tool-result"&&d.params){
+      if(d.params.toolName) pendingToolName=String(d.params.toolName);
+      else if(d.params._meta&&d.params._meta.tool) pendingToolName=String(d.params._meta.tool);
+      accept(d.params);
+    }
   });
   markHandshake("wait");
   parent.postMessage({jsonrpc:"2.0",id:initId,method:"ui/initialize",params:{protocolVersion:"2026-01-26",appInfo:{name:"SmartSiteBoard",version:"1"},appCapabilities:{availableDisplayModes:["inline"]}}},"*");

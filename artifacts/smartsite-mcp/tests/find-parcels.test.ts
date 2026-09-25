@@ -55,7 +55,9 @@ async function withTestClient(fn: (client: Client) => Promise<void>) {
 
 function firstText(result: unknown): Record<string, unknown> {
   const content = (result as { content: Array<{ text: string }> }).content;
-  return JSON.parse(content[0].text) as Record<string, unknown>;
+  const raw = content[0].text;
+  const jsonPart = raw.split("\n\n")[0] ?? raw;
+  return JSON.parse(jsonPart) as Record<string, unknown>;
 }
 
 const THREE_SET_BODY = {

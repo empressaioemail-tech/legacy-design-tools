@@ -341,7 +341,10 @@ describe("P-101 item 9: the panel still mounts for a free connector user", () =>
         arguments: {},
       });
       expect(result.isError).toBe(false);
-      expect(JSON.parse(textOf(result))).toEqual({ screens: [] });
+      expect(JSON.parse(textOf(result))).toMatchObject({
+        screens: [],
+        cardContract: "screen-list",
+      });
     });
   });
 

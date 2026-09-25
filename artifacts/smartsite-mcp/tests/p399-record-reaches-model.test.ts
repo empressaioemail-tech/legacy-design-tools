@@ -162,7 +162,7 @@ describe("P-399: the record reaches the model at depth node (shaper unit)", () =
     // The pre-fix sentence ("...and the map panel are attached to this result")
     // asserted an attachment a content-only consumer cannot read.
     expect(prose).not.toContain("are attached to this result");
-    expect(prose).toContain("cannot open");
+    expect(prose).toMatch(/MCP Apps|resource link/i);
   });
 
   it("NOT VACUOUS: a pre-P-399-shaped payload (record only in structuredContent) fails the control", () => {
@@ -224,11 +224,8 @@ describe("P-399 negatives: the paths that already worked are untouched", () => {
       })) as { content?: Array<{ type: string; text?: string }>; isError?: boolean };
 
       expect(result.isError).toBe(false);
-      // Unshaped results keep the P-91 v3 shape exactly: the tool's own JSON in
-      // content[0], then the standing vocabulary block appended by the wrapper.
-      // No resource_link is appended to a depth that was never a panel result.
-      expect((result.content ?? []).map((c) => c.type)).toEqual(["text", "text"]);
-      expect((result.content ?? []).some((c) => c.type === "resource_link")).toBe(false);
+      // P-437: a stub batch opens the screening board — JSON, vocabulary, resource_link.
+      expect((result.content ?? []).map((c) => c.type)).toEqual(["text", "text", "resource_link"]);
       expect((result.content as Array<{ text: string }>)[1].text).toBe(
         STANDING_VOCAB_CONTENT_PART.text,
       );

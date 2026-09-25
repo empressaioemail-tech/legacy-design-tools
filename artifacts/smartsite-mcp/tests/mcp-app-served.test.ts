@@ -32,8 +32,8 @@ const COPY = {
   unbakedPrefix: "No baked snapshot yet for",
   refused: "Upgrade to open this parcel",
   unreadable: "Result not readable",
-  empty: "No screen yet",
-  loading: "Loading Smart Site",
+  empty: "No parcels on this screen yet",
+  loading: "Smart Site",
   nothingToOpen: "Nothing to open until this resolves",
   nodeUnresolved: "node unresolved",
   railsPartlyUnread: "Some rails on this screen were not read",
@@ -1456,7 +1456,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(floodRow).toContain(COPY2.citationDegraded);
     expect(floodRow).not.toContain('data-act="cite"');
     f.ss().report();
-    const zoning = f.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    const zoning = f.segment('data-report-default="1"', 'data-report-section="flood"');
     expect(zoning).toContain(`data-act="cite" data-url="${ZONING_URL}"`);
     expect(zoning).toContain(`data-act="cite" data-url="${ZONING_URL_2}"`);
     expect(zoning).toContain(">citation 1</button>");
@@ -1612,7 +1612,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     f.init();
     f.toolResult(GOLD_FACTS_NO_ASOF);
     f.ss().report();
-    const z = f.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    const z = f.segment('data-report-default="1"', 'data-report-section="flood"');
     expect(z).toContain('data-report-state="unknown"');
     expect(z).toContain("g-unknown");
     expect(z).toContain(`data-paint-reason="${COPY2.asOfMissing}"`);
@@ -1623,7 +1623,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     g.init();
     g.toolResult(GOLD_FACTS);
     g.ss().report();
-    const gz = g.segment('data-report-section="zoning"', 'data-report-section="setbacks-envelope"');
+    const gz = g.segment('data-report-default="1"', 'data-report-section="flood"');
     expect(gz).toContain('data-report-state="present"');
     expect(gz).toContain('data-as-of="2026-08-29"');
     expect(gz).not.toContain("T10:00");
@@ -1792,7 +1792,8 @@ describe("P-91 v2 facts and actions (served)", () => {
     const f = fresh();
     f.init();
     f.toolResult(GOLD_FACTS);
-    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    expect(f.root.innerHTML).toContain('data-report-default="1"');
+    expect(f.root.innerHTML).not.toContain('data-report-more="1"');
     const toggle = f.root.querySelector('[data-act="report"]');
     expect(toggle).not.toBeNull();
     expect(toggle?.getAttribute("data-report-open")).toBe("0");
@@ -1802,9 +1803,9 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(f.root.querySelector('[data-act="report"]')?.getAttribute("data-report-open")).toBe("1");
     const report = f.segment('<div class="report"', '<div class="acts">');
     const ids = [...report.matchAll(/data-report-section="([^"]+)"/g)].map((m) => m[1]);
-    expect(ids).toEqual(["zoning", "setbacks-envelope", "flood", "land-use", "drainage"]);
+    expect(ids).toEqual(["zoning", "flood", "setbacks-envelope", "land-use", "drainage"]);
     const states = [...report.matchAll(/data-report-state="([^"]+)"/g)].map((m) => m[1]);
-    expect(states).toEqual(["present", "refused", "present", "absent-verified", "unread"]);
+    expect(states).toEqual(["present", "present", "refused", "absent-verified", "unread"]);
     const text = f.strip(report);
     for (const t of ["Zoning", "Setbacks and buildable envelope", "Flood hazard", "Land use", "Drainage"]) expect(text).toContain(t);
     for (const w of ["present", "refused", "absent, verified", "unread"]) expect(text).toContain(w);
@@ -1826,13 +1827,13 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(f.openLinks()).toHaveLength(0);
     expect(f.root.innerHTML).toContain('aria-label="parcel ring"');
     f.ss().report();
-    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    expect(f.root.innerHTML).not.toContain('data-report-more="1"');
     expect(f.root.querySelector('[data-act="report"]')?.getAttribute("data-report-open")).toBe("0");
     expect(f.messages()).toHaveLength(msgsBefore);
     /* a later result closes the view; a parcel with no brief says so */
     f.ss().report();
     f.toolResult(GOLD);
-    expect(f.root.innerHTML).not.toContain('data-report="1"');
+    expect(f.root.innerHTML).not.toContain('data-report-more="1"');
     f.ss().report();
     expect(f.strip(f.segment('<div class="report"', '<div class="acts">'))).toContain("No brief sections on this result");
     expect(f.root.innerHTML).not.toContain("data-report-section");

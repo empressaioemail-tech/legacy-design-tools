@@ -310,8 +310,9 @@ function assertMixedRows(rows: WireRow[]): void {
     flood: "refused",
     drainage: "unread",
     envelope: "refused",
+    label: "910 PINE, BASTROP, TX 78602",
   });
-  expect(Object.keys(ok.stub!).sort()).toEqual([...RAILS].sort());
+  expect(Object.keys(ok.stub!).sort()).toEqual([...RAILS, "label"].sort());
   for (const rail of RAILS) expect(VOCAB).toContain(ok.stub![rail]);
 
   const miss = byQuery.get(MISS)!;

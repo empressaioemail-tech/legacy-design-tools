@@ -95,6 +95,7 @@ import {
   UNRESOLVED_GROUP,
   USE_THIS_LABEL,
   boardGroups,
+  boardQueryCellHtml,
   candidateControlsHtml,
   candidateFor,
   countyFipsOf,
@@ -111,6 +112,7 @@ import {
   stubReadNoteHtml,
   useCandidateMessage,
   type BriefSection,
+  type BoardRow,
 } from "../src/mcp-app.js";
 import { registerTools } from "../src/tools.js";
 
@@ -529,7 +531,7 @@ describe("Wave J honesty", () => {
     expect(html).toContain(EMPTY_BOARD_TITLE);
     expect(html).toContain(LOADING_PANEL_TITLE);
     expect(html).toContain("scrollbar-color");
-    expect(html).toContain("Paste addresses in the chat. This panel does not search.");
+    expect(html).toContain("Paste addresses in the chat to add rows.");
     expect(html).toContain(NOTHING_TO_OPEN);
     expect(html).toContain(OPEN_DID_NOT_REACH_ME);
     expect(html).toContain(OPEN_SENT);
@@ -552,8 +554,8 @@ describe("Wave J honesty", () => {
     expect(html).toContain("if(ev.source!==window.parent)");
     expect(html).toContain("foreign=");
     expect(html).toContain("Object.create(null)");
-    const afterToolResultAccept = html.split("accept(d.params);")[1] ?? "";
-    expect(afterToolResultAccept.trimStart().startsWith("});")).toBe(true);
+    expect(html).toContain("ui/notifications/tool-call");
+    expect(html).toContain("accept(d.params);");
     expect(html).toContain("openWait");
     expect(html).toContain("openSent");
     expect(html).toContain("clearOpenTimer");
@@ -1655,5 +1657,30 @@ describe("P-91 v2 board (exported twins)", () => {
     expect(htmlContractViolations(clean.replace(/function boardGroups/g, "function boardParts"))).toContain("county_group_unmarked");
     expect(htmlContractViolations(clean.replace('var sortKey="completeness"', 'var sortKey="query"'))).toContain("completeness_sort_unbound");
     expect(htmlContractViolations(clean.replace(/function declaredLineHtml/g, "function declaredLine"))).toContain("declared_body_unbound");
+  });
+});
+
+describe("P-437 phase 2 board labels", () => {
+  it("boardQueryCellHtml leads with stub label when query is a node id", () => {
+    const html = boardQueryCellHtml({
+      query: "48021:34137",
+      parcelNodeId: "48021:34137",
+      resolution: "resolved",
+      rails: {} as BoardRow["rails"],
+      stubLabel: "908 PINE , BASTROP, TX 78602",
+    });
+    expect(html).toContain("908 PINE");
+    expect(html).toContain("48021:34137");
+    expect(html.indexOf("908 PINE")).toBeLessThan(html.indexOf("48021:34137"));
+  });
+
+  it("shapeSmartSiteNodeResult names the single-parcel card contract", async () => {
+    const { shapeSmartSiteNodeResult } = await import("../src/tools.js");
+    const record =
+      '{"parcelNodeId":"48021:34137","draw":{"label":"908 PINE , BASTROP, TX 78602","ring":[[0,0],[1,0],[1,1]],"overlays":[]}}';
+    const shaped = shapeSmartSiteNodeResult(record);
+    const prose = shaped.content[0]?.type === "text" ? shaped.content[0].text : "";
+    expect(prose).toContain("one parcel");
+    expect(prose).toContain("Do not describe a screening board");
   });
 });

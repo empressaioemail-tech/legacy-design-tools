@@ -49,6 +49,12 @@ import {
 } from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
 import {
+  appendCardContractProse,
+  cardViewFromToolPayload,
+  injectCardContract,
+  type CardView,
+} from "./card-contract.js";
+import {
   appMetaFor,
   registerMcpApp,
   APP_MIME,
@@ -236,7 +242,7 @@ export function splitFindParcelHits(bodyText: string): string {
         : undefined,
     );
   }
-  return JSON.stringify(out);
+  return injectCardContract(JSON.stringify(out), "none").text;
 }
 
 function notReadyMessage(tool: string, reason: string): string {
@@ -588,6 +594,37 @@ function annotationsFor(name: SmartsiteToolName) {
   return { readOnlyHint: true };
 }
 
+const APP_BOARD_LINK = {
+  type: "resource_link" as const,
+  uri: APP_RESOURCE_URI,
+  name: "Smart Site board",
+  mimeType: APP_MIME,
+  description: "Inline Smart Site MCP App (map, screening board, or parcel panel).",
+};
+
+function cardViewFromResultContent(content: HandlerResult["content"]): CardView | null {
+  const first = content[0];
+  if (!first || first.type !== "text") return null;
+  try {
+    const data = JSON.parse(first.text) as Record<string, unknown>;
+    if (typeof data.cardContract === "string") return data.cardContract as CardView;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function enrichAppToolJsonText(toolName: SmartsiteToolName, text: string): HandlerResult {
+  let view: CardView = "none";
+  try {
+    view = cardViewFromToolPayload(toolName, JSON.parse(text) as Record<string, unknown>);
+  } catch {
+    view = toolName === "create_screen" || toolName === "list_screens" ? "screen-board" : "none";
+  }
+  const { text: enriched } = injectCardContract(text, view);
+  return { content: [{ type: "text" as const, text: enriched }], isError: false };
+}
+
 type HandlerResult = ToolResult & {
   /**
    * P-243: set only by a handler branch that has already composed its own
@@ -615,10 +652,15 @@ function attachStandingVocabBlock(handler: ToolHandler): ToolHandler {
   return async (args) => {
     const { skipStandingVocab, ...result } = await handler(args);
     if (skipStandingVocab) return result;
-    return {
+    const withVocab = {
       ...result,
       content: [...result.content, STANDING_VOCAB_CONTENT_PART],
     };
+    const view = cardViewFromResultContent(withVocab.content);
+    if (view && view !== "none") {
+      return { ...withVocab, content: [...withVocab.content, APP_BOARD_LINK] };
+    }
+    return withVocab;
   };
 }
 
@@ -782,7 +824,10 @@ export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
     }
   }
 
-  const text = `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nThe full record and geometry summarised above follow in this same result, so this summary stands in for nothing. The interactive Smart Site board is referenced by a resource link, which a client that does not render widgets cannot open (open the parcel URL from the record instead). Owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`;
+  const text = appendCardContractProse(
+    `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nThe full record and geometry summarised above follow in this same result, so this summary stands in for nothing. The interactive Smart Site panel is referenced by a resource link when the host renders MCP Apps. Owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`,
+    "single-parcel",
+  );
 
   // P-399. The record, in the channel every client reads.
   //
@@ -1163,6 +1208,9 @@ export function registerTools(server: McpServer): void {
               if (mode === "single-node") {
                 return shapeSmartSiteNodeResult(anchored);
               }
+              if (Array.isArray(parcelNodeId)) {
+                return enrichAppToolJsonText("get_smart_site", anchored);
+              }
               return {
                 content: [{ type: "text" as const, text: anchored }],
                 isError: false,
@@ -1365,10 +1413,7 @@ export function registerTools(server: McpServer): void {
                 if (upgrade) return upgradeRequiredResult(upgrade);
                 return upstreamErrorResult(res.status, text);
               }
-              return {
-                content: [{ type: "text" as const, text }],
-                isError: false,
-              };
+              return enrichAppToolJsonText("create_screen", text);
             });
           }
           case "add_to_screen": {
@@ -1411,10 +1456,7 @@ export function registerTools(server: McpServer): void {
               });
               const text = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, text);
-              return {
-                content: [{ type: "text" as const, text }],
-                isError: false,
-              };
+              return enrichAppToolJsonText("list_screens", text);
             });
           }
           case "save_property": {
