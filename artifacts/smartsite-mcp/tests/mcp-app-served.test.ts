@@ -33,6 +33,7 @@ const COPY = {
   refused: "Upgrade to open this parcel",
   unreadable: "Result not readable",
   empty: "No screen yet",
+  loading: "Loading Smart Site",
   nothingToOpen: "Nothing to open until this resolves",
   nodeUnresolved: "node unresolved",
   railsPartlyUnread: "Some rails on this screen were not read",
@@ -810,7 +811,7 @@ function rowGlyphs(html: string, needle: string): string[] {
 }
 
 describe("served iframe script", () => {
-  it("positive control: gold paints the ring, the human envelope reason, and script-ran in the header", () => {
+  it("positive control: gold paints the ring, the human envelope reason, and hides script-ran from the card header", () => {
     const f = fresh();
     f.init();
     f.toolResult(GOLD);
@@ -819,7 +820,7 @@ describe("served iframe script", () => {
     expect(f.text()).toContain("908 PINE");
     expect(f.text()).toContain("Withheld, setbacks unruled");
     expect(f.root.innerHTML).not.toContain("atom_path_pending");
-    expect(f.root.innerHTML).toContain('<span data-script="ran">script-ran</span>');
+    expect(f.root.innerHTML).not.toContain('<span data-script="ran">script-ran</span>');
     expect(f.boot.textContent).toContain("script-ran");
     expect(f.boot.textContent).toContain("handshake=ready");
     expect(f.boot.textContent).toContain("caps=serverTools");
@@ -3227,5 +3228,22 @@ describe("P-428 served board reads tool results by shape", () => {
     });
     expect(f.text()).not.toContain(COPY.unreadable);
     expect(f.text()).toContain("Newest");
+  });
+
+  it("P-437: a node read with brief sections but no draw paints the parcel panel, not the empty board", () => {
+    const f = fresh();
+    f.init();
+    notifyToolResult(f, {
+      parcelNodeId: "48021:35113",
+      brief: {
+        sections: [
+          { id: "zoning", title: "Zoning", disposition: "present", data: { district: "GC" } },
+        ],
+      },
+      onRecord: { apn: "R123", countyName: "Bastrop" },
+    });
+    expect(f.text()).not.toContain(COPY.empty);
+    expect(f.text()).toContain("48021:35113");
+    expect(f.root.innerHTML).toContain('data-act="report"');
   });
 });

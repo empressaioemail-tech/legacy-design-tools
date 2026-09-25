@@ -14,6 +14,7 @@ import {
   LISTING_TURN_INSTRUCTION,
   LISTING_TURN_OPENER,
   EMPTY_BOARD_TITLE,
+  LOADING_PANEL_TITLE,
   NOTHING_TO_OPEN,
   NOT_ON_FILE_PREFIX,
   NO_BAKED_SNAPSHOT_PREFIX,
@@ -280,6 +281,21 @@ describe("mcp-app contracts", () => {
     expect(model.rows).toEqual([]);
   });
 
+  it("P-437: paints a single parcel from brief sections when no draw block is present", () => {
+    const model = parseToolResult(
+      JSON.stringify({
+        parcelNodeId: "48021:35113",
+        brief: {
+          sections: [{ id: "zoning", title: "Zoning", disposition: "present", data: { district: "GC" } }],
+        },
+        onRecord: { apn: "R123" },
+      }),
+    );
+    expect(model.kind).toBe("parcel");
+    expect(model.parcelNodeId).toBe("48021:35113");
+    expect(model.sections?.[0]?.id).toBe("zoning");
+  });
+
   it("keeps unresolved query verbatim on a screen", () => {
     const model = parseToolResult(
       JSON.stringify({
@@ -511,6 +527,8 @@ describe("Wave J honesty", () => {
   it("binds empty, zzzz slot, and the plan 4.4 state sentences as distinct copy", () => {
     const html = buildAppHtml();
     expect(html).toContain(EMPTY_BOARD_TITLE);
+    expect(html).toContain(LOADING_PANEL_TITLE);
+    expect(html).toContain("scrollbar-color");
     expect(html).toContain("Paste addresses in the chat. This panel does not search.");
     expect(html).toContain(NOTHING_TO_OPEN);
     expect(html).toContain(OPEN_DID_NOT_REACH_ME);
