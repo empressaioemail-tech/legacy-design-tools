@@ -87,7 +87,7 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "create_screen",
     title: "Create a screen",
     description:
-      "Create a named intake screen from pasted queries and open the screening board in the MCP App. source must be exactly \"pasted\". A query that resolves to a parcel already on the screen is reported in degraded.duplicates and not written twice. Resolved rows carry six rail states. Does not write a save. Unresolved rows keep the original query.",
+      "Create a named intake screen from pasted queries and open the screening board in the MCP App. source must be exactly one of pasted or map-selection (map-selection is for Property Explorer map multi-select handoff). A query that resolves to a parcel already on the screen is reported in degraded.duplicates and not written twice. Resolved rows carry six rail states. Does not write a save. Unresolved rows keep the original query.",
     readiness: "live" as const,
   },
   {

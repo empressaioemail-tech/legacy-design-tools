@@ -93,7 +93,7 @@ export const peScreenRows = pgTable(
     ),
     check(
       "pe_screen_rows_source_chk",
-      sql`${t.source} IN ('pasted', 'chrome', 'gmail', 'file', 'walk', 'saved')`,
+      sql`${t.source} IN ('pasted', 'chrome', 'gmail', 'file', 'walk', 'saved', 'map-selection')`,
     ),
     check(
       "pe_screen_rows_resolved_node_chk",
