@@ -496,12 +496,9 @@ async function assembleNodeBriefBody(
 }
 
 async function assembleStubBody(parcelNodeId: string) {
-  const stub = await assembleSmartSiteStubBody(parcelNodeId);
-  if (!stub) return null;
-  return applyExemptionTypesServeToResearchBriefBody(
-    stub as Record<string, unknown>,
-    "none",
-  );
+  // Stub rails carry no ownerFact or exemption codes; card/share policy needs
+  // no extra serve pass here (P-453).
+  return assembleSmartSiteStubBody(parcelNodeId);
 }
 
 /**
