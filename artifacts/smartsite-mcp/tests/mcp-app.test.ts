@@ -126,6 +126,7 @@ describe("mcp-app contracts", () => {
 
   it("ships Claude chrome and keeps listing history off the board template", () => {
     const html = buildAppHtml();
+    expect(html).toContain("var LOADING_SUBTITLE_BY_TOOL=");
     expect(html).toContain('data-theme="claude"');
     expect(html).toContain("btn primary");
     expect(html).toContain("node unresolved");
