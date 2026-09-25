@@ -50,20 +50,41 @@ import {
   STATE_WORDS as STATE_WORDS_PKG,
   UPGRADE_TO_OPEN as UPGRADE_TO_OPEN_PKG,
 } from "@empressaio/atom-contract/display";
-export const CITATION_DEGRADED = CITATION_DEGRADED_PKG;
-export const EDGE_WORDS: Record<string, string> = EDGE_WORDS_PKG;
-export const NO_BAKED_SNAPSHOT_PREFIX = NO_BAKED_SNAPSHOT_PREFIX_PKG;
-export const NOT_IMPLEMENTED_PREFIX = NOT_IMPLEMENTED_PREFIX_PKG;
-export const NOT_ON_FILE_PREFIX = NOT_ON_FILE_PREFIX_PKG;
-export const OPEN_DID_NOT_REACH_ME = OPEN_DID_NOT_REACH_ME_PKG;
-export const UPGRADE_TO_OPEN = UPGRADE_TO_OPEN_PKG;
-export function envelopeHuman(reason: string | undefined): string | undefined {
-  return envelopeHuman_PKG(reason);
+
+/** Server/buildAppHtml values — never the same binding names as display exports (esbuild rename). */
+const SS_CITATION_DEGRADED = CITATION_DEGRADED_PKG;
+const SS_EDGE_WORDS: Record<string, string> = EDGE_WORDS_PKG;
+const SS_NO_BAKED_SNAPSHOT_PREFIX = NO_BAKED_SNAPSHOT_PREFIX_PKG;
+const SS_NOT_IMPLEMENTED_PREFIX = NOT_IMPLEMENTED_PREFIX_PKG;
+const SS_NOT_ON_FILE_PREFIX = NOT_ON_FILE_PREFIX_PKG;
+const SS_OPEN_DID_NOT_REACH_ME = OPEN_DID_NOT_REACH_ME_PKG;
+const SS_UPGRADE_TO_OPEN = UPGRADE_TO_OPEN_PKG;
+const SS_STATE_WORDS: Record<CellState, string> = STATE_WORDS_PKG;
+const SS_HUMAN_ATOM_PATH_PENDING =
+  envelopeHuman_PKG("atom_path_pending") ?? "atom_path_pending";
+
+export {
+  SS_CITATION_DEGRADED as CITATION_DEGRADED,
+  SS_EDGE_WORDS as EDGE_WORDS,
+  SS_NO_BAKED_SNAPSHOT_PREFIX as NO_BAKED_SNAPSHOT_PREFIX,
+  SS_NOT_IMPLEMENTED_PREFIX as NOT_IMPLEMENTED_PREFIX,
+  SS_NOT_ON_FILE_PREFIX as NOT_ON_FILE_PREFIX,
+  SS_OPEN_DID_NOT_REACH_ME as OPEN_DID_NOT_REACH_ME,
+  SS_UPGRADE_TO_OPEN as UPGRADE_TO_OPEN,
+  SS_STATE_WORDS as STATE_WORDS,
+  envelopeHuman_PKG as envelopeHuman,
+  envelopeBasisHuman_PKG as envelopeBasisHuman,
+};
+
+/** Embedded in the served page; must not close over SS_* or pkg bindings. */
+export function envelopeHumanReason(
+  reason: string | undefined,
+): string | undefined {
+  if (reason === ["atom", "path", "pending"].join("_")) {
+    return HUMAN_ATOM_PATH_PENDING;
+  }
+  return reason;
 }
-export function envelopeBasisHuman(basis: string | undefined): string | undefined {
-  return envelopeBasisHuman_PKG(basis);
-}
-export const STATE_WORDS: Record<CellState, string> = STATE_WORDS_PKG;
 
 export const APP_RESOURCE_URI = "ui://smartsite/app-p562.html";
 export const APP_MIME = "text/html;profile=mcp-app";
@@ -2137,7 +2158,7 @@ export function metaHtml(
 export function overlayRowHtml(o: OverlayRow, i: number): string {
   const p = overlayPaint(o);
   const extra = o.id === "flood" ? " flood" : p.paint === "refused" ? " refused" : "";
-  const shown = envelopeHuman(o.reason);
+  const shown = envelopeHumanReason(o.reason);
   const why = shown ? reasonLineHtml("reason", shown) : "";
   const note = p.paintReason ? reasonLineHtml("note", p.paintReason, `data-paint-reason="${escapeHtml(p.paintReason)}"`) : "";
   const citations = o.citations ? o.citations : [];
@@ -3255,6 +3276,7 @@ export function parseToolContent(result: unknown): PanelModel {
  * (tests/mcp-app-served.test.ts) runs the embedded copy and fails on a missing one.
  */
 const INLINE_SHARED: ReadonlyArray<Function> = [
+  envelopeHumanReason,
   singleGroundNoteHtml,
   asRecord,
   railState,
@@ -3636,7 +3658,7 @@ export function htmlContractViolations(html: string): string[] {
     violations.push("open_link_unbound");
   }
   /* S7: each item's mechanism must be present in the served script, or the item is a claim */
-  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(CITATION_DEGRADED)) {
+  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(SS_CITATION_DEGRADED)) {
     violations.push("citation_link_unbound");
   }
   if (
@@ -3856,7 +3878,7 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("data-brief=") ||
     !html.includes("function declaredLineHtml") ||
     !html.includes(JSON.stringify(REFUSED_PREFIX)) ||
-    !html.includes(JSON.stringify(NOT_IMPLEMENTED_PREFIX)) ||
+    !html.includes(JSON.stringify(SS_NOT_IMPLEMENTED_PREFIX)) ||
     !html.includes(JSON.stringify(NOT_READY_INFIX)) ||
     /* P-101: the screens upgrade branch reads this reason inside the embedded
      * declaredLineHtml; without the var the branch throws in the iframe. */
@@ -3866,12 +3888,12 @@ export function htmlContractViolations(html: string): string[] {
   }
   const boundCopy = [
     NOTHING_TO_OPEN,
-    OPEN_DID_NOT_REACH_ME,
+    SS_OPEN_DID_NOT_REACH_ME,
     OPEN_SENT,
-    NOT_ON_FILE_PREFIX,
-    NO_BAKED_SNAPSHOT_PREFIX,
+    SS_NOT_ON_FILE_PREFIX,
+    SS_NO_BAKED_SNAPSHOT_PREFIX,
     RETIRED_RECORD_PREFIX,
-    UPGRADE_TO_OPEN,
+    SS_UPGRADE_TO_OPEN,
     /* P-101: declaredLineHtml is embedded BY SOURCE, so a constant it closes
      * over that is not emitted as a `var` throws ReferenceError in the iframe
      * and paints nothing. A unit test on declaredLineHtml alone cannot catch
@@ -4147,16 +4169,17 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var COUNTY_BY_FIPS=${JSON.stringify(COUNTY_BY_FIPS)};
   var COUNTY_UNKNOWN=${JSON.stringify(COUNTY_UNKNOWN)};
-  var NOT_ON_FILE_PREFIX=${JSON.stringify(NOT_ON_FILE_PREFIX)};
-  var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(NO_BAKED_SNAPSHOT_PREFIX)};
+  var NOT_ON_FILE_PREFIX=${JSON.stringify(SS_NOT_ON_FILE_PREFIX)};
+  var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(SS_NO_BAKED_SNAPSHOT_PREFIX)};
+  var HUMAN_ATOM_PATH_PENDING=${JSON.stringify(SS_HUMAN_ATOM_PATH_PENDING)};
   var RETIRED_RECORD_PREFIX=${JSON.stringify(RETIRED_RECORD_PREFIX)};
-  var EDGE_WORDS=${JSON.stringify(EDGE_WORDS)};
+  var EDGE_WORDS=${JSON.stringify(SS_EDGE_WORDS)};
   var ACROSS_ROW=${JSON.stringify(ACROSS_ROW)};
   var EDGE_TIP_HINT=${JSON.stringify(EDGE_TIP_HINT)};
   var UNIT_REFERENCE=${JSON.stringify(UNIT_REFERENCE)};
   var SCALE_BAR_FT=${JSON.stringify(SCALE_BAR_FT)};
   var ZONE_TINT=${JSON.stringify(ZONE_TINT)};
-  var CITATION_DEGRADED=${JSON.stringify(CITATION_DEGRADED)};
+  var CITATION_DEGRADED=${JSON.stringify(SS_CITATION_DEGRADED)};
   var AS_OF_MISSING=${JSON.stringify(AS_OF_MISSING)};
   var ABSENCE_UNVERIFIED=${JSON.stringify(ABSENCE_UNVERIFIED)};
   var DISPOSITION_UNSTATED=${JSON.stringify(DISPOSITION_UNSTATED)};
@@ -4171,10 +4194,10 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var ADD_TO_SCREEN_LABEL=${JSON.stringify(ADD_TO_SCREEN_LABEL)};
   var REPORT_TOGGLE=${JSON.stringify(REPORT_TOGGLE)};
   var NO_BRIEF=${JSON.stringify(NO_BRIEF)};
-  var STATE_WORDS=${JSON.stringify(STATE_WORDS)};
+  var STATE_WORDS=${JSON.stringify(SS_STATE_WORDS)};
   var SECTION_FOR_OVERLAY=${JSON.stringify(SECTION_FOR_OVERLAY)};
   var NOT_RETURNED=${JSON.stringify(NOT_RETURNED)};
-  var UPGRADE_TO_OPEN=${JSON.stringify(UPGRADE_TO_OPEN)};
+  var UPGRADE_TO_OPEN=${JSON.stringify(SS_UPGRADE_TO_OPEN)};
   var UPGRADE_TO_SCREEN=${JSON.stringify(UPGRADE_TO_SCREEN)};
   var UPGRADE_SCREENS_REASON=${JSON.stringify(UPGRADE_SCREENS_REASON)};
   var USE_THIS_LABEL=${JSON.stringify(USE_THIS_LABEL)};
@@ -4188,7 +4211,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var DUP_NOT_ADDED=${JSON.stringify(DUP_NOT_ADDED)};
   var TIMED_OUT_NOTE=${JSON.stringify(TIMED_OUT_NOTE)};
   var REFUSED_PREFIX=${JSON.stringify(REFUSED_PREFIX)};
-  var NOT_IMPLEMENTED_PREFIX=${JSON.stringify(NOT_IMPLEMENTED_PREFIX)};
+  var NOT_IMPLEMENTED_PREFIX=${JSON.stringify(SS_NOT_IMPLEMENTED_PREFIX)};
   var NOT_READY_INFIX=${JSON.stringify(NOT_READY_INFIX)};
   var UPSTREAM_KEY=${JSON.stringify(UPSTREAM_KEY)};
   var SORT_COMPLETENESS_LABEL=${JSON.stringify(SORT_COMPLETENESS_LABEL)};
@@ -4337,10 +4360,6 @@ ${inlineSharedSource()}
   }
   function openParcelMessage(node){
     return ${JSON.stringify(OPEN_TURN_OPENER)}+" "+node+". "+${JSON.stringify(OPEN_TURN_INSTRUCTION)};
-  }
-  function envelopeHuman(reason){
-    if(reason===["atom","path","pending"].join("_")) return ${JSON.stringify(envelopeHuman("atom_path_pending"))};
-    return reason;
   }
   function openLink(url){
     if(!url) return;
@@ -4515,7 +4534,7 @@ ${inlineSharedSource()}
     return '<p class="miss"><b>'+${JSON.stringify(NOT_RETURNED)}+"</b>"+idLine(m.parcelNodeId)+reasonLine(m.reason)+"</p>";
   }
   function refusedLine(r){
-    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+${JSON.stringify(UPGRADE_TO_OPEN)}+"</b>"+idLine(r.parcelNodeId)+"</p>";
+    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+${JSON.stringify(SS_UPGRADE_TO_OPEN)}+"</b>"+idLine(r.parcelNodeId)+"</p>";
     return '<p class="miss"><b>'+${JSON.stringify(OPEN_REFUSED)}+"</b>"+idLine(r.parcelNodeId)+reasonLine(r.reason)+"</p>";
   }
   function stateLines(){
@@ -4639,7 +4658,7 @@ ${inlineSharedSource()}
     openSent=null;
     openTimer=setTimeout(function(){
       if(openWait){
-        openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
+        openFail=${JSON.stringify(SS_OPEN_DID_NOT_REACH_ME)};
         openWait=null;
         render();
       }
@@ -4857,7 +4876,7 @@ ${inlineSharedSource()}
         replyText="reply="+(d.error.code!=null?String(d.error.code):"error");
         if(openWait){
           clearOpenTimer();
-          openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
+          openFail=${JSON.stringify(SS_OPEN_DID_NOT_REACH_ME)};
           openWait=null;
           openSent=null;
           render();

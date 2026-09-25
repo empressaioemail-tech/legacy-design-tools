@@ -705,7 +705,7 @@ function cardViewFromResultContent(content: HandlerResult["content"]): CardView 
 function enrichAppToolJsonText(
   toolName: SmartsiteToolName,
   text: string,
-  host?: string,
+  host?: McpRenderHostKey,
 ): HandlerResult {
   let view: CardView = "none";
   try {
