@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { BrokerageSiteContextLayer } from "./brokerageSiteContext";
 import {
   PERSONAL_ATTRIBUTE_EXEMPTION_REFUSAL,
   applyExemptionTypesServeToNodeFacetsResponse,
@@ -116,11 +117,11 @@ describe("applyExemptionTypesServeToNodeFacetsResponse — PE facets route", () 
 });
 
 describe("applyExemptionTypesServeToSiteContext — brokerage brief / export site layers", () => {
-  const cadTaxLayer = {
+  const cadTaxLayer: BrokerageSiteContextLayer = {
     layerKind: "cad-tax",
     adapterKey: "cad:tax",
     tier: "local",
-    status: "ok" as const,
+    status: "ok",
     summary: "legacy",
     payload: {
       kind: "cad-tax",
@@ -138,7 +139,7 @@ describe("applyExemptionTypesServeToSiteContext — brokerage brief / export sit
 
   it("homestead-only: summary names homestead only, not Over-65", () => {
     const out = applyExemptionTypesServeToSiteContext(
-      { layers: [cadTaxLayer] },
+      { placeKey: "test:place", layers: [cadTaxLayer] },
       "homestead-only",
     );
     expect(out.layers[0]?.summary).toContain("Homestead");
@@ -148,7 +149,7 @@ describe("applyExemptionTypesServeToSiteContext — brokerage brief / export sit
 
   it("none: drops exemption codes from payload and summary", () => {
     const out = applyExemptionTypesServeToSiteContext(
-      { layers: [cadTaxLayer] },
+      { placeKey: "test:place", layers: [cadTaxLayer] },
       "none",
     );
     const payload = out.layers[0]?.payload as Record<string, unknown>;
