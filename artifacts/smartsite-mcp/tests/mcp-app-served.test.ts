@@ -3173,3 +3173,59 @@ describe("P-91 v3 M-5: verify by violation", () => {
     expect(clean).not.toContain("preview_parcel");
   });
 });
+
+describe("P-428 served board reads tool results by shape", () => {
+  const notifyToolResult = (f: ReturnType<typeof fresh>, params: unknown) => {
+    f.deliver({
+      jsonrpc: "2.0",
+      method: "ui/notifications/tool-result",
+      params,
+    });
+  };
+
+  it("get_smart_site exact P-399 shape paints the parcel (not Result not readable)", async () => {
+    const { shapeSmartSiteNodeResult } = await import("../src/tools.js");
+    const record =
+      '{"parcelNodeId":"48021:34137","draw":{"label":"908 PINE , BASTROP, TX 78602","ring":[[48.6,83.94],[-50.37,83.7],[-49.07,-84.28],[50.84,-83.36]],"overlays":[]}}';
+    const shaped = shapeSmartSiteNodeResult(record);
+    const f = fresh();
+    f.init();
+    notifyToolResult(f, shaped);
+    expect(f.text()).not.toContain(COPY.unreadable);
+    expect(f.text()).toContain("48021:34137");
+    expect(f.root.innerHTML).toContain('aria-label="parcel ring"');
+  });
+
+  it("get_smart_site without structuredContent still paints when record is content[1]", async () => {
+    const { shapeSmartSiteNodeResult } = await import("../src/tools.js");
+    const record =
+      '{"parcelNodeId":"48021:34137","draw":{"label":"908 PINE , BASTROP, TX 78602","ring":[[48.6,83.94],[-50.37,83.7],[-49.07,-84.28],[50.84,-83.36]],"overlays":[]}}';
+    const shaped = shapeSmartSiteNodeResult(record);
+    const { structuredContent: _drop, ...withoutStructured } = shaped;
+    const f = fresh();
+    f.init();
+    notifyToolResult(f, withoutStructured);
+    expect(f.text()).not.toContain(COPY.unreadable);
+    expect(f.text()).toContain("908 PINE");
+  });
+
+  it("create_screen JSON in the first (only) text part still paints the board", () => {
+    const f = fresh();
+    f.init();
+    notifyToolResult(f, {
+      content: [{ type: "text", text: JSON.stringify(PARITY.board) }],
+    });
+    expect(f.text()).not.toContain(COPY.unreadable);
+    expect(f.text()).toContain("908 Pine");
+  });
+
+  it("list_screens JSON in the first text part paints the screen list", () => {
+    const f = fresh();
+    f.init();
+    notifyToolResult(f, {
+      content: [{ type: "text", text: JSON.stringify(PARITY_S8.screensList) }],
+    });
+    expect(f.text()).not.toContain(COPY.unreadable);
+    expect(f.text()).toContain("Newest");
+  });
+});

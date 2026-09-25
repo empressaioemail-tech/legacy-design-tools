@@ -106,20 +106,13 @@ services:
       # Stripe endpoint onto it (2.3). smartsite-mcp deploys fifth, after cortex, so
       # the record exists and resolves by the time this value is first read.
       - { key: CORTEX_API_BASE_URL, scope: RUN_TIME, type: GENERAL, value: "https://api.empressa.io" }
+      - { key: PARCEL_TILES_ORIGIN, scope: RUN_TIME, type: GENERAL, value: "https://hauska-artifacts.nyc3.digitaloceanspaces.com" }
 
       # ---- OWED: names this spec must carry, values that do not exist yet ----
       # Not omitted by oversight, and NOT a silent gap: each is a dependency with an
       # owner, and each is absent so the code's named refusal is what happens.
       #
-      #   PARCEL_TILES_ORIGIN   <- D-42 (the Spaces origin for the parcel PMTiles,
-      #                            bucket `hauska-artifacts` behind its CDN). The app
-      #                            CSP and the p559 network probe read this and
-      #                            NOTHING ELSE; D-25 Part 2/this lane's Part 2 removed
-      #                            the dead-bucket literal and made an unset value a
-      #                            named refusal (`parcel_tiles_origin_unset`), so the
-      #                            parcel ground is declared broken rather than
-      #                            silently dark. The register records this lane as
-      #                            waiting on this one value for the CSP.
+      #   (PARCEL_TILES_ORIGIN committed above — P-421 / P-428.)
       #
       #   HAUSKA_ENGINE_API_URL <- D-4 (engine droplet).
       #   HAUSKA_MCP_BASE_URL   <- D-7 (hauska-mcp-server on App Platform). Both
