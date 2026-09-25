@@ -89,14 +89,17 @@ export const PROBE_RESOURCE_TEXT = "probe-ok";
  * entry, which is a dark parcel ground with nothing saying why.
  */
 
+/** URL for the p559 tiles channel: an object on the configured origin, not the bare origin (listing 403). */
+export function parcelTilesProbeUrl(): string {
+  const tilesOrigin = requireParcelTilesOrigin();
+  return new URL("tiles.json", tilesOrigin.endsWith("/") ? tilesOrigin : `${tilesOrigin}/`).href;
+}
+
 /** The p559 map-ground net channels, as they are embedded into the served page. */
 export function probeNetTargets(): Array<{ key: string; url: string }> {
-  const tilesOrigin = requireParcelTilesOrigin();
   return [
     { key: "esri", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0" },
-    /* The tiles channel probes the ORIGIN, not a path: D-42 owns the Spaces
-     * layout, and a path guessed here would be this lane inventing it. */
-    { key: "tiles", url: tilesOrigin },
+    { key: "tiles", url: parcelTilesProbeUrl() },
     { key: "svc7", url: "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83?f=json" },
     { key: "self", url: "https://mcp.smartsite.cloud/health" },
   ];
@@ -2942,11 +2945,33 @@ export function firstTextPart(content: unknown): string | null {
   return null;
 }
 
-/** A tool result with no text part is unreadable, never empty. Scans every part. */
+/** The first text part whose body parses as a JSON object (the wire record), never prose. */
+export function firstJsonObjectTextPart(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    const rec = asRecord(part);
+    if (!rec || rec.type !== "text" || typeof rec.text !== "string") continue;
+    try {
+      const parsed = JSON.parse(rec.text);
+      if (asRecord(parsed)) return rec.text;
+    } catch {
+      /* prose or non-record text — keep scanning */
+    }
+  }
+  return null;
+}
+
+/** A tool result with no record is unreadable, never empty. Never treats prose as the record. */
 export function parseToolContent(result: unknown): PanelModel {
   if (typeof result === "string") return parseToolResult(result);
   const rec = asRecord(result);
-  const text = rec ? firstTextPart(rec.content) : null;
+  if (!rec) return emptyModel("unreadable");
+  const structured = rec.structuredContent;
+  if (structured !== undefined && structured !== null) {
+    const record = asRecord(structured);
+    if (record) return parseToolResult(JSON.stringify(structured));
+  }
+  const text = firstJsonObjectTextPart(rec.content);
   return text === null ? emptyModel("unreadable") : parseToolResult(text);
 }
 
@@ -2976,6 +3001,7 @@ const INLINE_SHARED: ReadonlyArray<Function> = [
   refusedRowsFrom,
   parseToolResult,
   firstTextPart,
+  firstJsonObjectTextPart,
   parseToolContent,
   zoningCitationUrl,
   zoningFromDraw,

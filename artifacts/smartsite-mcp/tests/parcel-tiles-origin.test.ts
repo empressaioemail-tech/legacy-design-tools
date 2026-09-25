@@ -150,9 +150,10 @@ describe("configured: the origin travels into both surfaces, and the dead bucket
     process.env[PARCEL_TILES_ORIGIN_ENV_NAME] = "https://tiles.test.invalid";
   });
 
-  it("the tiles channel carries the configured origin and the CSP declares it", () => {
+  it("the tiles channel probes tiles.json on the origin and the CSP declares the origin", () => {
     const tiles = probeNetTargets().find((t) => t.key === "tiles");
-    expect(tiles?.url).toBe("https://tiles.test.invalid");
+    expect(tiles?.url).toBe("https://tiles.test.invalid/tiles.json");
+    expect(tiles?.url).not.toBe("https://tiles.test.invalid");
     expect(probeCspDomains()).toContain("https://tiles.test.invalid");
   });
 

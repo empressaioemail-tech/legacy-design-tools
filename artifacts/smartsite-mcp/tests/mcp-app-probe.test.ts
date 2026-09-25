@@ -65,9 +65,10 @@ describe("p559 probe constants", () => {
     expect(origins).toContain("https://mcp.smartsite.cloud");
   });
 
-  it("D-42: the tiles channel and the CSP both carry the CONFIGURED origin, not a literal", () => {
+  it("D-42: the tiles channel probes tiles.json on the configured origin; CSP declares the origin", () => {
     const tiles = probeNetTargets().find((t) => t.key === "tiles");
-    expect(tiles?.url).toBe(TILES_ORIGIN);
+    expect(tiles?.url).toBe(`${TILES_ORIGIN}/tiles.json`);
+    expect(tiles?.url).not.toBe(TILES_ORIGIN);
     expect(probeCspDomains()).toContain(TILES_ORIGIN);
     /* The retired bucket must appear nowhere: not in the channels, not in the
      * declared CSP, not in the served page. */
