@@ -2933,6 +2933,43 @@ export function parseToolResult(text: string): PanelModel {
     if (declaredDegradation) model.degraded = declaredDegradation;
     return model;
   }
+  /* P-437: a single-parcel node read without a drawable ring still paints the
+   * parcel panel (sections, facts, actions), not the screening-board empty copy. */
+  const loneNodeId = stringOrNull(rec.parcelNodeId);
+  if (loneNodeId) {
+    const briefSections = sectionsFromBrief(rec);
+    const onRecord = asRecord(rec.onRecord);
+    if (briefSections.length > 0 || onRecord) {
+      const drawOnly = asRecord(rec.draw);
+      const label =
+        (drawOnly && typeof drawOnly.label === "string" ? drawOnly.label : null) ??
+        stringOrNull(rec.label) ??
+        loneNodeId;
+      const model: PanelModel = {
+        kind: "parcel",
+        rows: [],
+        overlays: drawOnly ? overlaysFromDraw(drawOnly) : [],
+        ring: drawOnly ? ringFromDraw(drawOnly) : [],
+        edges: drawOnly ? edgesFromDraw(drawOnly) : [],
+        parcelNodeId: loneNodeId,
+        label,
+      };
+      if (briefSections.length > 0) model.sections = briefSections;
+      if (drawOnly) {
+        const zoning = zoningFromDraw(drawOnly, rec);
+        if (zoning) model.zoning = zoning;
+        const frame = frameFromDraw(drawOnly);
+        if (frame) model.frame = frame;
+      }
+      const anchorRead = anchorReadFrom(rec.anchorRead);
+      if (anchorRead) {
+        model.anchorRead = anchorRead;
+        const anchor = anchorFrom(rec.anchor, anchorRead);
+        if (anchor) model.anchor = anchor;
+      }
+      return model;
+    }
+  }
   return emptyModel("empty");
 }
 
@@ -2966,6 +3003,17 @@ export function parseToolContent(result: unknown): PanelModel {
   if (typeof result === "string") return parseToolResult(result);
   const rec = asRecord(result);
   if (!rec) return emptyModel("unreadable");
+  /* P-437: some hosts forward the wire record as params without a content array. */
+  if (
+    !Array.isArray(rec.content) &&
+    rec.structuredContent === undefined &&
+    (stringOrNull(rec.parcelNodeId) ||
+      Array.isArray(rec.rows) ||
+      Array.isArray(rec.parcels) ||
+      Array.isArray(rec.screens))
+  ) {
+    return parseToolResult(JSON.stringify(rec));
+  }
   const structured = rec.structuredContent;
   if (structured !== undefined && structured !== null) {
     const record = asRecord(structured);
@@ -3152,6 +3200,9 @@ export const OPEN_TURN_INSTRUCTION =
 
 export const EMPTY_BOARD_TITLE = "No screen yet";
 export const EMPTY_BOARD_BODY = "Paste addresses in the chat. This panel does not search.";
+/** Shown before the host delivers the first tool result; not the screening-board empty state. */
+export const LOADING_PANEL_TITLE = "Loading Smart Site";
+export const LOADING_PANEL_BODY = "Reading this tool result.";
 export const NOTHING_TO_OPEN = "Nothing to open until this resolves";
 /** Host silence after Open click. Late tool results still replace this. */
 export const OPEN_DEAD_MS = 12000;
@@ -3604,7 +3655,13 @@ export function buildAppHtml(): string {
 --ss-fs-meta:12.5px;--ss-fs-body:14.5px;--ss-r-tip:12px;
 --bg:#1c1c1c}
 *{box-sizing:border-box}
+html{scrollbar-color:var(--ss-line-14) var(--bg);scrollbar-width:thin}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:8px;height:8px}
+html::-webkit-scrollbar-track,body::-webkit-scrollbar-track{background:var(--bg)}
+html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb{background:var(--ss-line-14);border-radius:4px}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ss-t3);font:var(--ss-fs-body)/1.45 var(--ss-ui)}
+.boot{display:none}
+html[data-debug="1"] .boot{display:block}
 #root{padding:2px;min-height:420px}
 .card{border:1px solid var(--ss-line-14);border-radius:var(--ss-r-tip);background:var(--ss-ink);overflow:visible;display:flex;flex-direction:column;min-height:400px}
 .hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--ss-t5);flex:0 0 auto}
@@ -3740,9 +3797,11 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 </head>
 <body>
 <div id="boot" class="boot" data-script="off">script-off</div>
-<div id="root"><p class="empty"><b>${EMPTY_BOARD_TITLE}</b>${EMPTY_BOARD_BODY}</p></div>
+<div id="root"><p class="empty"><b>${LOADING_PANEL_TITLE}</b>${LOADING_PANEL_BODY}</p></div>
 <script>
 (function(){
+  var showDebug=/[?&]debug=1(?:&|$)/.test(typeof location!=="undefined"&&location.search?location.search:"");
+  if(showDebug&&document.documentElement){document.documentElement.setAttribute("data-debug","1");}
   var boot=document.getElementById("boot");
   var handshake="off";
   var capText="caps=unread";
@@ -3933,6 +3992,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 ${inlineSharedSource()}
   var esc=escapeHtml;
   var model=emptyModel("empty");
+  var hasToolResult=false;
   var openWait=null;
   var openFail=null;
   var openSent=null;
@@ -4200,7 +4260,8 @@ ${inlineSharedSource()}
     return (openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+(openSent?'<p class="note">'+${JSON.stringify(OPEN_SENT)}+"</p>":"");
   }
   function card(title,inner){
-    return '<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+title+' <span data-script="ran">script-ran</span></div>'+inner+"</div>";
+    var diag=showDebug?' <span data-script="ran" class="diag">script-ran</span>':"";
+    return '<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+title+diag+'</div>'+inner+"</div>";
   }
   function render(){
     var root=document.getElementById("root");
@@ -4266,8 +4327,10 @@ ${inlineSharedSource()}
       root.innerHTML=card(esc(model.declared?model.declared.status:"result"),stateLines()+'<div class="well">'+(model.declared?declaredLineHtml(model.declared):"")+"</div>");
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+${JSON.stringify(RESULT_NOT_READABLE)}+"</b>"+${JSON.stringify(RESULT_NOT_READABLE_BODY)}+"</p>");
+    } else if(!hasToolResult){
+      root.innerHTML=card("panel",stateLines()+'<p class="empty"><b>'+${JSON.stringify(LOADING_PANEL_TITLE)}+"</b>"+${JSON.stringify(LOADING_PANEL_BODY)}+"</p>");
     } else {
-      root.innerHTML=card("waiting",stateLines()+'<p class="empty"><b>'+${JSON.stringify(EMPTY_BOARD_TITLE)}+"</b>"+${JSON.stringify(EMPTY_BOARD_BODY)}+"</p>");
+      root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+${JSON.stringify(EMPTY_BOARD_TITLE)}+"</b>"+${JSON.stringify(EMPTY_BOARD_BODY)}+"</p>");
     }
     requestAnimationFrame(function(){ fitHost(); });
   }
@@ -4393,6 +4456,7 @@ ${inlineSharedSource()}
     }
   });
   function accept(result){
+    hasToolResult=true;
     clearOpenTimer();
     openWait=null;
     openFail=null;
