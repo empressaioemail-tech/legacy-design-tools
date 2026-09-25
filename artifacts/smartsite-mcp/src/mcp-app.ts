@@ -11,6 +11,7 @@ import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
  * listed in INLINE_SHARED: those are embedded into the served page by source and
  * an imported binding does not exist in that scope. See the file-header note. */
 import { mapGroundReasonWords } from "./map-reason-words.js";
+import { mapRenderReportUrl } from "./oauth-metadata.js";
 import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 
 /*
@@ -375,6 +376,32 @@ export type PanelModel = {
   /** M-4: what the array's anchor phase did, as the producer declared it. */
   anchorBatch?: PanelAnchorBatch;
 };
+
+/** P-456b. What the served card reports after render. */
+export function mapCardOutcomeFromModel(model: PanelModel): {
+  outcome: "drawn" | "fallback" | "failed";
+  reasonCode: string;
+} {
+  if (model.kind === "unreadable") {
+    return { outcome: "failed", reasonCode: "panel_unreadable" };
+  }
+  if (
+    model.kind === "miss" ||
+    model.kind === "refused" ||
+    model.kind === "declared"
+  ) {
+    return { outcome: "fallback", reasonCode: model.kind };
+  }
+  if (
+    model.kind === "parcel" ||
+    model.kind === "parcels" ||
+    model.kind === "board" ||
+    model.kind === "screens"
+  ) {
+    return { outcome: "drawn", reasonCode: "ok" };
+  }
+  return { outcome: "fallback", reasonCode: model.kind || "unknown" };
+}
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
   if ((APP_HOST_TOOLS as readonly string[]).includes(name)) {
@@ -3519,10 +3546,21 @@ export function htmlContractViolations(html: string): string[] {
     if (beginCount !== endCount || beginCount > 1) {
       violations.push("probe_block_malformed");
     }
-    const scanned =
+    let scanned =
       beginCount === 1 && endCount === 1
         ? html.replace(/\/\*P559_PROBE_BEGIN\*\/[\s\S]*?\/\*P559_PROBE_END\*\//, "")
         : html;
+    const renderBegin = scanned.split("/*P456B_MAP_RENDER_REPORT_BEGIN*/").length - 1;
+    const renderEnd = scanned.split("/*P456B_MAP_RENDER_REPORT_END*/").length - 1;
+    if (renderBegin !== renderEnd || renderBegin > 1) {
+      violations.push("map_render_report_block_malformed");
+    }
+    if (renderBegin === 1 && renderEnd === 1) {
+      scanned = scanned.replace(
+        /\/\*P456B_MAP_RENDER_REPORT_BEGIN\*\/[\s\S]*?\/\*P456B_MAP_RENDER_REPORT_END\*\//,
+        "",
+      );
+    }
     if (/fetch\(|XMLHttpRequest|WebSocket/.test(scanned)) {
       violations.push("direct_network");
     }
@@ -4200,6 +4238,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var MULTI_NO_CANVAS_DRAWABLE=${JSON.stringify(MULTI_NO_CANVAS_DRAWABLE)};
   var MULTI_NO_CANVAS_NEEDED=${JSON.stringify(MULTI_NO_CANVAS_NEEDED)};
   var PREVIEW_TOOL=${JSON.stringify(PREVIEW_TOOL)};
+  var MAP_RENDER_REPORT_URL=${JSON.stringify(mapRenderReportUrl())};
   var PREVIEW_DEPTH=${JSON.stringify(PREVIEW_DEPTH)};
   var PREVIEW_DWELL_MS=${JSON.stringify(PREVIEW_DWELL_MS)};
   var PREVIEW_TIMEOUT_MS=${JSON.stringify(PREVIEW_TIMEOUT_MS)};
@@ -4681,6 +4720,33 @@ ${inlineSharedSource()}
       render();
     }
   });
+  var pendingMapRenderReport=null;
+  function mapRenderReportFromRecord(host){
+    var m=asRecord(host.mapRenderReport);
+    if(!m) return null;
+    var cid=stringOrNull(m.correlationId);
+    var tok=stringOrNull(m.reportToken);
+    if(!cid||!tok) return null;
+    return {correlationId:cid,reportToken:tok};
+  }
+  function mapCardOutcomeFromModel(m){
+    if(m.kind==="unreadable") return {outcome:"failed",reasonCode:"panel_unreadable"};
+    if(m.kind==="miss"||m.kind==="refused"||m.kind==="declared") return {outcome:"fallback",reasonCode:m.kind};
+    if(m.kind==="parcel"||m.kind==="parcels"||m.kind==="board"||m.kind==="screens") return {outcome:"drawn",reasonCode:"ok"};
+    return {outcome:"fallback",reasonCode:m.kind||"unknown"};
+  }
+  function emitMapRenderReport(m,override){
+    if(!pendingMapRenderReport||!MAP_RENDER_REPORT_URL) return;
+    var pick=override||mapCardOutcomeFromModel(m);
+    var payload={correlationId:pendingMapRenderReport.correlationId,reportToken:pendingMapRenderReport.reportToken,outcome:pick.outcome,reasonCode:pick.reasonCode};
+    if(pendingToolName) payload.tool=pendingToolName;
+    pendingMapRenderReport=null;
+    /*P456B_MAP_RENDER_REPORT_BEGIN*/
+    try{
+      fetch(MAP_RENDER_REPORT_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).catch(function(){});
+    }catch(e){}
+    /*P456B_MAP_RENDER_REPORT_END*/
+  }
   function accept(result){
     hasToolResult=true;
     clearOpenTimer();
@@ -4690,6 +4756,7 @@ ${inlineSharedSource()}
     reportOpen=false;
     groundOn=true;
     pendingToolName=null;
+    pendingMapRenderReport=null;
     sortKey="completeness";
     sortDir=1;
     /* M-5: a new result is a new panel instance, so the per neighbour once
@@ -4705,8 +4772,25 @@ ${inlineSharedSource()}
     previewBusyFor=null;
     previewNode=null;
     previewEl=null;
+    var wire=asRecord(result);
+    if(wire&&wire.structuredContent){
+      var sc=asRecord(wire.structuredContent);
+      if(sc) pendingMapRenderReport=mapRenderReportFromRecord(sc);
+    }
+    if(!pendingMapRenderReport&&wire&&wire.content){
+      var jt=firstJsonObjectTextPart(wire.content);
+      if(jt){
+        try{ pendingMapRenderReport=mapRenderReportFromRecord(JSON.parse(jt)); }catch(e){}
+      }
+    }
     model=parseToolContent(result);
-    render();
+    try{
+      render();
+      emitMapRenderReport(model);
+    }catch(err){
+      emitMapRenderReport(model,{outcome:"failed",reasonCode:"render_threw"});
+      throw err;
+    }
   }
   window.addEventListener("message",function(ev){
     if(ev.source!==window.parent){ foreignCount++; paintBoot(); return; }
