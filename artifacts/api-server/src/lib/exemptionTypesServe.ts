@@ -8,6 +8,10 @@
  */
 
 import { summarizeCadPayload } from "@workspace/adapters/local/cad";
+import type {
+  BrokerageSiteContext,
+  BrokerageSiteContextLayer,
+} from "./brokerageSiteContext";
 
 export type ExemptionDetailLevel = "none" | "homestead-only";
 
@@ -109,7 +113,7 @@ function sanitizeCadTaxPayload(
   } else if (codes === null) {
     delete next.exemptionCodes;
     delete next.exemptions;
-  } else {
+  } else if (Array.isArray(codes)) {
     next.exemptionCodes = codes;
     next.exemptions = codes.map((code) => ({
       code,
@@ -146,12 +150,13 @@ function sanitizeFacetsTree(value: unknown, level: ExemptionDetailLevel): unknow
 }
 
 /** Site-context / brokerage brief layers (cad-tax summaries, payloads). */
-export function applyExemptionTypesServeToSiteContext<
-  T extends { layers: Array<Record<string, unknown>> },
->(ctx: T, level: ExemptionDetailLevel): T {
+export function applyExemptionTypesServeToSiteContext(
+  ctx: BrokerageSiteContext,
+  level: ExemptionDetailLevel,
+): BrokerageSiteContext {
   return {
     ...ctx,
-    layers: ctx.layers.map((layer) => {
+    layers: ctx.layers.map((layer): BrokerageSiteContextLayer => {
       const payload = asRecord(layer.payload);
       if (!payload) return layer;
       let nextPayload = payload;
