@@ -1431,8 +1431,8 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
       esbuild:
-        specifier: 0.25.0
-        version: 0.25.0
+        specifier: 0.27.3
+        version: 0.27.3
       playwright-core:
         specifier: ^1.58.2
         version: 1.58.2
@@ -2493,23 +2493,11 @@ packages:
     resolution: {integrity: sha512-EGqPFUhociTX41lhrGECGXFANQGT5CcajRLeY6ahz1Y3dcRIoU/hUycm6P8PEOncDchgIY8mJTd39XuIPQKSTQ==}
     engines: {node: '>=18.18.0'}
 
-  '@esbuild/linux-x64@0.25.0':
-    resolution: {integrity: sha512-9yl91rHw/cpwMCNytUDxwj2XjFpxML0y9HAOH9pNVQDpQrBxHy01Dx+vaMu0N1CKa/RzBD2hB4u//nfc+Sd3Cw==}
-    engines: {node: '>=18'}
-    cpu: [x64]
-    os: [linux]
-
   '@esbuild/linux-x64@0.27.3':
     resolution: {integrity: sha512-Czi8yzXUWIQYAtL/2y6vogER8pvcsOsk5cpwL4Gk5nJqH5UZiVByIY8Eorm5R13gq+DQKYg0+JyQoytLQas4dA==}
     engines: {node: '>=18'}
     cpu: [x64]
     os: [linux]
-
-  '@esbuild/win32-x64@0.25.0':
-    resolution: {integrity: sha512-ZENoHJBxA20C2zFzh6AI4fT6RraMzjYw4xKWemRTRmRVtN9c5DcH9r/f2ihEkMjOW5eGgrwCslG/+Y/3bL+DHQ==}
-    engines: {node: '>=18'}
-    cpu: [x64]
-    os: [win32]
 
   '@esbuild/win32-x64@0.27.3':
     resolution: {integrity: sha512-4uJGhsxuptu3OcpVAzli+/gWusVGwZZHTlS63hh++ehExkVT8SgiEf7/uC/PclrPPkLhZqGgCTjd0VWLo6xMqA==}
@@ -4763,11 +4751,6 @@ packages:
     resolution: {integrity: sha512-H2/S7Pm8a9CL1uhp9OvjwrBh5Pvx0H8qVOxNu8Wed9Y7qv56MPtq+GGM8RJpq6glYJn9Wspr8uw7l55uyinNeg==}
     peerDependencies:
       esbuild: 0.27.3
-
-  esbuild@0.25.0:
-    resolution: {integrity: sha512-BXq5mqc8ltbaN34cDqWuYKyNhX8D/Z0J1xdtdQ8UcIIIyJyz+ZMKUt58tF3SrZ85jcfN/PZYhjR5uDQAYNVbuw==}
-    engines: {node: '>=18'}
-    hasBin: true
 
   esbuild@0.27.3:
     resolution: {integrity: sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg==}
@@ -7378,13 +7361,7 @@ snapshots:
 
   '@empressaio/setback-corpus@1.2.0': {}
 
-  '@esbuild/linux-x64@0.25.0':
-    optional: true
-
   '@esbuild/linux-x64@0.27.3':
-    optional: true
-
-  '@esbuild/win32-x64@0.25.0':
     optional: true
 
   '@esbuild/win32-x64@0.27.3':
@@ -9776,11 +9753,6 @@ snapshots:
       esbuild: 0.27.3
     transitivePeerDependencies:
       - supports-color
-
-  esbuild@0.25.0:
-    optionalDependencies:
-      '@esbuild/linux-x64': 0.25.0
-      '@esbuild/win32-x64': 0.25.0
 
   esbuild@0.27.3:
     optionalDependencies:
