@@ -17,6 +17,7 @@ import {
   refuseStudioReport,
   snapshotFromAuth,
 } from "./entitlement.js";
+import { customerBriefReason } from "./customer-brief-reason.js";
 import {
   ANCHOR_TIMEOUT_MS,
   anchorFromFacetsBody,
@@ -791,7 +792,10 @@ function citationText(section: BriefSection): string {
 function briefSectionRow(section: BriefSection): string {
   const value = briefSectionValue(section);
   const disposition = section.dispositionDisplayText ?? section.disposition ?? "unknown";
-  const note = section.disposition === "present" ? citationText(section) : (section.reason ?? disposition);
+  const note =
+    section.disposition === "present"
+      ? citationText(section)
+      : (customerBriefReason(section.reason ?? null) ?? disposition);
   return `| ${section.title ?? section.id ?? "?"} | ${value} | ${disposition} | ${note} |`;
 }
 

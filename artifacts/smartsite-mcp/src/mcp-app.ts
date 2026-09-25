@@ -11,6 +11,7 @@ import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
  * listed in INLINE_SHARED: those are embedded into the served page by source and
  * an imported binding does not exist in that scope. See the file-header note. */
 import { mapGroundReasonWords } from "./map-reason-words.js";
+import { customerBriefReason } from "./customer-brief-reason.js";
 import { mapRenderReportUrl } from "./oauth-metadata.js";
 import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 
@@ -2135,7 +2136,8 @@ export function whyControlHtml(
 }
 
 export function reasonLineHtml(key: string, text: string, attr?: string): string {
-  return `<span class="why"${attr ? ` ${attr}` : ""}><span class="key">${escapeHtml(key)}</span> <span class="reason">${escapeHtml(text)}</span></span>`;
+  const face = customerBriefReason(text) ?? text;
+  return `<span class="why"${attr ? ` ${attr}` : ""}><span class="key">${escapeHtml(key)}</span> <span class="reason">${escapeHtml(face)}</span></span>`;
 }
 
 /** F6: as-of (date only) and source when the wire carries them; vintage and provenance for an overlay. */
