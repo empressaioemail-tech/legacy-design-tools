@@ -10,6 +10,7 @@ import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
  * `buildAppHtml` and `registerMcpApp`). It must never be reached from a function
  * listed in INLINE_SHARED: those are embedded into the served page by source and
  * an imported binding does not exist in that scope. See the file-header note. */
+import { mapGroundReasonWords } from "./map-reason-words.js";
 import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 
 /*
@@ -121,10 +122,18 @@ export function probeCspDomains(): string[] {
     "https://mcp.smartsite.cloud",
   ];
 }
+/**
+ * Tools whose results bind the MCP App resource. ask_the_map stays off this list
+ * while readiness is blocked (P-91 item 34): the host would open a card with no
+ * wired handler, which is worse than a declared not_ready text result.
+ */
 export const APP_HOST_TOOLS = [
   "create_screen",
   "list_screens",
   "get_smart_site",
+  "find_parcel",
+  "find_parcels",
+  "find_nearest_parcels",
 ] as const;
 
 export const RAILS = [
@@ -479,6 +488,8 @@ export function retiredRecordSentence(id: unknown, asOf?: string): string {
     RETIRED_RECORD_PREFIX + " " + countyForNodeId(id) + " " + String(id == null ? "" : id);
   return asOf && asOf.trim() !== "" ? base + " as of " + asOf.trim() : base;
 }
+
+export { mapGroundReasonWords };
 
 export function escapeHtml(value: unknown): string {
   return String(value == null ? "" : value)
@@ -989,6 +1000,14 @@ export const GROUND_SUPERSAMPLE = 2;
 export const GROUND_MAX_TILES = 36;
 
 export const GROUND_SOURCE_LABEL = "Aerial: Esri World Imagery";
+/**
+ * P-444: Mapbox Satellite stays off this iframe until a single stable origin
+ * is measured. The public token is URL-restricted to smartsite.cloud and
+ * mcp.smartsite.cloud; Claude's host Referer is not that origin (or is blank),
+ * and wildcards are refused. Never use MAPBOX_SERVER_TOKEN to go around it.
+ */
+export const GROUND_MAPBOX_HOLD_NOTE =
+  "Mapbox held: Claude iframe origin is {32-hex}.claudemcpcontent.com (not mcp.smartsite.cloud); URL restrictions refuse wildcards; no-Referer is 403 and iOS omits Referer.";
 /** Esri publishes no per tile capture date, so we state that we do not know it. */
 export const GROUND_VINTAGE_NOTE = "capture date unstated";
 export const GROUND_TOGGLE_LABEL = "Aerial";
@@ -1116,53 +1135,59 @@ export function groundPlan(
   if (lat > 85 || lat < -85 || lon > 180 || lon < -180) return { plan: null, reason: "ground_anchor_off_world" };
   const fit = ringFit(ring);
   if (!fit) return { plan: null, reason: "ground_no_ring" };
-  const z = groundZoomFor(lat, fit.s);
-  const mpp = groundMetresPerPixel(lat, z);
-  const ppf = groundPixelsPerFoot(lat, z);
-  if (!(mpp > 0) || !(ppf > 0)) return { plan: null, reason: "ground_scale_unresolved" };
-  const world = groundWorldPixel(lat, lon, z);
-  const plan: GroundPlan = {
-    z: z,
-    lat: lat,
-    lon: lon,
-    metresPerPixel: mpp,
-    pixelsPerFoot: ppf,
-    vbPerMapPx: fit.s / ppf,
-    anchorPx: ringPixel(fit, 0, 0),
-    worldPx: world,
-    fit: fit,
-    tiles: [],
-  };
-  const k = plan.vbPerMapPx;
-  const side = Math.pow(2, z);
-  const wxMin = world.wx + (0 - plan.anchorPx.x) / k;
-  const wxMax = world.wx + (fit.w - plan.anchorPx.x) / k;
-  const wyMin = world.wy + (0 - plan.anchorPx.y) / k;
-  const wyMax = world.wy + (fit.h - plan.anchorPx.y) / k;
-  const txMin = Math.max(0, Math.floor(wxMin / GROUND_TILE_PX));
-  const txMax = Math.min(side - 1, Math.floor(wxMax / GROUND_TILE_PX));
-  const tyMin = Math.max(0, Math.floor(wyMin / GROUND_TILE_PX));
-  const tyMax = Math.min(side - 1, Math.floor(wyMax / GROUND_TILE_PX));
-  if (txMax < txMin || tyMax < tyMin) return { plan: null, reason: "ground_off_world" };
-  if ((txMax - txMin + 1) * (tyMax - tyMin + 1) > GROUND_MAX_TILES) {
-    return { plan: null, reason: "ground_tile_cap" };
-  }
-  const size = GROUND_TILE_PX * k;
-  for (let ty = tyMin; ty <= tyMax; ty++) {
-    for (let tx = txMin; tx <= txMax; tx++) {
-      const at = groundVbFromWorld(plan, tx * GROUND_TILE_PX, ty * GROUND_TILE_PX);
-      plan.tiles.push({
-        z: z,
-        x: tx,
-        y: ty,
-        url: groundTileUrl(z, tx, ty),
-        left: at.x,
-        top: at.y,
-        size: size,
-      });
+  let z = groundZoomFor(lat, fit.s);
+  for (;;) {
+    const mpp = groundMetresPerPixel(lat, z);
+    const ppf = groundPixelsPerFoot(lat, z);
+    if (!(mpp > 0) || !(ppf > 0)) return { plan: null, reason: "ground_scale_unresolved" };
+    const world = groundWorldPixel(lat, lon, z);
+    const plan: GroundPlan = {
+      z: z,
+      lat: lat,
+      lon: lon,
+      metresPerPixel: mpp,
+      pixelsPerFoot: ppf,
+      vbPerMapPx: fit.s / ppf,
+      anchorPx: ringPixel(fit, 0, 0),
+      worldPx: world,
+      fit: fit,
+      tiles: [],
+    };
+    const k = plan.vbPerMapPx;
+    const side = Math.pow(2, z);
+    const wxMin = world.wx + (0 - plan.anchorPx.x) / k;
+    const wxMax = world.wx + (fit.w - plan.anchorPx.x) / k;
+    const wyMin = world.wy + (0 - plan.anchorPx.y) / k;
+    const wyMax = world.wy + (fit.h - plan.anchorPx.y) / k;
+    const txMin = Math.max(0, Math.floor(wxMin / GROUND_TILE_PX));
+    const txMax = Math.min(side - 1, Math.floor(wxMax / GROUND_TILE_PX));
+    const tyMin = Math.max(0, Math.floor(wyMin / GROUND_TILE_PX));
+    const tyMax = Math.min(side - 1, Math.floor(wyMax / GROUND_TILE_PX));
+    if (txMax < txMin || tyMax < tyMin) return { plan: null, reason: "ground_off_world" };
+    const tileCount = (txMax - txMin + 1) * (tyMax - tyMin + 1);
+    if (tileCount <= GROUND_MAX_TILES) {
+      const size = GROUND_TILE_PX * k;
+      for (let ty = tyMin; ty <= tyMax; ty++) {
+        for (let tx = txMin; tx <= txMax; tx++) {
+          const at = groundVbFromWorld(plan, tx * GROUND_TILE_PX, ty * GROUND_TILE_PX);
+          plan.tiles.push({
+            z: z,
+            x: tx,
+            y: ty,
+            url: groundTileUrl(z, tx, ty),
+            left: at.x,
+            top: at.y,
+            size: size,
+          });
+        }
+      }
+      return { plan: plan, reason: null };
     }
+    if (z <= GROUND_ZOOM_MIN) {
+      return { plan: null, reason: "ground_tile_cap" };
+    }
+    z -= 1;
   }
-  return { plan: plan, reason: null };
 }
 
 /** viewBox units as a percentage of the box, which is what the mosaic is positioned in. */
@@ -1199,7 +1224,8 @@ export function groundLayerHtml(plan: GroundPlan): string {
 /** Source and vintage, then the toggle. The vintage is stated as unknown, never implied. */
 export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
   if (!plan) return "";
-  const label = GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE;
+  const label =
+    GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE + ". " + GROUND_MAPBOX_HOLD_NOTE;
   return (
     `<div class="gnote" data-ground-note="1"><span data-ground-source="1">${escapeHtml(label)}</span>` +
     `<button type="button" class="btn${on ? " on" : ""}" data-act="ground" data-ground-on="${on ? "1" : "0"}"` +
@@ -1351,6 +1377,42 @@ export function multiGroundReasonWords(reason: string): string {
       " " +
       MULTI_GROUND_TOO_WIDE_SUFFIX
     );
+  }
+  if (
+    reason.startsWith("ground_") ||
+    reason.startsWith("map_") ||
+    reason === "multi_ground_extent"
+  ) {
+    switch (reason) {
+      case "ground_tile_cap":
+        return "Aerial view is shown zoomed out because this parcel covers too much ground at closer zoom.";
+      case "ground_anchor_unread":
+        return "Aerial view is not shown yet because the map anchor was not included in this result.";
+      case "ground_anchor_missing":
+        return "Aerial view is not shown because no map anchor was read for this parcel.";
+      case "ground_anchor_absent":
+        return "Aerial view is not shown because county records carry no anchor point for this parcel.";
+      case "ground_anchor_error":
+        return "Aerial view is still loading or could not be read; the parcel outline is shown.";
+      case "ground_anchor_skipped":
+        return "Aerial view is not shown for this stub read; call again at node depth for imagery.";
+      case "ground_no_ring":
+        return "No parcel outline was returned to draw on the map.";
+      case "ground_off_world":
+      case "ground_anchor_off_world":
+        return "Aerial view is not shown because the anchor lies outside the map.";
+      case "map_no_parcel_hits":
+        return "No parcel matched this lookup, so there is no map to draw.";
+      case "map_located_unbound":
+        return "An address was found but no parcel is bound to it yet, so there is no parcel map.";
+      case "map_wiring_failed":
+        return "The parcel list could not be loaded for the map panel.";
+      default:
+        if (reason.startsWith("ground_anchor_")) {
+          return "Aerial view is not shown (" + reason.replace(/^ground_anchor_/, "") + ").";
+        }
+        return reason.replace(/_/g, " ");
+    }
   }
   return reason;
 }
@@ -1625,6 +1687,14 @@ export function multiUndrawnHtml(list: UndrawnParcel[], title?: string): string 
       '<span class="reason">' + escapeHtml(u.reason) + "</span></div>";
   }
   return '<div class="pset-list"><div class="req">' + escapeHtml(head) + " (" + list.length + ")</div>" + rows + "</div>";
+}
+
+/** Why there is no aerial under a single-parcel draw. Empty when ground painted. */
+export function singleGroundNoteHtml(reason: string): string {
+  return (
+    '<div class="gnote" data-ground-refused="' + escapeHtml(reason) + '">' +
+    escapeHtml(multiGroundReasonWords(reason)) + "</div>"
+  );
 }
 
 /** Why there is no ground under this canvas. Empty when there is one. */
@@ -2584,11 +2654,14 @@ export function renderParcelDraw(
   });
   /* M-2: ground under the drawing when the anchor was read, otherwise the svg
    * exactly as it renders with no anchor on the wire. */
-  const drawn = groundWrapHtml(
-    svg,
-    groundPlan(model.ring ?? [], model.anchor ?? null, model.anchorRead ?? null).plan,
-    groundOn === undefined ? true : groundOn,
+  const groundOutcome = groundPlan(
+    model.ring ?? [],
+    model.anchor ?? null,
+    model.anchorRead ?? null,
   );
+  const drawn =
+    groundWrapHtml(svg, groundOutcome.plan, groundOn === undefined ? true : groundOn) +
+    (groundOutcome.plan || !groundOutcome.reason ? "" : singleGroundNoteHtml(groundOutcome.reason));
   const tip = svg ? `<div class="tip" data-tip="1">${EDGE_TIP_HINT}</div>${frameNoteHtml(model.frame ?? null)}` : "";
   const edgeList = (model.edges ?? []).length
     ? `<ul class="edges">${(model.edges ?? [])
@@ -2935,6 +3008,17 @@ export function parseToolResult(text: string): PanelModel {
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
     return emptyModel("empty");
   }
+  const mapPanelNote = stringOrNull(rec.mapPanelNote);
+  if (mapPanelNote && !asRecord(rec.draw) && !Array.isArray(rec.parcels)) {
+    return {
+      kind: "parcel",
+      rows: [],
+      overlays: [],
+      ring: [],
+      edges: [],
+      label: mapPanelNote,
+    };
+  }
 
   /* M-4: a node array with two or more DRAWABLE parcels is a set, and it is
    * read before the single-parcel branch below, because that branch takes
@@ -3144,6 +3228,7 @@ export function parseToolContent(result: unknown): PanelModel {
  * (tests/mcp-app-served.test.ts) runs the embedded copy and fails on a missing one.
  */
 const INLINE_SHARED: ReadonlyArray<Function> = [
+  singleGroundNoteHtml,
   asRecord,
   railState,
   numberOrNull,
@@ -3539,7 +3624,8 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("function groundPlan") ||
     !html.includes("function groundWrapHtml") ||
     !html.includes(GROUND_TILE_URL_TEMPLATE) ||
-    !html.includes(GROUND_VINTAGE_NOTE)
+    !html.includes(GROUND_VINTAGE_NOTE) ||
+    !html.includes(GROUND_MAPBOX_HOLD_NOTE)
   ) {
     violations.push("ground_unbound");
   }
@@ -4080,6 +4166,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var GROUND_SUPERSAMPLE=${JSON.stringify(GROUND_SUPERSAMPLE)};
   var GROUND_MAX_TILES=${JSON.stringify(GROUND_MAX_TILES)};
   var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
+  var GROUND_MAPBOX_HOLD_NOTE=${JSON.stringify(GROUND_MAPBOX_HOLD_NOTE)};
   var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
   var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
   /* M-4 multi parcel canvas. Same rule as the ground constants above: the served
@@ -4426,7 +4513,9 @@ ${inlineSharedSource()}
       var flood=floodOverlayOf(model.overlays);
       var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null});
       /* M-2: same helpers the exported twin uses; a null plan returns svg untouched */
-      var drawn=groundWrapHtml(svg,groundPlan(model.ring||[],model.anchor||null,model.anchorRead||null).plan,groundOn);
+      var gOutcome=groundPlan(model.ring||[],model.anchor||null,model.anchorRead||null);
+      var drawn=groundWrapHtml(svg,gOutcome.plan,groundOn);
+      if(!gOutcome.plan&&gOutcome.reason){ drawn+=singleGroundNoteHtml(gOutcome.reason); }
       var tip=svg?'<div class="tip" data-tip="1">'+EDGE_TIP_HINT+"</div>"+frameNoteHtml(model.frame||null):"";
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
       var secs=model.sections||[];

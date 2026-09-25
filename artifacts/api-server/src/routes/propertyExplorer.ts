@@ -111,11 +111,11 @@ import {
   rollSitusCityIsDeclaredAbsent,
 } from "../lib/situsCompose";
 import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
-import {
-  composeSmartSiteStub,
-  type RailReadInput,
-} from "../lib/smartSiteStub";
-import type { FloodHazardFactRead } from "../lib/floodHazardFactRead";
+import { assembleSmartSiteStubBody } from "../lib/smartSiteStubServe";
+import { resolveNearestParcelsQueryable } from "../lib/nearestParcelsDb";
+import { searchNearestParcels } from "../lib/txgioNearestParcels";
+import { loadNearestParcelFactRow } from "../lib/nearestParcelFacts";
+import { gtmErrorBody } from "../lib/gtmErrorClass";
 import { installIdFromRequest } from "../lib/brokerageInstallId";
 import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
 import { isStripeConfigured } from "../lib/brokerageStripe";
@@ -179,15 +179,6 @@ function parcelNodeIdFromR1RunId(runId: string): string | null {
   } catch {
     return null;
   }
-}
-
-function floodReadToRail(flood: FloodHazardFactRead): RailReadInput {
-  return {
-    attempted: true,
-    state: flood.state,
-    code: flood.state === "refused" ? flood.code : undefined,
-    kind: "flood",
-  };
 }
 
 /**
@@ -498,44 +489,7 @@ async function assembleNodeBriefBody(
 }
 
 async function assembleStubBody(parcelNodeId: string) {
-  const snapshot = await loadBakedNodeFacetSnapshot(parcelNodeId);
-  if (!snapshot) return null;
-  /**
-   * P-270 CITY HALF (2026-09-19). The MCP label's city-limits licence: the
-   * label's city comes from `situsCompose.resolveSitusCity`, which may name the
-   * city whose limits contain the parcel where the payload's own roll city is a
-   * DECLARED `absent-verified` absence.
-   *
-   * The determination is read ONLY for exactly that shape, so this path pays for
-   * a city-limits read only where the read can change the answer — a screen of
-   * stubs whose payloads state their own roll city reads nothing extra, and the
-   * label is byte-identical to before. The read itself is the same call the
-   * brief body above already makes (`loadCityLimitsFactForServe`, the snapshot's
-   * own query point), not a second mechanism.
-   */
-  const needsCityLimits = rollSitusCityIsDeclaredAbsent(
-    rollSitusCityFromFacets(snapshot.facets),
-  );
-  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact, cityLimitsFact] =
-    await Promise.all([
-      loadFloodHazardFactForServe(parcelNodeId),
-      // OPS-16 A-096/A-097/A-098: zoning/setbacks not-applicable fix.
-      loadZoningFactForServe(parcelNodeId),
-      loadSetbacksFactForServe(parcelNodeId),
-      needsCityLimits
-        ? loadCityLimitsFactForServe(parcelNodeId, snapshot.queryPoint ?? null)
-        : Promise.resolve(null),
-    ]);
-  return composeSmartSiteStub({
-    parcelNodeId,
-    facets: snapshot.facets,
-    flood: floodReadToRail(floodHazardFact),
-    drainage: { attempted: false },
-    envelopeBriefRefusal: snapshot.envelopeBriefRefusal,
-    parcelRecordZoningFact,
-    parcelRecordSetbacksFact,
-    cityLimitsFact,
-  });
+  return assembleSmartSiteStubBody(parcelNodeId);
 }
 
 /**
@@ -1450,6 +1404,70 @@ router.post(
       else notFound.push(item.id);
     }
     res.json({ parcels, notFound });
+  },
+);
+
+const NearestParcelsBodySchema = z
+  .object({
+    parcelNodeId: z.string().trim().min(1).max(128),
+    cap: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+
+/**
+ * N nearest parcels by boundary distance in the txgio parcel store, with stub
+ * facts under the same entitlement gate as research/brief. No owner or dollar
+ * fields (stub depth only).
+ */
+router.post(
+  "/property-explorer/v1/research/nearest-parcels",
+  requirePeAuthenticated,
+  requirePePaidOrPropertyUnlocked((req) => {
+    const body = req.body as { parcelNodeId?: unknown };
+    return typeof body?.parcelNodeId === "string" ? body.parcelNodeId.trim() : null;
+  }),
+  async (req: Request, res: Response) => {
+    const parsed = NearestParcelsBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid_input" });
+      return;
+    }
+    const db = resolveNearestParcelsQueryable();
+    const geom = await searchNearestParcels({
+      parcelNodeId: parsed.data.parcelNodeId,
+      cap: parsed.data.cap,
+      db,
+    });
+    if ("refused" in geom) {
+      const status =
+        geom.code === "nearest_store_not_configured"
+          ? 503
+          : geom.code === "nearest_subject_not_in_store"
+            ? 404
+            : 422;
+      res.status(status).json(gtmErrorBody("serve_refused", geom.code, geom.reason));
+      return;
+    }
+    const parcels: unknown[] = [];
+    const notFound: string[] = [];
+    for (const hit of geom.neighbors) {
+      const row = await loadNearestParcelFactRow({
+        parcelNodeId: hit.parcelNodeId,
+        distanceFt: hit.distanceFt,
+      });
+      if (row) parcels.push(row);
+      else notFound.push(hit.parcelNodeId);
+    }
+    res.json({
+      subjectParcelNodeId: geom.subjectParcelNodeId,
+      cap: geom.cap,
+      received: parcels.length,
+      truncated: geom.truncated,
+      distanceMethod: geom.distanceMethod,
+      spatialIndex: geom.spatialIndex,
+      parcels,
+      notFound,
+    });
   },
 );
 

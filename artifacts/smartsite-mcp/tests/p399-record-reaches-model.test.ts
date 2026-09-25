@@ -257,7 +257,7 @@ describe("P-399 negatives: the paths that already worked are untouched", () => {
     });
   });
 
-  it("NEGATIVE 2 -- find_parcel still answers its hits verbatim in one text part, no resource_link", async () => {
+  it("NEGATIVE 2 -- find_parcel carries hits in content[0] and binds the MCP App (P-446)", async () => {
     mockCortexFetch.mockResolvedValue(
       new Response(
         JSON.stringify({ hits: [{ parcelNodeId: "48021:34137", label: "908 PINE" }] }),
@@ -271,8 +271,7 @@ describe("P-399 negatives: the paths that already worked are untouched", () => {
       })) as { content?: Array<{ type: string; text?: string }>; isError?: boolean };
 
       expect(result.isError).toBe(false);
-      expect((result.content ?? []).map((c) => c.type)).toEqual(["text", "text"]);
-      expect((result.content ?? []).some((c) => c.type === "resource_link")).toBe(false);
+      expect((result.content ?? []).some((c) => c.type === "resource_link")).toBe(true);
       const body = JSON.parse((result.content as Array<{ text: string }>)[0].text);
       expect(body.hits[0].parcelNodeId).toBe("48021:34137");
     });
