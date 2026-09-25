@@ -64,6 +64,12 @@ import {
   registerVocabularyResource,
   STANDING_VOCAB_CONTENT_PART,
 } from "./vocabulary.js";
+import { LIST_NODE_DEPTH_CAP } from "./map-reliability.js";
+import { wireFindParcelForMap, wireFindParcelsForMap } from "./map-tool-wire.js";
+import {
+  recordMapRenderEvent,
+  type MapRenderOutcome,
+} from "./render-metrics.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -242,7 +248,22 @@ export function splitFindParcelHits(bodyText: string): string {
         : undefined,
     );
   }
-  return injectCardContract(JSON.stringify(out), "none").text;
+  return JSON.stringify(out);
+}
+
+function hostKeyFromAuth(userId: string): string {
+  return userId.trim() || "unknown-host";
+}
+
+function recordToolMapIntent(
+  host: string,
+  tool: SmartsiteToolName,
+  view: CardView,
+  reasonCode: string,
+): void {
+  const outcome: MapRenderOutcome =
+    view === "none" ? "fallback" : view === "single-parcel" || view === "parcel-set" ? "card" : "card";
+  recordMapRenderEvent(host, tool, outcome, reasonCode);
 }
 
 function notReadyMessage(tool: string, reason: string): string {
@@ -614,12 +635,19 @@ function cardViewFromResultContent(content: HandlerResult["content"]): CardView 
   return null;
 }
 
-function enrichAppToolJsonText(toolName: SmartsiteToolName, text: string): HandlerResult {
+function enrichAppToolJsonText(
+  toolName: SmartsiteToolName,
+  text: string,
+  host?: string,
+): HandlerResult {
   let view: CardView = "none";
   try {
     view = cardViewFromToolPayload(toolName, JSON.parse(text) as Record<string, unknown>);
   } catch {
     view = toolName === "create_screen" || toolName === "list_screens" ? "screen-board" : "none";
+  }
+  if (host) {
+    recordToolMapIntent(host, toolName, view, view === "none" ? "card_contract_none" : "ok");
   }
   const { text: enriched } = injectCardContract(text, view);
   return { content: [{ type: "text" as const, text: enriched }], isError: false };
@@ -952,10 +980,19 @@ export function registerTools(server: McpServer): void {
               // tool must not strip, merge, or reorder any of them: a response
               // carrying only `matched` is the defect this card exists to
               // prevent.
-              return {
-                content: [{ type: "text" as const, text: body }],
-                isError: false,
-              };
+              const host = hostKeyFromAuth(auth.userId);
+              const canSeeOwner = canRunStudioReport(entitlement);
+              const wired = await wireFindParcelsForMap(config, auth.userId, body, canSeeOwner);
+              let view: CardView = "single-parcel";
+              try {
+                view = cardViewFromToolPayload(
+                  "find_parcels",
+                  JSON.parse(wired) as Record<string, unknown>,
+                );
+              } catch {
+                view = "none";
+              }
+              return enrichAppToolJsonText("find_parcels", wired, host);
             });
           }
           case "find_parcel": {
@@ -1017,10 +1054,19 @@ export function registerTools(server: McpServer): void {
                 // 200: cap, received, truncated, radiusFt, hits pass through
                 // verbatim. Truncation is a field cortex already puts on
                 // the wire; this tool must not strip it.
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: false,
-                };
+                const host = hostKeyFromAuth(auth.userId);
+                const canSeeOwner = canRunStudioReport(entitlement);
+                const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
+                let view: CardView = "single-parcel";
+                try {
+                  view = cardViewFromToolPayload(
+                    "find_parcel",
+                    JSON.parse(wired) as Record<string, unknown>,
+                  );
+                } catch {
+                  view = "none";
+                }
+                return enrichAppToolJsonText("find_parcel", wired, host);
               });
             }
 
@@ -1052,10 +1098,19 @@ export function registerTools(server: McpServer): void {
                   return upstreamErrorResult(res.status, body);
                 }
                 // 200: cap, received, truncated, hits pass through verbatim.
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: false,
-                };
+                const host = hostKeyFromAuth(auth.userId);
+                const canSeeOwner = canRunStudioReport(entitlement);
+                const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
+                let view: CardView = "single-parcel";
+                try {
+                  view = cardViewFromToolPayload(
+                    "find_parcel",
+                    JSON.parse(wired) as Record<string, unknown>,
+                  );
+                } catch {
+                  view = "none";
+                }
+                return enrichAppToolJsonText("find_parcel", wired, host);
               });
             }
 
@@ -1076,12 +1131,20 @@ export function registerTools(server: McpServer): void {
               );
               const body = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, body);
-              return {
-                content: [
-                  { type: "text" as const, text: splitFindParcelHits(body) },
-                ],
-                isError: false,
-              };
+              const split = splitFindParcelHits(body);
+              const host = hostKeyFromAuth(auth.userId);
+              const canSeeOwner = canRunStudioReport(entitlement);
+              const wired = await wireFindParcelForMap(config, auth.userId, split, canSeeOwner);
+              let view: CardView = "single-parcel";
+              try {
+                view = cardViewFromToolPayload(
+                  "find_parcel",
+                  JSON.parse(wired) as Record<string, unknown>,
+                );
+              } catch {
+                view = "none";
+              }
+              return enrichAppToolJsonText("find_parcel", wired, host);
             });
           }
           case "get_smart_site": {
@@ -1107,9 +1170,16 @@ export function registerTools(server: McpServer): void {
             const ids = Array.isArray(parcelNodeId)
               ? parcelNodeId
               : [parcelNodeId];
-            // Published defaults: an array reads at stub, one id at node.
+            // P-446: small lists default to node depth so the map canvas can draw.
             const effectiveDepth: ImplementedDepth =
-              depth ?? (Array.isArray(parcelNodeId) ? "stub" : "node");
+              depth ??
+              (Array.isArray(parcelNodeId) &&
+              parcelNodeId.length > 0 &&
+              parcelNodeId.length <= LIST_NODE_DEPTH_CAP
+                ? "node"
+                : Array.isArray(parcelNodeId)
+                  ? "stub"
+                  : "node");
             const cap = batchCapFor(effectiveDepth);
             if (Array.isArray(parcelNodeId) && ids.length > cap) {
               return {
@@ -1205,11 +1275,13 @@ export function registerTools(server: McpServer): void {
               const anchored = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
+              const host = hostKeyFromAuth(auth.userId);
               if (mode === "single-node") {
+                recordToolMapIntent(host, "get_smart_site", "single-parcel", "ok");
                 return shapeSmartSiteNodeResult(anchored);
               }
               if (Array.isArray(parcelNodeId)) {
-                return enrichAppToolJsonText("get_smart_site", anchored);
+                return enrichAppToolJsonText("get_smart_site", anchored, host);
               }
               return {
                 content: [{ type: "text" as const, text: anchored }],
@@ -1413,7 +1485,7 @@ export function registerTools(server: McpServer): void {
                 if (upgrade) return upgradeRequiredResult(upgrade);
                 return upstreamErrorResult(res.status, text);
               }
-              return enrichAppToolJsonText("create_screen", text);
+              return enrichAppToolJsonText("create_screen", text, hostKeyFromAuth(auth.userId));
             });
           }
           case "add_to_screen": {
@@ -1456,7 +1528,7 @@ export function registerTools(server: McpServer): void {
               });
               const text = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, text);
-              return enrichAppToolJsonText("list_screens", text);
+              return enrichAppToolJsonText("list_screens", text, hostKeyFromAuth(auth.userId));
             });
           }
           case "save_property": {

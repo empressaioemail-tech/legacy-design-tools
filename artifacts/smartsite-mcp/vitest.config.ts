@@ -10,6 +10,7 @@ export default defineConfig({
       // never be mistaken for the real Spaces origin D-42 creates. The unset
       // refusal is proven separately in tests/parcel-tiles-origin.test.ts.
       PARCEL_TILES_ORIGIN: "https://tiles.test.invalid",
+      SMARTSITE_MAP_WIRE: "0",
     },
   },
 });
