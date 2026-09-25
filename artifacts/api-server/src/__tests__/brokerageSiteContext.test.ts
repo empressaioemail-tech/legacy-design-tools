@@ -371,7 +371,8 @@ describe("fetchBrokerageSiteContext", () => {
 
     const tax = ctx.layers.find((l) => l.layerKind === "cad-tax");
     expect(tax?.summary).toContain("CAD assessed value $285,000 (tax year 2026)");
-    expect(tax?.summary).toContain("Homestead (HS), Over-65 (OV65)");
+    // P-453: free-tier site context carries no non-homestead exemption types.
+    expect(tax?.summary).not.toMatch(/Over-65|OV65/i);
 
     const occ = ctx.layers.find((l) => l.layerKind === "cad-owner-occupancy");
     expect(occ?.summary).toContain("Likely absentee owner");
