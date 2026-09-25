@@ -1085,7 +1085,6 @@ brokerageNodeFacetsRouter.get(
       // maxLotCoveragePct's own block.
       maxFootprintSqFtFact,
       }),
-      ) as Record<string, unknown>,
         exemptionDetailLevelForOwnerCoGate(grantsOwnerFact),
       ),
     );
