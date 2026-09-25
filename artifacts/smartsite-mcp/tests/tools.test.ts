@@ -44,6 +44,7 @@ const defaultAuth: SmartsiteAuthContext = {
   accessTier: "paid",
   subscriptionTier: "studio",
   devRole: false,
+  hostSession: { clientName: "vitest", uiCapable: true },
 };
 
 let mockAuth: SmartsiteAuthContext = { ...defaultAuth };

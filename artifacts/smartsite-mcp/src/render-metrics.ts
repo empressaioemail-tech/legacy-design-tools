@@ -1,4 +1,4 @@
-/**
+﻿/**
  * P-446 / P-456b. Map render telemetry: server records *sent*; the MCP App
  * reports drawn / fallback / failed. Counts are in-process on this instance;
  * operators aggregate JSON log lines across replicas.

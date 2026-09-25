@@ -26,6 +26,7 @@ const mockAuth: SmartsiteAuthContext = {
   accessTier: "paid",
   subscriptionTier: "solo",
   devRole: false,
+  hostSession: { clientName: "vitest", uiCapable: true },
 };
 vi.mock("../src/request-context.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/request-context.js")>();

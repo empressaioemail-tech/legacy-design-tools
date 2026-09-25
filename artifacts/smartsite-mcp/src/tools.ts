@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+﻿import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { SMARTSITE_MCP_TOOLS, type SmartsiteToolName } from "./constants.js";
@@ -30,7 +30,7 @@ import {
   type AnchorOutcome,
   type BatchAnchorOutcome,
 } from "./parcel-anchor.js";
-import { requireAuthContext } from "./request-context.js";
+import { hostSessionFromAuth, requireAuthContext } from "./request-context.js";
 import {
   executeExportInstrument,
   exportKindNotAvailableResult,
@@ -71,8 +71,9 @@ import {
   wireFindParcelForMap,
   wireFindParcelsForMap,
 } from "./map-tool-wire.js";
-import { renderHostKeyForUser } from "./mcp-client-context.js";
 import type { McpRenderHostKey } from "./mcp-host-key.js";
+import { hostKeyFromSession } from "./host-ui-capability.js";
+import { applyHostTierToResult } from "./host-tier-result.js";
 import {
   recordMapRenderNoMap,
   recordMapRenderSent,
@@ -105,7 +106,7 @@ const CREATE_SCREEN_SOURCES = ["pasted", "map-selection"] as const;
  * P-91 v3 Q1. Mirrors PARCEL_NODE_ID_RE in
  * artifacts/api-server/src/routes/brokeragePlaceSitusSearch.ts (read
  * 2026-08-31): county FIPS, colon, county-assigned parcel id. Used to pick
- * find_parcel's `near` centre-point path — a parcel node id reads the
+ * find_parcel's `near` centre-point path ΓÇö a parcel node id reads the
  * anchor (node facets) route the same way M-1 does; anything else geocodes
  * as free text via place/resolve.
  */
@@ -214,13 +215,13 @@ function askTheMapInputSchema(): typeof ASK_THE_MAP_STRICT {
  * exists, parcel not bound" instead of "no match". Non-JSON bodies pass through.
  *
  * P-107 (OPS-16 A-072). Cortex may also carry `missClass: "out_of_coverage"`
- * (plus `outOfCoverageState`) straight through from searchPlaceByPrefix —
+ * (plus `outOfCoverageState`) straight through from searchPlaceByPrefix ΓÇö
  * the query resolved to a state Smart Site's store has not reached, fired
  * BEFORE the store was ever searched, so there is no `located` row to move
  * here either. That token is enriched with `missClassDisplayText` and
  * `agentGuidance` (read from the shared VOCABULARY / mirrored coverage
- * constant in tool-honesty.ts) so a caller reads a served answer — what IS
- * covered today — rather than a bare, unexplained machine token. `no-hit`
+ * constant in tool-honesty.ts) so a caller reads a served answer ΓÇö what IS
+ * covered today ΓÇö rather than a bare, unexplained machine token. `no-hit`
  * and `located-unbound` are left exactly as they were: unenriched.
  */
 export function splitFindParcelHits(bodyText: string): string {
@@ -259,6 +260,14 @@ export function splitFindParcelHits(bodyText: string): string {
     );
   }
   return JSON.stringify(out);
+}
+
+function hostKeyFromAuth(): McpRenderHostKey {
+  const auth = requireAuthContext();
+  return hostKeyFromSession(
+    hostSessionFromAuth(auth),
+    auth.userId,
+  ) as McpRenderHostKey;
 }
 
 function injectMapRenderReportFields(
@@ -345,7 +354,7 @@ function upstreamErrorResult(httpStatus: number, bodyText: string): ToolResult {
 
 /**
  * A refusal this server itself makes (as opposed to one it relays from an
- * upstream serve_refused body — see declarePlaceSearchRefusal in
+ * upstream serve_refused body ΓÇö see declarePlaceSearchRefusal in
  * tool-honesty.ts for that case, which carries its own shape). `reason` is
  * a machine token, matching this file's own convention (parcel_batch_cap,
  * screen_id_not_accepted); `extra` carries any additional declared fields
@@ -458,8 +467,8 @@ type CenterPointOutcome =
  * any address; the node facets route serves cityLimitsFact.queryPoint per
  * parcel (parcel-anchor.ts's M-1 anchor).
  *
- * situs-search is not used here. Its parcel-situs hits — the common case
- * when `query` already names a known parcel — carry no coordinate at all
+ * situs-search is not used here. Its parcel-situs hits ΓÇö the common case
+ * when `query` already names a known parcel ΓÇö carry no coordinate at all
  * (SitusSearchHit in txgioAddressResolve.ts has no lat/lng field; only the
  * rarer address-point hits do), so routing through it would still need a
  * second lookup for the common case and buys nothing over calling the
@@ -743,26 +752,35 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<HandlerResult>;
 /**
  * V2 (P-91 v3), payload half, standing-block leg. Every tool result gets
  * one extra content entry: the vocabulary lookup block, byte-identical on
- * every call. content[0] — the tool's own JSON — is never touched or
+ * every call. content[0] ΓÇö the tool's own JSON ΓÇö is never touched or
  * reordered, so every existing caller that reads content[0] sees exactly
  * what it saw before this wrapper existed; this is purely additive.
  *
  * P-243 amendment: a result may opt out via skipStandingVocab when its own
  * content[0] is already composed prose, not raw tokens.
  */
-function attachStandingVocabBlock(handler: ToolHandler): ToolHandler {
+function attachStandingVocabBlock(
+  toolName: SmartsiteToolName,
+  handler: ToolHandler,
+): ToolHandler {
   return async (args) => {
+    const auth = requireAuthContext();
+    const hostSession = hostSessionFromAuth(auth);
     const { skipStandingVocab, ...result } = await handler(args);
-    if (skipStandingVocab) return result;
-    const withVocab = {
-      ...result,
-      content: [...result.content, STANDING_VOCAB_CONTENT_PART],
-    };
-    const view = cardViewFromResultContent(withVocab.content);
-    if (view && view !== "none") {
-      return { ...withVocab, content: [...withVocab.content, APP_BOARD_LINK] };
+    let shaped = result;
+    if (!skipStandingVocab) {
+      const withVocab = {
+        ...shaped,
+        content: [...shaped.content, STANDING_VOCAB_CONTENT_PART],
+      };
+      const view = cardViewFromResultContent(withVocab.content);
+      if (view && view !== "none" && hostSession.uiCapable) {
+        shaped = { ...withVocab, content: [...withVocab.content, APP_BOARD_LINK] };
+      } else {
+        shaped = withVocab;
+      }
     }
-    return withVocab;
+    return applyHostTierToResult(toolName, shaped, hostSession, auth.userId);
   };
 }
 
@@ -800,7 +818,7 @@ function briefSectionRow(section: BriefSection): string {
 }
 
 function briefSectionValue(section: BriefSection): string {
-  if (section.disposition !== "present" || !section.data) return "—";
+  if (section.disposition !== "present" || !section.data) return "ΓÇö";
   const d = section.data;
   switch (section.id) {
     case "zoning":
@@ -984,7 +1002,7 @@ export function registerTools(server: McpServer): void {
         annotations: annotationsFor(tool.name),
         ...(uiMeta ? { _meta: uiMeta } : {}),
       },
-      attachStandingVocabBlock(async (args: Record<string, unknown>) => {
+      attachStandingVocabBlock(tool.name, async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
 
@@ -1010,7 +1028,7 @@ export function registerTools(server: McpServer): void {
             if (!subject) {
               return declaredRefusalResult(
                 "nearest_invalid_node",
-                "parcelNodeId is required — the subject parcel you want neighbours for.",
+                "parcelNodeId is required ΓÇö the subject parcel you want neighbours for.",
               );
             }
             return withCortex(async (config) => {
@@ -1049,7 +1067,7 @@ export function registerTools(server: McpServer): void {
                 }
                 return upstreamErrorResult(res.status, body);
               }
-              const host = renderHostKeyForUser(auth.userId);
+              const host = hostKeyFromAuth();
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindNearestParcelsForMap(
                 config,
@@ -1116,7 +1134,7 @@ export function registerTools(server: McpServer): void {
               // tool must not strip, merge, or reorder any of them: a response
               // carrying only `matched` is the defect this card exists to
               // prevent.
-              const host = renderHostKeyForUser(auth.userId);
+              const host = hostKeyFromAuth();
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindParcelsForMap(config, auth.userId, body, canSeeOwner);
               let view: CardView = "single-parcel";
@@ -1190,7 +1208,7 @@ export function registerTools(server: McpServer): void {
                 // 200: cap, received, truncated, radiusFt, hits pass through
                 // verbatim. Truncation is a field cortex already puts on
                 // the wire; this tool must not strip it.
-                const host = renderHostKeyForUser(auth.userId);
+                const host = hostKeyFromAuth();
                 const canSeeOwner = canRunStudioReport(entitlement);
                 const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
                 let view: CardView = "single-parcel";
@@ -1234,7 +1252,7 @@ export function registerTools(server: McpServer): void {
                   return upstreamErrorResult(res.status, body);
                 }
                 // 200: cap, received, truncated, hits pass through verbatim.
-                const host = renderHostKeyForUser(auth.userId);
+                const host = hostKeyFromAuth();
                 const canSeeOwner = canRunStudioReport(entitlement);
                 const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
                 let view: CardView = "single-parcel";
@@ -1268,7 +1286,7 @@ export function registerTools(server: McpServer): void {
               const body = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, body);
               const split = splitFindParcelHits(body);
-              const host = renderHostKeyForUser(auth.userId);
+              const host = hostKeyFromAuth();
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindParcelForMap(config, auth.userId, split, canSeeOwner);
               let view: CardView = "single-parcel";
@@ -1411,7 +1429,7 @@ export function registerTools(server: McpServer): void {
               const anchored = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
-              const host = renderHostKeyForUser(auth.userId);
+              const host = hostKeyFromAuth();
               if (mode === "single-node") {
                 const correlationId = recordToolMapIntent(
                   host,
@@ -1531,19 +1549,19 @@ export function registerTools(server: McpServer): void {
           // never-existent POST /tools/export_instrument REST route; and the
           // upstream tools' SDK metering is absorbed on Legacy Group ATX's
           // side via this server's own HAUSKA_MCP_SERVICE_KEY (operator
-          // ruling, not a new billing mechanism — see export-instrument.ts).
+          // ruling, not a new billing mechanism ΓÇö see export-instrument.ts).
           //
           // GATES CORRECTED, P-119 / OPS-16 A-103. The operator's final
           // package table settled two things this connector had wrong:
           // dossier (X-ray) was gated Studio/Team here while the web app
-          // has only ever required Solo+ (or a property unlock) — backwards,
+          // has only ever required Solo+ (or a property unlock) ΓÇö backwards,
           // corrected below to match the web app (A-068/A-074/A-099 named
           // this divergence; never resolved until now). Site plan and
           // terrain keep their Studio/Team ceiling but now ALSO clear on a
-          // property unlock, per the table's Property Unlock row — a
+          // property unlock, per the table's Property Unlock row ΓÇö a
           // per-parcel lookup, checked only when the account-wide Studio
           // check fails, never a broadened account-level predicate (that
-          // shape — `tier !== 'paid'` — is exactly the over-grant class
+          // shape ΓÇö `tier !== 'paid'` ΓÇö is exactly the over-grant class
           // A-068 found live once already).
           case "export_instrument": {
             const { parcelNodeId, kind } = args as {
@@ -1554,7 +1572,7 @@ export function registerTools(server: McpServer): void {
               return exportKindNotAvailableResult();
             }
             if (kind === "feasibility") {
-              // Studio/Team OR a property unlock (P-119) — same shape as
+              // Studio/Team OR a property unlock (P-119) ΓÇö same shape as
               // site plan/terrain below, but there is no hauska-mcp-server
               // tool to proxy: this calls hauska-engine-api directly (see
               // feasibility-export.ts).
@@ -1566,12 +1584,12 @@ export function registerTools(server: McpServer): void {
               }
               // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13):
               // this line is reached ONLY after the Studio-or-unlock check
-              // above already passed (by subscription OR by unlock — either
+              // above already passed (by subscription OR by unlock ΓÇö either
               // one), so callerTier is always "public-paid" here. Passed
               // explicitly, never a hardcoded default inside
               // buildEngineGateHeaders, so a future call site that skips
               // the check above sends "public-free" and the engine's own
-              // independent tier check refuses it — defense in depth.
+              // independent tier check refuses it ΓÇö defense in depth.
               // `entitlement` is carried too so a refusal from the ENGINE's
               // own gate (an outcome this local check did not expect,
               // since it already said yes) surfaces in the same
@@ -1585,7 +1603,7 @@ export function registerTools(server: McpServer): void {
               );
             }
             if (isPropertyExportKind(kind)) {
-              // dossier (X-ray): Solo+ OR a property unlock — matches the
+              // dossier (X-ray): Solo+ OR a property unlock ΓÇö matches the
               // web app's resolveDossierExportAuth exactly (P-119 row 1).
               if (!canRunDeepReport(entitlement)) {
                 const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
@@ -1625,7 +1643,7 @@ export function registerTools(server: McpServer): void {
               const text = await res.text();
               if (!res.ok) {
                 // OPS-16 A-101: screens have no local Studio predicate (the
-                // route is the sole gate — see mapScreensGateNonOk). A 402
+                // route is the sole gate ΓÇö see mapScreensGateNonOk). A 402
                 // shaped as its own refusal reshapes into the same declared
                 // upgrade_required envelope export_instrument's local gate
                 // returns; anything else stays the generic upstream error.
@@ -1633,7 +1651,7 @@ export function registerTools(server: McpServer): void {
                 if (upgrade) return upgradeRequiredResult(upgrade);
                 return upstreamErrorResult(res.status, text);
               }
-              return enrichAppToolJsonText("create_screen", text, renderHostKeyForUser(auth.userId));
+              return enrichAppToolJsonText("create_screen", text, hostKeyFromAuth());
             });
           }
           case "add_to_screen": {
@@ -1676,7 +1694,7 @@ export function registerTools(server: McpServer): void {
               });
               const text = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, text);
-              return enrichAppToolJsonText("list_screens", text, renderHostKeyForUser(auth.userId));
+              return enrichAppToolJsonText("list_screens", text, hostKeyFromAuth());
             });
           }
           case "save_property": {
