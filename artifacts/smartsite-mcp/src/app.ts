@@ -25,7 +25,14 @@ import {
   oauthProtectedResourceMetadata,
 } from "./oauth-metadata.js";
 import { registerTools } from "./tools.js";
-import { snapshotMapRenderMetrics } from "./render-metrics.js";
+import {
+  recordMapRenderCardReport,
+  snapshotMapRenderMetrics,
+} from "./render-metrics.js";
+import {
+  requireSeatMetricsKey,
+  requireSeatMetricsOrReportToken,
+} from "./seat-metrics-auth.js";
 
 /**
  * The Implementation every /mcp session announces on initialize. Exported so a
@@ -100,10 +107,38 @@ export function createSmartsiteMcpApp(
     res.json(await buildDependenciesHealthReport());
   });
 
-  /** P-446: per-host MCP map render / fallback counts for this instance. */
-  app.get("/internal/map-render-metrics", (_req, res) => {
+  /** P-456b: card-reported draw counts; seat key required. */
+  app.get("/internal/map-render-metrics", requireSeatMetricsKey, (_req, res) => {
     res.json({ hosts: snapshotMapRenderMetrics() });
   });
+
+  app.post(
+    "/internal/map-render-report",
+    requireSeatMetricsOrReportToken,
+    (req, res) => {
+      const body = req.body as Record<string, unknown>;
+      const outcome = body?.outcome;
+      if (
+        outcome !== "drawn" &&
+        outcome !== "fallback" &&
+        outcome !== "failed"
+      ) {
+        res.status(400).json({ ok: false, error: "invalid_outcome" });
+        return;
+      }
+      const result = recordMapRenderCardReport({
+        correlationId: String(body?.correlationId ?? ""),
+        outcome,
+        reasonCode: String(body?.reasonCode ?? ""),
+        tool: body?.tool != null ? String(body.tool) : undefined,
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.status(204).end();
+    },
+  );
 
   app.get("/llms.txt", (_req, res) => {
     res

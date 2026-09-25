@@ -7,6 +7,7 @@ import type { NextFunction, Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 import { recordMcpClientDetached } from "./connection-record.js";
+import { noteMcpClientFromInitializeBody } from "./mcp-client-context.js";
 import { resolveSmartsiteUserFromClaims, type IdentityClaims } from "./identity.js";
 import { wwwAuthenticateHeader } from "./oauth-metadata.js";
 import { runWithAuth, type SmartsiteAuthContext } from "./request-context.js";
@@ -152,6 +153,7 @@ export function buildMcpAuthMiddleware(config: AuthConfig = loadAuthConfig()) {
     // response. `express.json` is mounted ahead of this middleware in app.ts,
     // so `req.body` is parsed here.
     recordMcpClientDetached(ctx.userId, req.body);
+    noteMcpClientFromInitializeBody(ctx.userId, req.body);
 
     runWithAuth(ctx, () => next());
   };

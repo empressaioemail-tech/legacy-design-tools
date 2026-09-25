@@ -11,6 +11,7 @@ import type { AnchorReadStatus, ParcelAnchor } from "./parcel-anchor.js";
  * listed in INLINE_SHARED: those are embedded into the served page by source and
  * an imported binding does not exist in that scope. See the file-header note. */
 import { mapGroundReasonWords } from "./map-reason-words.js";
+import { mapRenderReportUrl } from "./oauth-metadata.js";
 import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 
 /*
@@ -49,20 +50,41 @@ import {
   STATE_WORDS as STATE_WORDS_PKG,
   UPGRADE_TO_OPEN as UPGRADE_TO_OPEN_PKG,
 } from "@empressaio/atom-contract/display";
-export const CITATION_DEGRADED = CITATION_DEGRADED_PKG;
-export const EDGE_WORDS: Record<string, string> = EDGE_WORDS_PKG;
-export const NO_BAKED_SNAPSHOT_PREFIX = NO_BAKED_SNAPSHOT_PREFIX_PKG;
-export const NOT_IMPLEMENTED_PREFIX = NOT_IMPLEMENTED_PREFIX_PKG;
-export const NOT_ON_FILE_PREFIX = NOT_ON_FILE_PREFIX_PKG;
-export const OPEN_DID_NOT_REACH_ME = OPEN_DID_NOT_REACH_ME_PKG;
-export const UPGRADE_TO_OPEN = UPGRADE_TO_OPEN_PKG;
-export function envelopeHuman(reason: string | undefined): string | undefined {
-  return envelopeHuman_PKG(reason);
+
+/** Server/buildAppHtml values — never the same binding names as display exports (esbuild rename). */
+const SS_CITATION_DEGRADED = CITATION_DEGRADED_PKG;
+const SS_EDGE_WORDS: Record<string, string> = EDGE_WORDS_PKG;
+const SS_NO_BAKED_SNAPSHOT_PREFIX = NO_BAKED_SNAPSHOT_PREFIX_PKG;
+const SS_NOT_IMPLEMENTED_PREFIX = NOT_IMPLEMENTED_PREFIX_PKG;
+const SS_NOT_ON_FILE_PREFIX = NOT_ON_FILE_PREFIX_PKG;
+const SS_OPEN_DID_NOT_REACH_ME = OPEN_DID_NOT_REACH_ME_PKG;
+const SS_UPGRADE_TO_OPEN = UPGRADE_TO_OPEN_PKG;
+const SS_STATE_WORDS: Record<CellState, string> = STATE_WORDS_PKG;
+const SS_HUMAN_ATOM_PATH_PENDING =
+  envelopeHuman_PKG("atom_path_pending") ?? "atom_path_pending";
+
+export {
+  SS_CITATION_DEGRADED as CITATION_DEGRADED,
+  SS_EDGE_WORDS as EDGE_WORDS,
+  SS_NO_BAKED_SNAPSHOT_PREFIX as NO_BAKED_SNAPSHOT_PREFIX,
+  SS_NOT_IMPLEMENTED_PREFIX as NOT_IMPLEMENTED_PREFIX,
+  SS_NOT_ON_FILE_PREFIX as NOT_ON_FILE_PREFIX,
+  SS_OPEN_DID_NOT_REACH_ME as OPEN_DID_NOT_REACH_ME,
+  SS_UPGRADE_TO_OPEN as UPGRADE_TO_OPEN,
+  SS_STATE_WORDS as STATE_WORDS,
+  envelopeHuman_PKG as envelopeHuman,
+  envelopeBasisHuman_PKG as envelopeBasisHuman,
+};
+
+/** Embedded in the served page; must not close over SS_* or pkg bindings. */
+export function envelopeHumanReason(
+  reason: string | undefined,
+): string | undefined {
+  if (reason === ["atom", "path", "pending"].join("_")) {
+    return HUMAN_ATOM_PATH_PENDING;
+  }
+  return reason;
 }
-export function envelopeBasisHuman(basis: string | undefined): string | undefined {
-  return envelopeBasisHuman_PKG(basis);
-}
-export const STATE_WORDS: Record<CellState, string> = STATE_WORDS_PKG;
 
 export const APP_RESOURCE_URI = "ui://smartsite/app-p562.html";
 export const APP_MIME = "text/html;profile=mcp-app";
@@ -375,6 +397,32 @@ export type PanelModel = {
   /** M-4: what the array's anchor phase did, as the producer declared it. */
   anchorBatch?: PanelAnchorBatch;
 };
+
+/** P-456b. What the served card reports after render. */
+export function mapCardOutcomeFromModel(model: PanelModel): {
+  outcome: "drawn" | "fallback" | "failed";
+  reasonCode: string;
+} {
+  if (model.kind === "unreadable") {
+    return { outcome: "failed", reasonCode: "panel_unreadable" };
+  }
+  if (
+    model.kind === "miss" ||
+    model.kind === "refused" ||
+    model.kind === "declared"
+  ) {
+    return { outcome: "fallback", reasonCode: model.kind };
+  }
+  if (
+    model.kind === "parcel" ||
+    model.kind === "parcels" ||
+    model.kind === "board" ||
+    model.kind === "screens"
+  ) {
+    return { outcome: "drawn", reasonCode: "ok" };
+  }
+  return { outcome: "fallback", reasonCode: model.kind || "unknown" };
+}
 
 export function appMetaFor(name: string): { ui: { resourceUri: string } } | undefined {
   if ((APP_HOST_TOOLS as readonly string[]).includes(name)) {
@@ -2110,7 +2158,7 @@ export function metaHtml(
 export function overlayRowHtml(o: OverlayRow, i: number): string {
   const p = overlayPaint(o);
   const extra = o.id === "flood" ? " flood" : p.paint === "refused" ? " refused" : "";
-  const shown = envelopeHuman(o.reason);
+  const shown = envelopeHumanReason(o.reason);
   const why = shown ? reasonLineHtml("reason", shown) : "";
   const note = p.paintReason ? reasonLineHtml("note", p.paintReason, `data-paint-reason="${escapeHtml(p.paintReason)}"`) : "";
   const citations = o.citations ? o.citations : [];
@@ -3228,6 +3276,7 @@ export function parseToolContent(result: unknown): PanelModel {
  * (tests/mcp-app-served.test.ts) runs the embedded copy and fails on a missing one.
  */
 const INLINE_SHARED: ReadonlyArray<Function> = [
+  envelopeHumanReason,
   singleGroundNoteHtml,
   asRecord,
   railState,
@@ -3519,10 +3568,21 @@ export function htmlContractViolations(html: string): string[] {
     if (beginCount !== endCount || beginCount > 1) {
       violations.push("probe_block_malformed");
     }
-    const scanned =
+    let scanned =
       beginCount === 1 && endCount === 1
         ? html.replace(/\/\*P559_PROBE_BEGIN\*\/[\s\S]*?\/\*P559_PROBE_END\*\//, "")
         : html;
+    const renderBegin = scanned.split("/*P456B_MAP_RENDER_REPORT_BEGIN*/").length - 1;
+    const renderEnd = scanned.split("/*P456B_MAP_RENDER_REPORT_END*/").length - 1;
+    if (renderBegin !== renderEnd || renderBegin > 1) {
+      violations.push("map_render_report_block_malformed");
+    }
+    if (renderBegin === 1 && renderEnd === 1) {
+      scanned = scanned.replace(
+        /\/\*P456B_MAP_RENDER_REPORT_BEGIN\*\/[\s\S]*?\/\*P456B_MAP_RENDER_REPORT_END\*\//,
+        "",
+      );
+    }
     if (/fetch\(|XMLHttpRequest|WebSocket/.test(scanned)) {
       violations.push("direct_network");
     }
@@ -3598,7 +3658,7 @@ export function htmlContractViolations(html: string): string[] {
     violations.push("open_link_unbound");
   }
   /* S7: each item's mechanism must be present in the served script, or the item is a claim */
-  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(CITATION_DEGRADED)) {
+  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(SS_CITATION_DEGRADED)) {
     violations.push("citation_link_unbound");
   }
   if (
@@ -3818,7 +3878,7 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("data-brief=") ||
     !html.includes("function declaredLineHtml") ||
     !html.includes(JSON.stringify(REFUSED_PREFIX)) ||
-    !html.includes(JSON.stringify(NOT_IMPLEMENTED_PREFIX)) ||
+    !html.includes(JSON.stringify(SS_NOT_IMPLEMENTED_PREFIX)) ||
     !html.includes(JSON.stringify(NOT_READY_INFIX)) ||
     /* P-101: the screens upgrade branch reads this reason inside the embedded
      * declaredLineHtml; without the var the branch throws in the iframe. */
@@ -3828,12 +3888,12 @@ export function htmlContractViolations(html: string): string[] {
   }
   const boundCopy = [
     NOTHING_TO_OPEN,
-    OPEN_DID_NOT_REACH_ME,
+    SS_OPEN_DID_NOT_REACH_ME,
     OPEN_SENT,
-    NOT_ON_FILE_PREFIX,
-    NO_BAKED_SNAPSHOT_PREFIX,
+    SS_NOT_ON_FILE_PREFIX,
+    SS_NO_BAKED_SNAPSHOT_PREFIX,
     RETIRED_RECORD_PREFIX,
-    UPGRADE_TO_OPEN,
+    SS_UPGRADE_TO_OPEN,
     /* P-101: declaredLineHtml is embedded BY SOURCE, so a constant it closes
      * over that is not emitted as a `var` throws ReferenceError in the iframe
      * and paints nothing. A unit test on declaredLineHtml alone cannot catch
@@ -4109,16 +4169,17 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var NODE_RE=/^\\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
   var COUNTY_BY_FIPS=${JSON.stringify(COUNTY_BY_FIPS)};
   var COUNTY_UNKNOWN=${JSON.stringify(COUNTY_UNKNOWN)};
-  var NOT_ON_FILE_PREFIX=${JSON.stringify(NOT_ON_FILE_PREFIX)};
-  var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(NO_BAKED_SNAPSHOT_PREFIX)};
+  var NOT_ON_FILE_PREFIX=${JSON.stringify(SS_NOT_ON_FILE_PREFIX)};
+  var NO_BAKED_SNAPSHOT_PREFIX=${JSON.stringify(SS_NO_BAKED_SNAPSHOT_PREFIX)};
+  var HUMAN_ATOM_PATH_PENDING=${JSON.stringify(SS_HUMAN_ATOM_PATH_PENDING)};
   var RETIRED_RECORD_PREFIX=${JSON.stringify(RETIRED_RECORD_PREFIX)};
-  var EDGE_WORDS=${JSON.stringify(EDGE_WORDS)};
+  var EDGE_WORDS=${JSON.stringify(SS_EDGE_WORDS)};
   var ACROSS_ROW=${JSON.stringify(ACROSS_ROW)};
   var EDGE_TIP_HINT=${JSON.stringify(EDGE_TIP_HINT)};
   var UNIT_REFERENCE=${JSON.stringify(UNIT_REFERENCE)};
   var SCALE_BAR_FT=${JSON.stringify(SCALE_BAR_FT)};
   var ZONE_TINT=${JSON.stringify(ZONE_TINT)};
-  var CITATION_DEGRADED=${JSON.stringify(CITATION_DEGRADED)};
+  var CITATION_DEGRADED=${JSON.stringify(SS_CITATION_DEGRADED)};
   var AS_OF_MISSING=${JSON.stringify(AS_OF_MISSING)};
   var ABSENCE_UNVERIFIED=${JSON.stringify(ABSENCE_UNVERIFIED)};
   var DISPOSITION_UNSTATED=${JSON.stringify(DISPOSITION_UNSTATED)};
@@ -4133,10 +4194,10 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var ADD_TO_SCREEN_LABEL=${JSON.stringify(ADD_TO_SCREEN_LABEL)};
   var REPORT_TOGGLE=${JSON.stringify(REPORT_TOGGLE)};
   var NO_BRIEF=${JSON.stringify(NO_BRIEF)};
-  var STATE_WORDS=${JSON.stringify(STATE_WORDS)};
+  var STATE_WORDS=${JSON.stringify(SS_STATE_WORDS)};
   var SECTION_FOR_OVERLAY=${JSON.stringify(SECTION_FOR_OVERLAY)};
   var NOT_RETURNED=${JSON.stringify(NOT_RETURNED)};
-  var UPGRADE_TO_OPEN=${JSON.stringify(UPGRADE_TO_OPEN)};
+  var UPGRADE_TO_OPEN=${JSON.stringify(SS_UPGRADE_TO_OPEN)};
   var UPGRADE_TO_SCREEN=${JSON.stringify(UPGRADE_TO_SCREEN)};
   var UPGRADE_SCREENS_REASON=${JSON.stringify(UPGRADE_SCREENS_REASON)};
   var USE_THIS_LABEL=${JSON.stringify(USE_THIS_LABEL)};
@@ -4150,7 +4211,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var DUP_NOT_ADDED=${JSON.stringify(DUP_NOT_ADDED)};
   var TIMED_OUT_NOTE=${JSON.stringify(TIMED_OUT_NOTE)};
   var REFUSED_PREFIX=${JSON.stringify(REFUSED_PREFIX)};
-  var NOT_IMPLEMENTED_PREFIX=${JSON.stringify(NOT_IMPLEMENTED_PREFIX)};
+  var NOT_IMPLEMENTED_PREFIX=${JSON.stringify(SS_NOT_IMPLEMENTED_PREFIX)};
   var NOT_READY_INFIX=${JSON.stringify(NOT_READY_INFIX)};
   var UPSTREAM_KEY=${JSON.stringify(UPSTREAM_KEY)};
   var SORT_COMPLETENESS_LABEL=${JSON.stringify(SORT_COMPLETENESS_LABEL)};
@@ -4200,6 +4261,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var MULTI_NO_CANVAS_DRAWABLE=${JSON.stringify(MULTI_NO_CANVAS_DRAWABLE)};
   var MULTI_NO_CANVAS_NEEDED=${JSON.stringify(MULTI_NO_CANVAS_NEEDED)};
   var PREVIEW_TOOL=${JSON.stringify(PREVIEW_TOOL)};
+  var MAP_RENDER_REPORT_URL=${JSON.stringify(mapRenderReportUrl())};
   var PREVIEW_DEPTH=${JSON.stringify(PREVIEW_DEPTH)};
   var PREVIEW_DWELL_MS=${JSON.stringify(PREVIEW_DWELL_MS)};
   var PREVIEW_TIMEOUT_MS=${JSON.stringify(PREVIEW_TIMEOUT_MS)};
@@ -4298,10 +4360,6 @@ ${inlineSharedSource()}
   }
   function openParcelMessage(node){
     return ${JSON.stringify(OPEN_TURN_OPENER)}+" "+node+". "+${JSON.stringify(OPEN_TURN_INSTRUCTION)};
-  }
-  function envelopeHuman(reason){
-    if(reason===["atom","path","pending"].join("_")) return ${JSON.stringify(envelopeHuman("atom_path_pending"))};
-    return reason;
   }
   function openLink(url){
     if(!url) return;
@@ -4476,7 +4534,7 @@ ${inlineSharedSource()}
     return '<p class="miss"><b>'+${JSON.stringify(NOT_RETURNED)}+"</b>"+idLine(m.parcelNodeId)+reasonLine(m.reason)+"</p>";
   }
   function refusedLine(r){
-    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+${JSON.stringify(UPGRADE_TO_OPEN)}+"</b>"+idLine(r.parcelNodeId)+"</p>";
+    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+${JSON.stringify(SS_UPGRADE_TO_OPEN)}+"</b>"+idLine(r.parcelNodeId)+"</p>";
     return '<p class="miss"><b>'+${JSON.stringify(OPEN_REFUSED)}+"</b>"+idLine(r.parcelNodeId)+reasonLine(r.reason)+"</p>";
   }
   function stateLines(){
@@ -4600,7 +4658,7 @@ ${inlineSharedSource()}
     openSent=null;
     openTimer=setTimeout(function(){
       if(openWait){
-        openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
+        openFail=${JSON.stringify(SS_OPEN_DID_NOT_REACH_ME)};
         openWait=null;
         render();
       }
@@ -4681,6 +4739,33 @@ ${inlineSharedSource()}
       render();
     }
   });
+  var pendingMapRenderReport=null;
+  function mapRenderReportFromRecord(host){
+    var m=asRecord(host.mapRenderReport);
+    if(!m) return null;
+    var cid=stringOrNull(m.correlationId);
+    var tok=stringOrNull(m.reportToken);
+    if(!cid||!tok) return null;
+    return {correlationId:cid,reportToken:tok};
+  }
+  function mapCardOutcomeFromModel(m){
+    if(m.kind==="unreadable") return {outcome:"failed",reasonCode:"panel_unreadable"};
+    if(m.kind==="miss"||m.kind==="refused"||m.kind==="declared") return {outcome:"fallback",reasonCode:m.kind};
+    if(m.kind==="parcel"||m.kind==="parcels"||m.kind==="board"||m.kind==="screens") return {outcome:"drawn",reasonCode:"ok"};
+    return {outcome:"fallback",reasonCode:m.kind||"unknown"};
+  }
+  function emitMapRenderReport(m,override){
+    if(!pendingMapRenderReport||!MAP_RENDER_REPORT_URL) return;
+    var pick=override||mapCardOutcomeFromModel(m);
+    var payload={correlationId:pendingMapRenderReport.correlationId,reportToken:pendingMapRenderReport.reportToken,outcome:pick.outcome,reasonCode:pick.reasonCode};
+    if(pendingToolName) payload.tool=pendingToolName;
+    pendingMapRenderReport=null;
+    /*P456B_MAP_RENDER_REPORT_BEGIN*/
+    try{
+      fetch(MAP_RENDER_REPORT_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).catch(function(){});
+    }catch(e){}
+    /*P456B_MAP_RENDER_REPORT_END*/
+  }
   function accept(result){
     hasToolResult=true;
     clearOpenTimer();
@@ -4690,6 +4775,7 @@ ${inlineSharedSource()}
     reportOpen=false;
     groundOn=true;
     pendingToolName=null;
+    pendingMapRenderReport=null;
     sortKey="completeness";
     sortDir=1;
     /* M-5: a new result is a new panel instance, so the per neighbour once
@@ -4705,8 +4791,25 @@ ${inlineSharedSource()}
     previewBusyFor=null;
     previewNode=null;
     previewEl=null;
+    var wire=asRecord(result);
+    if(wire&&wire.structuredContent){
+      var sc=asRecord(wire.structuredContent);
+      if(sc) pendingMapRenderReport=mapRenderReportFromRecord(sc);
+    }
+    if(!pendingMapRenderReport&&wire&&wire.content){
+      var jt=firstJsonObjectTextPart(wire.content);
+      if(jt){
+        try{ pendingMapRenderReport=mapRenderReportFromRecord(JSON.parse(jt)); }catch(e){}
+      }
+    }
     model=parseToolContent(result);
-    render();
+    try{
+      render();
+      emitMapRenderReport(model);
+    }catch(err){
+      emitMapRenderReport(model,{outcome:"failed",reasonCode:"render_threw"});
+      throw err;
+    }
   }
   window.addEventListener("message",function(ev){
     if(ev.source!==window.parent){ foreignCount++; paintBoot(); return; }
@@ -4773,7 +4876,7 @@ ${inlineSharedSource()}
         replyText="reply="+(d.error.code!=null?String(d.error.code):"error");
         if(openWait){
           clearOpenTimer();
-          openFail=${JSON.stringify(OPEN_DID_NOT_REACH_ME)};
+          openFail=${JSON.stringify(SS_OPEN_DID_NOT_REACH_ME)};
           openWait=null;
           openSent=null;
           render();

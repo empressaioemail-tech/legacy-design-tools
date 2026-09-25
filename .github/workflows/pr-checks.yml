@@ -263,6 +263,13 @@ jobs:
           path: hauska-engine-checkout
           sparse-checkout: |
             packages/engine-core/scripts
+      - name: P-456 smartsite-mcp production bundle gate (esbuild rename + Chromium)
+        env:
+          PARCEL_TILES_ORIGIN: https://hauska-artifacts.nyc3.digitaloceanspaces.com
+        run: |
+          cd artifacts/smartsite-mcp
+          pnpm exec playwright-core install chromium
+          node scripts/prod-bundle-gate/run-gate.mjs
       - name: Run tests
         env:
           HAUSKA_ENGINE_ROOT: ${{ github.workspace }}/hauska-engine-checkout

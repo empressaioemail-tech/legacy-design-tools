@@ -70,10 +70,13 @@ import {
   wireFindParcelForMap,
   wireFindParcelsForMap,
 } from "./map-tool-wire.js";
+import { renderHostKeyForUser } from "./mcp-client-context.js";
+import type { McpRenderHostKey } from "./mcp-host-key.js";
 import {
-  recordMapRenderEvent,
-  type MapRenderOutcome,
+  recordMapRenderNoMap,
+  recordMapRenderSent,
 } from "./render-metrics.js";
+import { mintMapRenderReportToken } from "./seat-metrics-auth.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -257,19 +260,43 @@ export function splitFindParcelHits(bodyText: string): string {
   return JSON.stringify(out);
 }
 
-function hostKeyFromAuth(userId: string): string {
-  return userId.trim() || "unknown-host";
+function injectMapRenderReportFields(
+  text: string,
+  correlationId: string | null,
+): string {
+  if (!correlationId) return text;
+  const reportToken = mintMapRenderReportToken(correlationId);
+  if (!reportToken) return text;
+  try {
+    const data = JSON.parse(text) as Record<string, unknown>;
+    data.mapRenderReport = { correlationId, reportToken };
+    return JSON.stringify(data);
+  } catch {
+    return text;
+  }
+}
+
+function attachMapRenderReportToStructuredContent(
+  structuredContent: Record<string, unknown> | undefined,
+  correlationId: string | null,
+): void {
+  if (!structuredContent || !correlationId) return;
+  const reportToken = mintMapRenderReportToken(correlationId);
+  if (!reportToken) return;
+  structuredContent.mapRenderReport = { correlationId, reportToken };
 }
 
 function recordToolMapIntent(
-  host: string,
+  host: McpRenderHostKey,
   tool: SmartsiteToolName,
   view: CardView,
   reasonCode: string,
-): void {
-  const outcome: MapRenderOutcome =
-    view === "none" ? "fallback" : view === "single-parcel" || view === "parcel-set" ? "card" : "card";
-  recordMapRenderEvent(host, tool, outcome, reasonCode);
+): string | null {
+  if (view === "none") {
+    recordMapRenderNoMap(host, tool, reasonCode);
+    return null;
+  }
+  return recordMapRenderSent(host, tool, reasonCode);
 }
 
 function notReadyMessage(tool: string, reason: string): string {
@@ -678,7 +705,7 @@ function cardViewFromResultContent(content: HandlerResult["content"]): CardView 
 function enrichAppToolJsonText(
   toolName: SmartsiteToolName,
   text: string,
-  host?: string,
+  host?: McpRenderHostKey,
 ): HandlerResult {
   let view: CardView = "none";
   try {
@@ -686,10 +713,16 @@ function enrichAppToolJsonText(
   } catch {
     view = toolName === "create_screen" || toolName === "list_screens" ? "screen-board" : "none";
   }
-  if (host) {
-    recordToolMapIntent(host, toolName, view, view === "none" ? "card_contract_none" : "ok");
-  }
-  const { text: enriched } = injectCardContract(text, view);
+  const correlationId = host
+    ? recordToolMapIntent(
+        host,
+        toolName,
+        view,
+        view === "none" ? "card_contract_none" : "ok",
+      )
+    : null;
+  const withReport = injectMapRenderReportFields(text, correlationId);
+  const { text: enriched } = injectCardContract(withReport, view);
   return { content: [{ type: "text" as const, text: enriched }], isError: false };
 }
 
@@ -1012,7 +1045,7 @@ export function registerTools(server: McpServer): void {
                 }
                 return upstreamErrorResult(res.status, body);
               }
-              const host = hostKeyFromAuth(auth.userId);
+              const host = renderHostKeyForUser(auth.userId);
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindNearestParcelsForMap(
                 config,
@@ -1079,7 +1112,7 @@ export function registerTools(server: McpServer): void {
               // tool must not strip, merge, or reorder any of them: a response
               // carrying only `matched` is the defect this card exists to
               // prevent.
-              const host = hostKeyFromAuth(auth.userId);
+              const host = renderHostKeyForUser(auth.userId);
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindParcelsForMap(config, auth.userId, body, canSeeOwner);
               let view: CardView = "single-parcel";
@@ -1153,7 +1186,7 @@ export function registerTools(server: McpServer): void {
                 // 200: cap, received, truncated, radiusFt, hits pass through
                 // verbatim. Truncation is a field cortex already puts on
                 // the wire; this tool must not strip it.
-                const host = hostKeyFromAuth(auth.userId);
+                const host = renderHostKeyForUser(auth.userId);
                 const canSeeOwner = canRunStudioReport(entitlement);
                 const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
                 let view: CardView = "single-parcel";
@@ -1197,7 +1230,7 @@ export function registerTools(server: McpServer): void {
                   return upstreamErrorResult(res.status, body);
                 }
                 // 200: cap, received, truncated, hits pass through verbatim.
-                const host = hostKeyFromAuth(auth.userId);
+                const host = renderHostKeyForUser(auth.userId);
                 const canSeeOwner = canRunStudioReport(entitlement);
                 const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
                 let view: CardView = "single-parcel";
@@ -1231,7 +1264,7 @@ export function registerTools(server: McpServer): void {
               const body = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, body);
               const split = splitFindParcelHits(body);
-              const host = hostKeyFromAuth(auth.userId);
+              const host = renderHostKeyForUser(auth.userId);
               const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindParcelForMap(config, auth.userId, split, canSeeOwner);
               let view: CardView = "single-parcel";
@@ -1374,10 +1407,22 @@ export function registerTools(server: McpServer): void {
               const anchored = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
-              const host = hostKeyFromAuth(auth.userId);
+              const host = renderHostKeyForUser(auth.userId);
               if (mode === "single-node") {
-                recordToolMapIntent(host, "get_smart_site", "single-parcel", "ok");
-                return shapeSmartSiteNodeResult(anchored);
+                const correlationId = recordToolMapIntent(
+                  host,
+                  "get_smart_site",
+                  "single-parcel",
+                  "ok",
+                );
+                const shaped = shapeSmartSiteNodeResult(anchored);
+                if (shaped.structuredContent) {
+                  attachMapRenderReportToStructuredContent(
+                    shaped.structuredContent as Record<string, unknown>,
+                    correlationId,
+                  );
+                }
+                return shaped;
               }
               if (Array.isArray(parcelNodeId)) {
                 return enrichAppToolJsonText("get_smart_site", anchored, host);
@@ -1584,7 +1629,7 @@ export function registerTools(server: McpServer): void {
                 if (upgrade) return upgradeRequiredResult(upgrade);
                 return upstreamErrorResult(res.status, text);
               }
-              return enrichAppToolJsonText("create_screen", text, hostKeyFromAuth(auth.userId));
+              return enrichAppToolJsonText("create_screen", text, renderHostKeyForUser(auth.userId));
             });
           }
           case "add_to_screen": {
@@ -1627,7 +1672,7 @@ export function registerTools(server: McpServer): void {
               });
               const text = await res.text();
               if (!res.ok) return upstreamErrorResult(res.status, text);
-              return enrichAppToolJsonText("list_screens", text, hostKeyFromAuth(auth.userId));
+              return enrichAppToolJsonText("list_screens", text, renderHostKeyForUser(auth.userId));
             });
           }
           case "save_property": {

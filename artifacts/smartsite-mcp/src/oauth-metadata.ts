@@ -1,6 +1,17 @@
 const DEFAULT_RESOURCE = "https://mcp.smartsite.cloud/mcp";
 const DEFAULT_AUTHKIT = "https://happy-asteroid-26.authkit.app";
 
+export function smartsiteMcpPublicBase(): string {
+  return (
+    process.env.SMARTSITE_MCP_PUBLIC_URL?.trim().replace(/\/$/, "") ||
+    "https://mcp.smartsite.cloud"
+  );
+}
+
+export function mapRenderReportUrl(): string {
+  return `${smartsiteMcpPublicBase()}/internal/map-render-report`;
+}
+
 export function mcpResourceUrl(): string {
   const base = process.env.SMARTSITE_MCP_PUBLIC_URL?.trim().replace(/\/$/, "");
   if (base) return `${base}/mcp`;
