@@ -49,6 +49,13 @@ export function cardViewFromToolPayload(
     if (Array.isArray(data.rows)) return "screen-board";
     return "screen-board";
   }
+  if (toolName === "find_parcel" || toolName === "find_parcels") {
+    if (Array.isArray(data.parcels) && data.parcels.length >= 2) return "parcel-set";
+    if (data.draw || data.parcelNodeId) return "single-parcel";
+    if (Array.isArray(data.parcels) && data.parcels.length === 1) return "single-parcel";
+    if (typeof data.mapPanelNote === "string") return "single-parcel";
+    return "single-parcel";
+  }
   return "none";
 }
 

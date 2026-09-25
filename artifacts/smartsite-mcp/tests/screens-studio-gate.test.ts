@@ -307,7 +307,7 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
 /**
  * P-101 item 9 — call 1 of the operator ruling, in the connector.
  *
- * `create_screen` and `list_screens` are two of three `APP_HOST_TOOLS`; the
+ * `create_screen` and `list_screens` are two of five `APP_HOST_TOOLS`; the
  * third, `get_smart_site`, is already paid-gated. Gating `list_screens` too
  * would leave a free connector user with NO panel entry point at all. The
  * ruling therefore leaves it open, and this is the proof that the decision
