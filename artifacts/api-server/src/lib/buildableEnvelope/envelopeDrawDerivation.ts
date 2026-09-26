@@ -65,7 +65,7 @@ import {
 } from "./composeBuildableEnvelopeDerivation";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import { labelEdges } from "./edgeLabeling";
-import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT, openRing } from "./geometry";
+import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT } from "./geometry";
 import { decideEnvelopeFromLedger } from "./ledgerEnvelopeRails";
 import type { EnvelopeDrawChain, EnvelopeDrawStep } from "./envelopeDrawOutcome";
 import {
@@ -298,15 +298,13 @@ export async function deriveEnvelopeDraw(
     };
 
     stageAtThrow = "edge-labeling-unavailable";
-    // One-foot chord bound first. A multi-thousand-edge ring can still make
-    // the strip difference throw (48309:999666, 9,004 edges at one foot, still
-    // throwing at two feet). Retry once at three feet, which is what let that
-    // parcel draw, and only accept the retry when it produces a ring.
+    // One-foot chord bound first. When that ring's strip difference throws,
+    // retry once at three feet and keep the retry only if it produces a ring.
+    // Measured: 48309:999666 (9,004 edges at one foot) and 48453:548022 (a
+    // 14-edge road-labeled inset). On 548022 the three-foot envelope is inside
+    // the StratMap ring.
     let drawn = composeOn(COLLINEAR_MERGE_MAX_FT);
-    if (
-      drawn.composed?.derived.emptyKind === "clip-failed" &&
-      openRing(drawn.ring).length > 2000
-    ) {
+    if (drawn.composed?.derived.emptyKind === "clip-failed") {
       const retry = composeOn(COLLINEAR_MERGE_RETRY_FT);
       if (retry.labeling && retry.composed && !retry.composed.derived.empty) {
         drawn = retry;
