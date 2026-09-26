@@ -19,7 +19,9 @@ COPY artifacts/smartsite-mcp ./artifacts/smartsite-mcp
 COPY tsconfig.base.json ./
 
 WORKDIR /app/artifacts/smartsite-mcp
-RUN pnpm add -D esbuild && pnpm exec esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.mjs --external:dotenv --external:express --external:jose --external:drizzle-orm --external:pg --external:zod --external:"@modelcontextprotocol/*"
+RUN pnpm add -D esbuild \
+ && pnpm exec esbuild src/card/app-entry.ts --bundle --platform=browser --format=iife --minify-whitespace --outfile=dist/card.iife.js \
+ && pnpm exec esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.mjs --external:dotenv --external:express --external:jose --external:drizzle-orm --external:pg --external:zod --external:"@modelcontextprotocol/*" --external:esbuild
 
 ENV NODE_ENV=production
 EXPOSE 8080

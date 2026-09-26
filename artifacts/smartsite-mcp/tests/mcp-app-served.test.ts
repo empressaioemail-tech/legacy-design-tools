@@ -706,6 +706,9 @@ function fresh() {
       if (type === "message") listener = fn;
     },
     console,
+    URL,
+    fetch: () => Promise.reject(new Error("no fetch in served-script vm")),
+    location: { search: "" },
   };
   /* window === the sandbox global, so window.parent is the capture above. */
   sandbox.window = sandbox;
@@ -1850,7 +1853,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(app.htmlContractViolations(clean.split(COPY2.citationDegraded).join("citation missing"))).toContain("citation_link_unbound");
     expect(app.htmlContractViolations(clean.replace(/function sendWhy/g, "function sendHow"))).toContain("why_turn_unbound");
     expect(app.htmlContractViolations(clean.split(COPY2.whyOpener).join("Tell me about"))).toContain("why_turn_unbound");
-    expect(app.htmlContractViolations(clean.replace('"Chasing"', '"Pursuing"'))).toContain("save_statuses_unbound");
+    expect(app.htmlContractViolations(clean.replaceAll('"Chasing"', '"Pursuing"'))).toContain("save_statuses_unbound");
     expect(app.htmlContractViolations(clean.replace(/function toggleReport/g, "function toggleView"))).toContain("report_toggle_unbound");
     expect(app.htmlContractViolations(clean.replace(/function sendAddToScreen/g, "function sendAdd"))).toContain("add_to_screen_unbound");
   });
@@ -3094,7 +3097,7 @@ describe("P-91 v3 M-5: verify by violation", () => {
     expect(app.htmlContractViolations(mut("function previewBlockHtml", "function previewBox"))).toContain("preview_not_marked");
     /* the mutation the FIRST version of this rule passed on: the line is deleted
      * from the block, and the sentence is still in the page as a var. */
-    const noNote = mut(`'<span class="pvnote">' + PREVIEW_NOT_IN_CHAT + "</span></span>"`, `"</span>"`);
+    const noNote = mut(`'<span class="pvnote">'+PREVIEW_NOT_IN_CHAT+"</span></span>"`, `"</span>"`);
     expect(noNote).toContain(app.PREVIEW_NOT_IN_CHAT);
     expect(app.htmlContractViolations(noNote)).toContain("preview_not_marked");
     expect(app.htmlContractViolations(mut("previewRailsHtml(row)", "railsOf(row)"))).toContain("preview_not_marked");
@@ -3107,10 +3110,10 @@ describe("P-91 v3 M-5: verify by violation", () => {
     expect(app.htmlContractViolations(mut("function previewLine", "function pLine"))).toContain("preview_absence_unstated");
     expect(app.htmlContractViolations(mut("function previewRowFrom", "function pRow"))).toContain("preview_absence_unstated");
     /* a state word that stops being reached, with its sentence still declared */
-    const noFallback = mut("  return PREVIEW_UNSTATED;", '  return "";');
+    const noFallback = mut("return PREVIEW_UNSTATED", 'return ""');
     expect(noFallback).toContain(app.PREVIEW_UNSTATED);
     expect(app.htmlContractViolations(noFallback)).toContain("preview_absence_unstated");
-    const noBusy = mut('if (state === "busy") return PREVIEW_BUSY;', "");
+    const noBusy = mut('if(state==="busy")return PREVIEW_BUSY;', "");
     expect(noBusy).toContain(app.PREVIEW_BUSY);
     expect(app.htmlContractViolations(noBusy)).toContain("preview_absence_unstated");
   });
@@ -3131,7 +3134,7 @@ describe("P-91 v3 M-5: verify by violation", () => {
 
   it("a second, missing or misplaced tools/call site fires tools_call_unmarked", () => {
     /* a second call anywhere */
-    expect(app.htmlContractViolations(mut("  function tipEl(){", '  function tipEl(){parent.postMessage({method:"tools/call"},"*");'))).toContain(
+    expect(app.htmlContractViolations(mut("function tipEl(){", 'function tipEl(){parent.postMessage({method:"tools/call"},"*");'))).toContain(
       "tools_call_unmarked",
     );
     /* the markers gone */

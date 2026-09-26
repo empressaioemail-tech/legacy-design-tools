@@ -168,7 +168,7 @@ describe("P-101 item 10: the new copy survives into the SERVED script", () => {
     expect(htmlContractViolations(clean)).not.toContain("declared_body_unbound");
     expect(htmlContractViolations(clean)).not.toContain("miss_copy_unbound");
 
-    const noReason = clean.replace(
+    const noReason = clean.replaceAll(
       `var UPGRADE_SCREENS_REASON=${JSON.stringify(UPGRADE_SCREENS_REASON)};`,
       "",
     );
