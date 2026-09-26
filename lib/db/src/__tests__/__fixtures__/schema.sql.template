@@ -1556,23 +1556,6 @@ CREATE TABLE @@SCHEMA@@.pe_team_members (
 );
 
 
--- Name: pe_user_entitlements; Type: TABLE; Schema: public; Owner: -
-
-CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
-    owner_user_id text NOT NULL,
-    tenant_id text DEFAULT 'default'::text NOT NULL,
-    access_tier text DEFAULT 'free'::text NOT NULL,
-    dev_role boolean DEFAULT false NOT NULL,
-    entitlement_source text,
-    stripe_customer_id text,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    subscription_tier text,
-    seats_purchased integer,
-    billing_interval text,
-    CONSTRAINT pe_user_entitlements_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
-);
-
-
 -- Name: pe_user_entitlement_history; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_user_entitlement_history (
@@ -1589,6 +1572,23 @@ CREATE TABLE @@SCHEMA@@.pe_user_entitlement_history (
     superseded_at timestamp with time zone DEFAULT now() NOT NULL,
     stripe_event_id text NOT NULL,
     CONSTRAINT pe_user_entitlement_history_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
+);
+
+
+-- Name: pe_user_entitlements; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_user_entitlements (
+    owner_user_id text NOT NULL,
+    tenant_id text DEFAULT 'default'::text NOT NULL,
+    access_tier text DEFAULT 'free'::text NOT NULL,
+    dev_role boolean DEFAULT false NOT NULL,
+    entitlement_source text,
+    stripe_customer_id text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    subscription_tier text,
+    seats_purchased integer,
+    billing_interval text,
+    CONSTRAINT pe_user_entitlements_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
 );
 
 
@@ -3177,16 +3177,16 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
     ADD CONSTRAINT pe_team_members_pkey PRIMARY KEY (account_owner_user_id, member_user_id);
 
 
--- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
-    ADD CONSTRAINT pe_user_entitlements_pkey PRIMARY KEY (owner_user_id);
-
-
 -- Name: pe_user_entitlement_history pe_user_entitlement_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
     ADD CONSTRAINT pe_user_entitlement_history_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
+    ADD CONSTRAINT pe_user_entitlements_pkey PRIMARY KEY (owner_user_id);
 
 
 -- Name: pe_user_identities pe_user_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4272,14 +4272,14 @@ CREATE UNIQUE INDEX pe_team_members_account_member_uidx ON @@SCHEMA@@.pe_team_me
 CREATE UNIQUE INDEX pe_team_members_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (member_user_id);
 
 
--- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
-
-CREATE INDEX pe_user_entitlements_tenant_idx ON @@SCHEMA@@.pe_user_entitlements USING btree (tenant_id);
-
-
 -- Name: pe_user_entitlement_history_owner_user_id_superseded_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_user_entitlement_history_owner_user_id_superseded_at_idx ON @@SCHEMA@@.pe_user_entitlement_history USING btree (owner_user_id, superseded_at);
+
+
+-- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_user_entitlements_tenant_idx ON @@SCHEMA@@.pe_user_entitlements USING btree (tenant_id);
 
 
 -- Name: pe_user_identities_provider_subject_uidx; Type: INDEX; Schema: public; Owner: -

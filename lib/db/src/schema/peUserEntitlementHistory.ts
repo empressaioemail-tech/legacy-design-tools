@@ -41,7 +41,6 @@ export const peUserEntitlementHistory = pgTable(
       .notNull()
       .references(() => peStripeWebhookEvents.stripeEventId, {
         onDelete: "restrict",
-        name: "pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e",
       }),
   },
   (t) => [
