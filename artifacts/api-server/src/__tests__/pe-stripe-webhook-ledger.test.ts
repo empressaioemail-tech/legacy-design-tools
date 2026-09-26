@@ -8,6 +8,7 @@
 
 import { createHmac } from "node:crypto";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
@@ -28,15 +29,20 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 const { handleStripeWebhook } = await import("../lib/brokerageStripe");
-const {
+
+import {
   db,
   peUserEntitlements,
   peStripeWebhookEvents,
   peUserEntitlementHistory,
   users,
-} = await import("@workspace/db");
+} from "@workspace/db";
 
-setupRouteTests(() => undefined as never);
+let getApp: () => Express;
+setupRouteTests((g) => {
+  getApp = g;
+});
+void getApp;
 
 const USER = "user-p480-r14";
 const WEBHOOK_SECRET = "whsec_test_p480_ledger";
