@@ -299,7 +299,23 @@ export type PanelModel = {
   anchorBatch?: PanelAnchorBatch;
   /** P-448: present only when the tool result carried `inlineCard`. The panel does not compose it. */
   inlineCard?: InlineCard;
+  /** A-331 / P-474: owner of record for the fullscreen deeper view only. */
+  ownerDisplay?: OwnerPanelDisplay;
 };
+
+/** A-331. Parsed from `ownerFact`; rendered only in fullscreen detail. */
+export type OwnerPanelDisplay =
+  | {
+      kind: "present";
+      name: string;
+      mailingAddress: string;
+      taxYear: number | null;
+      sourceLabel: string | null;
+    }
+  | { kind: "gated" };
+
+export const OWNER_DETAIL_HEADING = "Owner of record, county appraisal roll";
+export const OWNER_GATED_VALUE = "Studio plan";
 
 export type InlineFactModel = { label: string; value: string; state: string; detail?: string };
 export type InlineItemModel = {
@@ -2177,6 +2193,7 @@ export function customerDate(value: string | null | undefined): string | null {
 export function customerSource(source: string | null | undefined): string | null {
   if (!source) return null;
   if (/^https:\/\//i.test(source)) return source;
+  if (/^cad-property-owner-v1$/i.test(source.trim())) return "County appraisal roll";
   if (/adapter|fixture|parcel_record|_/i.test(source)) return null;
   return source;
 }
@@ -3320,6 +3337,7 @@ function parseToolResultInner(text: string): PanelModel {
       const setBatch = anchorBatchFrom(rec.anchorBatch);
       if (setBatch) model.anchorBatch = setBatch;
     }
+    attachOwnerDisplay(model, rec);
     return model;
   }
 
@@ -3396,10 +3414,33 @@ function parseToolResultInner(text: string): PanelModel {
         const anchor = anchorFrom(rec.anchor, anchorRead);
         if (anchor) model.anchor = anchor;
       }
+      attachOwnerDisplay(model, rec);
       return model;
     }
   }
   return emptyModel("empty");
+}
+
+export function ownerDisplayFrom(ownerFact: unknown): OwnerPanelDisplay | null {
+  const rec = asRecord(ownerFact);
+  if (!rec) return null;
+  if (rec.state === "refused" && rec.code === "studio-gated") return { kind: "gated" };
+  if (rec.state !== "present") return null;
+  const name = stringOrNull(rec.ownerName);
+  const mailingAddress = stringOrNull(rec.ownerMailingAddress);
+  if (!name && !mailingAddress) return null;
+  return {
+    kind: "present",
+    name: name ?? "Name not on this result",
+    mailingAddress: mailingAddress ?? "Mailing address not on this result",
+    taxYear: numberOrNull(rec.taxYear),
+    sourceLabel: customerSource(stringOrNull(rec.sourceAdapter) ?? stringOrNull(rec.source)),
+  };
+}
+
+function attachOwnerDisplay(model: PanelModel, rec: Record<string, unknown>): void {
+  const owner = ownerDisplayFrom(rec.ownerFact);
+  if (owner) model.ownerDisplay = owner;
 }
 
 export function parseToolResult(text: string): PanelModel {

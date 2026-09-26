@@ -857,6 +857,10 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 .ss-v2{min-height:0}
 .ss-body{padding:20px;display:flex;flex-direction:column;gap:16px}
 .ss-address{margin:0;font-size:14px;line-height:20px;color:var(--color-text-secondary,#C2C0B6)}
+.ss-owner-name,.ss-owner-mail{margin:0 0 6px;font-size:14px;line-height:20px;color:var(--color-text-primary,var(--ss-t3))}
+.ss-owner-meta{margin:0 0 10px;font-size:12px;line-height:16px;color:var(--color-text-secondary,#C2C0B6)}
+.ss-owner-row{display:flex;align-items:center;gap:8px;font-size:14px;line-height:20px}
+.ss-owner-gated{color:var(--color-text-tertiary,#9C9A92)}
 .ss-v2 .af-answer{margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-.01em}
 .ss-chip{position:absolute;left:12px;top:12px;z-index:2;height:28px;padding:0 10px;display:flex;align-items:center;border-radius:999px;background:var(--color-background-primary,#30302E);border:0.5px solid var(--color-border-tertiary,rgba(250,249,245,.15))}
 .ss-brand{display:inline-flex;align-items:center;gap:6px;color:var(--color-text-primary,#FAF9F5);font-size:12px;font-weight:700;letter-spacing:.06em}

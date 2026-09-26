@@ -5,7 +5,10 @@
 import { markerHtml } from "./answer-first-html.js";
 import {
   type BriefSection,
+  type OwnerPanelDisplay,
   type PanelModel,
+  OWNER_DETAIL_HEADING,
+  OWNER_GATED_VALUE,
   customerDate,
   customerSource,
   escapeHtml,
@@ -91,6 +94,33 @@ function rowHtml(s: BriefSection, i: number): string {
   );
 }
 
+export function ownerDetailSectionHtml(owner: OwnerPanelDisplay | undefined | null): string {
+  if (!owner) return "";
+  if (owner.kind === "gated") {
+    return (
+      `<section class="ss-group" data-owner="gated">` +
+      `<h3>${escapeHtml(OWNER_DETAIL_HEADING)}</h3>` +
+      `<div class="ss-owner-row" data-state="gated">` +
+      `${markerHtml("gated")}<span class="ss-owner-gated">${escapeHtml(OWNER_GATED_VALUE)}</span>` +
+      `</div></section>`
+    );
+  }
+  const meta: string[] = [];
+  if (owner.taxYear != null) meta.push(`Tax year ${owner.taxYear}`);
+  if (owner.sourceLabel) meta.push(owner.sourceLabel);
+  const metaLine = meta.length
+    ? `<p class="ss-owner-meta">${escapeHtml(meta.join(". "))}</p>`
+    : "";
+  return (
+    `<section class="ss-group" data-owner="present">` +
+    `<h3>${escapeHtml(OWNER_DETAIL_HEADING)}</h3>` +
+    `<p class="ss-owner-name">${escapeHtml(owner.name)}</p>` +
+    `<p class="ss-owner-mail">${escapeHtml(owner.mailingAddress)}</p>` +
+    metaLine +
+    `</section>`
+  );
+}
+
 function panelHtml(model: PanelModel): string {
   const sections = model.sections ?? [];
   const used = new Set<string>();
@@ -115,6 +145,7 @@ function panelHtml(model: PanelModel): string {
     answer +
     groups +
     unknownHtml +
+    ownerDetailSectionHtml(model.ownerDisplay) +
     `<p class="ss-disclaimer">${escapeHtml(DISCLAIMER)}</p>` +
     `<button type="button" class="btn" data-act="collapse" onclick="window.__ss&&window.__ss.collapse()">Back</button>` +
     `</aside>`
