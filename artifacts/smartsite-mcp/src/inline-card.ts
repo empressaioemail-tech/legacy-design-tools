@@ -4,45 +4,12 @@
  * does not derive it.
  */
 
+import { customerSitus, landUseCustomerName, landUseNameFromCode } from "./card/panel-lib.js";
 import { customerBriefReason, isMachineCustomerString } from "./customer-brief-reason.js";
 
-/**
- * Same table as api-server `ptadLandUseDescription`. This package's tsc
- * rootDir cannot import that file. tests/inline-card.test.ts asserts the
- * two functions agree on a fixed code list, so a drift fails the test.
- */
+/** P-458's land-use table. The inline card does not keep a second copy. */
 export function cardLandUseName(rawCode: string): string | null {
-  const code = rawCode.trim().toUpperCase();
-  if (!code) return null;
-  if (code.startsWith("EX") || code.startsWith("X")) return "Exempt property";
-  switch (code[0]) {
-    case "A":
-      return "Single-family residential";
-    case "B":
-      return "Multifamily residential";
-    case "C":
-      return "Vacant lot or tract";
-    case "D":
-      return code.startsWith("D2")
-        ? "Improvements on agricultural land"
-        : "Agricultural / qualified open-space land";
-    case "E":
-      return code.startsWith("E1")
-        ? "Rural single-family residential (farm/ranch improvement)"
-        : "Rural farm or ranch land";
-    case "F":
-      return code.startsWith("F2") ? "Industrial real property" : "Commercial real property";
-    case "J":
-      return "Utility";
-    case "M":
-      return "Mobile home (residential)";
-    case "O":
-      return "Residential inventory (builder lots)";
-    case "S":
-      return "Special inventory";
-    default:
-      return null;
-  }
+  return landUseNameFromCode(rawCode);
 }
 
 export type InlineFactState = "present" | "absent" | "refused" | "unknown" | "not-read";
@@ -101,7 +68,7 @@ export function safeCustomer(text: string, fallback: string): string {
 
 function cleanAddress(raw: string | null): string | null {
   if (!raw) return null;
-  const cleaned = raw.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
+  const cleaned = customerSitus(raw);
   if (/\b\d{5}:[A-Za-z0-9]/.test(cleaned)) return null;
   if (/\b[a-z][a-z0-9]*_[a-z0-9_]+\b/.test(cleaned)) return null;
   return safeCustomer(cleaned, "") || null;
@@ -172,11 +139,8 @@ function landUseFact(host: Record<string, unknown>): InlineFact {
     return { label: "Land use", value: sec ? absentValue(state) : "Not on this result", state: sec ? state : "absent" };
   }
   const data = asRecord(sec.data);
-  const label = str(data?.landUseLabel);
-  const named = label ? cleanAddress(label) : null;
-  const code = str(data?.landUseCode);
-  const looked = !named && code ? cardLandUseName(code) : null;
-  const value = named ?? looked ?? "Not named on this result";
+  const named = data ? landUseCustomerName(data) : null;
+  const value = (named && cleanAddress(named)) || "Not named on this result";
   return { label: "Land use", value: safeCustomer(value, "Not named on this result"), state: "present" };
 }
 
@@ -199,7 +163,7 @@ function floodFact(host: Record<string, unknown>): InlineFact {
     return { label: "Flood", value: "Not named on this result", state: "present" };
   }
   const method = str(data?.method);
-  const point = method === "point-on-surface" ? ", read at one point on the parcel" : "";
+  const point = method === "point-on-surface" ? ", read at a point on the parcel" : "";
   const value = `Zone ${zone}${point}`;
   return { label: "Flood", value: safeCustomer(value, `Zone ${zone}`), state: "present" };
 }

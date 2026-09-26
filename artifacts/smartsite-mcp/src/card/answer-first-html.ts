@@ -11,19 +11,23 @@ import {
   type PanelParcel,
   type RingPt,
   escapeHtml,
+  groundCreditText,
   groundLayerHtml,
   groundPlan,
   ringSvg,
 } from "./panel-lib.js";
 
+const ENVELOPE_AREA_UNSTATED = "Modelled from the setback table on record. The area is not stated.";
+
 function aerialHtml(
   ring: RingPt[],
   anchor: PanelAnchor | null | undefined,
   anchorRead: PanelAnchorRead | null | undefined,
-  envelope: RingPt[] | null,
+  envelope: OverlayRow | null,
   thumb: boolean,
 ): string {
-  const svg = ringSvg(ring, [], { quiet: true, envelope });
+  const geom = envelope?.geom && envelope.geom.length >= 3 ? envelope.geom : null;
+  const svg = ringSvg(ring, [], { quiet: true, envelope: geom });
   if (!svg) {
     return `<div class="af-aerial af-aerial-none" data-aerial="absent">No aerial on this result</div>`;
   }
@@ -31,17 +35,18 @@ function aerialHtml(
   const layer = outcome.plan ? groundLayerHtml(outcome.plan) : "";
   const cls = thumb ? "gwrap af-aerial af-thumb" : "gwrap af-aerial";
   const credit = layer
-    ? `<p class="af-credit">Aerial: Esri World Imagery. Capture date not stated.</p>`
+    ? `<p class="af-credit">${escapeHtml(groundCreditText())}</p>`
     : `<p class="af-credit" data-aerial="absent">No aerial on this result</p>`;
-  const env = envelope && envelope.length >= 3
-    ? `<p class="af-credit" data-envelope="modelled">Modelled from setbacks. Area not shown.</p>`
+  const env = geom
+    ? `<p class="af-credit" data-envelope="modelled">${escapeHtml(envelope?.basisDisplayText || ENVELOPE_AREA_UNSTATED)}</p>`
     : "";
   return `<div class="${cls}" data-ground="${layer ? "on" : "off"}">${layer}${svg}</div>${credit}${env}`;
 }
 
-function envelopeOf(overlays: OverlayRow[]): RingPt[] | null {
+function envelopeOf(overlays: OverlayRow[]): OverlayRow | null {
   for (const o of overlays) {
-    if (o.draw === "inset-fill" && o.state === "present" && o.geom && o.geom.length >= 3) return o.geom;
+    if (o.id === "envelope" && o.geom && o.geom.length >= 3) return o;
+    if (o.draw === "inset-fill" && o.state === "present" && o.geom && o.geom.length >= 3) return o;
   }
   return null;
 }

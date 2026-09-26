@@ -84,7 +84,7 @@ describe("P-448 inline card", () => {
     expect(card.facts.map((f) => f.label)).toEqual(["Zoning", "Land use", "Flood", "Setbacks"]);
     expect(card.facts[0]?.value).toBe("SF-1 in Bastrop");
     expect(card.facts[1]?.value).toBe("Vacant lot or tract");
-    expect(card.facts[2]?.value).toContain("read at one point on the parcel");
+    expect(card.facts[2]?.value).toContain("read at a point on the parcel");
     expect(card.facts[3]?.value).toContain("30 ft front");
     expect(card.expandUrl).toBe("https://smartsite.cloud/card#abc");
     expect(card.shareUrl).toBe(card.expandUrl);

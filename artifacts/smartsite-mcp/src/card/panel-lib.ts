@@ -111,8 +111,6 @@ export type OverlayRow = {
   paint?: CellState;
   /** A client-side downgrade note; only when the wire carries no reason of its own. */
   paintReason?: string;
-  /** P-448: inset-fill outline in the parcel's own foot frame. Absent when the wire carried none. */
-  geom?: RingPt[];
 };
 
 /** The refusal object a brief section may carry, field by field; a missing field is null, never a default. */
