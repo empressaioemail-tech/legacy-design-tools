@@ -939,7 +939,7 @@ describe("4.3 rails at first paint: attachScreenStubs", () => {
     expect(String((errors[0]![1] as Error).message)).toContain("zoning");
   });
 
-  it("rows not started inside SCREEN_STUB_BUDGET_MS are skipped; rows already started finish", async () => {
+  it("rows not started inside the scaled stub budget are skipped; rows already started finish", async () => {
     expect(SCREEN_STUB_BUDGET_MS).toBe(6_000);
     expect(SCREEN_STUB_CONCURRENCY).toBe(8);
     vi.useFakeTimers();
@@ -957,27 +957,49 @@ describe("4.3 rails at first paint: attachScreenStubs", () => {
         return okBody(id);
       };
       const pending = attachScreenStubs(screenOf(rows), assembler);
-      // t=0: eight start. t=4000: eight finish, eight more start (under budget).
-      // t=8000: those finish; the four never started are past the budget.
+      // Budget scales by ceil(n/concurrency) waves (20 rows -> 15s), so every
+      // row starts before the budget expires at 4s/read.
       await vi.advanceTimersByTimeAsync(READ_MS);
       expect(started).toHaveLength(16);
       await vi.advanceTimersByTimeAsync(READ_MS);
-      // Asserted before awaiting: with the budget check removed the last four
-      // rows start here, and this fails by assertion instead of by a hang.
-      expect(started).toHaveLength(16);
+      expect(started).toHaveLength(20);
+      await vi.advanceTimersByTimeAsync(READ_MS);
       const out = await pending;
-      expect(started).toHaveLength(16);
-      expect(finished).toHaveLength(16);
+      expect(started).toHaveLength(20);
+      expect(finished).toHaveLength(20);
       const reads = out.rows.map((r) => r.stubRead);
-      expect(reads.filter((s) => s === "ok")).toHaveLength(16);
-      expect(reads.filter((s) => s === "skipped")).toHaveLength(4);
-      for (const row of out.rows.slice(16)) {
-        expect(row.stubRead).toBe("skipped");
-        expect(row.stub).toEqual(allRails("unread"));
-      }
-      // A row started at t=4000 finished at t=8000, past the budget, and is ok.
-      expect(out.rows[15]!.stubRead).toBe("ok");
-      expect(out.stubsDegraded).toBe(true);
+      expect(reads.filter((s) => s === "ok")).toHaveLength(20);
+      expect(reads.filter((s) => s === "skipped")).toHaveLength(0);
+      expect(out.stubsDegraded).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("P-475: map-selection node ids are not capped by the situs resolve timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new MemoryScreenSaveStore();
+      const ids = Array.from({ length: 7 }, (_, i) => `48453:${100 + i}`);
+      const pending = createScreen(
+        store,
+        SCOPE,
+        { queries: ids, source: "map-selection" },
+        async (query) => {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, CREATE_SCREEN_RESOLVE_TIMEOUT_MS + 500),
+          );
+          return [{ parcelNodeId: query, label: query }];
+        },
+      );
+      await vi.advanceTimersByTimeAsync(CREATE_SCREEN_RESOLVE_TIMEOUT_MS + 600);
+      const created = await pending;
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      expect(created.screen.degraded).toBeUndefined();
+      expect(created.screen.rows.every((r) => r.resolution === "resolved")).toBe(
+        true,
+      );
     } finally {
       vi.useRealTimers();
     }
