@@ -301,7 +301,7 @@ export type PanelModel = {
   inlineCard?: InlineCard;
 };
 
-export type InlineFactModel = { label: string; value: string; state: string };
+export type InlineFactModel = { label: string; value: string; state: string; detail?: string };
 export type InlineItemModel = {
   parcelNodeId: string;
   answer: string;
@@ -783,6 +783,8 @@ export type DrawCues = {
   floodMethod?: string | null;
   /** P-448: parcel outline only. No jurisdiction key, flood tint, scale bar, or edge hits. */
   quiet?: boolean;
+  /** P-466: paint the flood tint on a quiet ring when the result carries a flood overlay. */
+  paintFlood?: boolean;
 };
 
 /**
@@ -884,7 +886,7 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     ? `<polygon class="ring-fill" points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(${stroke})" stroke-width="2"${family ? ` data-zone-family="${family}"` : ""}/>`
     : "";
   const flood = cues && cues.flood ? cues.flood : null;
-  const tint = !quiet && hasRing ? floodTint(flood) : null;
+  const tint = hasRing && (!quiet || !!cues?.paintFlood) ? floodTint(flood) : null;
   const tintPoly = tint
     ? `<polygon class="flood-tint" data-flood-tint="${tint}" points="${pts}" fill="var(--ss-blue)" fill-opacity="${tint === "heavy" ? ".32" : ".14"}"/>`
     : "";
@@ -898,7 +900,7 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
       }`
     : "";
   const envelopePoly = envelope
-    ? `<polygon class="envelope" data-envelope="modelled" points="${envelope.map(pt).join(" ")}" fill="none" stroke="var(--ss-atom)" stroke-width="1.5" stroke-dasharray="4 3"/>`
+    ? `<polygon class="envelope" data-envelope="modelled" points="${envelope.map(pt).join(" ")}" fill="rgba(111,193,184,.16)" stroke="#6FC1B8" stroke-width="1.5" stroke-dasharray="6 4"/>`
     : "";
   const hits = quiet
     ? ""
@@ -2566,9 +2568,9 @@ export function boardQueryCellHtml(row: BoardRow): string {
     const primary = boardRowPrimaryLabel(row);
     const secondary =
       row.parcelNodeId && primary !== row.parcelNodeId
-        ? `<div class="pn atom">${escapeHtml(row.parcelNodeId)}</div>`
+        ? `<div class="pn atom ss-clip">${escapeHtml(row.parcelNodeId)}</div>`
         : row.parcelNodeId && looksLikeParcelNodeId(row.query) && primary !== row.query
-          ? `<div class="pn atom">${escapeHtml(row.query)}</div>`
+          ? `<div class="pn atom ss-clip">${escapeHtml(row.query)}</div>`
           : "";
     return `<div class="pl">${escapeHtml(primary)}</div>${secondary}${stubReadNoteHtml(row)}`;
   }
@@ -3188,7 +3190,9 @@ function inlineCardFrom(value: unknown): InlineCard | null {
     for (const raw of rec.facts) {
       const f = asRecord(raw);
       if (!f || typeof f.label !== "string" || typeof f.value !== "string" || typeof f.state !== "string") continue;
-      facts.push({ label: f.label, value: f.value, state: f.state });
+      const fact: InlineFactModel = { label: f.label, value: f.value, state: f.state };
+      if (typeof f.detail === "string" && f.detail.trim()) fact.detail = f.detail.trim();
+      facts.push(fact);
     }
   }
   const items: InlineItemModel[] = [];
