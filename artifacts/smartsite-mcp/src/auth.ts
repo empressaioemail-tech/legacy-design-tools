@@ -7,6 +7,7 @@ import type { NextFunction, Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 
 import { recordMcpClientDetached } from "./connection-record.js";
+import { ingestHostSessionFromBody } from "./host-ui-capability.js";
 import { noteMcpClientFromInitializeBody } from "./mcp-client-context.js";
 import { resolveSmartsiteUserFromClaims, type IdentityClaims } from "./identity.js";
 import { wwwAuthenticateHeader } from "./oauth-metadata.js";
@@ -140,12 +141,15 @@ export function buildMcpAuthMiddleware(config: AuthConfig = loadAuthConfig()) {
       return;
     }
 
+    const hostSession = ingestHostSessionFromBody(resolved.userId, req.body);
+
     const ctx: SmartsiteAuthContext = {
       userId: resolved.userId,
       email: claims.email ?? null,
       accessTier: resolved.entitlement.accessTier,
       subscriptionTier: resolved.entitlement.subscriptionTier,
       devRole: resolved.entitlement.devRole,
+      hostSession,
     };
 
     // P-87 Claude Sync — the connected signal. Only an `initialize` that
