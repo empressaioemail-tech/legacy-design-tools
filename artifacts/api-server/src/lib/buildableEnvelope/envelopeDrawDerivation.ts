@@ -65,7 +65,7 @@ import {
 } from "./composeBuildableEnvelopeDerivation";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import { labelEdges } from "./edgeLabeling";
-import { cleanParcelRing } from "./geometry";
+import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT, openRing } from "./geometry";
 import { decideEnvelopeFromLedger } from "./ledgerEnvelopeRails";
 import type { EnvelopeDrawChain, EnvelopeDrawStep } from "./envelopeDrawOutcome";
 import {
@@ -266,8 +266,6 @@ export async function deriveEnvelopeDraw(
     const effectiveZoningCode = ledger.district;
     const jurisdictionKey = ledger.jurisdictionKey;
     const resolved = ledger.resolved;
-    const ring = cleanParcelRing(parcel.ring);
-
     const hasPoint = point !== null;
     let roads = [] as ReturnType<typeof namedRoadsToCandidates>;
     if (!skipRoad && hasPoint) {
@@ -275,14 +273,46 @@ export async function deriveEnvelopeDraw(
         await fetchNearbyRoads({ lat: point.lat, lng: point.lng }),
       );
     }
+    const refPoint = hasPoint && point ? { lng: point.lng, lat: point.lat } : null;
+    const composeOn = (maxChordFt: number) => {
+      const ring = cleanParcelRing(parcel.ring, maxChordFt);
+      const labeling = labelEdges({
+        ring,
+        roads,
+        refPoint,
+        situsAddress: parcel.situsAddress,
+      });
+      if (!labeling) return { ring, labeling: null, composed: null };
+      const composed = composeBuildableEnvelopeDerivation({
+        ring,
+        table: resolved.table,
+        district: resolved.district,
+        labeling,
+        atomChain,
+        spineZoning,
+        resolvedSourceKind: resolved.sourceKind,
+        resolvedSourceLabel: resolved.sourceLabel,
+        resolvedEffectiveDate: resolved.effectiveDate,
+      });
+      return { ring, labeling, composed };
+    };
+
     stageAtThrow = "edge-labeling-unavailable";
-    const labeling = labelEdges({
-      ring,
-      roads,
-      refPoint: hasPoint ? { lng: point.lng, lat: point.lat } : null,
-      situsAddress: parcel.situsAddress,
-    });
-    if (!labeling) {
+    // One-foot chord bound first. A multi-thousand-edge ring can still make
+    // the strip difference throw (48309:999666, 9,004 edges at one foot, still
+    // throwing at two feet). Retry once at three feet, which is what let that
+    // parcel draw, and only accept the retry when it produces a ring.
+    let drawn = composeOn(COLLINEAR_MERGE_MAX_FT);
+    if (
+      drawn.composed?.derived.emptyKind === "clip-failed" &&
+      openRing(drawn.ring).length > 2000
+    ) {
+      const retry = composeOn(COLLINEAR_MERGE_RETRY_FT);
+      if (retry.labeling && retry.composed && !retry.composed.derived.empty) {
+        drawn = retry;
+      }
+    }
+    if (!drawn.labeling || !drawn.composed) {
       return {
         state: "ungeometric-parcel",
         parcel,
@@ -296,23 +326,9 @@ export async function deriveEnvelopeDraw(
       };
     }
     stageAtThrow = "derivation-threw";
-
-    /**
-     * 6) The SAME pure composition the map/export route runs — real reuse, not
-     * a re-implementation.
-     */
-    const { derived, wireStatus, honesty, derivePath } =
-      composeBuildableEnvelopeDerivation({
-        ring,
-        table: resolved.table,
-        district: resolved.district,
-        labeling,
-        atomChain,
-        spineZoning,
-        resolvedSourceKind: resolved.sourceKind,
-        resolvedSourceLabel: resolved.sourceLabel,
-        resolvedEffectiveDate: resolved.effectiveDate,
-      });
+    const composed = drawn.composed!;
+    const labeling = drawn.labeling!;
+    const { derived, wireStatus, honesty, derivePath } = composed;
 
     return {
       state: "drawn",

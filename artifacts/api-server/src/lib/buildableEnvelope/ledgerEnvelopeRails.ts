@@ -26,6 +26,7 @@ import { loadZoningFactForServe } from "../zoningFactServeCutover";
 import {
   type ZoningFactRead,
 } from "../zoningFactFromParcelRecord";
+import { NOT_SPECIFIED_MAX_HEIGHT_FT } from "./derive";
 
 export type LedgerEnvelopeValues = {
   state: "values";
@@ -136,19 +137,30 @@ export async function decideEnvelopeFromLedger(
     };
   }
   const cornerFt = setbacks.cornerFt;
+  // The setback corpus writes 999 on side_corner_ft when the ordinance states
+  // no separate street-side yard. That is the same not-specified sentinel as
+  // max height, not a 999-foot setback. Lakeway R-1 records it that way
+  // (lib/adapters/src/local/setbacks/lakeway-tx.json: the quote says "999 is
+  // the not_specified sentinel, not a standard"). The ledger cell keeps the
+  // bare number. Measured on 48453:832328: treating 999 as feet consumed the
+  // lot. A null corner and a 999 corner are the same absence.
+  const cornerForDistrict =
+    cornerFt != null && cornerFt !== NOT_SPECIFIED_MAX_HEIGHT_FT ? cornerFt : 0;
+  const cornerSpecified =
+    cornerFt != null && cornerFt !== NOT_SPECIFIED_MAX_HEIGHT_FT;
   const districtRow: SetbackDistrict = {
     district_name: zoning.district,
     front_ft: frontFt,
     side_ft: setbacks.sideFt,
     rear_ft: setbacks.rearFt,
-    side_corner_ft: cornerFt ?? 0,
+    side_corner_ft: cornerForDistrict,
     // 999 is derive.ts's stated-absence sentinel, not a height.
-    max_height_ft: 999,
+    max_height_ft: NOT_SPECIFIED_MAX_HEIGHT_FT,
     max_lot_coverage_pct: 0,
     max_impervious_pct: 0,
     citation_url: zoning.provenance ?? "",
     provenance: {
-      ...(cornerFt == null ? { side_corner_ft: { not_specified: true } } : {}),
+      ...(cornerSpecified ? {} : { side_corner_ft: { not_specified: true } }),
       max_lot_coverage_pct: { not_specified: true },
     },
   };
@@ -165,7 +177,7 @@ export async function decideEnvelopeFromLedger(
     note:
       `District ${zoning.district} and setbacks ` +
       `${setbacks.frontFt}/${setbacks.sideFt}/${setbacks.rearFt}` +
-      (cornerFt == null ? "" : `/${cornerFt}`) +
+      (cornerSpecified ? `/${cornerFt}` : "") +
       " ft read from parcel_record.",
     zoningCode: zoning.district,
   };
@@ -175,7 +187,7 @@ export async function decideEnvelopeFromLedger(
       front_ft: frontFt,
       side_ft: setbacks.sideFt,
       rear_ft: setbacks.rearFt,
-      ...(cornerFt == null ? {} : { side_corner_ft: cornerFt }),
+      ...(cornerSpecified ? { side_corner_ft: cornerForDistrict } : {}),
     },
     districtCode: zoning.district,
     sourceKind: "parcel-record",

@@ -128,87 +128,172 @@ export function projectRing(ring: Ring): ProjectedRing | null {
 
 /**
  * Ring cleaning before any inset (P-465). Stated tolerances:
- * - an edge shorter than {@link STUB_MAX_FT} feet is dropped;
- * - a vertex whose deflection from straight is at most
- *   {@link COLLINEAR_MERGE_TURN_DEG} degrees is dropped, until the dropped
- *   run's accumulated deflection would pass
- *   {@link COLLINEAR_MERGE_ACCUM_TURN_DEG} degrees.
- * Grouping in edgeLabeling.ts is labeling-only and does not rewrite the ring,
- * so the inset used to offset every original chord, including sub-2 ft stubs.
+ * - an edge shorter than {@link STUB_MAX_FT} feet is dropped when the dropped
+ *   vertex already lies within {@link COLLINEAR_MERGE_MAX_FT} of the chord
+ *   that replaces it;
+ * - other vertices are dropped only by a Douglas-Peucker pass whose tolerance
+ *   is {@link COLLINEAR_MERGE_MAX_FT} foot, so every original vertex stays
+ *   within one foot of the cleaned ring.
+ *
+ * A turn-accumulation merge (10° steps, 45° accumulated) is not used. On the
+ * CP3 census it replaced curved cadastral runs with chords tens to hundreds of
+ * feet off the StratMap ring, and the inset of that chord drew outside the lot.
+ * Grouping in edgeLabeling.ts is labeling-only and does not rewrite the ring.
  */
 export const STUB_MAX_FT = 2;
-export const COLLINEAR_MERGE_TURN_DEG = 10;
-export const COLLINEAR_MERGE_ACCUM_TURN_DEG = 45;
-
-function deflectionDeg(a: XY, b: XY, c: XY): number {
-  const v1x = b.x - a.x;
-  const v1y = b.y - a.y;
-  const v2x = c.x - b.x;
-  const v2y = c.y - b.y;
-  const l1 = Math.hypot(v1x, v1y);
-  const l2 = Math.hypot(v2x, v2y);
-  if (l1 < 1e-9 || l2 < 1e-9) return 0;
-  const cos = Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (l1 * l2)));
-  return (Math.acos(cos) * 180) / Math.PI;
-}
+/** Maximum distance, in feet, that cleaning may move the parcel boundary. */
+export const COLLINEAR_MERGE_MAX_FT = 1;
+/**
+ * Second chord bound, used only when the one-foot ring's strip difference
+ * does not complete. Measured on 48309:999666: 9,004 edges at one foot and
+ * 7,002 edges at two feet threw inside polygon-clipping; 5,905 edges at
+ * three feet drew. Three feet is not the ordinary tolerance.
+ */
+export const COLLINEAR_MERGE_RETRY_FT = 3;
 
 function edgeLenM(a: XY, b: XY): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function dropShortEdges(pts: XY[]): XY[] {
-  let cur = pts;
-  for (let guard = 0; guard < 64 && cur.length > 3; guard++) {
-    let shortAt = -1;
-    for (let i = 0; i < cur.length; i++) {
-      const a = cur[i]!;
-      const b = cur[(i + 1) % cur.length]!;
-      if (edgeLenM(a, b) < feetToMeters(STUB_MAX_FT)) {
-        shortAt = i;
-        break;
-      }
-    }
-    if (shortAt < 0) break;
-    const drop = (shortAt + 1) % cur.length;
-    cur = cur.filter((_, i) => i !== drop);
-  }
-  return cur;
+function pointSegDistM(p: XY, a: XY, b: XY): number {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1e-18) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby));
 }
 
-function dropCollinearVertices(pts: XY[]): XY[] {
+/**
+ * Closed-ring Douglas–Peucker. Every input vertex stays within `tolM` of the
+ * simplified ring. Returns the input when simplification would leave fewer
+ * than 3 vertices.
+ */
+function simplifyRingWithin(pts: XY[], tolM: number): XY[] {
   if (pts.length <= 3) return pts;
-  const n = pts.length;
-  const turns = pts.map((_, i) =>
-    deflectionDeg(pts[(i - 1 + n) % n]!, pts[i]!, pts[(i + 1) % n]!),
-  );
-  const start = turns.findIndex((t) => t > COLLINEAR_MERGE_TURN_DEG);
-  if (start < 0) return pts;
-  const keep = new Array<boolean>(n).fill(false);
-  keep[start] = true;
-  let acc = 0;
-  for (let k = 1; k < n; k++) {
-    const i = (start + k) % n;
-    const t = turns[i]!;
-    if (t > COLLINEAR_MERGE_TURN_DEG || acc + t > COLLINEAR_MERGE_ACCUM_TURN_DEG) {
-      acc = 0;
-      keep[i] = true;
-    } else {
-      acc += t;
+  let cx = 0;
+  let cy = 0;
+  for (const p of pts) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= pts.length;
+  cy /= pts.length;
+  let i0 = 0;
+  let d0 = -1;
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.hypot(pts[i]!.x - cx, pts[i]!.y - cy);
+    if (d > d0) {
+      d0 = d;
+      i0 = i;
     }
+  }
+  let i1 = 0;
+  let d1 = -1;
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.hypot(pts[i]!.x - pts[i0]!.x, pts[i]!.y - pts[i0]!.y);
+    if (d > d1) {
+      d1 = d;
+      i1 = i;
+    }
+  }
+  if (i0 === i1) return pts;
+
+  const chain = (from: number, to: number): XY[] => {
+    const out: XY[] = [];
+    let i = from;
+    for (;;) {
+      out.push(pts[i]!);
+      if (i === to) break;
+      i = (i + 1) % pts.length;
+    }
+    return out;
+  };
+
+  const dp = (span: XY[]): XY[] => {
+    if (span.length <= 2) return span;
+    const a = span[0]!;
+    const b = span[span.length - 1]!;
+    let maxD = 0;
+    let idx = 0;
+    for (let i = 1; i < span.length - 1; i++) {
+      const d = pointSegDistM(span[i]!, a, b);
+      if (d > maxD) {
+        maxD = d;
+        idx = i;
+      }
+    }
+    if (maxD <= tolM) return [a, b];
+    const left = dp(span.slice(0, idx + 1));
+    const right = dp(span.slice(idx));
+    return [...left.slice(0, -1), ...right];
+  };
+
+  const merged = [
+    ...dp(chain(i0, i1)).slice(0, -1),
+    ...dp(chain(i1, i0)).slice(0, -1),
+  ];
+  return merged.length >= 3 ? merged : pts;
+}
+
+/**
+ * Drop a vertex of a sub-2 ft edge only when it already lies within the chord
+ * tolerance of its two neighbors. Independent (one pass), so a chain of nicks
+ * cannot walk a bend off the lot; the sagitta pass then enforces the same
+ * bound against the original vertices.
+ */
+function dropShortEdgesWithin(pts: XY[], tolM: number): XY[] {
+  if (pts.length <= 3) return pts;
+  const stubM = feetToMeters(STUB_MAX_FT);
+  const n = pts.length;
+  const keep = new Array<boolean>(n).fill(true);
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n]!;
+    const cur = pts[i]!;
+    const next = pts[(i + 1) % n]!;
+    const short = edgeLenM(prev, cur) < stubM || edgeLenM(cur, next) < stubM;
+    if (!short) continue;
+    if (pointSegDistM(cur, prev, next) <= tolM) keep[i] = false;
   }
   const next = pts.filter((_, i) => keep[i]);
   return next.length >= 3 ? next : pts;
 }
 
 /**
- * Merge sub-2 ft edges and collinear runs, then close the ring. Returns the
- * input unchanged when the ring is degenerate or cleaning would leave fewer
- * than 3 vertices.
+ * Merge sub-2 ft nicks and collinear vertices that lie within one foot of the
+ * replacing chord, then close the ring. Returns the input unchanged when the
+ * ring is degenerate or cleaning would leave fewer than 3 vertices.
  */
-export function cleanParcelRing(ring: Ring): Ring {
+function maxChordDeviationM(original: XY[], simplified: XY[]): number {
+  let max = 0;
+  const n = simplified.length;
+  for (const p of original) {
+    let best = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = pointSegDistM(p, simplified[i]!, simplified[(i + 1) % n]!);
+      if (d < best) best = d;
+    }
+    if (best > max) max = best;
+  }
+  return max;
+}
+
+export function cleanParcelRing(
+  ring: Ring,
+  maxChordFt: number = COLLINEAR_MERGE_MAX_FT,
+): Ring {
   const proj = projectRing(ring);
   if (!proj) return ring;
-  const cleaned = dropCollinearVertices(dropShortEdges(proj.points));
+  const tolM = feetToMeters(maxChordFt);
+  const stubbed = simplifyRingWithin(dropShortEdgesWithin(proj.points, tolM), tolM);
+  // The stub pass drops against immediate neighbors. If that walked a bend
+  // more than a foot off the served ring, discard it and simplify the
+  // original vertices, which is bounded by the same tolerance.
+  const cleaned =
+    maxChordDeviationM(proj.points, stubbed) <= tolM + 1e-6
+      ? stubbed
+      : simplifyRingWithin(proj.points, tolM);
   if (cleaned.length < 3) return ring;
   const closed = cleaned.map((p) => unproject(p, proj));
   const first = closed[0]!;
@@ -371,8 +456,9 @@ function xyFromClipRing(ring: polygonClipping.Ring): XY[] {
 export const BOOLEAN_RETRY_GRID_M = 2 ** -26;
 
 /** One quantisation step onto the retry grid. Exact: the grid is a power of two. */
+const activeRetryGridM = BOOLEAN_RETRY_GRID_M;
 function snapToRetryGrid(v: number): number {
-  return Math.round(v / BOOLEAN_RETRY_GRID_M) * BOOLEAN_RETRY_GRID_M;
+  return Math.round(v / activeRetryGridM) * activeRetryGridM;
 }
 
 /** Snap an open XY ring onto the retry grid, dropping vertices the snap merged. */
@@ -518,6 +604,7 @@ function setbackStadium(
   b: XY,
   nrm: XY,
   distM: number,
+  joinSegments: number = SETBACK_JOIN_SEGMENTS,
 ): polygonClipping.Polygon | null {
   if (distM <= 1e-9) return null;
   const dx = b.x - a.x;
@@ -532,8 +619,8 @@ function setbackStadium(
     [b.x, b.y],
   ];
   // Cap at b: sweep from the edge direction (+u) round to the inward normal.
-  for (let k = 1; k < SETBACK_JOIN_SEGMENTS; k++) {
-    const t = (k * Math.PI) / 2 / SETBACK_JOIN_SEGMENTS;
+  for (let k = 1; k < joinSegments; k++) {
+    const t = (k * Math.PI) / 2 / joinSegments;
     const c = Math.cos(t);
     const s = Math.sin(t);
     ring.push([
@@ -544,8 +631,8 @@ function setbackStadium(
   ring.push([b.x + nrm.x * distM, b.y + nrm.y * distM]);
   ring.push([a.x + nrm.x * distM, a.y + nrm.y * distM]);
   // Cap at a: sweep from the inward normal round to the reverse direction (-u).
-  for (let k = 1; k < SETBACK_JOIN_SEGMENTS; k++) {
-    const t = (k * Math.PI) / 2 / SETBACK_JOIN_SEGMENTS;
+  for (let k = 1; k < joinSegments; k++) {
+    const t = (k * Math.PI) / 2 / joinSegments;
     const c = Math.cos(t);
     const s = Math.sin(t);
     ring.push([
@@ -601,35 +688,73 @@ function setbackStadium(
  * boundary segment, which the ordinance permits, and is unbounded at a sharp
  * reflex notch.
  */
+function unionStrips(
+  strips: polygonClipping.Polygon[],
+): { forbidden: polygonClipping.MultiPolygon } | { detail: string } {
+  if (strips.length === 0) return { forbidden: [] };
+  // Ordinary lots keep the left-fold. A ring of hundreds of edges makes that
+  // fold quadratic (48309:999666, about ten thousand edges, did not finish).
+  // Those union in a balanced tree. Union is the same region either way;
+  // only the library's operation order changes, and only past this count.
+  if (strips.length <= 48) {
+    let forbidden: polygonClipping.MultiPolygon = [strips[0]!];
+    for (let i = 1; i < strips.length; i++) {
+      try {
+        forbidden = polygonClipping.union(forbidden, strips[i]!);
+      } catch (e) {
+        return { detail: `setback strip union threw (${errorMessage(e)})` };
+      }
+    }
+    return { forbidden };
+  }
+  let level: polygonClipping.MultiPolygon[] = strips.map((strip) => [strip]);
+  while (level.length > 1) {
+    const next: polygonClipping.MultiPolygon[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i]!;
+      const right = level[i + 1];
+      if (!right) {
+        next.push(left);
+        continue;
+      }
+      try {
+        next.push(polygonClipping.union(left, right));
+      } catch (e) {
+        return { detail: `setback strip union threw (${errorMessage(e)})` };
+      }
+    }
+    level = next;
+  }
+  return { forbidden: level[0] ?? [] };
+}
+
 function buildForbiddenStrips(
   pts: XY[],
   insetMetersPerEdge: number[],
   quantise: boolean,
 ): { forbidden: polygonClipping.MultiPolygon | null } | { detail: string } {
   const n = pts.length;
-  let forbidden: polygonClipping.MultiPolygon | null = null;
+  // A multi-thousand-edge ring (48309:999666, 9,004 edges after the one-foot
+  // clean, 61 miles of boundary) does not finish when every edge carries a
+  // 15-segment round cap. On a boundary that dense the neighbouring rectangles
+  // already cover the corner disc to well under a foot, so the cap is omitted.
+  const joinSegments = n > 2000 ? 1 : SETBACK_JOIN_SEGMENTS;
+  const strips: polygonClipping.Polygon[] = [];
   for (let i = 0; i < n; i++) {
     const a = pts[i]!;
     const b = pts[(i + 1) % n]!;
     const nrm = inwardNormal(a, b);
     if (!nrm) continue;
-    const built = setbackStadium(a, b, nrm, insetMetersPerEdge[i]!);
+    const built = setbackStadium(a, b, nrm, insetMetersPerEdge[i]!, joinSegments);
     if (!built) continue;
     const strip = quantise ? snapClipPolygon(built) : built;
     if (!strip) continue;
-    if (!forbidden) {
-      forbidden = [strip];
-      continue;
-    }
-    try {
-      forbidden = polygonClipping.union(forbidden, strip);
-    } catch (e) {
-      return {
-        detail: `setback strip union threw (${errorMessage(e)})`,
-      };
-    }
+    strips.push(strip);
   }
-  return { forbidden };
+  if (strips.length === 0) return { forbidden: null };
+  const unioned = unionStrips(strips);
+  if ("detail" in unioned) return unioned;
+  return { forbidden: unioned.forbidden };
 }
 
 /** Deviation-from-straight beyond which a vertex is a reversal, degrees. */
@@ -916,15 +1041,49 @@ function segCrossProper(a: XY, b: XY, c: XY, d: XY): boolean {
 
 function ringSelfIntersects(points: XY[]): boolean {
   const n = points.length;
+  if (n < 4) return false;
+  // Parcel rings of several thousand vertices make the naive pair loop
+  // dominate the draw (measured on 48309:999666, 13k vertices). Segments are
+  // bucketed by a 20 m grid; a proper crossing lies in a cell both bboxes
+  // cover, so the pair set is the same as the full loop.
+  const cell = 20;
+  const buckets = new Map<number, number[]>();
+  const pack = (ix: number, iy: number) => ix * 73856093 + iy;
   for (let i = 0; i < n; i++) {
     const a = points[i]!;
     const b = points[(i + 1) % n]!;
-    for (let j = i + 1; j < n; j++) {
-      if (Math.abs(i - j) <= 1) continue;
-      if (i === 0 && j === n - 1) continue;
-      const c = points[j]!;
-      const d = points[(j + 1) % n]!;
-      if (segCrossProper(a, b, c, d)) return true;
+    const minx = Math.floor(Math.min(a.x, b.x) / cell);
+    const maxx = Math.floor(Math.max(a.x, b.x) / cell);
+    const miny = Math.floor(Math.min(a.y, b.y) / cell);
+    const maxy = Math.floor(Math.max(a.y, b.y) / cell);
+    for (let ix = minx; ix <= maxx; ix++) {
+      for (let iy = miny; iy <= maxy; iy++) {
+        const k = pack(ix, iy);
+        const arr = buckets.get(k);
+        if (arr) arr.push(i);
+        else buckets.set(k, [i]);
+      }
+    }
+  }
+  const seen = new Set<number>();
+  for (const arr of buckets.values()) {
+    for (let p = 0; p < arr.length; p++) {
+      const i = arr[p]!;
+      const a = points[i]!;
+      const b = points[(i + 1) % n]!;
+      for (let q = p + 1; q < arr.length; q++) {
+        const j = arr[q]!;
+        if (Math.abs(i - j) <= 1) continue;
+        if ((i === 0 && j === n - 1) || (j === 0 && i === n - 1)) continue;
+        const lo = i < j ? i : j;
+        const hi = i < j ? j : i;
+        const id = lo * n + hi;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const c = points[j]!;
+        const d = points[(j + 1) % n]!;
+        if (segCrossProper(a, b, c, d)) return true;
+      }
     }
   }
   return false;
@@ -1132,12 +1291,17 @@ function classifyInset(
       };
     }
   }
-  const conservation = conservationFailures(orig, inset, forbidden, quantise);
+  // The clip already produced a ring. polygon-clipping still dead-ends on the
+  // conservation booleans when a strip shares the parcel boundary (P-372): the
+  // two reported ends can be a fraction of a millimetre apart. The clip retries
+  // that case on the quantised grid; this gate must do the same before it
+  // declines a ring the clip accepted. A retry that still cannot run, or that
+  // runs and finds a real overlap, stays a validation failure.
+  let conservation = conservationFailures(orig, inset, forbidden, quantise);
+  if (conservation.kind === "could-not-run" && !quantise) {
+    conservation = conservationFailures(orig, inset, forbidden, true);
+  }
   if (conservation.kind === "could-not-run") {
-    // The conservation gate's own boolean could not complete. This is the
-    // VALIDATION stage failing, not the clip (which already succeeded) and not a
-    // finding about the ring, so it declines as a validation failure whose
-    // reason names the operation that could not run.
     return {
       kind: "validation-failed",
       reason: `conservation check could not run (${conservation.reason})`,

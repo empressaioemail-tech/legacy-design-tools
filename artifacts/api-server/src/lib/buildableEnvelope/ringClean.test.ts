@@ -87,4 +87,26 @@ describe("cleanParcelRing", () => {
     expect(drawn).toBeLessThan(lot);
     expect(Math.abs(drawn - 850) / 850).toBeLessThan(0.35);
   });
+
+  it("keeps a bend whose chord would leave the lot by more than a foot", () => {
+    // A 100 x 40 ft lot whose north edge bows 15 ft. The retired 45°
+    // accumulation would replace that bow with the chord.
+    const dirty = [
+      at(0, 0),
+      at(100, 0),
+      at(100, 40),
+      at(75, 55),
+      at(50, 55),
+      at(25, 55),
+      at(0, 40),
+      at(0, 0),
+    ];
+    const cleaned = openRing(cleanParcelRing(dirty));
+    const bulge = cleaned.some((p) => {
+      const northFt =
+        (p[1] - LAT) * ((Math.PI / 180) * 6_378_137) * 3.280839895;
+      return northFt > 50;
+    });
+    expect(bulge).toBe(true);
+  });
 });
