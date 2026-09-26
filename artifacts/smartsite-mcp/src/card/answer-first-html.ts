@@ -14,7 +14,9 @@ import {
   floodOverlayOf,
   groundLayerHtml,
   groundPlan,
+  gwrapAspectAttr,
   mapboxAttributionHtml,
+  ringFit,
   ringSvg,
   LOADING_PANEL_TITLE,
 } from "./panel-lib.js";
@@ -80,6 +82,8 @@ function aerialHtml(
   }
   const outcome = groundPlan(ring, anchor ?? null, anchorRead ?? null);
   const layer = outcome.plan ? groundLayerHtml(outcome.plan) : "";
+  const fit = outcome.plan?.fit ?? ringFit(ring);
+  const aspect = gwrapAspectAttr(fit);
   const cls = thumb ? "gwrap af-aerial af-thumb" : "gwrap af-aerial";
   const chip = `<div class="ss-chip">${LOGO}</div>`;
   const gis = `<div class="ss-gis">GIS-approximate</div>`;
@@ -90,7 +94,7 @@ function aerialHtml(
     : "";
   return {
     html:
-      `<div class="${cls}" data-ground="${layer ? "on" : "off"}">${layer}${svg}${chip}${gis}${undrawn}</div>${credit}${env}`,
+      `<div class="${cls}" data-ground="${layer ? "on" : "off"}"${aspect}>${layer}${svg}${chip}${gis}${undrawn}</div>${credit}${env}`,
     credited: !!layer,
   };
 }

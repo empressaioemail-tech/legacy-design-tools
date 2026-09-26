@@ -17,6 +17,7 @@ import {
   groundPlan,
   landUseCustomerName,
   mapboxAttributionHtml,
+  ringFit,
   ringSvg,
   sourceOf,
   stateWord,
@@ -168,11 +169,13 @@ export function detailHtml(model: PanelModel, opts: DetailOpts): string {
   });
   const outcome = groundPlan(model.ring ?? [], model.anchor ?? null, model.anchorRead ?? null);
   const layer = opts.groundOn && outcome.plan ? groundLayerHtml(outcome.plan) : "";
+  const fit = outcome.plan?.fit ?? (model.ring?.length ? ringFit(model.ring) : null);
+  const aspect = fit ? ` style="aspect-ratio:${fit.w}/${fit.h}"` : "";
   const map = svg
-    ? `<div class="gwrap af-aerial ss-map" data-ground="${layer ? "on" : "off"}" data-lines="${opts.linesOn ? "on" : "off"}">${layer}${svg}` +
+    ? `<div class="ss-map-outer" data-map-outer="1"><div class="ss-map-viewport" data-map-viewport="1"><div class="gwrap af-aerial ss-map" data-ground="${layer ? "on" : "off"}" data-lines="${opts.linesOn ? "on" : "off"}"${aspect}>${layer}${svg}` +
       `<div class="ss-gis">GIS-approximate</div>` +
       (!geom && named ? `<div class="ss-mapnote" data-envelope="undrawn">No envelope drawn</div>` : "") +
-      `</div>`
+      `</div></div></div>`
     : `<div class="af-aerial af-aerial-none" data-aerial="absent"><p class="af-outline">Parcel outline not on this read</p></div>`;
   const credit = outcome.plan ? mapboxAttributionHtml() : "";
   const toggle = (key: string, label: string, on: boolean) =>

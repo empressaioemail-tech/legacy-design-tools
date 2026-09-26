@@ -748,8 +748,15 @@ svg.ring .sm{fill:var(--ss-t6)}
    box exactly: no margin collapsing question, and a percentage inside it is a
    viewBox unit. The layer paints no background, so a tile that does not load
    leaves the panel's own void rather than a grey stand-in for imagery. */
-.gwrap{position:relative;margin:8px 0;border-radius:6px;overflow:hidden}
-.gwrap svg.ring{margin:0;position:relative;z-index:1}
+.gwrap{position:relative;margin:8px 0;border-radius:6px;overflow:hidden;width:100%}
+.gwrap svg.ring{margin:0;position:relative;z-index:1;width:100%;height:100%;display:block}
+.ss-map-outer{overflow:hidden;flex:1 1 auto;min-height:200px;touch-action:none;cursor:grab}
+.ss-map-outer:active{cursor:grabbing}
+.ss-map-viewport{transform-origin:50% 50%;will-change:transform}
+.ss-map-viewport .ss-layers,.ss-map-viewport+.ss-layers{position:relative}
+.lookup-card{padding:8px 0}
+.lookup-head{margin:0 0 6px;font-size:14px;line-height:20px;color:var(--color-text-primary,var(--ss-t3))}
+.lookup-detail{margin:0;font-size:13px;line-height:18px;color:var(--color-text-secondary,var(--ss-t5))}
 .ground{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .ground img{position:absolute;display:block;max-width:none;user-select:none}
 /* The ring's void fill is a 55 percent scrim, which is right over nothing and
@@ -850,6 +857,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 .af-slide{flex:0 0 78%;max-width:280px;scroll-snap-align:start;border:0.5px solid var(--color-border-tertiary,var(--ss-line-14));border-radius:12px;background:var(--color-background-secondary,#262624);overflow:hidden}
 .af-slide .af-answer{padding:0 12px}
 .af-aerial{position:relative;aspect-ratio:5/2;max-height:none;overflow:hidden;background:var(--color-background-secondary,#262624)}
+.af-aerial.gwrap,.gwrap.af-aerial{aspect-ratio:unset}
 .af-thumb{aspect-ratio:5/2}
 .af-aerial-none{min-height:96px;display:flex;align-items:center;justify-content:center;color:var(--color-text-secondary,var(--ss-t5));font-size:12px}
 .af-outline{margin:0;padding:28px 12px 12px;text-align:center}
@@ -916,6 +924,14 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   .ss-sheet-handle{display:flex;align-items:center;justify-content:center;min-height:44px;cursor:pointer;font-size:12px;color:var(--color-text-tertiary,#9C9A92)}
   .af-slide{flex-basis:86%}
   .ss-v2 .btn{min-height:44px;min-width:44px}
+}
+@media (prefers-color-scheme:light){
+  :root{--ss-accent:#2C6B9E;--ss-ok:#437426;--ss-no:#A73D39;--ss-amber:#A87829;--ss-record:#6FC1B8}
+  .ss-v2,.ss-board{background:var(--color-background-primary,#FFFFFF);color:var(--color-text-primary,#141413);border-color:var(--color-border-tertiary,rgba(20,20,19,.15))}
+  .af-slide{background:var(--color-background-secondary,#F5F4ED)}
+  .af-aerial,.af-aerial.gwrap{background:var(--color-background-secondary,#F5F4ED)}
+  .ss-tile,.ss-row{background:var(--color-background-secondary,#F5F4ED)}
+  .ss-chip,.ss-gis,.ss-mapnote{background:var(--color-background-primary,#FFFFFF)}
 }
 @media (prefers-reduced-motion:reduce){.af-skel .sk{animation:none}}
 @keyframes af-pulse{0%,100%{opacity:.55}50%{opacity:1}}

@@ -231,7 +231,24 @@ export type PanelParcel = {
   returned: boolean;
 };
 
-export type PanelKind = "board" | "parcel" | "parcels" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
+export type PanelKind =
+  | "board"
+  | "parcel"
+  | "parcels"
+  | "empty"
+  | "miss"
+  | "refused"
+  | "unreadable"
+  | "screens"
+  | "declared"
+  | "lookup";
+
+/** P-474. find_parcel / declared failures with distinct customer copy. */
+export type LookupCard = {
+  state: string;
+  headline: string;
+  detail: string | null;
+};
 export type MissClass = "absent" | "unbaked" | "retired" | "unstated";
 export type MissRow = {
   parcelNodeId: string;
@@ -301,6 +318,8 @@ export type PanelModel = {
   inlineCard?: InlineCard;
   /** A-331 / P-474: owner of record for the fullscreen deeper view only. */
   ownerDisplay?: OwnerPanelDisplay;
+  /** P-474: address lookup or tool failure card. */
+  lookup?: LookupCard;
 };
 
 /** A-331. Parsed from `ownerFact`; rendered only in fullscreen detail. */
@@ -1278,10 +1297,119 @@ export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
  * A null plan returns the svg untouched: no wrapper, no note, no toggle and no
  * tile url anywhere in the html.
  */
+/** P-474. Mosaic and ring share one box aspect ratio so tiles stay aligned. */
+export function gwrapAspectAttr(fit: RingFit | null | undefined): string {
+  if (!fit || !(fit.w > 0) || !(fit.h > 0)) return "";
+  return ` style="aspect-ratio:${fit.w}/${fit.h}"`;
+}
+
 export function groundWrapHtml(svg: string, plan: GroundPlan | null, on: boolean): string {
   if (!svg || !plan) return svg;
   const layer = on ? groundLayerHtml(plan) : "";
-  return `<div class="gwrap" data-ground="${on ? "on" : "off"}">${layer}${svg}</div>` + groundNoteHtml(plan, on);
+  const aspect = gwrapAspectAttr(plan.fit);
+  return (
+    `<div class="gwrap" data-ground="${on ? "on" : "off"}"${aspect}>${layer}${svg}</div>` +
+    groundNoteHtml(plan, on)
+  );
+}
+
+export function parcelPageUrl(parcelNodeId: string): string {
+  return "https://smartsite.cloud/p/" + encodeURIComponent(parcelNodeId.trim());
+}
+
+const LOOKUP_NO_MATCH_HINT = "Try adding the city, state and ZIP.";
+
+export function lookupCardHtml(lookup: LookupCard): string {
+  const detail = lookup.detail
+    ? `<p class="lookup-detail">${escapeHtml(lookup.detail)}</p>`
+    : "";
+  return (
+    `<div class="lookup-card" data-lookup-state="${escapeHtml(lookup.state)}">` +
+    `<p class="lookup-head"><span class="ss-marker" data-marker="${escapeHtml(lookup.state === "out_of_coverage" ? "unknown" : lookup.state === "outage" ? "refused" : "unknown")}" aria-hidden="true"></span> ` +
+    `<b>${escapeHtml(lookup.headline)}</b></p>${detail}</div>`
+  );
+}
+
+function lookupHeadlineFromMissClass(rec: Record<string, unknown>): LookupCard {
+  const missClass = stringOrNull(rec.missClass) ?? "no-hit";
+  const display = stringOrNull(rec.missClassDisplayText);
+  const outState = stringOrNull(rec.outOfCoverageState);
+  if (missClass === "out_of_coverage") {
+    const headline =
+      display && !display.includes("_")
+        ? display
+        : outState && outState !== "TX"
+          ? "Outside Texas, not covered"
+          : "Outside Texas, not covered";
+    return { state: "out_of_coverage", headline, detail: null };
+  }
+  if (missClass === "in_texas_outside_full_coverage" || missClass === "in_texas_outside_counties") {
+    return {
+      state: missClass,
+      headline: display ?? "In Texas, outside the counties we fully cover",
+      detail: null,
+    };
+  }
+  if (missClass === "located-unbound") {
+    return {
+      state: "located-unbound",
+      headline: "Address found, no parcel bound yet",
+      detail: LOOKUP_NO_MATCH_HINT,
+    };
+  }
+  if (missClass === "no-hit" || missClass === "situs-search-budget") {
+    return {
+      state: "no_hit",
+      headline: "No parcel matched this address",
+      detail: LOOKUP_NO_MATCH_HINT,
+    };
+  }
+  return {
+    state: missClass,
+    headline: display ?? "This lookup did not return a parcel",
+    detail: missClass === "no-hit" ? LOOKUP_NO_MATCH_HINT : null,
+  };
+}
+
+export function lookupCardFrom(rec: Record<string, unknown>): PanelModel | null {
+  if (Array.isArray(rec.hits) && rec.hits.length === 0) {
+    const lookup = lookupHeadlineFromMissClass(rec);
+    return { kind: "lookup", rows: [], overlays: [], ring: [], edges: [], lookup };
+  }
+  const declared = declaredFrom(rec);
+  if (declared) {
+    if (declared.reason === "upstream_non_json" && declared.brief && /<html/i.test(declared.brief)) {
+      return {
+        kind: "lookup",
+        rows: [],
+        overlays: [],
+        ring: [],
+        edges: [],
+        lookup: {
+          state: "outage",
+          headline: "Smart Site could not reach the server",
+          detail: "Try again in a moment.",
+        },
+      };
+    }
+    if (declared.status === "error" || declared.status === "degraded") {
+      const reason = declared.reason ?? "error";
+      const isTimeout = /timeout/i.test(reason);
+      return {
+        kind: "lookup",
+        rows: [],
+        overlays: [],
+        ring: [],
+        edges: [],
+        lookup: {
+          state: isTimeout ? "timeout" : "refused",
+          headline: isTimeout ? "This request timed out" : "This request was refused",
+          detail: declared.message ?? null,
+        },
+      };
+    }
+  }
+  return null;
 }
 
 /*
@@ -3255,15 +3383,18 @@ function parseToolResultInner(text: string): PanelModel {
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
     return emptyModel("empty");
   }
+  const lookupEarly = lookupCardFrom(rec);
+  if (lookupEarly) return lookupEarly;
   const mapPanelNote = stringOrNull(rec.mapPanelNote);
   if (mapPanelNote && !asRecord(rec.draw) && !Array.isArray(rec.parcels)) {
+    const reason = stringOrNull(rec.mapPanelReason) ?? "map";
     return {
-      kind: "parcel",
+      kind: "lookup",
       rows: [],
       overlays: [],
       ring: [],
       edges: [],
-      label: mapPanelNote,
+      lookup: { state: reason, headline: mapPanelNote, detail: null },
     };
   }
 

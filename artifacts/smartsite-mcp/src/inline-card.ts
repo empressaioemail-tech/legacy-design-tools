@@ -433,9 +433,13 @@ export function composeInlineCard(
   const parcels = Array.isArray(data.parcels) ? data.parcels : null;
   const topDraw = asRecord(data.draw);
   const topBrief = sectionsOf(data).length > 0;
-  if (parcels && parcels.length >= CAROUSEL_MIN && !topDraw && !topBrief) {
+  if (parcels && parcels.length >= CAROUSEL_MIN && !topDraw) {
     const built = itemsFromParcels(parcels, mintParcelLink);
-    return carousel(`${built.items.length} parcels`, built.items, built.moreCount, shareUrl);
+    const title =
+      parcels.length === built.items.length
+        ? `${built.items.length} parcels`
+        : `${built.items.length} parcels on this card`;
+    return carousel(title, built.items, built.moreCount, shareUrl);
   }
   const rows = Array.isArray(data.rows) ? data.rows : null;
   if (rows && rows.length >= CAROUSEL_MIN && !topDraw) {
@@ -444,7 +448,7 @@ export function composeInlineCard(
     const name = cleanAddress(str(screen?.name) ?? str(data.name));
     return carousel(name ?? "Selected parcels", built.items, built.moreCount, shareUrl);
   }
-  if (topDraw || topBrief) {
+  if (topDraw || (topBrief && !(parcels && parcels.length >= CAROUSEL_MIN))) {
     return singleCard(data, shareUrl);
   }
   return null;

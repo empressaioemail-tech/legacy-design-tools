@@ -133,6 +133,8 @@ import {
   degradedNotesHtml,
   screensListHtml,
   declaredLineHtml,
+  lookupCardHtml,
+  parcelPageUrl,
   mapCardOutcomeFromModel,
   EMPTY_BOARD_BODY,
   EMPTY_BOARD_TITLE,
@@ -378,6 +380,10 @@ declare const __SS_CARD_DATA__: {
   var floodOn=true;
   var envelopeOn=true;
   var linesOn=true;
+  var mapTx=0;
+  var mapTy=0;
+  var mapScale=1;
+  var mapDrag=null;
   var rpcId=1;
   var initId=rpcId++;
   var ready=false;
@@ -639,6 +645,7 @@ declare const __SS_CARD_DATA__: {
     if(deepView&&model.kind==="parcel"){
       root.innerHTML=cardV2(stateLines()+detailHtml(model,{groundOn:groundOn,floodOn:floodOn,envelopeOn:envelopeOn,linesOn:linesOn,sheet:sheetHigh?"high":"low"}));
       bindDrawing();
+      bindMapViewport();
     } else if(model.inlineCard&&model.inlineCard.layout==="carousel"&&model.kind==="parcels"){
       root.innerHTML=cardV2(stateLines()+answerFirstCarouselHtml(model));
     } else if(model.inlineCard&&model.inlineCard.layout==="single"&&model.kind==="parcel"){
@@ -654,7 +661,7 @@ declare const __SS_CARD_DATA__: {
         return hdr+sortBoardRows(grp.rows,sortKey,sortDir).map(function(r){
         var i=pos++;
         var open=r.parcelNodeId&&r.resolution==="resolved"
-          ?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
+          ?'<button type="button" class="btn" data-act="open" data-url="'+esc(parcelPageUrl(r.parcelNodeId))+'" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
           :'<div class="slot">'+NOTHING_TO_OPEN+"</div>"+lookupControlHtml(r);
         return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom idcol">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
           var g=glyph(r.rails[k]);
@@ -669,7 +676,7 @@ declare const __SS_CARD_DATA__: {
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>"+
         '<div class="af-acts"><button type="button" class="btn primary" data-act="board" onclick="window.__ss&&window.__ss.expand(this)">Open board</button>'+boardShare+"</div>",false,"ss-board");
     } else if(model.kind==="parcel"){
-      var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
+      var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("");
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
       var flood=floodOverlayOf(model.overlays);
       var secs=model.sections||[];
@@ -712,6 +719,8 @@ declare const __SS_CARD_DATA__: {
       /* M-4: the same helpers the exported twin uses. A set that cannot make a
        * canvas never reaches here: the parser hands it back as a single parcel. */
       root.innerHTML=card(MULTI_CARD_TITLE,stateLines()+'<div class="well">'+renderParcelSet(model,groundOn)+"</div>");
+    } else if(model.kind==="lookup"&&model.lookup){
+      root.innerHTML=cardV2(stateLines()+'<div class="well">'+lookupCardHtml(model.lookup)+"</div>");
     } else if(model.kind==="miss"){
       root.innerHTML=card("lookup",'<div class="well">'+(model.misses||[]).map(missLine).join("")+"</div>");
     } else if(model.kind==="refused"){
@@ -778,13 +787,59 @@ declare const __SS_CARD_DATA__: {
   function requestMode(mode){
     parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/request-display-mode",params:{mode:mode}},"*");
   }
+  function resetMapView(){
+    mapTx=0;
+    mapTy=0;
+    mapScale=1;
+    mapDrag=null;
+  }
+  function applyMapTransform(){
+    var vp=document.querySelector("[data-map-viewport]");
+    if(!vp) return;
+    vp.style.transform="translate("+mapTx+"px,"+mapTy+"px) scale("+mapScale+")";
+  }
+  function bindMapViewport(){
+    applyMapTransform();
+  }
+  function initMapControls(){
+    document.body.addEventListener("wheel",function(ev){
+      if(!deepView) return;
+      var t=ev.target;
+      if(!t||typeof t.closest!=="function"||!t.closest("[data-map-outer]")) return;
+      ev.preventDefault();
+      var delta=ev.deltaY>0?0.9:1.1;
+      mapScale=Math.min(4,Math.max(0.5,mapScale*delta));
+      applyMapTransform();
+    },{passive:false});
+    document.body.addEventListener("pointerdown",function(ev){
+      if(!deepView) return;
+      var t=ev.target;
+      if(!t||typeof t.closest!=="function") return;
+      var outer=t.closest("[data-map-outer]");
+      if(!outer) return;
+      mapDrag={x:ev.clientX-mapTx,y:ev.clientY-mapTy,id:ev.pointerId,el:outer};
+      outer.setPointerCapture(ev.pointerId);
+    });
+    document.body.addEventListener("pointermove",function(ev){
+      if(!mapDrag||mapDrag.id!==ev.pointerId) return;
+      mapTx=ev.clientX-mapDrag.x;
+      mapTy=ev.clientY-mapDrag.y;
+      applyMapTransform();
+    });
+    document.body.addEventListener("pointerup",function(ev){
+      if(mapDrag&&mapDrag.id===ev.pointerId) mapDrag=null;
+    });
+  }
+  initMapControls();
   function sendExpand(){
     deepView=true;
+    resetMapView();
     requestMode("fullscreen");
     render();
   }
   function sendCollapse(){
     deepView=false;
+    resetMapView();
     openTile=-1;
     openRow=-1;
     requestMode("inline");
@@ -930,7 +985,7 @@ declare const __SS_CARD_DATA__: {
   }
   function mapCardOutcomeFromModel(m){
     if(m.kind==="unreadable") return {outcome:"failed",reasonCode:"panel_unreadable"};
-    if(m.kind==="miss"||m.kind==="refused"||m.kind==="declared") return {outcome:"fallback",reasonCode:m.kind};
+    if(m.kind==="lookup"||m.kind==="miss"||m.kind==="refused"||m.kind==="declared") return {outcome:"fallback",reasonCode:m.kind};
     if(m.kind==="parcel"||m.kind==="parcels"||m.kind==="board"||m.kind==="screens") return {outcome:"drawn",reasonCode:"ok"};
     return {outcome:"fallback",reasonCode:m.kind||"unknown"};
   }
@@ -955,6 +1010,7 @@ declare const __SS_CARD_DATA__: {
     reportOpen=false;
     groundOn=true;
     deepView=false;
+    resetMapView();
     openTile=-1;
     openRow=-1;
     sheetHigh=false;
