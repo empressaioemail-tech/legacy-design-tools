@@ -55,7 +55,7 @@ describe("smartsite-mcp constants", () => {
     expect(exportInstrument?.description).not.toMatch(/\/tools\/export_instrument/);
   });
 
-  it("descriptions do not promise a map, listings, web, or owner data", () => {
+  it("descriptions do not promise a map, listings, or web search, and owner data is tiered", () => {
     const askTheMap = SMARTSITE_MCP_TOOLS.find((t) => t.name === "ask_the_map");
     expect(askTheMap?.description).not.toMatch(/visible map context/i);
     expect(askTheMap?.description).toContain("not_ready");
@@ -67,6 +67,10 @@ describe("smartsite-mcp constants", () => {
     expect(getSmartSite?.description).toContain("array cap 25");
     expect(getSmartSite?.description).toMatch(/depth node: array cap 25/);
     expect(getSmartSite?.description).toMatch(/does not need to be saved/);
+    expect(getSmartSite?.description).toContain("Owner name and mailing address are included for Studio and Team");
+    expect(getSmartSite?.description).toContain("declared refusal");
+    expect(getSmartSite?.description).not.toMatch(/does not carry at any depth/);
+    expect(getSmartSite?.description).toContain("area figure is withheld");
     const findParcel = SMARTSITE_MCP_TOOLS.find((t) => t.name === "find_parcel");
     expect(findParcel?.description).toContain("missClass");
     expect(findParcel?.description).toMatch(/not that the parcel does not exist/);

@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildR1Brief, composeLandUseBriefSectionFromAtom } from "./r1BriefCompose";
+import { buildR1Brief, composeLandUseBriefSectionFromAtom, landUseCustomerLabel } from "./r1BriefCompose";
 import type {
   LandUseFactPresent,
   LandUseFactTypedAbsence,
@@ -65,6 +65,19 @@ describe("composeLandUseBriefSectionFromAtom", () => {
     expect(part.data).toEqual({ landUseCode: "SF-RESIDENTIAL", landUseLabel: "Single Family Residential" });
     expect(part.disposition).toBe("present");
     expect(part.asOf).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("a null label on a PTAD code is filled from the shared description", () => {
+    const part = composeLandUseBriefSectionFromAtom(
+      { ...PRESENT_ATOM, landUseCode: "C1", landUseLabel: null },
+      "2026-09-01T00:00:00.000Z",
+    );
+    expect(part.data).toEqual({ landUseCode: "C1", landUseLabel: "Vacant lot or tract" });
+  });
+
+  it("a hyphenated local code with no label is not forced through the PTAD first letter", () => {
+    expect(landUseCustomerLabel("SF-RESIDENTIAL", null)).toBeNull();
+    expect(landUseCustomerLabel("C1", "Vacant commercial")).toBe("Vacant commercial");
   });
 
   it("absent: data is the raw fact object, disposition absent", () => {

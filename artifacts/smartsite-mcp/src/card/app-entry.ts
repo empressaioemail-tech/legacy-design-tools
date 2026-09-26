@@ -644,16 +644,27 @@ declare const __SS_CARD_DATA__: {
       var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
       var flood=floodOverlayOf(model.overlays);
-      var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null});
+      var secs=model.sections||[];
+      var floodSection=null;
+      for(var fi0=0;fi0<secs.length;fi0++){ if(secs[fi0].id==="flood"){ floodSection=secs[fi0]; break; } }
+      var floodMethod=floodSection&&floodSection.data?floodSection.data.method:null;
+      var envelope=null;
+      for(var ei=0;ei<model.overlays.length;ei++){
+        var eo=model.overlays[ei];
+        if(eo.id==="envelope"&&eo.geom&&eo.geom.length>=3){ envelope=eo; break; }
+      }
+      var svg=ringSvg(model.ring||[],model.edges||[],{zoning:model.zoning||null,flood:flood,frame:model.frame||null,envelope:envelope?envelope.geom:null,floodMethod:floodMethod});
       /* M-2: same helpers the exported twin uses; a null plan returns svg untouched */
       var gOutcome=groundPlan(model.ring||[],model.anchor||null,model.anchorRead||null);
       var drawn=groundWrapHtml(svg,gOutcome.plan,groundOn);
+      if(envelope){
+        drawn+='<div class="envnote" data-envelope-disclosure="1">'+esc(envelope.basisDisplayText||"Modelled from the setback table on record. The area is not stated.")+"</div>";
+      }
       if(!gOutcome.plan&&gOutcome.reason){ drawn+=singleGroundNoteHtml(gOutcome.reason); }
       var tip=svg?'<div class="tip" data-tip="1">'+EDGE_TIP_HINT+"</div>"+frameNoteHtml(model.frame||null):"";
       var edgeList=(model.edges&&model.edges.length)?'<ul class="edges">'+model.edges.map(function(e){return "<li>"+esc(edgeCaption(e))+"</li>"}).join("")+"</ul>":"";
-      var secs=model.sections||[];
       var floodFacts="";
-      for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi); break; } }
+      for(var fi=0;fi<secs.length;fi++){ if(secs[fi].id==="flood"){ floodFacts=floodFactsHtml(secs[fi],fi,flood?flood.sfha:undefined); break; } }
       var subhead=parcelFactSubheadHtml(secs);
       var report=reportHtmlPartialDefault(secs,reportOpen);
       /* M-5: what this panel did NOT draw, whenever the result carried more than

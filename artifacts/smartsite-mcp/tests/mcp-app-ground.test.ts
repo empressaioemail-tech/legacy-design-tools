@@ -20,6 +20,7 @@ import {
   GROUND_EQUATOR_MPP,
   GROUND_MAX_TILES,
   GROUND_SOURCE_LABEL,
+  GROUND_LICENCE_NOTE,
   GROUND_MAPBOX_HOLD_NOTE,
   GROUND_SUPERSAMPLE,
   GROUND_TILE_ORIGIN,
@@ -538,8 +539,9 @@ describe("M-2 the painted ground", () => {
     expect(on).not.toMatch(/\b(19|20)\d\d\b/);
   });
 
-  it("labels the Mapbox hold on the Esri aerial, so the choice is not silent", () => {
-    expect(on).toContain(GROUND_MAPBOX_HOLD_NOTE);
+  it("credits provider, capture date, and licence, and leaves the engineering note off the credit", () => {
+    expect(on).toContain(GROUND_LICENCE_NOTE);
+    expect(on).not.toContain(GROUND_MAPBOX_HOLD_NOTE);
     expect(on).not.toContain("api.mapbox.com");
   });
 
@@ -583,9 +585,9 @@ describe("M-2 the painted ground", () => {
       'data-flood-tint="heavy"',
       'data-north="up"',
       "data-scale-ft=",
-      "unit reference",
+      ">50 ft<",
       'data-tip="1"',
-      "frame gis-approximate",
+      "Approximate map position",
     ]) {
       expect(on, marker).toContain(marker);
       expect(off, marker).toContain(marker);
@@ -598,7 +600,7 @@ describe("M-2 the painted ground", () => {
     /* the neighbor across a right of way is named and gets NO door */
     const tip = edgeTipHtml(row, 2);
     expect(tip).toContain(ACROSS_ROW);
-    expect(tip).toContain("48021:34121");
+    expect(tip).not.toContain("48021:34121");
     expect(tip).not.toContain('data-act="addscreen"');
     expect(edgeDoor(row)).toBeNull();
     /* an adjoining neighbor does get one */

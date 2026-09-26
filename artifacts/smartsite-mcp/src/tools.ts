@@ -802,7 +802,7 @@ function mono(value: unknown): string {
 
 /** Citation column: never invents a link where citationsDegraded is true (falsifier 3). */
 function citationText(section: BriefSection): string {
-  if (section.citationsDegraded) return "citation degraded";
+  if (section.citationsDegraded) return "No citation link on this read";
   const url = section.citations?.[0]?.url;
   return url ? url : "no citation on record";
 }

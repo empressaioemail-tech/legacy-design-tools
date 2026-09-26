@@ -925,7 +925,7 @@ describe("served iframe script", () => {
     f.init();
     f.toolResult(BATCH);
     expect(f.openButtons()).toBe(1);
-    expect(f.text()).toContain("908 PINE , BASTROP, TX 78602");
+    expect(f.text()).toContain("908 PINE, BASTROP, TX 78602");
     expect(f.text()).toContain(COPY.nodeUnresolved);
     expect(f.text()).toContain("48021:900099");
     expect(f.text()).toContain(COPY.nothingToOpen);
@@ -944,7 +944,7 @@ describe("served iframe script", () => {
     expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:34137"')).toEqual(LIVE_GLYPHS);
     expect(rowGlyphs(f.root.innerHTML, 'data-node="48021:8720522"')).toEqual(LIVE_GLYPHS);
     expect(rowGlyphs(f.root.innerHTML, "48021:900099")).toEqual(ALL_UNREAD);
-    expect(f.text()).toContain("908 PINE , BASTROP, TX 78602");
+    expect(f.text()).toContain("908 PINE, BASTROP, TX 78602");
     expect(f.text()).toContain("111 RAINMAKER CV, BASTROP, TX 78602");
     expect(f.text()).toContain(COPY.nodeUnresolved);
     expect(f.text()).toContain(COPY.nothingToOpen);
@@ -1160,17 +1160,17 @@ describe("P-91 v2 drawing (served)", () => {
     f.hover(0);
     expect(f.tipText()).toContain("rear");
     expect(f.tipText()).toContain("alley");
-    expect(f.tipText()).toContain("48021:road:925036023");
+    expect(f.tipText()).not.toContain("48021:road:925036023");
     f.hover(3);
     expect(f.tipText()).toContain("corner side");
     expect(f.tipText()).toContain("right of way");
-    expect(f.tipText()).toContain("48021:road:129017865");
+    expect(f.tipText()).not.toContain("48021:road:129017865");
     expect(f.tipText()).toContain("local");
     expect(f.tipText()).not.toContain(COPY.acrossRow);
     f.hover(1);
     expect(f.tipText()).toContain("side");
     expect(f.tipText()).toContain("neighbor");
-    expect(f.tipText()).toContain("48021:34169");
+    expect(f.tipText()).not.toContain("48021:34169");
     expect(f.tipText()).not.toContain("48021:road:");
     expect(f.edge(3).getAttribute("class")).toBe("edge");
     f.leave(1);
@@ -1185,7 +1185,7 @@ describe("P-91 v2 drawing (served)", () => {
     f.init();
     f.toolResult(GOLD_NO_FT);
     f.hover(1);
-    expect(f.tipText()).toContain("48021:34169");
+    expect(f.tipText()).not.toContain("48021:34169");
     expect(f.tipText()).not.toMatch(/\d ft/);
     f.hover(0);
     expect(f.tipText()).toContain("98.98 ft");
@@ -1199,14 +1199,14 @@ describe("P-91 v2 drawing (served)", () => {
     f.hover(1);
     f.down(1);
     f.leave(1);
-    expect(f.tipText()).toContain("48021:34169");
+    expect(f.tipText()).not.toContain("48021:34169");
     expect(f.edge(1).getAttribute("class")).toBe("edge hot");
     f.hover(2);
-    expect(f.tipText()).toContain("48021:34121");
+    expect(f.tipText()).not.toContain("48021:34121");
     expect(f.edge(2).getAttribute("class")).toBe("edge hot");
     expect(f.edge(1).getAttribute("class")).toBe("edge");
     f.leave(2);
-    expect(f.tipText()).toContain("48021:34169");
+    expect(f.tipText()).not.toContain("48021:34169");
     expect(f.edge(1).getAttribute("class")).toBe("edge hot");
     expect(f.edge(2).getAttribute("class")).toBe("edge");
     f.hover(1);
@@ -1258,9 +1258,9 @@ describe("P-91 v2 drawing (served)", () => {
     f.toolResult(GOLD_NODE);
     f.hover(2);
     const t = f.tipText();
-    expect(t).toContain("48021:34121");
+    expect(t).not.toContain("48021:34121");
     expect(t).toContain(COPY.acrossRow);
-    expect(t).toContain("48021:road:15113284");
+    expect(t).not.toContain("48021:road:15113284");
     expect(t).toContain("front");
     expect(t).toContain("right of way");
     expect(f.tip().innerHTML).not.toContain('data-act="open"');
@@ -1272,12 +1272,12 @@ describe("P-91 v2 drawing (served)", () => {
     g.init();
     g.toolResult(NODE_34121);
     g.hover(7);
-    expect(g.tipText()).toContain("48021:35105");
+    expect(g.tipText()).not.toContain("48021:35105");
     expect(g.tipText()).toContain(COPY.acrossRow);
     expect(g.tipText()).toContain("minor collector");
     expect(g.openButtons()).toBe(0);
     g.hover(5);
-    expect(g.tipText()).toContain("48021:34153");
+    expect(g.tipText()).not.toContain("48021:34153");
     expect(g.openButtons()).toBe(1);
   });
 
@@ -1288,7 +1288,7 @@ describe("P-91 v2 drawing (served)", () => {
     const html = f.root.innerHTML;
     expect(html).toContain('data-zoning="SF-1"');
     expect(html).toContain(">SF-1</text>");
-    expect(html).toContain(">bastrop_city_tx</text>");
+    expect(html).not.toContain("bastrop_city_tx");
     expect(html).toContain('stroke="var(--ss-t3)" stroke-width="2" data-zone-family="residential"');
     const district = f.district();
     expect(district?.getAttribute("class")).toBe("zn link");
@@ -1391,9 +1391,10 @@ describe("P-91 v2 drawing (served)", () => {
     expect(html).toContain('data-north="up"');
     expect(html).toContain('data-scale-ft="50"');
     expect(f.text()).toContain("50 ft");
-    expect(f.text()).toContain(COPY.unitRef);
+    expect(f.text()).not.toContain(COPY.unitRef);
     expect(html).toContain('data-frame-quality="gis-approximate"');
-    expect(f.text()).toContain("gis-approximate");
+    expect(f.text()).toContain("Approximate map position");
+    expect(f.text()).not.toContain("gis-approximate");
     const poly = /<polygon class="ring-fill" points="([^"]+)"/.exec(html)?.[1] ?? "";
     const xs = poly.split(" ").map((p) => Number(p.split(",")[0]));
     const ringPx = Math.max(...xs) - Math.min(...xs);
@@ -1432,7 +1433,7 @@ describe("P-91 v2 drawing (served)", () => {
  * here, the module constants there).
  */
 const COPY2 = {
-  citationDegraded: "citation degraded",
+  citationDegraded: "No citation link on this read",
   asOfMissing: "as-of missing",
   absenceUnverified: "absence unverified; no provenance on the wire",
   bfeNone: "none on record",
@@ -1504,14 +1505,14 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(row).toContain('data-fact-subtype="0.2 PCT ANNUAL CHANCE FLOOD HAZARD"');
     expect(row).toContain('data-fact-sfha="no"');
     expect(row).toContain(`data-fact-bfe="${COPY2.bfeNone}"`);
-    expect(row).toContain('data-fact-adapter="adapter:flood-test"');
-    expect(row).toContain('data-fact-vintage="NFHL_48_20260101"');
-    expect(row).toContain('data-fact-evaluated="2026-08-29"');
+    expect(row).not.toContain("data-fact-adapter");
+    expect(row).toContain('data-fact-vintage="2026-01-01"');
+    expect(row).not.toContain("NFHL_");
     expect(row).not.toContain("T10:00");
     expect(row).not.toContain("data-zone-exposure");
     expect(f.text()).not.toContain(FLOOD_SUMMARY);
     expect(f.strip(row)).toContain("as of 2026-08-29");
-    expect(f.strip(row)).toContain("source adapter:flood-test");
+    expect(f.strip(row)).not.toContain("adapter");
     const ae = fresh();
     ae.init();
     ae.toolResult(NODE_49295_FACTS);
@@ -1520,7 +1521,8 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(aeRow).toContain('data-fact-subtype="FLOODWAY"');
     expect(aeRow).toContain('data-fact-sfha="yes"');
     expect(aeRow).toContain('data-fact-bfe="372.5"');
-    expect(aeRow).toContain('data-fact-vintage="NFHL_48_20260101"');
+    expect(aeRow).toContain('data-fact-vintage="2026-01-01"');
+    expect(aeRow).not.toContain("NFHL_");
     expect(aeRow).not.toContain("data-zone-exposure");
     expect(aeRow).toContain(COPY2.citationDegraded);
     const s = fresh();
@@ -1580,7 +1582,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(pipe).toContain('data-paint="absent-verified"');
     expect(pipe).toContain("g-absent-verified");
     expect(pipe).toContain('data-vintage="2026-06"');
-    expect(pipe).toContain('data-provenance="present"');
+    expect(pipe).not.toContain("data-provenance");
     expect(pipe).not.toContain('data-act="why"');
     const sd = f.segment('data-overlay="special-district"', "</div>");
     expect(sd).toContain('data-paint="unknown"');
@@ -1591,7 +1593,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(sd).toContain('data-act="why"');
     const well = f.segment('data-overlay="well"', "</div>");
     expect(well).toContain('data-paint="unknown"');
-    expect(f.strip(well)).toContain("provenance unknown; vintage unknown");
+    expect(f.strip(well)).not.toContain("provenance unknown");
     expect(well).not.toContain("data-paint-reason");
     const v = fresh();
     v.init();
@@ -1605,9 +1607,9 @@ describe("P-91 v2 facts and actions (served)", () => {
     d.toolResult(GOLD_FACTS_DEGRADED);
     const dsd = d.segment('data-overlay="special-district"', "</div>");
     expect(dsd).toContain('data-paint="unknown"');
-    expect(d.strip(dsd)).toContain("provenance degraded; vintage unknown");
+    expect(d.strip(dsd)).not.toContain("provenance degraded");
     expect(dsd).not.toContain("data-paint-reason");
-    expect(dsd).toContain('data-provenance="degraded"');
+    expect(dsd).not.toContain("data-provenance");
   });
 
   it("F6 as-of and source: a present section without asOf paints unknown with as-of missing; with asOf the row shows the date only and the source", () => {
@@ -1630,7 +1632,7 @@ describe("P-91 v2 facts and actions (served)", () => {
     expect(gz).toContain('data-report-state="present"');
     expect(gz).toContain('data-as-of="2026-08-29"');
     expect(gz).not.toContain("T10:00");
-    expect(gz).toContain('data-source="adapter:zoning-test"');
+    expect(gz).not.toContain("adapter:zoning-test");
     expect(gz).not.toContain(COPY2.asOfMissing);
     expect(gz).not.toContain('data-act="why"');
     const env = g.segment('data-report-section="setbacks-envelope"', 'data-report-section="flood"');
@@ -1814,10 +1816,10 @@ describe("P-91 v2 facts and actions (served)", () => {
     for (const w of ["present", "refused", "absent, verified", "unread"]) expect(text).toContain(w);
     expect(text).toContain("as of 2026-08-29");
     expect(text).not.toContain("T10:00");
-    expect(report).toContain('data-source="adapter:zoning-test"');
+    expect(report).not.toContain("adapter:zoning-test");
     expect(report).toContain('data-source="baked-envelope-facet"');
-    expect(report).toContain('data-source="adapter:flood-test"');
-    expect(report).toContain('data-source="adapter:landuse-test"');
+    expect(report).not.toContain("adapter:flood-test");
+    expect(report).not.toContain("adapter:landuse-test");
     expect(report).toContain(`data-act="cite" data-url="${ZONING_URL}"`);
     expect(report).toContain('data-agent-guidance="1"');
     expect(text).toContain(ENVELOPE_GUIDANCE);
@@ -2831,7 +2833,7 @@ describe("P-91 v3 M-5 item 2 (served): the paint only preview channel", () => {
     }
     /* and the facts above it still do */
     const facts = f.tip().innerHTML.slice(0, f.tip().innerHTML.indexOf('<span class="pv"'));
-    expect(facts).toContain('class="tn"');
+    expect(facts).toContain('class="tw"');
     /* the block has a rule of its own in the page, not the tooltip's */
     expect(app.buildAppHtml()).toContain(".tip .pv{");
   });
@@ -3070,7 +3072,8 @@ describe("P-91 v3 M-5 item 2 (served): the paint only preview channel", () => {
     f.toolResult(GOLD_NODE);
     /* edge 2 is a ROW that DOES name a neighbor; edgeDoor still refuses it */
     f.hover(2);
-    expect(f.tip().innerHTML).toContain("48021:34121");
+    expect(f.tip().innerHTML).toContain("across the right of way");
+    expect(f.tip().innerHTML).not.toContain("48021:34121");
     expect(hasPv(f)).toBe(false);
     expect(f.fire(app.PREVIEW_DWELL_MS)).toBe(0);
     expect(toolCalls(f)).toHaveLength(0);
