@@ -301,3 +301,19 @@ describe("STANDING_VOCAB_CONTENT_PART (V2, standing-block leg)", () => {
     expect(a).toBe(STANDING_VOCAB_BLOCK_TEXT);
   });
 });
+
+describe("P-456c panel display literals match @empressaio/atom-contract/display", () => {
+  it("byte-matches the package so the IIFE copy cannot drift", async () => {
+    const display = await import("@empressaio/atom-contract/display");
+    const panel = await import("../src/card/panel-lib.js");
+    expect(panel.CITATION_DEGRADED).toBe(display.CITATION_DEGRADED);
+    expect(panel.EDGE_WORDS).toEqual(display.EDGE_WORDS);
+    expect(panel.NO_BAKED_SNAPSHOT_PREFIX).toBe(display.NO_BAKED_SNAPSHOT_PREFIX);
+    expect(panel.NOT_IMPLEMENTED_PREFIX).toBe(display.NOT_IMPLEMENTED_PREFIX);
+    expect(panel.NOT_ON_FILE_PREFIX).toBe(display.NOT_ON_FILE_PREFIX);
+    expect(panel.OPEN_DID_NOT_REACH_ME).toBe(display.OPEN_DID_NOT_REACH_ME);
+    expect(panel.STATE_WORDS).toEqual(display.STATE_WORDS);
+    expect(panel.UPGRADE_TO_OPEN).toBe(display.UPGRADE_TO_OPEN);
+    expect(panel.HUMAN_ATOM_PATH_PENDING).toBe(display.envelopeHuman("atom_path_pending"));
+  });
+});

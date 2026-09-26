@@ -9,7 +9,8 @@
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:prod-bundle-gate": "node scripts/prod-bundle-gate/run-gate.mjs"
+    "test:prod-bundle-gate": "node scripts/prod-bundle-gate/run-gate.mjs",
+    "test:artifact-html-gate": "node scripts/artifact-html-gate/run-gate.mjs"
   },
   "dependencies": {
     "@empressaio/atom-contract": "^1.36.0",

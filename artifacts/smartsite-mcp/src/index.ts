@@ -1,7 +1,5 @@
 import dotenv from "dotenv";
 
-import { createSmartsiteMcpApp } from "./app.js";
-import { isAuthConfigured, loadAuthConfig } from "./auth.js";
 import { SERVER_NAME } from "./constants.js";
 import {
   PARCEL_TILES_ORIGIN_ENV_NAME,
@@ -35,6 +33,13 @@ async function main(): Promise<void> {
     }
     throw err;
   }
+  if (process.argv.includes("--print-app-html")) {
+    const { buildAppHtml } = await import("./mcp-app.js");
+    process.stdout.write(buildAppHtml());
+    process.exit(0);
+  }
+  const { createSmartsiteMcpApp } = await import("./app.js");
+  const { isAuthConfigured, loadAuthConfig } = await import("./auth.js");
   const authConfig = loadAuthConfig();
   const app = createSmartsiteMcpApp({ authConfig });
 

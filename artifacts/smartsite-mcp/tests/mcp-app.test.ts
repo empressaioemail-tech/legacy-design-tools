@@ -1307,8 +1307,8 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     const clean = buildAppHtml();
     expect(htmlContractViolations(clean)).toEqual([]);
     expect(htmlContractViolations(clean.replace('data-act="cite"', 'data-act="site"'))).toContain("citation_link_unbound");
-    expect(htmlContractViolations(clean.replace(WHY_TURN_INSTRUCTION, "Answer however you like."))).toContain("why_turn_unbound");
-    expect(htmlContractViolations(clean.replace('"Watching"', '"Following"'))).toContain("save_statuses_unbound");
+    expect(htmlContractViolations(clean.replaceAll(WHY_TURN_INSTRUCTION, "Answer however you like."))).toContain("why_turn_unbound");
+    expect(htmlContractViolations(clean.replaceAll('"Watching"', '"Following"'))).toContain("save_statuses_unbound");
     expect(htmlContractViolations(clean.replace('data-act="report"', 'data-act="view"'))).toContain("report_toggle_unbound");
     expect(htmlContractViolations(clean.replace(/add_to_screen/g, "add_to_list"))).toContain("add_to_screen_unbound");
   });
