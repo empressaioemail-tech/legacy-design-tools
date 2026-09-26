@@ -206,7 +206,21 @@ export async function wireFindNearestParcelsForMap(
   bodyText: string,
   canSeeOwner: boolean,
 ): Promise<string> {
-  if (!mapWireEnabled()) return bodyText;
+  if (!mapWireEnabled()) {
+    try {
+      const raw = asRecord(JSON.parse(bodyText));
+      const stamped = raw
+        ? {
+            ...raw,
+            nearestNeighbors: raw.parcels,
+            nearestSubjectParcelNodeId: raw.subjectParcelNodeId,
+          }
+        : JSON.parse(bodyText);
+      return JSON.stringify(stripNearestOwnerAndDollars(stamped));
+    } catch {
+      return bodyText;
+    }
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);
@@ -218,14 +232,33 @@ export async function wireFindNearestParcelsForMap(
 
   const ids = parcelIdsFromNearestParcels(rec.parcels);
   if (ids.length === 0) {
-    const merged = withMapNote(rec, "map_no_parcel_hits");
+    const merged = stripNearestOwnerAndDollars(
+      withMapNote(
+        {
+          ...rec,
+          nearestNeighbors: rec.parcels,
+          nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
+        },
+        "map_no_parcel_hits",
+      ),
+    ) as Record<string, unknown>;
     const view = cardViewFromToolPayload("find_nearest_parcels", merged);
     return injectCardContract(JSON.stringify(merged), view).text;
   }
 
-  const wired = await fetchNodeBriefWire(config, userId, ids, canSeeOwner);
+  const wired = await fetchNodeBriefWire(config, userId, ids, false);
   if (!wired.ok) {
-    const merged = withMapNote({ ...rec, mapWiring: "failed" }, wired.reason);
+    const merged = stripNearestOwnerAndDollars(
+      withMapNote(
+        {
+          ...rec,
+          mapWiring: "failed",
+          nearestNeighbors: rec.parcels,
+          nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
+        },
+        wired.reason,
+      ),
+    ) as Record<string, unknown>;
     const view = cardViewFromToolPayload("find_nearest_parcels", merged);
     return injectCardContract(JSON.stringify(merged), view).text;
   }
@@ -234,15 +267,55 @@ export async function wireFindNearestParcelsForMap(
   try {
     briefRec = JSON.parse(wired.text) as Record<string, unknown>;
   } catch {
-    const merged = withMapNote({ ...rec, mapWiring: "failed" }, "map_wiring_failed");
+    const merged = stripNearestOwnerAndDollars(
+      withMapNote(
+        {
+          ...rec,
+          mapWiring: "failed",
+          nearestNeighbors: rec.parcels,
+          nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
+        },
+        "map_wiring_failed",
+      ),
+    ) as Record<string, unknown>;
     return injectCardContract(JSON.stringify(merged), "none").text;
   }
-  const merged = {
-    ...rec,
+  const nearestList = rec.parcels;
+  const merged = stripNearestOwnerAndDollars({
     ...briefRec,
+    ...rec,
+    parcels: Array.isArray(briefRec.parcels) ? briefRec.parcels : nearestList,
     nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
-    nearestNeighbors: rec.parcels,
-  };
-  const view = cardViewFromToolPayload("find_nearest_parcels", merged);
+    nearestNeighbors: nearestList,
+    mapParcels: briefRec.parcels,
+  });
+  const view = cardViewFromToolPayload(
+    "find_nearest_parcels",
+    merged as Record<string, unknown>,
+  );
   return injectCardContract(JSON.stringify(merged), view).text;
+}
+
+const NEAREST_DOLLAR_KEYS = new Set([
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+  "cadRoll",
+]);
+
+/** Catalog contract: this tool returns no owner or dollar field at any tier. */
+export function stripNearestOwnerAndDollars(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNearestOwnerAndDollars);
+  const rec = asRecord(value);
+  if (!rec) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(rec)) {
+    if (key === "ownerFact" || key === "ownerName" || key === "ownerMailingAddress") {
+      continue;
+    }
+    if (NEAREST_DOLLAR_KEYS.has(key)) continue;
+    out[key] = stripNearestOwnerAndDollars(child);
+  }
+  return out;
 }
