@@ -13,7 +13,7 @@ function sourcesNewerThan(baked: string, sources: string[]): boolean {
 export function loadCardIife(): string {
   if (cache) return cache;
   const here = dirname(fileURLToPath(import.meta.url));
-  const sources = [join(here, "app-entry.ts"), join(here, "panel-lib.ts")];
+  const sources = [join(here, "app-entry.ts"), join(here, "panel-lib.ts"), join(here, "answer-first-html.ts")];
   const baked = [
     join(here, "card.iife.js"),
     join(here, "../card.iife.js"),

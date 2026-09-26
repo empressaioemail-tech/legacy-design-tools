@@ -836,6 +836,27 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 .scr .btn{margin-left:auto}
 .sortc{cursor:pointer;text-decoration:underline dotted;margin-left:6px}
 .brief{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t5);background:var(--ss-void);border-radius:6px;padding:8px;margin:6px 0 0;white-space:pre-wrap;word-break:break-word;overflow-x:auto}
+.card.af-fit{min-height:0;overflow:visible;background:var(--color-background-primary,var(--ss-ink));color:var(--color-text-primary,var(--ss-t3));border-color:var(--color-border-primary,var(--ss-line-14))}
+#root:has(.af-fit){min-height:0}
+.af{overflow:visible}
+.af-answer{margin:0 0 8px;font-weight:650;color:var(--color-text-primary,var(--ss-t3))}
+.af-facts{list-style:none;margin:0 0 8px;padding:0}
+.af-facts li{padding:4px 0;border-bottom:1px solid var(--color-border-secondary,var(--ss-line-06))}
+.af-k{color:var(--color-text-secondary,var(--ss-t5))}
+.af-v{color:var(--color-text-primary,var(--ss-t3))}
+.af-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.af-note,.af-credit{color:var(--color-text-secondary,var(--ss-t5));font-size:var(--ss-fs-meta);margin:4px 0 0}
+.af-carousel{display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding-bottom:4px}
+.af-slide{flex:0 0 220px;scroll-snap-align:start;border:1px solid var(--color-border-primary,var(--ss-line-14));border-radius:8px;padding:8px;background:var(--color-background-secondary,var(--ss-void))}
+.af-aerial{max-height:220px;overflow:hidden}
+.af-thumb{max-height:140px;overflow:hidden}
+.af-aerial-none{min-height:72px;display:flex;align-items:center;color:var(--color-text-secondary,var(--ss-t5));font-size:var(--ss-fs-meta)}
+.af-skel .sk{height:14px;margin:0 0 8px;border-radius:6px;background:var(--color-background-secondary,var(--ss-raised));animation:af-pulse 1.2s ease-in-out infinite}
+.af-skel .sk-short{width:60%}
+.af-skel .sk-btn{width:120px;height:36px}
+@media (max-width:640px){.af-fit .btn{min-height:44px;min-width:44px;padding:12px 16px}}
+@media (prefers-reduced-motion:reduce){.af-skel .sk{animation:none}}
+@keyframes af-pulse{0%,100%{opacity:.55}50%{opacity:1}}
 </style>
 </head>
 <body>

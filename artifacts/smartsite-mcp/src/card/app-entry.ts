@@ -148,6 +148,7 @@ import {
   OPEN_TURN_OPENER,
   UPGRADE_TO_OPEN,
 } from "./panel-lib.js";
+import { answerFirstCarouselHtml, answerFirstSingleHtml } from "./answer-first-html.js";
 
 declare const __SS_CARD_DATA__: {
   probeNet: Array<{ key: string; url: string }>;
@@ -612,13 +613,19 @@ declare const __SS_CARD_DATA__: {
   function stateLines(){
     return (openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+(openSent?'<p class="note">'+OPEN_SENT+"</p>":"");
   }
-  function card(title,inner){
+  function card(title,inner,fit){
     var diag=showDebug?' <span data-script="ran" class="diag">script-ran</span>':"";
-    return '<div class="card"><div class="hdr"><span class="mark"></span>Smart Site · '+title+diag+'</div>'+inner+"</div>";
+    var cls=fit?"card af-fit":"card";
+    return '<div class="'+cls+'"><div class="hdr"><span class="mark"></span>Smart Site · '+title+diag+'</div>'+inner+"</div>";
   }
   function render(){
     var root=document.getElementById("root");
-    if(model.kind==="board"){
+    if(model.inlineCard&&model.inlineCard.layout==="carousel"&&(model.kind==="parcels"||model.kind==="board")){
+      root.innerHTML=card(esc(model.inlineCard.title||"parcels"),stateLines()+answerFirstCarouselHtml(model),true);
+    } else if(model.inlineCard&&model.inlineCard.layout==="single"&&model.kind==="parcel"){
+      root.innerHTML=card(esc(model.inlineCard.title||"parcel"),stateLines()+answerFirstSingleHtml(model),true);
+      bindDrawing();
+    } else if(model.kind==="board"){
       /* B4 B5: groups by county prefix when there is more than one; each group in the local sort order; Open only on a resolved row */
       var grouping=boardGroups(model.rows);
       var head='<tr><th data-k="query">Address / query</th><th data-k="id">Parcel</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
@@ -695,7 +702,7 @@ declare const __SS_CARD_DATA__: {
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+RESULT_NOT_READABLE+"</b>"+RESULT_NOT_READABLE_BODY+"</p>");
     } else if(!hasToolResult){
-      root.innerHTML=card("panel",stateLines()+'<p class="empty"><b>'+LOADING_PANEL_TITLE+'</b><span data-loading-sub="1">'+esc(loadingPanelSubtitle(pendingToolName))+'</span></p>');
+      root.innerHTML=card("panel",stateLines()+'<div class="af-skel" data-loading="1" aria-busy="true"><div class="sk"></div><div class="sk"></div><div class="sk sk-short"></div><div class="af-acts"><div class="sk sk-btn"></div><div class="sk sk-btn"></div></div></div>',true);
     } else {
       root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+EMPTY_BOARD_TITLE+"</b>"+EMPTY_BOARD_BODY+"</p>");
     }
@@ -747,7 +754,21 @@ declare const __SS_CARD_DATA__: {
       }
     },OPEN_DEAD_MS);
   }
+  function sendExpand(btn){
+    var url=attr(btn,"data-url");
+    if(!url) return;
+    openLink(url);
+  }
+  function sendShare(btn){
+    var url=attr(btn,"data-url");
+    if(!url) return;
+    var clip=navigator.clipboard&&navigator.clipboard.writeText;
+    if(!clip){ openLink(url); return; }
+    clip.call(navigator.clipboard,url).then(function(){ btn.textContent="Link copied"; }).catch(function(){ openLink(url); });
+  }
   function sendOpen(btn){
+    var url=attr(btn,"data-url");
+    if(url){ openLink(url); return; }
     var node=btn&&btn.getAttribute("data-node");
     if(!node) return;
     armOpenWait(node);
@@ -811,7 +832,7 @@ declare const __SS_CARD_DATA__: {
     groundOn=!groundOn;
     render();
   }
-  window.__ss={listing:sendListing,open:sendOpen,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,ground:toggleGround,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
+  window.__ss={listing:sendListing,open:sendOpen,expand:sendExpand,share:sendShare,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,ground:toggleGround,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;

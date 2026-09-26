@@ -297,6 +297,27 @@ export type PanelModel = {
   parcels?: PanelParcel[];
   /** M-4: what the array's anchor phase did, as the producer declared it. */
   anchorBatch?: PanelAnchorBatch;
+  /** P-448: present only when the tool result carried `inlineCard`. The panel does not compose it. */
+  inlineCard?: InlineCard;
+};
+
+export type InlineFactModel = { label: string; value: string; state: string };
+export type InlineItemModel = {
+  parcelNodeId: string;
+  answer: string;
+  actionLabel: string;
+  actionUrl: string | null;
+};
+/** P-448. The server's inline card, copied field by field. A missing field is not invented. */
+export type InlineCard = {
+  layout: "single" | "carousel";
+  title: string;
+  answer: string;
+  facts: InlineFactModel[];
+  expandUrl: string | null;
+  shareUrl: string | null;
+  items: InlineItemModel[];
+  moreCount: number;
 };
 
 /** P-456b. What the served card reports after render. */
@@ -760,6 +781,8 @@ export type DrawCues = {
   frame?: DrawFrame | null;
   envelope?: RingPt[] | null;
   floodMethod?: string | null;
+  /** P-448: parcel outline only. No jurisdiction key, flood tint, scale bar, or edge hits. */
+  quiet?: boolean;
 };
 
 /**
@@ -828,6 +851,7 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
   };
   const pts = ring.map(pt).join(" ");
+  const quiet = !!(cues && cues.quiet);
   const n = ring.length;
   const seg = (e: DrawEdge, i: number): string | null => {
     const ends = edgeEnds(e, i, n);
@@ -835,14 +859,18 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     const b = ring[ends[1]];
     return a && b ? `${pt(a)} ${pt(b)}` : null;
   };
-  const road = edges
+  const road = quiet
+    ? ""
+    : edges
     .map((e, i) => {
       const p = seg(e, i);
       if (!edgeHasRoad(e) || !p) return "";
       return `<polyline points="${p}" fill="none" stroke="var(--ss-t3)" stroke-width="7" stroke-linecap="square" opacity=".35"/>`;
     })
     .join("");
-  const neigh = edges
+  const neigh = quiet
+    ? ""
+    : edges
     .map((e, i) => {
       const p = seg(e, i);
       if (!e.neighbor || edgeHasRoad(e) || !p) return "";
@@ -856,11 +884,11 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     ? `<polygon class="ring-fill" points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(${stroke})" stroke-width="2"${family ? ` data-zone-family="${family}"` : ""}/>`
     : "";
   const flood = cues && cues.flood ? cues.flood : null;
-  const tint = hasRing ? floodTint(flood) : null;
+  const tint = !quiet && hasRing ? floodTint(flood) : null;
   const tintPoly = tint
     ? `<polygon class="flood-tint" data-flood-tint="${tint}" points="${pts}" fill="var(--ss-blue)" fill-opacity="${tint === "heavy" ? ".32" : ".14"}"/>`
     : "";
-  const zoneText = tint && flood ? escapeHtml(floodZoneLabel(flood.label)) : "";
+  const zoneText = !quiet && tint && flood ? escapeHtml(floodZoneLabel(flood.label)) : "";
   const pointRead = cues?.floodMethod === "point-on-surface";
   const floodText = zoneText
     ? `<text class="fz" data-flood-zone="${zoneText}" x="${(w / 2).toFixed(1)}" y="16" text-anchor="middle">${zoneText}</text>${
@@ -872,13 +900,15 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
   const envelopePoly = envelope
     ? `<polygon class="envelope" data-envelope="modelled" points="${envelope.map(pt).join(" ")}" fill="none" stroke="var(--ss-atom)" stroke-width="1.5" stroke-dasharray="4 3"/>`
     : "";
-  const hits = edges
+  const hits = quiet
+    ? ""
+    : edges
     .map((e, i) => {
       const p = seg(e, i);
       return p ? `<polyline class="edge" data-edge="${i}" points="${p}"/>` : "";
     })
     .join("");
-  const district = zoning
+  const district = !quiet && zoning
     ? `<text class="zn${zoning.url ? " link" : ""}" data-zoning="${escapeHtml(zoning.v)}"${zoning.url ? ` data-zoning-url="${escapeHtml(zoning.url)}"` : ""} x="${(w / 2).toFixed(1)}" y="${(h / 2).toFixed(1)}" text-anchor="middle">${escapeHtml(zoning.v)}</text>${
         jurisdictionShown(zoning.jurisdiction)
           ? `<text class="zj" x="${(w / 2).toFixed(1)}" y="${(h / 2 + 15).toFixed(1)}" text-anchor="middle">${escapeHtml(jurisdictionShown(zoning.jurisdiction) ?? "")}</text>`
@@ -891,7 +921,7 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     : "";
   const barFt = frame && frame.units === "ft" ? scaleBarFt(maxX - minX) : null;
   let scale = "";
-  if (barFt !== null) {
+  if (barFt !== null && !quiet) {
     const x2 = (pad + barFt * s).toFixed(1);
     const y = h - 12;
     scale = `<g class="scale" data-scale-ft="${barFt}"><line x1="${pad}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--ss-t5)" stroke-width="2"/><line x1="${pad}" y1="${y - 4}" x2="${pad}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><line x1="${x2}" y1="${y - 4}" x2="${x2}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><text class="sl" x="${pad}" y="${y - 7}">${barFt} ft</text></g>`;
@@ -3147,7 +3177,47 @@ export function declaredFrom(rec: Record<string, unknown>): DeclaredBody | null 
  * buildAppHtml() embeds this function and its helpers by source (INLINE_SHARED),
  * so the iframe runs this code, not a hand copy.
  */
-export function parseToolResult(text: string): PanelModel {
+function inlineCardFrom(value: unknown): InlineCard | null {
+  const rec = asRecord(value);
+  if (!rec) return null;
+  const layout = rec.layout === "carousel" ? "carousel" : rec.layout === "single" ? "single" : null;
+  if (!layout) return null;
+  if (typeof rec.answer !== "string") return null;
+  const facts: InlineFactModel[] = [];
+  if (Array.isArray(rec.facts)) {
+    for (const raw of rec.facts) {
+      const f = asRecord(raw);
+      if (!f || typeof f.label !== "string" || typeof f.value !== "string" || typeof f.state !== "string") continue;
+      facts.push({ label: f.label, value: f.value, state: f.state });
+    }
+  }
+  const items: InlineItemModel[] = [];
+  if (Array.isArray(rec.items)) {
+    for (const raw of rec.items) {
+      const it = asRecord(raw);
+      if (!it || typeof it.answer !== "string" || typeof it.actionLabel !== "string") continue;
+      items.push({
+        parcelNodeId: typeof it.parcelNodeId === "string" ? it.parcelNodeId : "",
+        answer: it.answer,
+        actionLabel: it.actionLabel,
+        actionUrl: typeof it.actionUrl === "string" ? it.actionUrl : null,
+      });
+    }
+  }
+  const more = typeof rec.moreCount === "number" && Number.isFinite(rec.moreCount) ? rec.moreCount : 0;
+  return {
+    layout,
+    title: typeof rec.title === "string" ? rec.title : "",
+    answer: rec.answer,
+    facts,
+    expandUrl: typeof rec.expandUrl === "string" ? rec.expandUrl : null,
+    shareUrl: typeof rec.shareUrl === "string" ? rec.shareUrl : null,
+    items,
+    moreCount: more,
+  };
+}
+
+function parseToolResultInner(text: string): PanelModel {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -3321,6 +3391,20 @@ export function parseToolResult(text: string): PanelModel {
     }
   }
   return emptyModel("empty");
+}
+
+export function parseToolResult(text: string): PanelModel {
+  const model = parseToolResultInner(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return model;
+  }
+  const rec = asRecord(parsed);
+  const inline = rec ? inlineCardFrom(rec.inlineCard) : null;
+  if (inline) model.inlineCard = inline;
+  return model;
 }
 
 export function firstTextPart(content: unknown): string | null {
