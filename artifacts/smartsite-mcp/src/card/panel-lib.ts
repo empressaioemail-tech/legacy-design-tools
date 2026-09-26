@@ -231,7 +231,24 @@ export type PanelParcel = {
   returned: boolean;
 };
 
-export type PanelKind = "board" | "parcel" | "parcels" | "empty" | "miss" | "refused" | "unreadable" | "screens" | "declared";
+export type PanelKind =
+  | "board"
+  | "parcel"
+  | "parcels"
+  | "empty"
+  | "miss"
+  | "refused"
+  | "unreadable"
+  | "screens"
+  | "declared"
+  | "lookup";
+
+/** P-474. find_parcel / declared failures with distinct customer copy. */
+export type LookupCard = {
+  state: string;
+  headline: string;
+  detail: string | null;
+};
 export type MissClass = "absent" | "unbaked" | "retired" | "unstated";
 export type MissRow = {
   parcelNodeId: string;
@@ -299,7 +316,34 @@ export type PanelModel = {
   anchorBatch?: PanelAnchorBatch;
   /** P-448: present only when the tool result carried `inlineCard`. The panel does not compose it. */
   inlineCard?: InlineCard;
+  /** A-331 / P-474: owner of record for the fullscreen deeper view only. */
+  ownerDisplay?: OwnerPanelDisplay;
+  /** P-474: address lookup or tool failure card. */
+  lookup?: LookupCard;
+  /** P-474 / P-452: nearest-parcel list on find_nearest_parcels reads. */
+  nearestSubjectParcelNodeId?: string;
+  nearestNeighbors?: NearestNeighborRow[];
 };
+
+export type NearestNeighborRow = {
+  parcelNodeId: string;
+  label: string;
+  distanceFt: number | null;
+};
+
+/** A-331. Parsed from `ownerFact`; rendered only in fullscreen detail. */
+export type OwnerPanelDisplay =
+  | {
+      kind: "present";
+      name: string;
+      mailingAddress: string;
+      taxYear: number | null;
+      sourceLabel: string | null;
+    }
+  | { kind: "gated" };
+
+export const OWNER_DETAIL_HEADING = "Owner of record, county appraisal roll";
+export const OWNER_GATED_VALUE = "Studio plan";
 
 export type InlineFactModel = { label: string; value: string; state: string; detail?: string };
 export type InlineItemModel = {
@@ -1262,10 +1306,118 @@ export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
  * A null plan returns the svg untouched: no wrapper, no note, no toggle and no
  * tile url anywhere in the html.
  */
+/** P-474. Mosaic and ring share one box aspect ratio so tiles stay aligned. */
+export function gwrapAspectAttr(fit: RingFit | null | undefined): string {
+  if (!fit || !(fit.w > 0) || !(fit.h > 0)) return "";
+  return ` style="aspect-ratio:${fit.w}/${fit.h}"`;
+}
+
 export function groundWrapHtml(svg: string, plan: GroundPlan | null, on: boolean): string {
   if (!svg || !plan) return svg;
   const layer = on ? groundLayerHtml(plan) : "";
-  return `<div class="gwrap" data-ground="${on ? "on" : "off"}">${layer}${svg}</div>` + groundNoteHtml(plan, on);
+  const aspect = gwrapAspectAttr(plan.fit);
+  return (
+    `<div class="gwrap" data-ground="${on ? "on" : "off"}"${aspect}>${layer}${svg}</div>` +
+    groundNoteHtml(plan, on)
+  );
+}
+
+export function parcelPageUrl(parcelNodeId: string): string {
+  return "https://smartsite.cloud/p/" + encodeURIComponent(parcelNodeId.trim());
+}
+
+const LOOKUP_NO_MATCH_HINT = "Try adding the city, state and ZIP.";
+
+export function lookupCardHtml(lookup: LookupCard): string {
+  const detail = lookup.detail
+    ? `<p class="lookup-detail">${escapeHtml(lookup.detail)}</p>`
+    : "";
+  return (
+    `<div class="lookup-card" data-lookup-state="${escapeHtml(lookup.state)}">` +
+    `<p class="lookup-head"><span class="ss-marker" data-marker="${escapeHtml(lookup.state === "out_of_coverage" ? "unknown" : lookup.state === "outage" ? "refused" : "unknown")}" aria-hidden="true"></span> ` +
+    `<b>${escapeHtml(lookup.headline)}</b></p>${detail}</div>`
+  );
+}
+
+function lookupHeadlineFromMissClass(rec: Record<string, unknown>): LookupCard {
+  const missClass = stringOrNull(rec.missClass) ?? "no-hit";
+  const display = stringOrNull(rec.missClassDisplayText);
+  const outState = stringOrNull(rec.outOfCoverageState);
+  if (missClass === "out_of_coverage") {
+    const headline =
+      display && !display.includes("_")
+        ? display
+        : outState && outState !== "TX"
+          ? "Outside Texas, not covered"
+          : "Outside Texas, not covered";
+    return { state: "out_of_coverage", headline, detail: null };
+  }
+  if (missClass === "in_texas_outside_full_coverage" || missClass === "in_texas_outside_counties") {
+    return {
+      state: missClass,
+      headline: display ?? "In Texas, outside the counties we fully cover",
+      detail: null,
+    };
+  }
+  if (missClass === "located-unbound") {
+    return {
+      state: "located-unbound",
+      headline: "Address found, no parcel bound yet",
+      detail: LOOKUP_NO_MATCH_HINT,
+    };
+  }
+  if (missClass === "no-hit" || missClass === "situs-search-budget") {
+    return {
+      state: "no_hit",
+      headline: "No parcel matched this address",
+      detail: LOOKUP_NO_MATCH_HINT,
+    };
+  }
+  return {
+    state: missClass,
+    headline: display ?? "This lookup did not return a parcel",
+    detail: missClass === "no-hit" ? LOOKUP_NO_MATCH_HINT : null,
+  };
+}
+
+function lookupOutageFromHtmlBody(rec: Record<string, unknown>): PanelModel | null {
+  const brief = typeof rec.brief === "string" ? rec.brief : null;
+  const reason = stringOrNull(rec.reason);
+  if (brief && /<html/i.test(brief) && (reason === "upstream_non_json" || reason === "upstream_html")) {
+    return {
+      kind: "lookup",
+      rows: [],
+      overlays: [],
+      ring: [],
+      edges: [],
+      lookup: {
+        state: "outage",
+        headline: "Smart Site could not reach the server",
+        detail: "Try again in a moment.",
+      },
+    };
+  }
+  return null;
+}
+
+export function lookupCardFrom(rec: Record<string, unknown>): PanelModel | null {
+  if (Array.isArray(rec.hits) && rec.hits.length === 0) {
+    const outage = lookupOutageFromHtmlBody(rec);
+    if (outage) return outage;
+    const lookup = lookupHeadlineFromMissClass(rec);
+    return { kind: "lookup", rows: [], overlays: [], ring: [], edges: [], lookup };
+  }
+  const declared = declaredFrom(rec);
+  if (declared) {
+    if (declared.reason === "upstream_non_json" && declared.brief && /<html/i.test(declared.brief)) {
+      const lookupShaped =
+        Array.isArray(rec.hits) ||
+        rec.missClass != null ||
+        (typeof rec.mapPanelNote === "string" && !asRecord(rec.draw) && !Array.isArray(rec.parcels));
+      if (lookupShaped) return lookupOutageFromHtmlBody({ ...rec, brief: declared.brief, reason: declared.reason });
+    }
+  }
+  return null;
 }
 
 /*
@@ -2177,6 +2329,7 @@ export function customerDate(value: string | null | undefined): string | null {
 export function customerSource(source: string | null | undefined): string | null {
   if (!source) return null;
   if (/^https:\/\//i.test(source)) return source;
+  if (/^cad-property-owner-v1$/i.test(source.trim())) return "County appraisal roll";
   if (/adapter|fixture|parcel_record|_/i.test(source)) return null;
   return source;
 }
@@ -3238,15 +3391,18 @@ function parseToolResultInner(text: string): PanelModel {
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
     return emptyModel("empty");
   }
+  const lookupEarly = lookupCardFrom(rec);
+  if (lookupEarly) return lookupEarly;
   const mapPanelNote = stringOrNull(rec.mapPanelNote);
   if (mapPanelNote && !asRecord(rec.draw) && !Array.isArray(rec.parcels)) {
+    const reason = stringOrNull(rec.mapPanelReason) ?? "map";
     return {
-      kind: "parcel",
+      kind: "lookup",
       rows: [],
       overlays: [],
       ring: [],
       edges: [],
-      label: mapPanelNote,
+      lookup: { state: reason, headline: mapPanelNote, detail: null },
     };
   }
 
@@ -3320,6 +3476,8 @@ function parseToolResultInner(text: string): PanelModel {
       const setBatch = anchorBatchFrom(rec.anchorBatch);
       if (setBatch) model.anchorBatch = setBatch;
     }
+    attachOwnerDisplay(model, rec);
+    attachNearestNeighbors(model, rec);
     return model;
   }
 
@@ -3396,10 +3554,102 @@ function parseToolResultInner(text: string): PanelModel {
         const anchor = anchorFrom(rec.anchor, anchorRead);
         if (anchor) model.anchor = anchor;
       }
+      attachOwnerDisplay(model, rec);
+      attachNearestNeighbors(model, rec);
       return model;
     }
   }
   return emptyModel("empty");
+}
+
+export function ownerDisplayFrom(ownerFact: unknown): OwnerPanelDisplay | null {
+  const rec = asRecord(ownerFact);
+  if (!rec) return null;
+  if (rec.state === "refused" && rec.code === "studio-gated") return { kind: "gated" };
+  if (rec.state !== "present") return null;
+  const name = stringOrNull(rec.ownerName);
+  const mailingAddress = stringOrNull(rec.ownerMailingAddress);
+  if (!name && !mailingAddress) return null;
+  return {
+    kind: "present",
+    name: name ?? "Name not on this result",
+    mailingAddress: mailingAddress ?? "Mailing address not on this result",
+    taxYear: numberOrNull(rec.taxYear),
+    sourceLabel: customerSource(stringOrNull(rec.sourceAdapter) ?? stringOrNull(rec.source)),
+  };
+}
+
+function attachOwnerDisplay(model: PanelModel, rec: Record<string, unknown>): void {
+  const owner = ownerDisplayFrom(rec.ownerFact);
+  if (owner) model.ownerDisplay = owner;
+}
+
+function nearestDistanceLabel(ft: number | null): string {
+  if (ft === null || !Number.isFinite(ft)) return "—";
+  if (ft < 1) return "Adjacent";
+  return `${Math.round(ft)} ft`;
+}
+
+export function nearestNeighborsFrom(rec: Record<string, unknown>): {
+  subjectId: string | null;
+  rows: NearestNeighborRow[];
+} | null {
+  const subjectId =
+    stringOrNull(rec.nearestSubjectParcelNodeId) ?? stringOrNull(rec.subjectParcelNodeId);
+  const src = Array.isArray(rec.nearestNeighbors)
+    ? rec.nearestNeighbors
+    : subjectId && Array.isArray(rec.parcels)
+      ? rec.parcels
+      : null;
+  if (!src || src.length === 0) return null;
+  const rows: NearestNeighborRow[] = [];
+  for (const raw of src) {
+    const row = asRecord(raw);
+    if (!row) continue;
+    const parcelNodeId = stringOrNull(row.parcelNodeId);
+    if (!parcelNodeId) continue;
+    const label =
+      stringOrNull(row.label) ??
+      (asRecord(row.draw) ? stringOrNull(asRecord(row.draw)!.label) : null) ??
+      parcelNodeId;
+    rows.push({
+      parcelNodeId,
+      label: customerSitus(label) || label,
+      distanceFt: numberOrNull(row.distanceFt),
+    });
+  }
+  if (rows.length === 0) return null;
+  return { subjectId, rows };
+}
+
+export function nearestNeighborsListHtml(
+  subjectId: string | null,
+  rows: NearestNeighborRow[],
+): string {
+  const subj = subjectId
+    ? `<p class="ss-nearest-sub">Subject parcel <span class="pn ss-clip">${escapeHtml(subjectId)}</span></p>`
+    : "";
+  const items = rows
+    .map(
+      (r) =>
+        `<li class="ss-nearest-row" data-node="${escapeHtml(r.parcelNodeId)}">` +
+        `<span class="ss-nearest-lbl">${escapeHtml(r.label)}</span>` +
+        `<span class="ss-nearest-dist">${escapeHtml(nearestDistanceLabel(r.distanceFt))}</span>` +
+        `</li>`,
+    )
+    .join("");
+  return (
+    `<section class="ss-nearest" data-nearest="1">` +
+    `<h3 class="ss-nearest-h">Nearest parcels</h3>${subj}` +
+    `<ul class="ss-nearest-list">${items}</ul></section>`
+  );
+}
+
+function attachNearestNeighbors(model: PanelModel, rec: Record<string, unknown>): void {
+  const nearest = nearestNeighborsFrom(rec);
+  if (!nearest) return;
+  model.nearestSubjectParcelNodeId = nearest.subjectId ?? undefined;
+  model.nearestNeighbors = nearest.rows;
 }
 
 export function parseToolResult(text: string): PanelModel {

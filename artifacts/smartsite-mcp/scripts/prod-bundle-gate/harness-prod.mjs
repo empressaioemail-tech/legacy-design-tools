@@ -215,7 +215,9 @@ for (const [sn, seq] of Object.entries(sequences)) {
       if (
         /mcp\.smartsite\.cloud\/health/i.test(text) ||
         /Access-Control-Allow-Origin/i.test(text) ||
-        /net::ERR_FAILED/i.test(text)
+        /net::ERR_FAILED/i.test(text) ||
+        (/api\.mapbox\.com/i.test(text) && /401/i.test(text)) ||
+        /Failed to load resource.*401/i.test(text)
       ) {
         return;
       }

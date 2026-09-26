@@ -126,12 +126,29 @@ function dateLong(iso: string): string {
   return `${month} ${Number(m[3])}, ${m[1]}`;
 }
 
+function httpsCitationLabel(sec: Record<string, unknown>): string | null {
+  const raw = asRecord(sec)?.citations;
+  if (!Array.isArray(raw)) return null;
+  for (const item of raw) {
+    if (typeof item !== "string" || !/^https:\/\//i.test(item.trim())) continue;
+    const url = item.trim();
+    if (/arcgis\.com/i.test(url)) {
+      const title = str(sec.title) ?? "County map layer";
+      return `${title} (county GIS)`;
+    }
+    const named = customerSource(url);
+    if (named && !/^https:\/\//i.test(named)) return named;
+  }
+  return null;
+}
+
 function factDetail(sec: Record<string, unknown> | null, state: InlineFactState): string {
   if (!sec) return "Source is not on this result.";
   const data = asRecord(sec.data);
   const refusal = asRecord(sec.refusal);
   const sourceRaw = str(data?.sourceAdapter) || str(refusal?.producer) || str(data?.provenance);
-  const source = sourceRaw ? customerSource(sourceRaw) : null;
+  const source =
+    httpsCitationLabel(sec) ?? (sourceRaw ? customerSource(sourceRaw) : null);
   const dated = dateLong(
     customerDate(str(sec.asOf) || str(data?.asOf) || str(data?.sourceVintage) || str(data?.vintage)) || "",
   );
@@ -167,7 +184,14 @@ function zoningFact(host: Record<string, unknown>): InlineFact {
   const sec = section(host, "zoning");
   const state = stateOf(disposition(sec));
   if (!sec || state !== "present") {
-    return { label: "Zoning", value: sec ? absentValue(state) : "Not on this result", state: sec ? state : "absent" };
+    const reason = sec ? str(sec.reason) : null;
+    const value =
+      sec && reason && state === "absent-verified"
+        ? safeCustomer(reason, absentValue(state))
+        : sec
+          ? absentValue(state)
+          : "Not on this result";
+    return { label: "Zoning", value, state: sec ? state : "absent" };
   }
   const data = asRecord(sec.data);
   const code = districtCode(data);
@@ -433,9 +457,13 @@ export function composeInlineCard(
   const parcels = Array.isArray(data.parcels) ? data.parcels : null;
   const topDraw = asRecord(data.draw);
   const topBrief = sectionsOf(data).length > 0;
-  if (parcels && parcels.length >= CAROUSEL_MIN && !topDraw && !topBrief) {
+  if (parcels && parcels.length >= CAROUSEL_MIN && !topDraw) {
     const built = itemsFromParcels(parcels, mintParcelLink);
-    return carousel(`${built.items.length} parcels`, built.items, built.moreCount, shareUrl);
+    const title =
+      parcels.length === built.items.length
+        ? `${built.items.length} parcels`
+        : `${built.items.length} parcels on this card`;
+    return carousel(title, built.items, built.moreCount, shareUrl);
   }
   const rows = Array.isArray(data.rows) ? data.rows : null;
   if (rows && rows.length >= CAROUSEL_MIN && !topDraw) {
@@ -444,7 +472,7 @@ export function composeInlineCard(
     const name = cleanAddress(str(screen?.name) ?? str(data.name));
     return carousel(name ?? "Selected parcels", built.items, built.moreCount, shareUrl);
   }
-  if (topDraw || topBrief) {
+  if (topDraw || (topBrief && !(parcels && parcels.length >= CAROUSEL_MIN))) {
     return singleCard(data, shareUrl);
   }
   return null;

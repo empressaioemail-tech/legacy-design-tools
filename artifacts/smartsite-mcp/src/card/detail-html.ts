@@ -5,7 +5,10 @@
 import { markerHtml } from "./answer-first-html.js";
 import {
   type BriefSection,
+  type OwnerPanelDisplay,
   type PanelModel,
+  OWNER_DETAIL_HEADING,
+  OWNER_GATED_VALUE,
   customerDate,
   customerSource,
   escapeHtml,
@@ -14,6 +17,8 @@ import {
   groundPlan,
   landUseCustomerName,
   mapboxAttributionHtml,
+  nearestNeighborsListHtml,
+  ringFit,
   ringSvg,
   sourceOf,
   stateWord,
@@ -71,9 +76,20 @@ function sectionValue(s: BriefSection): string {
   return displayState(s.paint);
 }
 
+function citationSourceLabel(s: BriefSection): string | null {
+  if (!Array.isArray(s.citations)) return null;
+  for (const raw of s.citations) {
+    if (typeof raw !== "string" || !/^https:\/\//i.test(raw.trim())) continue;
+    if (/arcgis\.com/i.test(raw)) return `${s.title || s.id} (county GIS)`;
+    const named = customerSource(raw);
+    if (named && !/^https:\/\//i.test(named)) return named;
+  }
+  return null;
+}
+
 function sourceLine(s: BriefSection): string {
   const bits: string[] = [];
-  const source = customerSource(sourceOf(s));
+  const source = citationSourceLabel(s) ?? customerSource(sourceOf(s));
   if (source) bits.push(source);
   const dated = dateLong(customerDate(s.asOf));
   if (dated) bits.push(dated);
@@ -88,6 +104,33 @@ function rowHtml(s: BriefSection, i: number): string {
     `<span class="ss-tile-v">${markerHtml(s.paint)}<span>${escapeHtml(sectionValue(s))}</span></span>` +
     `<span class="ss-tile-detail" hidden>${escapeHtml(sourceLine(s))}</span>` +
     `</button>`
+  );
+}
+
+export function ownerDetailSectionHtml(owner: OwnerPanelDisplay | undefined | null): string {
+  if (!owner) return "";
+  if (owner.kind === "gated") {
+    return (
+      `<section class="ss-group" data-owner="gated">` +
+      `<h3>${escapeHtml(OWNER_DETAIL_HEADING)}</h3>` +
+      `<div class="ss-owner-row" data-state="gated">` +
+      `${markerHtml("gated")}<span class="ss-owner-gated">${escapeHtml(OWNER_GATED_VALUE)}</span>` +
+      `</div></section>`
+    );
+  }
+  const meta: string[] = [];
+  if (owner.taxYear != null) meta.push(`Tax year ${owner.taxYear}`);
+  if (owner.sourceLabel) meta.push(owner.sourceLabel);
+  const metaLine = meta.length
+    ? `<p class="ss-owner-meta">${escapeHtml(meta.join(". "))}</p>`
+    : "";
+  return (
+    `<section class="ss-group" data-owner="present">` +
+    `<h3>${escapeHtml(OWNER_DETAIL_HEADING)}</h3>` +
+    `<p class="ss-owner-name">${escapeHtml(owner.name)}</p>` +
+    `<p class="ss-owner-mail">${escapeHtml(owner.mailingAddress)}</p>` +
+    metaLine +
+    `</section>`
   );
 }
 
@@ -115,6 +158,13 @@ function panelHtml(model: PanelModel): string {
     answer +
     groups +
     unknownHtml +
+    ownerDetailSectionHtml(model.ownerDisplay) +
+    (model.nearestNeighbors && model.nearestNeighbors.length > 0
+      ? nearestNeighborsListHtml(
+          model.nearestSubjectParcelNodeId ?? model.parcelNodeId ?? null,
+          model.nearestNeighbors,
+        )
+      : "") +
     `<p class="ss-disclaimer">${escapeHtml(DISCLAIMER)}</p>` +
     `<button type="button" class="btn" data-act="collapse" onclick="window.__ss&&window.__ss.collapse()">Back</button>` +
     `</aside>`
@@ -137,11 +187,13 @@ export function detailHtml(model: PanelModel, opts: DetailOpts): string {
   });
   const outcome = groundPlan(model.ring ?? [], model.anchor ?? null, model.anchorRead ?? null);
   const layer = opts.groundOn && outcome.plan ? groundLayerHtml(outcome.plan) : "";
+  const fit = outcome.plan?.fit ?? (model.ring?.length ? ringFit(model.ring) : null);
+  const aspect = fit ? ` style="aspect-ratio:${fit.w}/${fit.h}"` : "";
   const map = svg
-    ? `<div class="gwrap af-aerial ss-map" data-ground="${layer ? "on" : "off"}" data-lines="${opts.linesOn ? "on" : "off"}">${layer}${svg}` +
+    ? `<div class="ss-map-outer" data-map-outer="1"><div class="ss-map-viewport" data-map-viewport="1"><div class="gwrap af-aerial ss-map" data-ground="${layer ? "on" : "off"}" data-lines="${opts.linesOn ? "on" : "off"}"${aspect}>${layer}${svg}` +
       `<div class="ss-gis">GIS-approximate</div>` +
       (!geom && named ? `<div class="ss-mapnote" data-envelope="undrawn">No envelope drawn</div>` : "") +
-      `</div>`
+      `</div></div></div>`
     : `<div class="af-aerial af-aerial-none" data-aerial="absent"><p class="af-outline">Parcel outline not on this read</p></div>`;
   const credit = outcome.plan ? mapboxAttributionHtml() : "";
   const toggle = (key: string, label: string, on: boolean) =>
