@@ -387,6 +387,61 @@ function declareNearestParcelsServeRefusal(
   };
 }
 
+async function resolveNearestSubjectFromQuery(
+  config: CortexClientConfig,
+  userId: string,
+  query: string,
+): Promise<
+  | { ok: true; parcelNodeId: string }
+  | { ok: false; result: ToolResult }
+> {
+  const res = await cortexFetch(
+    config,
+    `/api/brokerage/v1/place/situs-search?q=${encodeURIComponent(query)}`,
+    { userId },
+  );
+  const body = await res.text();
+  if (!res.ok) return { ok: false, result: upstreamErrorResult(res.status, body) };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(splitFindParcelHits(body));
+  } catch {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  const rec =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  const hits = Array.isArray(rec?.hits) ? rec.hits : [];
+  const ids: string[] = [];
+  for (const raw of hits) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const id = (raw as Record<string, unknown>).parcelNodeId;
+    if (typeof id === "string" && id.length > 0) ids.push(id);
+  }
+  if (ids.length === 1) return { ok: true, parcelNodeId: ids[0]! };
+  if (ids.length === 0) {
+    const miss =
+      typeof rec?.missClass === "string" ? rec.missClass : "no-hit";
+    return {
+      ok: false,
+      result: declaredRefusalResult(
+        "nearest_subject_not_found",
+        "That address did not bind to one parcel. Use find_parcel, then call this tool with the parcelNodeId.",
+        { missClass: miss, query },
+      ),
+    };
+  }
+  return {
+    ok: false,
+    result: declaredRefusalResult(
+      "nearest_subject_ambiguous",
+      "That address hit more than one parcel. Pick one parcelNodeId and call again; do not search the web.",
+      { query, hits: ids },
+    ),
+  };
+}
+
 function declaredRefusalResult(
   reason: string,
   message: string,
@@ -551,7 +606,8 @@ function inputSchemaFor(name: SmartsiteToolName) {
     case "find_nearest_parcels":
       return z
         .object({
-          parcelNodeId: z.string().min(1),
+          parcelNodeId: z.string().min(1).optional(),
+          query: z.string().min(1).optional(),
           cap: z.number().int().min(1).max(FIND_NEAREST_CAP_MAX).optional(),
         })
         .strict();
@@ -1020,18 +1076,34 @@ export function registerTools(server: McpServer): void {
 
         switch (tool.name) {
           case "find_nearest_parcels": {
-            const { parcelNodeId, cap } = args as {
+            const { parcelNodeId, query, cap } = args as {
               parcelNodeId?: string;
+              query?: string;
               cap?: number;
             };
-            const subject = parcelNodeId?.trim() ?? "";
-            if (!subject) {
+            const givenId = parcelNodeId?.trim() ?? "";
+            const givenQuery = query?.trim() ?? "";
+            if (!givenId && !givenQuery) {
               return declaredRefusalResult(
                 "nearest_invalid_node",
-                "parcelNodeId is required ΓÇö the subject parcel you want neighbours for.",
+                "Give parcelNodeId or query (the subject address or parcel you want neighbours for).",
               );
             }
             return withCortex(async (config) => {
+              let subject = givenId;
+              if (!subject && givenQuery) {
+                if (/^\d{5}:\S+/.test(givenQuery)) {
+                  subject = givenQuery;
+                } else {
+                  const resolved = await resolveNearestSubjectFromQuery(
+                    config,
+                    auth.userId,
+                    givenQuery,
+                  );
+                  if (!resolved.ok) return resolved.result;
+                  subject = resolved.parcelNodeId;
+                }
+              }
               const payload: { parcelNodeId: string; cap?: number } = {
                 parcelNodeId: subject,
               };
@@ -1068,12 +1140,11 @@ export function registerTools(server: McpServer): void {
                 return upstreamErrorResult(res.status, body);
               }
               const host = hostKeyFromAuth();
-              const canSeeOwner = canRunStudioReport(entitlement);
               const wired = await wireFindNearestParcelsForMap(
                 config,
                 auth.userId,
                 body,
-                canSeeOwner,
+                false,
               );
               return enrichAppToolJsonText("find_nearest_parcels", wired, host);
             });

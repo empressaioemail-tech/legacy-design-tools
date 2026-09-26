@@ -47,21 +47,63 @@ function answerLine(data: Record<string, unknown>): string {
   return facts ? `${label}. ${facts}.` : `${label}.`;
 }
 
+function cellText(value: unknown, fallback = "—"): string {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const rec = asRecord(value);
+  if (!rec) return fallback;
+  if (typeof rec.value === "string" && rec.value.trim()) return rec.value.trim();
+  if (typeof rec.district === "string" && rec.district.trim()) return rec.district.trim();
+  if (typeof rec.landUseLabel === "string" && rec.landUseLabel.trim()) return rec.landUseLabel;
+  if (typeof rec.floodZone === "string" && rec.floodZone.trim()) return rec.floodZone;
+  if (typeof rec.state === "string" && rec.state.trim()) return rec.state;
+  return fallback;
+}
+
 function compactListTable(data: Record<string, unknown>): string | null {
-  const parcels = data.parcels;
-  if (!Array.isArray(parcels) || parcels.length === 0) return null;
-  const rows = parcels.slice(0, 8).map((raw, i) => {
+  const nearest = Array.isArray(data.nearestNeighbors)
+    ? data.nearestNeighbors
+    : null;
+  const parcels = Array.isArray(data.parcels) ? data.parcels : null;
+  const rowsSrc = nearest && nearest.length > 0 ? nearest : parcels;
+  if (!rowsSrc || rowsSrc.length === 0) return null;
+  const briefById = new Map<string, Record<string, unknown>>();
+  if (parcels) {
+    for (const raw of parcels) {
+      const p = asRecord(raw);
+      if (p && typeof p.parcelNodeId === "string") briefById.set(p.parcelNodeId, p);
+    }
+  }
+  const isNearest = nearest !== null && nearest.length > 0;
+  const header = isNearest
+    ? "| # | Situs | Distance | Acres | Zoning | Land use | Flood | Parcel id |"
+    : "| # | Situs | Parcel id |";
+  const rule = isNearest
+    ? "| --- | --- | --- | --- | --- | --- | --- | --- |"
+    : "| --- | --- | --- |";
+  const rows = rowsSrc.slice(0, 8).map((raw, i) => {
     const p = asRecord(raw);
     const id = typeof p?.parcelNodeId === "string" ? p.parcelNodeId : `#${i + 1}`;
+    const brief = briefById.get(id);
+    const briefSections = ((asRecord(brief?.brief)?.sections ?? []) as BriefSection[]);
+    const section = (want: string) => briefSections.find((s) => s.id === want);
     const situs =
-      typeof p?.situs === "string"
-        ? p.situs
-        : typeof p?.label === "string"
-          ? p.label
+      typeof p?.label === "string"
+        ? p.label
+        : typeof p?.situs === "string"
+          ? p.situs
           : id;
-    return `| ${i + 1} | ${situs} | ${id} |`;
+    if (!isNearest) return `| ${i + 1} | ${situs} | ${id} |`;
+    const distance =
+      typeof p?.distanceFt === "number" ? `${Math.round(p.distanceFt)} ft` : "—";
+    const acres =
+      typeof p?.acreageAcres === "number" ? String(p.acreageAcres) : "—";
+    const zoning = cellText(section("zoning")?.data, cellText(p?.zoning));
+    const landUse = cellText(section("land-use")?.data, cellText(p?.landUse));
+    const flood = cellText(section("flood")?.data, cellText(p?.flood));
+    return `| ${i + 1} | ${situs} | ${distance} | ${acres} | ${zoning} | ${landUse} | ${flood} | ${id} |`;
   });
-  return ["| # | Situs | Parcel id |", "| --- | --- | --- |", ...rows].join("\n");
+  return [header, rule, ...rows].join("\n");
 }
 
 export function buildReadingLayoutText(
