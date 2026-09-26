@@ -345,6 +345,54 @@ function parseLocalityTail(tail: string): PlaceSearchLocality {
 }
 
 /**
+ * City-only tail on a comma-less address with no state/ZIP anchor. Does not
+ * call {@link normalizeStreetLineCandidates} (that function calls this).
+ */
+function parseTrailingCityWithoutAnchor(raw: string): string | null {
+  const flat = raw
+    .trim()
+    .replace(/,/g, " ");
+  const tokens = flat
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (tokens.length < 3 || !/^\d/.test(tokens[0]!)) return null;
+
+  const last = tokens[tokens.length - 1]!;
+  if (ZIP_RE.test(last)) return null;
+
+  for (let i = tokens.length - 2; i >= 1; i--) {
+    const t = tokens[i]!;
+    const canonical = STREET_TYPE_ABBR[t] ?? t;
+    if (STREET_TYPE_SUFFIXES.has(canonical)) {
+      const cityTokens = tokens.slice(i + 1);
+      if (cityTokens.length >= 1 && cityTokens.length <= 3) {
+        return normalizeLocalityToken(cityTokens.join(" "));
+      }
+      break;
+    }
+  }
+
+  for (let cityWords = 1; cityWords <= 3; cityWords++) {
+    const splitAt = tokens.length - cityWords;
+    if (splitAt < 2) break;
+    const cityTokens = tokens.slice(splitAt);
+    const maybeCity = cityTokens.join(" ");
+    if (!maybeCity || STREET_TYPE_SUFFIXES.has(cityTokens[0]!)) continue;
+    if (cityTokens.some((t) => ZIP_RE.test(t) || STATE_RE.test(t))) continue;
+    const beforeCity = tokens[splitAt - 1]!;
+    const beforeCanon =
+      STREET_TYPE_ABBR[beforeCity] ?? DIRECTIONAL_ABBR[beforeCity] ?? beforeCity;
+    if (STREET_TYPE_SUFFIXES.has(beforeCanon)) continue;
+    return normalizeLocalityToken(maybeCity);
+  }
+  return null;
+}
+
+/**
  * Parse city/state/ZIP from a full typed address for prefix-search filtering.
  * Supports "908 Pine St, Bastrop TX 78602" and comma-less "908 Pine St Bastrop TX 78602".
  */
@@ -365,27 +413,12 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
     .trim()
     .split(" ")
     .filter(Boolean);
-  if (tokens.length < 4) return { city: null, state: null, zip: null };
+  if (tokens.length < 3) return { city: null, state: null, zip: null };
 
   const last = tokens[tokens.length - 1]!;
   if (!ZIP_RE.test(last)) {
-    // Comma-less "<street> <city>" without state/zip — e.g. "908 Pine St Bastrop".
-    for (let i = tokens.length - 2; i >= 1; i--) {
-      const t = tokens[i]!;
-      const canonical = STREET_TYPE_ABBR[t] ?? t;
-      if (STREET_TYPE_SUFFIXES.has(canonical)) {
-        const cityTokens = tokens.slice(i + 1);
-        if (cityTokens.length >= 1 && cityTokens.length <= 3) {
-          return {
-            city: normalizeLocalityToken(cityTokens.join(" ")),
-            state: null,
-            zip: null,
-          };
-        }
-        break;
-      }
-    }
-    return { city: null, state: null, zip: null };
+    const city = parseTrailingCityWithoutAnchor(trimmed);
+    return { city, state: null, zip: null };
   }
   const zip = last;
   const maybeState = tokens[tokens.length - 2]!;
@@ -553,6 +586,11 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
     emitAnchorStrippedCandidates(flatTokens, push);
   }
 
+  emitCityOnlyTailStrippedCandidates(raw, push);
+
+  const beforeSuffix = [...candidates];
+  emitImpliedStreetSuffixCandidates(raw, beforeSuffix, push);
+
   return candidates;
 }
 
@@ -573,6 +611,52 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
  * 1..3-word city drop and let the DB's EXACT normalized match + unique-prop
  * rule pick the real street line.
  */
+/**
+ * Comma-less "<street> <city>" with no state/ZIP anchor: strip the parsed city
+ * tail so keys match stored situs first-comma segments (e.g. "1503 WATER ST").
+ */
+function emitCityOnlyTailStrippedCandidates(
+  raw: string,
+  push: (toks: string[]) => void,
+): void {
+  const city = parseTrailingCityWithoutAnchor(raw);
+  if (!city) return;
+
+  const flatTokens = baseStreetTokens(raw.replace(/,/g, " "));
+  if (flatTokens.length < 2) return;
+
+  const cityTokens = city.split(" ").filter(Boolean);
+  if (flatTokens.length <= cityTokens.length + 1) return;
+
+  const tail = flatTokens.slice(-cityTokens.length);
+  if (tail.join(" ") !== city) return;
+
+  push(flatTokens.slice(0, flatTokens.length - cityTokens.length));
+}
+
+/** When the typed line omits a street-type suffix the store often carries. */
+function emitImpliedStreetSuffixCandidates(
+  raw: string,
+  keys: string[],
+  push: (toks: string[]) => void,
+): void {
+  const city = parseTrailingCityWithoutAnchor(raw);
+  for (const key of keys) {
+    const tokens = key.split(" ").filter(Boolean);
+    if (tokens.length < 2) continue;
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) continue;
+    if (city) {
+      const cityTokens = city.split(" ").filter(Boolean);
+      if (tokens.length > cityTokens.length) {
+        const tail = tokens.slice(-cityTokens.length).join(" ");
+        if (tail === city) continue;
+      }
+    }
+    push([...tokens, "ST"]);
+  }
+}
+
 function emitAnchorStrippedCandidates(
   tokens: string[],
   push: (toks: string[]) => void,
