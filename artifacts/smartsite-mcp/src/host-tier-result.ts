@@ -13,6 +13,7 @@ import {
 } from "./mcp-card-link.js";
 import type { HostSessionSnapshot } from "./host-ui-capability.js";
 import { hostKeyFromSession } from "./host-ui-capability.js";
+import { attachInlineCard } from "./inline-card.js";
 import {
   buildReadingLayoutText,
   injectCardPageLink,
@@ -36,6 +37,16 @@ function firstJsonText(content: ToolResult["content"]): string | null {
 function isChromeSidePanel(session: HostSessionSnapshot): boolean {
   const name = session.clientName?.toLowerCase() ?? "";
   return name.includes("chrome") || name.includes("claude-in-chrome");
+}
+
+function mergeStructured(
+  prior: ToolResult["structuredContent"],
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  if (prior && typeof prior === "object" && !Array.isArray(prior)) {
+    return { ...prior, ...data };
+  }
+  return data;
 }
 
 function outcomeForView(view: CardView, uiCapable: boolean): MapRenderOutcome {
@@ -80,6 +91,16 @@ export function applyHostTierToResult(
     data = JSON.parse(injectCardPageLink(JSON.stringify(data), link)) as Record<string, unknown>;
   }
 
+  data = attachInlineCard(data, link?.url ?? null, (parcelNodeId) => {
+    if (!secret) return null;
+    return mintMcpCardLink({
+      secret,
+      sharerUserId: userId,
+      tool,
+      scope: { kind: "parcel", parcelNodeId },
+    }).url;
+  });
+
   if (!uiCapable && link) {
     const reading = buildReadingLayoutText(data, link, {
       openInBrowser: isChromeSidePanel(session),
@@ -94,21 +115,22 @@ export function applyHostTierToResult(
     return {
       ...result,
       content: nextContent,
-      structuredContent: (result.structuredContent ?? data) as Record<string, unknown>,
+      structuredContent: mergeStructured(result.structuredContent, data),
     };
   }
 
-  if (link) {
+  const nextText = JSON.stringify(data);
+  if (nextText !== jsonText) {
     const replaced: ToolResult["content"] = result.content.map((part) => {
       if (part.type === "text" && part.text === jsonText) {
-        return { type: "text" as const, text: JSON.stringify(data) };
+        return { type: "text" as const, text: nextText };
       }
       return part;
     });
     return {
       ...result,
       content: replaced,
-      structuredContent: (result.structuredContent ?? data) as Record<string, unknown>,
+      structuredContent: mergeStructured(result.structuredContent, data),
     };
   }
 

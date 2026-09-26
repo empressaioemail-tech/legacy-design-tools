@@ -34,6 +34,8 @@ function sectionValue(section: BriefSection): string {
 }
 
 function answerLine(data: Record<string, unknown>): string {
+  const card = asRecord(data.inlineCard);
+  if (typeof card?.answer === "string" && card.answer.trim()) return card.answer.trim();
   const draw = asRecord(data.draw);
   const onRecord = asRecord(data.onRecord);
   const label =
@@ -113,7 +115,20 @@ export function buildReadingLayoutText(
 ): string {
   const lines: string[] = [];
   lines.push(`Answer: ${answerLine(data)}`);
-  const sections = ((asRecord(data.brief)?.sections ?? []) as BriefSection[]).slice(0, 4);
+  const cardFacts = asRecord(data.inlineCard);
+  const wiredFacts = Array.isArray(cardFacts?.facts) ? cardFacts.facts : null;
+  if (wiredFacts && wiredFacts.length > 0) {
+    lines.push("");
+    lines.push("Four facts:");
+    for (const raw of wiredFacts.slice(0, 4)) {
+      const fact = asRecord(raw);
+      if (!fact) continue;
+      lines.push(`- ${fact.label ?? "fact"}: ${fact.value ?? "—"} (${fact.state ?? "unknown"})`);
+    }
+  }
+  const sections = wiredFacts && wiredFacts.length > 0
+    ? []
+    : ((asRecord(data.brief)?.sections ?? []) as BriefSection[]).slice(0, 4);
   if (sections.length > 0) {
     lines.push("");
     lines.push("Four facts:");
