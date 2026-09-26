@@ -377,11 +377,21 @@ function itemsFromRows(
  * or a screen of at least three rows. Returns null when this result is not
  * one of those shapes (the widget keeps its previous view).
  */
+const DECLARED_ERROR_STATUS = new Set([
+  "error",
+  "refused",
+  "not_implemented",
+  "degraded",
+  "not_ready",
+  "upgrade_required",
+]);
+
 export function composeInlineCard(
   data: Record<string, unknown>,
   shareUrl: string | null,
   mintParcelLink: (parcelNodeId: string) => string | null,
 ): InlineCard | null {
+  if (typeof data.status === "string" && DECLARED_ERROR_STATUS.has(data.status)) return null;
   const parcels = Array.isArray(data.parcels) ? data.parcels : null;
   const topDraw = asRecord(data.draw);
   const topBrief = sectionsOf(data).length > 0;
@@ -396,7 +406,7 @@ export function composeInlineCard(
     const name = cleanAddress(str(screen?.name) ?? str(data.name));
     return carousel(name ?? "Selected parcels", built.items, built.moreCount, shareUrl);
   }
-  if (str(data.parcelNodeId) || topDraw || topBrief) {
+  if (topDraw || topBrief) {
     return singleCard(data, shareUrl);
   }
   return null;

@@ -193,6 +193,17 @@ describe("P-448 inline card", () => {
     }
   });
 
+  it("an error body keeps its shape", () => {
+    const err = {
+      status: "error",
+      reason: "baked_snapshot_not_found",
+      upstreamStatus: 404,
+      error: "baked_snapshot_not_found",
+      parcelNodeId: "48021:900099",
+    };
+    expect(attachInlineCard(err, null)).toEqual(err);
+  });
+
   it("safeCustomer replaces a planted machine string", () => {
     expect(safeCustomer("bastrop_city_tx", "Parcel")).toBe("Parcel");
     expect(safeCustomer("fine address", "Parcel")).toBe("fine address");
