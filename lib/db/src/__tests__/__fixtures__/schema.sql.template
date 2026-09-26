@@ -5062,6 +5062,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
     ADD CONSTRAINT pe_share_grants_grantor_user_id_users_id_fk FOREIGN KEY (grantor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
+-- Name: pe_stripe_webhook_events pe_stripe_webhook_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_stripe_webhook_events
+    ADD CONSTRAINT pe_stripe_webhook_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE SET NULL;
+
+
 -- Name: pe_team_invitations pe_team_invitations_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
@@ -5080,28 +5086,22 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
     ADD CONSTRAINT pe_team_members_member_user_id_users_id_fk FOREIGN KEY (member_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
--- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
-    ADD CONSTRAINT pe_user_entitlements_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
-
-
--- Name: pe_stripe_webhook_events pe_stripe_webhook_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY @@SCHEMA@@.pe_stripe_webhook_events
-    ADD CONSTRAINT pe_stripe_webhook_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE SET NULL;
-
-
 -- Name: pe_user_entitlement_history pe_user_entitlement_history_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
     ADD CONSTRAINT pe_user_entitlement_history_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
--- Name: pe_user_entitlement_history pe_user_entitlement_history_stripe_event_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: pe_user_entitlement_history pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
-    ADD CONSTRAINT pe_user_entitlement_history_stripe_event_id_fk FOREIGN KEY (stripe_event_id) REFERENCES @@SCHEMA@@.pe_stripe_webhook_events(stripe_event_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e FOREIGN KEY (stripe_event_id) REFERENCES @@SCHEMA@@.pe_stripe_webhook_events(stripe_event_id) ON DELETE RESTRICT;
+
+
+-- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
+    ADD CONSTRAINT pe_user_entitlements_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_user_identities pe_user_identities_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

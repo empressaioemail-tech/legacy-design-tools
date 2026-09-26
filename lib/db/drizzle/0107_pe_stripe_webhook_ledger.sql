@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS pe_user_entitlement_history (
   billing_interval text,
   superseded_at timestamptz NOT NULL DEFAULT now(),
   stripe_event_id text NOT NULL
-    CONSTRAINT pe_user_entitlement_history_stripe_event_id_fk
+    CONSTRAINT pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e
     REFERENCES pe_stripe_webhook_events(stripe_event_id) ON DELETE RESTRICT,
   CONSTRAINT pe_user_entitlement_history_billing_interval_chk
     CHECK (billing_interval IS NULL OR billing_interval IN ('month', 'year'))
