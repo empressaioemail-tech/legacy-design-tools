@@ -164,20 +164,34 @@ describe("POST /api/pe-help/chat", () => {
     const res = await request(getApp())
       .post("/api/pe-help/chat")
       .send({ message: "anything" });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(422);
     expect(res.body.error).toBe("upstream_error");
-    // The failure body must not contain an invented "message" answer field
-    // shaped like a real reply.
+    expect(res.body.message).toContain("admin@smartsite.cloud");
     expect(res.body.message).not.toMatch(/\$49|Solo|X-ray/);
     anthropicMocks.throwOnCreate = null;
   });
 
-  it("returns an honest 502 when the model responds with no text content", async () => {
+  it("returns an honest 422 when the model responds with no text content", async () => {
     anthropicMocks.response = { content: [], stop_reason: "end_turn" };
     const res = await request(getApp())
       .post("/api/pe-help/chat")
       .send({ message: "anything" });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(422);
     expect(res.body.error).toBe("no_answer");
+    expect(res.body.message).toContain("admin@smartsite.cloud");
+  });
+
+  it("names a missing workspace in plain words, still 422 so a gateway cannot swallow it", async () => {
+    anthropicMocks.throwOnCreate = new Error(
+      "This API key is not scoped to a workspace",
+    );
+    const res = await request(getApp())
+      .post("/api/pe-help/chat")
+      .send({ message: "What does Smart Site cost?" });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("workspace_required");
+    expect(res.body.message).toContain("workspace");
+    expect(res.body.message).toContain("admin@smartsite.cloud");
+    anthropicMocks.throwOnCreate = null;
   });
 });

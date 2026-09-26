@@ -29,6 +29,9 @@ import { PE_HELP_WIDGET_SYSTEM_PROMPT } from "../lib/peHelpWidgetPrompt";
  * property-scoping, no tool-use loop, no gating.
  */
 
+const HELP_SUPPORT_EMAIL = "admin@smartsite.cloud";
+const HELP_UNAVAILABLE = `The assistant could not answer just now. Email us at ${HELP_SUPPORT_EMAIL}.`;
+
 const router: IRouter = Router();
 
 const HISTORY_TURN_MAX_CHARS = 4000;
@@ -93,20 +96,26 @@ router.post("/pe-help/chat", async (req: Request, res: Response) => {
     if (!textBlock || !textBlock.text.trim()) {
       // Never fabricate an answer when the model returns nothing textual
       // (e.g. it only emitted a non-text block). Honest failure, not a
-      // canned fake reply.
+      // canned fake reply. 422, not 502: App Platform replaces an
+      // application 502 with an HTML gateway page, and the widget then
+      // cannot read the reason.
       logger.warn({ stopReason: response.stop_reason }, "pe-help: model returned no text content");
-      res.status(502).json({
+      res.status(422).json({
         error: "no_answer",
-        message: "The assistant did not return an answer — try again.",
+        message: HELP_UNAVAILABLE,
       });
       return;
     }
     res.status(200).json({ message: textBlock.text });
   } catch (err) {
     logger.error({ err }, "pe-help: chat call failed");
-    res.status(502).json({
-      error: "upstream_error",
-      message: "Could not reach the assistant — try again.",
+    const raw = err instanceof Error ? err.message : String(err);
+    const workspace = /workspace/i.test(raw);
+    res.status(422).json({
+      error: workspace ? "workspace_required" : "upstream_error",
+      message: workspace
+        ? `The assistant is not connected to a workspace, so it cannot answer. Email us at ${HELP_SUPPORT_EMAIL}.`
+        : HELP_UNAVAILABLE,
     });
   }
 });
