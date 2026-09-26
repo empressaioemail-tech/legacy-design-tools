@@ -4,7 +4,7 @@
  * does not derive it.
  */
 
-import { customerSitus, landUseCustomerName, landUseNameFromCode } from "./card/panel-lib.js";
+import { customerDate, customerSitus, customerSource, landUseCustomerName, landUseNameFromCode } from "./card/panel-lib.js";
 import { customerBriefReason, isMachineCustomerString } from "./customer-brief-reason.js";
 
 /** P-458's land-use table. The inline card does not keep a second copy. */
@@ -12,12 +12,21 @@ export function cardLandUseName(rawCode: string): string | null {
   return landUseNameFromCode(rawCode);
 }
 
-export type InlineFactState = "present" | "absent" | "refused" | "unknown" | "not-read";
+export type InlineFactState =
+  | "present"
+  | "absent"
+  | "absent-verified"
+  | "refused"
+  | "unknown"
+  | "not-read"
+  | "gated";
 
 export type InlineFact = {
   label: string;
   value: string;
   state: InlineFactState;
+  /** Source and date already on the section, or an honest absence. The widget prints this. */
+  detail?: string;
 };
 
 export type InlineItem = {
@@ -93,15 +102,50 @@ function stateOf(dispositionWord: string): InlineFactState {
   if (dispositionWord === "refused") return "refused";
   if (dispositionWord === "unknown") return "unknown";
   if (dispositionWord === "unread") return "not-read";
-  if (dispositionWord === "absent" || dispositionWord === "absent-verified") return "absent";
+  if (dispositionWord === "absent-verified") return "absent-verified";
+  if (dispositionWord === "gated") return "gated";
+  if (dispositionWord === "absent") return "absent";
   return "absent";
 }
 
 function absentValue(state: InlineFactState): string {
   if (state === "refused") return "Refused";
-  if (state === "unknown") return "Not verified";
+  if (state === "unknown") return "unknown";
   if (state === "not-read") return "Not read";
-  return "Not on file";
+  if (state === "gated") return "Solo plan";
+  return "absent, verified";
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dateLong(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  const month = MONTHS[Number(m[2]) - 1];
+  if (!month) return iso;
+  return `${month} ${Number(m[3])}, ${m[1]}`;
+}
+
+function factDetail(sec: Record<string, unknown> | null, state: InlineFactState): string {
+  if (!sec) return "Source is not on this result.";
+  const data = asRecord(sec.data);
+  const refusal = asRecord(sec.refusal);
+  const sourceRaw = str(data?.sourceAdapter) || str(refusal?.producer) || str(data?.provenance);
+  const source = sourceRaw ? customerSource(sourceRaw) : null;
+  const dated = dateLong(
+    customerDate(str(sec.asOf) || str(data?.asOf) || str(data?.sourceVintage) || str(data?.vintage)) || "",
+  );
+  const reasonRaw = str(sec.reason) || str(refusal?.declineReason) || str(refusal?.reason);
+  const reason = reasonRaw ? safeCustomer(reasonRaw, "") : "";
+  const bits: string[] = [];
+  if (source) bits.push(source);
+  if (dated) bits.push(dated);
+  if (reason) bits.push(reason);
+  if (bits.length) return safeCustomer(bits.join(". "), "Source is not on this result.");
+  if (state === "unknown" || state === "refused" || state === "not-read" || state === "gated") {
+    return "This result does not say why.";
+  }
+  return "Source is not on this result.";
 }
 
 function districtCode(data: Record<string, unknown> | null): string | null {
@@ -196,6 +240,17 @@ function setbackFact(host: Record<string, unknown>): InlineFact {
   return { label: "Setbacks", value: safeCustomer(value, "Not named on this result"), state: "present" };
 }
 
+function stampFact(host: Record<string, unknown>, id: (typeof FACT_ORDER)[number], fact: InlineFact): InlineFact {
+  const sec = section(host, id);
+  const refusal = asRecord(sec?.refusal);
+  const code = str(refusal?.code);
+  let next = fact;
+  if (code === "studio-gated" || code === "gated") {
+    next = { ...fact, state: "gated", value: "Solo plan" };
+  }
+  return { ...next, detail: factDetail(sec, next.state) };
+}
+
 export function fourFacts(host: Record<string, unknown>): InlineFact[] {
   const byId: Record<(typeof FACT_ORDER)[number], InlineFact> = {
     zoning: zoningFact(host),
@@ -203,7 +258,26 @@ export function fourFacts(host: Record<string, unknown>): InlineFact[] {
     flood: floodFact(host),
     "setbacks-envelope": setbackFact(host),
   };
-  return FACT_ORDER.map((id) => byId[id]);
+  return FACT_ORDER.map((id) => stampFact(host, id, byId[id]));
+}
+
+function factsForQuestion(host: Record<string, unknown>): InlineFact[] {
+  const all = fourFacts(host);
+  const question = str(host.question);
+  if (!question) return all;
+  const q = question.toLowerCase();
+  const want: string[] = [];
+  if (/flood/.test(q)) want.push("Flood");
+  if (/zon/.test(q)) want.push("Zoning");
+  if (/setback|build|envelope/.test(q)) want.push("Setbacks");
+  if (/land use|\buse\b/.test(q)) want.push("Land use");
+  if (!want.length) return all;
+  const picked = all.filter((f) => want.includes(f.label));
+  for (const fact of all) {
+    if (picked.length >= 4) break;
+    if (!picked.includes(fact)) picked.push(fact);
+  }
+  return picked.slice(0, 4);
 }
 
 function addressOf(host: Record<string, unknown>): string {
@@ -237,7 +311,7 @@ function singleCard(
     layout: "single",
     title: address,
     answer: answerLineFromHost(host),
-    facts: fourFacts(host),
+    facts: factsForQuestion(host),
     expandUrl: shareUrl,
     shareUrl,
     items: [],

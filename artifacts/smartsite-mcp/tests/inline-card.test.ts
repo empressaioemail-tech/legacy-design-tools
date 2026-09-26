@@ -104,8 +104,8 @@ describe("P-448 inline card", () => {
       expandUrl: string | null;
     };
     expect(card.facts[0]).toMatchObject({ value: "Refused", state: "refused" });
-    expect(card.facts[1]).toMatchObject({ value: "Not on file", state: "absent" });
-    expect(card.facts[2]).toMatchObject({ value: "Not verified", state: "unknown" });
+    expect(card.facts[1]).toMatchObject({ value: "absent, verified", state: "absent" });
+    expect(card.facts[2]).toMatchObject({ value: "unknown", state: "unknown" });
     expect(card.expandUrl).toBeNull();
   });
 

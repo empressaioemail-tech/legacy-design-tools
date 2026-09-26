@@ -148,7 +148,8 @@ import {
   OPEN_TURN_OPENER,
   UPGRADE_TO_OPEN,
 } from "./panel-lib.js";
-import { answerFirstCarouselHtml, answerFirstSingleHtml } from "./answer-first-html.js";
+import { answerFirstCarouselHtml, answerFirstSingleHtml, loadingSkeletonHtml } from "./answer-first-html.js";
+import { detailHtml } from "./detail-html.js";
 
 declare const __SS_CARD_DATA__: {
   probeNet: Array<{ key: string; url: string }>;
@@ -370,6 +371,13 @@ declare const __SS_CARD_DATA__: {
   var pendingToolName=null;
   /* M-2: local view state, same rule. On whenever a ground exists; the toggle turns it off. */
   var groundOn=true;
+  var deepView=false;
+  var openTile=-1;
+  var openRow=-1;
+  var sheetHigh=false;
+  var floodOn=true;
+  var envelopeOn=true;
+  var linesOn=true;
   var rpcId=1;
   var initId=rpcId++;
   var ready=false;
@@ -613,22 +621,33 @@ declare const __SS_CARD_DATA__: {
   function stateLines(){
     return (openFail?'<p class="fail">'+esc(openFail)+"</p>":"")+(openSent?'<p class="note">'+OPEN_SENT+"</p>":"");
   }
-  function card(title,inner,fit){
+  function card(title,inner,fit,extra){
     var diag=showDebug?' <span data-script="ran" class="diag">script-ran</span>':"";
-    var cls=fit?"card af-fit":"card";
-    return '<div class="'+cls+'"><div class="hdr"><span class="mark"></span>Smart Site · '+title+diag+'</div>'+inner+"</div>";
+    var cls=(fit?"card af-fit":"card")+(extra?" "+extra:"");
+    if(extra==="ss-board"){
+      var brand='<span class="ss-brand" data-wordmark="1"><span class="ss-smart">SMART</span> <span class="ss-site">SITE</span></span> ';
+      return '<div class="'+cls+'"><div class="hdr">'+brand+title+diag+"</div>"+inner+"</div>";
+    }
+    return '<div class="'+cls+'"><div class="hdr"><span class="mark"></span>Smart Site · '+title+diag+"</div>"+inner+"</div>";
+  }
+  function cardV2(inner,clip){
+    var hidden=clip?'<span class="ss-clip" aria-hidden="true">'+esc(clip)+"</span>":"";
+    return '<div class="card af-fit ss-v2">'+inner+hidden+"</div>";
   }
   function render(){
     var root=document.getElementById("root");
-    if(model.inlineCard&&model.inlineCard.layout==="carousel"&&(model.kind==="parcels"||model.kind==="board")){
-      root.innerHTML=card(esc(model.inlineCard.title||"parcels"),stateLines()+answerFirstCarouselHtml(model),true);
+    if(deepView&&model.kind==="parcel"){
+      root.innerHTML=cardV2(stateLines()+detailHtml(model,{groundOn:groundOn,floodOn:floodOn,envelopeOn:envelopeOn,linesOn:linesOn,sheet:sheetHigh?"high":"low"}));
+      bindDrawing();
+    } else if(model.inlineCard&&model.inlineCard.layout==="carousel"&&model.kind==="parcels"){
+      root.innerHTML=cardV2(stateLines()+answerFirstCarouselHtml(model));
     } else if(model.inlineCard&&model.inlineCard.layout==="single"&&model.kind==="parcel"){
-      root.innerHTML=card(esc(model.inlineCard.title||"parcel"),stateLines()+answerFirstSingleHtml(model),true);
+      root.innerHTML=cardV2(stateLines()+answerFirstSingleHtml(model),model.parcelNodeId||"");
       bindDrawing();
     } else if(model.kind==="board"){
       /* B4 B5: groups by county prefix when there is more than one; each group in the local sort order; Open only on a resolved row */
       var grouping=boardGroups(model.rows);
-      var head='<tr><th data-k="query">Address / query</th><th data-k="id">Parcel</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
+      var head='<tr><th data-k="query">Address</th><th data-k="id" class="idcol">Parcel</th>'+RAILS.map(function(r){return "<th>"+r+"</th>"}).join("")+"<th></th></tr>";
       var pos=0;
       var body=grouping.groups.map(function(grp){
         var hdr=grouping.grouped?'<tr class="grp" data-county-group="'+esc(grp.fips||"unresolved")+'"><th colspan="'+(RAILS.length+3)+'">'+esc(grp.title)+"</th></tr>":"";
@@ -637,7 +656,7 @@ declare const __SS_CARD_DATA__: {
         var open=r.parcelNodeId&&r.resolution==="resolved"
           ?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
           :'<div class="slot">'+NOTHING_TO_OPEN+"</div>"+lookupControlHtml(r);
-        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
+        return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom idcol">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
           var g=glyph(r.rails[k]);
           var ask=r.parcelNodeId?whyControlHtml("rail",railState(r.rails[k]),{rail:k,node:r.parcelNodeId},g):"";
           return "<td>"+(ask||g)+"</td>";
@@ -645,8 +664,10 @@ declare const __SS_CARD_DATA__: {
         }).join("");
       }).join("");
       var note=model.stubsDegraded===true?'<p class="note">'+RAILS_PARTLY_UNREAD+"</p>":"";
+      var boardShare=model.inlineCard&&model.inlineCard.shareUrl?'<button type="button" class="btn" data-act="share" data-url="'+esc(model.inlineCard.shareUrl)+'" onclick="window.__ss&&window.__ss.share(this)">Share</button>':"";
       root.innerHTML=card(esc(boardCardTitle(model.screenName)),stateLines()+'<div class="well"><div class="req">Rows <span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+note+
-        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>");
+        '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>"+
+        '<div class="af-acts"><button type="button" class="btn primary" data-act="board" onclick="window.__ss&&window.__ss.expand(this)">Open board</button>'+boardShare+"</div>",false,"ss-board");
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("")||'<p class="empty">No overlays on this draw.</p>';
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
@@ -702,7 +723,7 @@ declare const __SS_CARD_DATA__: {
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+RESULT_NOT_READABLE+"</b>"+RESULT_NOT_READABLE_BODY+"</p>");
     } else if(!hasToolResult){
-      root.innerHTML=card("panel",stateLines()+'<div class="af-skel" data-loading="1" aria-busy="true"><div class="sk"></div><div class="sk"></div><div class="sk sk-short"></div><div class="af-acts"><div class="sk sk-btn"></div><div class="sk sk-btn"></div></div></div>',true);
+      root.innerHTML=cardV2(stateLines()+loadingSkeletonHtml());
     } else {
       root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+EMPTY_BOARD_TITLE+"</b>"+EMPTY_BOARD_BODY+"</p>");
     }
@@ -754,10 +775,65 @@ declare const __SS_CARD_DATA__: {
       }
     },OPEN_DEAD_MS);
   }
-  function sendExpand(btn){
-    var url=attr(btn,"data-url");
-    if(!url) return;
-    openLink(url);
+  function requestMode(mode){
+    parent.postMessage({jsonrpc:"2.0",id:rpcId++,method:"ui/request-display-mode",params:{mode:mode}},"*");
+  }
+  function sendExpand(){
+    deepView=true;
+    requestMode("fullscreen");
+    render();
+  }
+  function sendCollapse(){
+    deepView=false;
+    openTile=-1;
+    openRow=-1;
+    requestMode("inline");
+    render();
+  }
+  function sendTile(btn){
+    var i=Number(btn&&btn.getAttribute("data-i"));
+    if(!Number.isFinite(i)) return;
+    openTile=openTile===i?-1:i;
+    paintOpen(".ss-tile","data-i",openTile,".ss-source");
+  }
+  function sendRow(btn){
+    var i=Number(btn&&btn.getAttribute("data-i"));
+    if(!Number.isFinite(i)) return;
+    openRow=openRow===i?-1:i;
+    paintOpen(".ss-row","data-i",openRow,".ss-source");
+  }
+  function paintOpen(sel,attrName,open,panelSel){
+    var root=document.getElementById("root");
+    if(!root) return;
+    var nodes=root.querySelectorAll(sel);
+    var text="";
+    for(var n=0;n<nodes.length;n++){
+      var on=String(nodes[n].getAttribute(attrName))===String(open);
+      if(on) nodes[n].setAttribute("data-open","1");
+      else nodes[n].removeAttribute("data-open");
+      if(on){
+        var d=nodes[n].querySelector(".ss-tile-detail");
+        text=d?d.textContent:"";
+      }
+    }
+    var panel=root.querySelector(panelSel);
+    if(!panel) return;
+    if(open<0||!text){ panel.setAttribute("hidden",""); panel.textContent=""; return; }
+    panel.removeAttribute("hidden");
+    panel.textContent=text;
+  }
+  function sendLayer(btn){
+    var key=attr(btn,"data-layer");
+    if(key==="aerial") groundOn=!groundOn;
+    else if(key==="flood") floodOn=!floodOn;
+    else if(key==="envelope") envelopeOn=!envelopeOn;
+    else if(key==="lines") linesOn=!linesOn;
+    else return;
+    render();
+  }
+  function sendSheet(){
+    sheetHigh=!sheetHigh;
+    render();
   }
   function sendShare(btn){
     var url=attr(btn,"data-url");
@@ -832,7 +908,7 @@ declare const __SS_CARD_DATA__: {
     groundOn=!groundOn;
     render();
   }
-  window.__ss={listing:sendListing,open:sendOpen,expand:sendExpand,share:sendShare,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,ground:toggleGround,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,fp:function(){return fingerprint(model)},parse:parseToolResult};
+  window.__ss={listing:sendListing,open:sendOpen,expand:sendExpand,collapse:sendCollapse,share:sendShare,save:sendSave,cite:sendCite,why:sendWhy,addToScreen:sendAddToScreen,report:toggleReport,ground:toggleGround,useCandidate:sendUseCandidate,lookup:sendLookup,reopen:sendReopen,tile:sendTile,row:sendRow,layer:sendLayer,sheet:sendSheet,fp:function(){return fingerprint(model)},parse:parseToolResult};
   document.body.addEventListener("click",function(ev){
     var el=ev.target;
     if(!el||!el.closest) return;
@@ -878,6 +954,13 @@ declare const __SS_CARD_DATA__: {
     openSent=null;
     reportOpen=false;
     groundOn=true;
+    deepView=false;
+    openTile=-1;
+    openRow=-1;
+    sheetHigh=false;
+    floodOn=true;
+    envelopeOn=true;
+    linesOn=true;
     pendingToolName=null;
     pendingMapRenderReport=null;
     sortKey="completeness";
