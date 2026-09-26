@@ -260,9 +260,13 @@ describe("lib/db schema integration", () => {
         // on the grant row. Sorts before `pe_share_grants` (`_a` < `_g`).
         "pe_share_attributions",
         "pe_share_grants",
+        // P-480 — append-only Stripe webhook delivery record.
+        "pe_stripe_webhook_events",
         "pe_team_invitations",
         "pe_team_members",
         "pe_user_entitlements",
+        // P-480 — superseded entitlement snapshots keyed to webhook events.
+        "pe_user_entitlement_history",
         "pe_user_identities",
         "pe_workbench_state",
         // PLR-11 — atomic tenant-scoped permit-number counter.
