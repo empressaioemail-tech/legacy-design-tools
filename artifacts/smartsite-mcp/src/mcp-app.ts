@@ -18,6 +18,7 @@ import {
   AS_OF_MISSING,
   BFE_NONE,
   CITATION_DEGRADED,
+  CITATION_NOT_LINKED,
   COUNTY_BY_FIPS,
   COUNTY_UNKNOWN,
   DECLARED_STATUSES,
@@ -29,7 +30,7 @@ import {
   EMPTY_BOARD_BODY,
   EMPTY_BOARD_TITLE,
   GROUND_EQUATOR_MPP,
-  GROUND_MAPBOX_HOLD_NOTE,
+  GROUND_LICENCE_NOTE,
   GROUND_MAX_TILES,
   GROUND_SOURCE_LABEL,
   GROUND_SUPERSAMPLE,
@@ -401,8 +402,11 @@ export function htmlContractViolations(html: string): string[] {
     violations.push("open_link_unbound");
   }
   /* S7: each item's mechanism must be present in the served script, or the item is a claim */
-  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(CITATION_DEGRADED)) {
+  if (!html.includes('data-act="cite"') || !html.includes("function sendCite") || !html.includes(CITATION_NOT_LINKED)) {
     violations.push("citation_link_unbound");
+  }
+  if (html.includes(CITATION_DEGRADED)) {
+    violations.push("citation_degraded_in_page");
   }
   if (
     !html.includes('data-act="why"') ||
@@ -428,7 +432,9 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("function groundWrapHtml") ||
     !html.includes(GROUND_TILE_URL_TEMPLATE) ||
     !html.includes(GROUND_VINTAGE_NOTE) ||
-    !html.includes(GROUND_MAPBOX_HOLD_NOTE)
+    !html.includes(GROUND_LICENCE_NOTE) ||
+    html.includes("Mapbox held") ||
+    html.includes("claudemcpcontent")
   ) {
     violations.push("ground_unbound");
   }
@@ -857,7 +863,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var UNIT_REFERENCE=${JSON.stringify(UNIT_REFERENCE)};
   var SCALE_BAR_FT=${JSON.stringify(SCALE_BAR_FT)};
   var ZONE_TINT=${JSON.stringify(ZONE_TINT)};
-  var CITATION_DEGRADED=${JSON.stringify(CITATION_DEGRADED)};
+  var CITATION_NOT_LINKED=${JSON.stringify(CITATION_NOT_LINKED)};
   var AS_OF_MISSING=${JSON.stringify(AS_OF_MISSING)};
   var ABSENCE_UNVERIFIED=${JSON.stringify(ABSENCE_UNVERIFIED)};
   var DISPOSITION_UNSTATED=${JSON.stringify(DISPOSITION_UNSTATED)};
@@ -903,7 +909,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var GROUND_SUPERSAMPLE=${JSON.stringify(GROUND_SUPERSAMPLE)};
   var GROUND_MAX_TILES=${JSON.stringify(GROUND_MAX_TILES)};
   var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
-  var GROUND_MAPBOX_HOLD_NOTE=${JSON.stringify(GROUND_MAPBOX_HOLD_NOTE)};
+  var GROUND_LICENCE_NOTE=${JSON.stringify(GROUND_LICENCE_NOTE)};
   var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
   var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
   var MULTI_MIN_DRAWN=${JSON.stringify(MULTI_MIN_DRAWN)};

@@ -55,7 +55,8 @@ describe("P-243: get_smart_site single-node shaping", () => {
     const shapedText = (result.content.find((c) => c.type === "text") as { text: string }).text;
     // Every present brief section in the fixture has citationsDegraded true
     // and an empty citations[] -- the table must say so, never print a URL.
-    expect(shapedText).toContain("citation degraded");
+    expect(shapedText).toContain("No citation link on this read");
+    expect(shapedText).not.toContain("citation degraded");
     expect(shapedText).not.toMatch(/https?:\/\//);
   });
 

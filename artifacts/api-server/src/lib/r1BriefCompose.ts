@@ -32,6 +32,7 @@ import { envelopeDrawRefusalReason } from "./buildableEnvelope/envelopeDrawOutco
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
 import type { LandUseFactRead } from "./landUseFactRead";
+import { ptadLandUseDescription } from "./ptadLandUse";
 import { isSlatedForCellServe } from "./cellServeRule";
 
 type JsonRecord = Record<string, unknown>;
@@ -194,6 +195,23 @@ export function zoningDisposition(zoning: unknown): "present" | "absent" {
  * shape carries `landUseCode`. Description, source and vintage without a
  * code are not a determination.
  */
+/**
+ * A PTAD class code with no label borrows the shared description. A label
+ * already on the atom wins. Codes that are not a short PTAD token (a
+ * hyphenated local name such as SF-RESIDENTIAL) are not run through the
+ * first-letter map, which would otherwise call them special inventory.
+ */
+export function landUseCustomerLabel(
+  landUseCode: string,
+  landUseLabel: string | null | undefined,
+): string | null {
+  const named = landUseLabel?.trim() ?? "";
+  if (named) return named;
+  const code = landUseCode.trim();
+  if (!/^[A-Za-z][A-Za-z0-9]{0,3}$/.test(code)) return null;
+  return ptadLandUseDescription(code);
+}
+
 export function landUseDisposition(landUse: unknown): "present" | "absent" {
   if (nonEmptyString(landUse)) return "present";
   const record = asRecord(landUse);
@@ -662,7 +680,10 @@ export function composeLandUseBriefSectionFromAtom(
   bakedAt: string | null,
 ): BriefSectionParts {
   if (fact.state === "present") {
-    const data = { landUseCode: fact.landUseCode, landUseLabel: fact.landUseLabel };
+    const data = {
+      landUseCode: fact.landUseCode,
+      landUseLabel: landUseCustomerLabel(fact.landUseCode, fact.landUseLabel),
+    };
     return withCitationPosture({
       data,
       citations: [],

@@ -6,6 +6,8 @@
 import type { AnchorReadStatus, ParcelAnchor } from "../parcel-anchor.js";
 
 export const CITATION_DEGRADED = "citation degraded";
+/** Customer sentence. The wire token stays CITATION_DEGRADED and is not printed. */
+export const CITATION_NOT_LINKED = "No citation link on this read";
 export const EDGE_WORDS = {
   front: "front",
   side: "side",
@@ -96,6 +98,9 @@ export type OverlayRow = {
   /** D4: flood only; absent when the wire does not state it. */
   sfha?: boolean;
   draw?: string;
+  /** Local-foot ring for an inset-fill envelope. Absent when the wire has no polygon. */
+  geom?: RingPt[];
+  basisDisplayText?: string;
   /** F5: as the wire carries them; absent when it does not. */
   provenance?: string;
   vintage?: string;
@@ -571,17 +576,34 @@ export function edgesFromDraw(draw: Record<string, unknown>): DrawEdge[] {
   return out;
 }
 
+export function roadClassCustomer(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value === "gravel") return "gravel road";
+  if (value === "residential") return "residential street";
+  if (value === "alley") return "alley";
+  if (/^[a-z][a-z ]+$/.test(value)) return value;
+  return null;
+}
+
+/** Customer line. Road ids and neighbour ids stay off this line. */
 export function edgeCaption(edge: DrawEdge): string {
   const bits: string[] = [];
-  if (edge.role) bits.push(edge.role);
-  if (edge.adjacency) bits.push(edge.adjacency);
-  if (edge.neighbor) bits.push(edge.neighbor);
-  if (edge.roadNode) bits.push(edge.roadNode);
-  if (edge.road) bits.push(edge.road);
+  const role = edgeWord(edge.role);
+  const adj = edgeWord(edge.adjacency);
+  if (role) bits.push(role);
+  if (adj && adj !== role) bits.push(adj);
+  const road = roadClassCustomer(edge.roadClass);
+  if (road && road !== adj && road !== role) bits.push(road);
   const ft = edge.ft ?? edge.lengthFt;
   if (ft != null) bits.push(`${ft} ft`);
   if (edge.bearing) bits.push(edge.bearing);
   return bits.join(" · ");
+}
+
+/** Collapse the producer's space before a comma. Does not invent a street name. */
+export function customerSitus(label: string | null | undefined): string {
+  if (!label) return "";
+  return label.replace(/\s+,/g, ",").replace(/,\s*/g, ", ").replace(/[ \t]+/g, " ").trim();
 }
 
 export function edgeIndex(edge: DrawEdge, fallback: number): number {
@@ -669,17 +691,11 @@ export function edgeTipHtml(edge: DrawEdge, index: number): string {
   const ft = edge.ft ?? edge.lengthFt;
   if (ft != null) bits.push(`<span class="tf">${escapeHtml(ft)} ft</span>`);
   if (edge.bearing) bits.push(`<span class="tb">${escapeHtml(edge.bearing)}</span>`);
-  const roadId = edge.roadNode || edge.road;
-  const roadBits = roadId
-    ? `<span class="tn">${escapeHtml(roadId)}</span>${edge.roadClass ? `<span class="tw">${escapeHtml(edge.roadClass)}</span>` : ""}`
-    : "";
+  const roadWord = roadClassCustomer(edge.roadClass);
+  const roadBits = roadWord ? `<span class="tw">${escapeHtml(roadWord)}</span>` : "";
   if (edgeIsRow(edge)) {
     if (roadBits) bits.push(roadBits);
-    if (edge.neighbor) {
-      bits.push(`<span class="tn">${escapeHtml(edge.neighbor)}</span><span class="tw">${ACROSS_ROW}</span>`);
-    }
-  } else if (edge.neighbor) {
-    bits.push(`<span class="tn">${escapeHtml(edge.neighbor)}</span>`);
+    if (edge.neighbor) bits.push(`<span class="tw">${ACROSS_ROW}</span>`);
   } else if (roadBits) {
     bits.push(roadBits);
   }
@@ -737,7 +753,13 @@ export function edgeEnds(edge: DrawEdge, fallback: number, n: number): [number, 
   return [a, b];
 }
 
-export type DrawCues = { zoning?: DrawZoning | null; flood?: OverlayRow | null; frame?: DrawFrame | null };
+export type DrawCues = {
+  zoning?: DrawZoning | null;
+  flood?: OverlayRow | null;
+  frame?: DrawFrame | null;
+  envelope?: RingPt[] | null;
+  floodMethod?: string | null;
+};
 
 /**
  * The one placement of the local foot frame into the 320x220 viewBox. Extracted
@@ -789,7 +811,9 @@ export function ringPixel(fit: RingFit, x: number, y: number): RingPt {
 }
 
 export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): string {
-  const fit = ringFit(ring);
+  const envelope = cues?.envelope && cues.envelope.length >= 3 ? cues.envelope : null;
+  const hasRing = ring.length >= 3;
+  const fit = ringFit(hasRing ? ring : envelope ?? []);
   if (!fit) return "";
   const minX = fit.minX;
   const maxX = fit.maxX;
@@ -827,15 +851,25 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
   const zoning = cues && cues.zoning && cues.zoning.state === "present" && cues.zoning.v ? cues.zoning : null;
   const family = zoning ? zoneFamily(zoning.v) : null;
   const stroke = family ? ZONE_TINT[family] : "--ss-t3";
-  const ringPoly = `<polygon class="ring-fill" points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(${stroke})" stroke-width="2"${family ? ` data-zone-family="${family}"` : ""}/>`;
+  const ringPoly = hasRing
+    ? `<polygon class="ring-fill" points="${pts}" fill="var(--ss-void)" fill-opacity=".55" stroke="var(${stroke})" stroke-width="2"${family ? ` data-zone-family="${family}"` : ""}/>`
+    : "";
   const flood = cues && cues.flood ? cues.flood : null;
-  const tint = floodTint(flood);
+  const tint = hasRing ? floodTint(flood) : null;
   const tintPoly = tint
     ? `<polygon class="flood-tint" data-flood-tint="${tint}" points="${pts}" fill="var(--ss-blue)" fill-opacity="${tint === "heavy" ? ".32" : ".14"}"/>`
     : "";
   const zoneText = tint && flood ? escapeHtml(floodZoneLabel(flood.label)) : "";
+  const pointRead = cues?.floodMethod === "point-on-surface";
   const floodText = zoneText
-    ? `<text class="fz" data-flood-zone="${zoneText}" x="${(w / 2).toFixed(1)}" y="${(oy - 6).toFixed(1)}" text-anchor="middle">${zoneText}</text>`
+    ? `<text class="fz" data-flood-zone="${zoneText}" x="${(w / 2).toFixed(1)}" y="16" text-anchor="middle">${zoneText}</text>${
+        pointRead
+          ? `<text class="fzpt" data-flood-point="1" x="${(w / 2).toFixed(1)}" y="28" text-anchor="middle">read at a point on the parcel</text>`
+          : ""
+      }`
+    : "";
+  const envelopePoly = envelope
+    ? `<polygon class="envelope" data-envelope="modelled" points="${envelope.map(pt).join(" ")}" fill="none" stroke="var(--ss-atom)" stroke-width="1.5" stroke-dasharray="4 3"/>`
     : "";
   const hits = edges
     .map((e, i) => {
@@ -845,8 +879,8 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
     .join("");
   const district = zoning
     ? `<text class="zn${zoning.url ? " link" : ""}" data-zoning="${escapeHtml(zoning.v)}"${zoning.url ? ` data-zoning-url="${escapeHtml(zoning.url)}"` : ""} x="${(w / 2).toFixed(1)}" y="${(h / 2).toFixed(1)}" text-anchor="middle">${escapeHtml(zoning.v)}</text>${
-        zoning.jurisdiction
-          ? `<text class="zj" x="${(w / 2).toFixed(1)}" y="${(h / 2 + 15).toFixed(1)}" text-anchor="middle">${escapeHtml(zoning.jurisdiction)}</text>`
+        jurisdictionShown(zoning.jurisdiction)
+          ? `<text class="zj" x="${(w / 2).toFixed(1)}" y="${(h / 2 + 15).toFixed(1)}" text-anchor="middle">${escapeHtml(jurisdictionShown(zoning.jurisdiction) ?? "")}</text>`
           : ""
       }`
     : "";
@@ -859,15 +893,17 @@ export function ringSvg(ring: RingPt[], edges: DrawEdge[], cues?: DrawCues): str
   if (barFt !== null) {
     const x2 = (pad + barFt * s).toFixed(1);
     const y = h - 12;
-    scale = `<g class="scale" data-scale-ft="${barFt}"><line x1="${pad}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--ss-t5)" stroke-width="2"/><line x1="${pad}" y1="${y - 4}" x2="${pad}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><line x1="${x2}" y1="${y - 4}" x2="${x2}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><text class="sl" x="${pad}" y="${y - 7}">${barFt} ft <tspan class="sm">${UNIT_REFERENCE}</tspan></text></g>`;
+    scale = `<g class="scale" data-scale-ft="${barFt}"><line x1="${pad}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--ss-t5)" stroke-width="2"/><line x1="${pad}" y1="${y - 4}" x2="${pad}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><line x1="${x2}" y1="${y - 4}" x2="${x2}" y2="${y + 4}" stroke="var(--ss-t5)" stroke-width="1.5"/><text class="sl" x="${pad}" y="${y - 7}">${barFt} ft</text></g>`;
   }
-  return `<svg class="ring" viewBox="0 0 ${w} ${h}" aria-label="parcel ring">${road}${neigh}${ringPoly}${tintPoly}${hits}${floodText}${district}${north}${scale}</svg>`;
+  return `<svg class="ring" viewBox="0 0 ${w} ${h}" aria-label="parcel ring">${road}${neigh}${ringPoly}${tintPoly}${envelopePoly}${hits}${floodText}${district}${north}${scale}</svg>`;
 }
 
-/** D7: frame.quality printed as it arrives, under the drawing. */
+export const FRAME_APPROXIMATE = "Approximate map position";
+
+/** Customer words for a known frame quality. An unmapped token is not printed. */
 export function frameNoteHtml(frame: DrawFrame | null | undefined): string {
-  if (!frame || !frame.quality) return "";
-  return `<div class="fnote" data-frame-quality="${escapeHtml(frame.quality)}">frame ${escapeHtml(frame.quality)}</div>`;
+  if (!frame || frame.quality !== "gis-approximate") return "";
+  return `<div class="fnote" data-frame-quality="${escapeHtml(frame.quality)}">${FRAME_APPROXIMATE}</div>`;
 }
 
 /*
@@ -951,6 +987,11 @@ export const GROUND_MAPBOX_HOLD_NOTE =
   "Mapbox held: Claude iframe origin is {32-hex}.claudemcpcontent.com (not mcp.smartsite.cloud); URL restrictions refuse wildcards; no-Referer is 403 and iOS omits Referer.";
 /** Esri publishes no per tile capture date, so we state that we do not know it. */
 export const GROUND_VINTAGE_NOTE = "capture date unstated";
+/** No licence string is on the imagery read. Unknown stays unstated. */
+export const GROUND_LICENCE_NOTE = "licence unstated";
+export function groundCreditText(): string {
+  return GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE + ", " + GROUND_LICENCE_NOTE;
+}
 export const GROUND_TOGGLE_LABEL = "Aerial";
 
 /** Ground resolution in metres per pixel at this latitude and zoom. */
@@ -1165,8 +1206,7 @@ export function groundLayerHtml(plan: GroundPlan): string {
 /** Source and vintage, then the toggle. The vintage is stated as unknown, never implied. */
 export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
   if (!plan) return "";
-  const label =
-    GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE + ". " + GROUND_MAPBOX_HOLD_NOTE;
+  const label = groundCreditText();
   return (
     `<div class="gnote" data-ground-note="1"><span data-ground-source="1">${escapeHtml(label)}</span>` +
     `<button type="button" class="btn${on ? " on" : ""}" data-act="ground" data-ground-on="${on ? "1" : "0"}"` +
@@ -2003,7 +2043,7 @@ export function stateWord(state: CellState): string {
 
 /** F1: one control per https citation, posting ui/open-link on click; degraded prints the text and never a link. */
 export function citationHtml(citations: string[], degraded: boolean): string {
-  if (degraded) return `<span class="cite-deg" data-cite-degraded="1">${CITATION_DEGRADED}</span>`;
+  if (degraded) return `<span class="cite-deg" data-cite-degraded="1">${CITATION_NOT_LINKED}</span>`;
   const safe: string[] = [];
   for (const c of citations) if (typeof c === "string" && /^https:\/\//i.test(c)) safe.push(c);
   return safe
@@ -2055,30 +2095,123 @@ export function metaHtml(
   provenance?: string | null,
 ): string {
   const bits: string[] = [];
-  const d = dateOnly(asOf);
+  const d = customerDate(asOf);
   if (d) bits.push(`<span data-as-of="${escapeHtml(d)}"><span class="key">as of</span> ${escapeHtml(d)}</span>`);
-  if (source) bits.push(`<span data-source="${escapeHtml(source)}"><span class="key">source</span> ${escapeHtml(source)}</span>`);
-  if (vintage) bits.push(`<span data-vintage="${escapeHtml(vintage)}"><span class="key">vintage</span> ${escapeHtml(vintage)}</span>`);
-  if (provenance) bits.push(`<span data-provenance="${escapeHtml(provenance)}"><span class="key">provenance</span> ${escapeHtml(provenance)}</span>`);
+  const sourceShown = customerSource(source);
+  if (sourceShown) bits.push(`<span data-source="${escapeHtml(sourceShown)}"><span class="key">source</span> ${escapeHtml(sourceShown)}</span>`);
+  const vintageShown = customerDate(vintage);
+  if (vintageShown) bits.push(`<span data-vintage="${escapeHtml(vintageShown)}"><span class="key">as of</span> ${escapeHtml(vintageShown)}</span>`);
+  if (provenance) bits.push(`<span data-provenance="${escapeHtml(provenance)}" hidden></span>`);
   return bits.length ? `<span class="meta">${bits.join(" ")}</span>` : "";
 }
 
-/** One overlay row: the paint state (F5), citations (F1), vintage and provenance, the why control (P1). Spans only, no nested div. */
+const OVERLAY_TITLES: Record<string, string> = {
+  flood: "Flood",
+  footprint: "Footprint",
+  envelope: "Buildable envelope",
+  pipeline: "Pipeline",
+  specialDistrict: "Special district",
+  well: "Well",
+};
+
+export function overlayTitle(id: string): string {
+  return OVERLAY_TITLES[id] ?? "Record";
+}
+
+/** A date we can read. Tokens, UNKNOWN, and raw instants' clock time are not printed. */
+export function customerDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toUpperCase() === "UNKNOWN") return null;
+  const iso = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(trimmed);
+  if (iso?.[1]) return iso[1];
+  if (/^\d{4}-\d{2}$/.test(trimmed)) return trimmed;
+  const nfhl = /^NFHL_\d+_(\d{4})(\d{2})(\d{2})$/.exec(trimmed);
+  if (nfhl) return `${nfhl[1]}-${nfhl[2]}-${nfhl[3]}`;
+  return null;
+}
+
+export function customerSource(source: string | null | undefined): string | null {
+  if (!source) return null;
+  if (/^https:\/\//i.test(source)) return source;
+  if (/adapter|fixture|parcel_record|_/i.test(source)) return null;
+  return source;
+}
+
+/**
+ * Unknown is not drawn as a verified absence. A "No …" label on an unknown
+ * overlay is replaced. The pipeline sentence is the one the review measured.
+ */
+export function overlayCustomerLabel(o: Pick<OverlayRow, "id" | "state" | "label">): string {
+  const state = railState(o.state);
+  if (state === "unknown") {
+    if (o.id === "pipeline") return "Not known whether a pipeline is within 500 ft";
+    if (/^\s*no\b/i.test(o.label)) return `${overlayTitle(o.id)} is not known`;
+  }
+  return o.label;
+}
+
+/** PTAD first-letter names. Must match api-server ptadLandUseDescription for short codes. */
+export function landUseNameFromCode(rawCode: string): string | null {
+  const code = rawCode.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9]{0,3}$/.test(code)) return null;
+  if (code.startsWith("EX") || code.startsWith("X")) return "Exempt property";
+  switch (code[0]) {
+    case "A":
+      return "Single-family residential";
+    case "B":
+      return "Multifamily residential";
+    case "C":
+      return "Vacant lot or tract";
+    case "D":
+      return code.startsWith("D2")
+        ? "Improvements on agricultural land"
+        : "Agricultural / qualified open-space land";
+    case "E":
+      return code.startsWith("E1")
+        ? "Rural single-family residential (farm/ranch improvement)"
+        : "Rural farm or ranch land";
+    case "F":
+      return code.startsWith("F2") ? "Industrial real property" : "Commercial real property";
+    case "J":
+      return "Utility";
+    case "M":
+      return "Mobile home (residential)";
+    case "O":
+      return "Residential inventory (builder lots)";
+    case "S":
+      return "Special inventory";
+    default:
+      return null;
+  }
+}
+
+export function landUseCustomerName(data: Record<string, unknown> | null | undefined): string | null {
+  if (!data) return null;
+  const label = typeof data.landUseLabel === "string" ? data.landUseLabel.trim() : "";
+  if (label) return label;
+  const code = typeof data.landUseCode === "string" ? data.landUseCode : "";
+  if (!code) return null;
+  return landUseNameFromCode(code);
+}
+
+/** One overlay row: the paint state (F5), citations (F1), a readable date, the why control (P1). */
 export function overlayRowHtml(o: OverlayRow, i: number): string {
   const p = overlayPaint(o);
   const extra = o.id === "flood" ? " flood" : p.paint === "refused" ? " refused" : "";
-  const shown = envelopeHumanReason(o.reason);
+  const humanReason = envelopeHumanReason(o.reason);
+  const shown = humanReason && !/degraded|provenance|adapter/i.test(humanReason) ? humanReason : undefined;
   const why = shown ? reasonLineHtml("reason", shown) : "";
   const note = p.paintReason ? reasonLineHtml("note", p.paintReason, `data-paint-reason="${escapeHtml(p.paintReason)}"`) : "";
   const citations = o.citations ? o.citations : [];
   const degraded = o.citationsDegraded === true || (p.paint === "present" && citations.length === 0);
   const cites = citationHtml(citations, degraded);
   const ask = whyControlHtml("overlay", p.paint, { i: String(i) });
-  return `<div class="ovl${extra}" data-overlay="${escapeHtml(o.id)}" data-paint="${p.paint}"><span class="g ${glyphClass(p.paint)}" title="${stateWord(p.paint)}"></span> <span class="key">${escapeHtml(o.id)}</span> <span class="lbl">${escapeHtml(o.label)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(null, null, o.vintage, o.provenance)}${why}${note}</div>`;
+  return `<div class="ovl${extra}" data-overlay="${escapeHtml(o.id)}" data-paint="${p.paint}"><span class="g ${glyphClass(p.paint)}" title="${stateWord(p.paint)}"></span> <span class="key">${escapeHtml(overlayTitle(o.id))}</span> <span class="lbl">${escapeHtml(overlayCustomerLabel(o))}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(null, null, o.vintage, null)}${why}${note}</div>`;
 }
 
 /** F2: the flood row under the drawing, every value read off the flood section's data; a non-present section prints its state. */
-export function floodFactsHtml(s: BriefSection, i: number): string {
+export function floodFactsHtml(s: BriefSection, i: number, overlaySfha?: boolean): string {
   const head = `<span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="key">flood</span> <span class="lbl">${escapeHtml(s.title)}</span>`;
   const meta = metaHtml(s.asOf, sourceOf(s));
   const cites = citationHtml(s.citations, s.citationsDegraded);
@@ -2091,20 +2224,27 @@ export function floodFactsHtml(s: BriefSection, i: number): string {
   }
   const d: Record<string, unknown> = s.data ? s.data : {};
   const str = (k: string): string => stringOrNull(d[k]) ?? UNSTATED;
-  const sfha = d.inSpecialFloodHazardArea === true ? "yes" : d.inSpecialFloodHazardArea === false ? "no" : UNSTATED;
+  const sectionSfha =
+    d.inSpecialFloodHazardArea === true ? true : d.inSpecialFloodHazardArea === false ? false : null;
+  const sfhaBool = sectionSfha !== null ? sectionSfha : overlaySfha === true || overlaySfha === false ? overlaySfha : null;
+  const sfha = sfhaBool === true ? "yes" : sfhaBool === false ? "no" : UNSTATED;
   const bfe = numberOrNull(d.baseFloodElevation);
+  const method = stringOrNull(d.method);
+  const readAt = method === "point-on-surface" ? "a point on the parcel" : null;
+  const vintage = customerDate(stringOrNull(d.sourceVintage)) ?? customerDate(stringOrNull(d.evaluatedAt));
   /* data-fact-*, not data-flood-*: the drawing already owns data-flood-zone and data-flood-tint (D4) */
   const kv = (k: string, v: string, attr: string): string =>
     `<span class="kv" data-fact-${attr}="${escapeHtml(v)}"><span class="key">${k}</span> ${escapeHtml(v)}</span>`;
   const rows = [
     kv("zone", str("floodZone"), "zone"),
-    kv("subtype", str("zoneSubtype"), "subtype"),
+    stringOrNull(d.zoneSubtype) ? kv("subtype", str("zoneSubtype"), "subtype") : "",
     kv("SFHA", sfha, "sfha"),
     kv("base flood elevation", bfe === null ? BFE_NONE : String(bfe), "bfe"),
-    kv("source adapter", str("sourceAdapter"), "adapter"),
-    kv("source vintage", str("sourceVintage"), "vintage"),
-    kv("evaluated at", dateOnly(stringOrNull(d.evaluatedAt)) ?? UNSTATED, "evaluated"),
-  ].join(" ");
+    readAt ? kv("read at", readAt, "method") : "",
+    vintage ? kv("as of", vintage, "vintage") : "",
+  ]
+    .filter((row) => row.length > 0)
+    .join(" ");
   const summary = s.zoneExposureSummary
     ? `<div class="fsum" data-zone-exposure="1">${escapeHtml(s.zoneExposureSummary)}</div>`
     : "";
@@ -2376,8 +2516,8 @@ export function stubReadNoteHtml(row: Pick<BoardRow, "stubRead">): string {
 export function boardRowPrimaryLabel(row: Pick<BoardRow, "query" | "resolution" | "stubLabel" | "parcelNodeId">): string {
   if (row.resolution !== "resolved") return row.query;
   const stubLabel = row.stubLabel?.trim();
-  if (stubLabel && (looksLikeParcelNodeId(row.query) || stubLabel !== row.query)) return stubLabel;
-  return row.query;
+  if (stubLabel && (looksLikeParcelNodeId(row.query) || stubLabel !== row.query)) return customerSitus(stubLabel);
+  return customerSitus(row.query) || row.query;
 }
 
 export function boardQueryCellHtml(row: BoardRow): string {
@@ -2404,7 +2544,8 @@ export function boardCardTitle(screenName?: string | null): string {
 }
 
 export function parcelCardTitle(model: Pick<PanelModel, "label" | "parcelNodeId">): string {
-  return model.label?.trim() || model.parcelNodeId || "parcel";
+  const situs = customerSitus(model.label);
+  return situs || model.parcelNodeId || "parcel";
 }
 
 /** P-437: zoning · land use · flood one line (present values only). */
@@ -2416,13 +2557,9 @@ export function parcelFactSubheadHtml(sections: BriefSection[]): string {
       case "zoning":
         return typeof d.district === "string" ? d.district : null;
       case "land-use":
-        return typeof d.landUseLabel === "string"
-          ? d.landUseLabel
-          : typeof d.landUseCode === "string"
-            ? d.landUseCode
-            : null;
+        return landUseCustomerName(d);
       case "flood":
-        return typeof d.floodZone === "string" ? d.floodZone : null;
+        return typeof d.floodZone === "string" ? `zone ${d.floodZone}` : null;
       default:
         return null;
     }
@@ -2604,10 +2741,16 @@ export function renderParcelDraw(
   const node = model.parcelNodeId
     ? `<div class="pn atom">${escapeHtml(model.parcelNodeId)}</div>`
     : "";
+  const sectionsForDraw = model.sections ?? [];
+  const floodSection = sectionsForDraw.find((s) => s.id === "flood") ?? null;
+  const floodMethod = floodSection?.data ? stringOrNull(floodSection.data.method) : null;
+  const envelopeOverlay = model.overlays.find((o) => o.id === "envelope" && o.geom && o.geom.length >= 3) ?? null;
   const svg = ringSvg(model.ring ?? [], model.edges ?? [], {
     zoning: model.zoning ?? null,
     flood: floodOverlayOf(model.overlays),
     frame: model.frame ?? null,
+    envelope: envelopeOverlay?.geom ?? null,
+    floodMethod,
   });
   /* M-2: ground under the drawing when the anchor was read, otherwise the svg
    * exactly as it renders with no anchor on the wire. */
@@ -2616,8 +2759,15 @@ export function renderParcelDraw(
     model.anchor ?? null,
     model.anchorRead ?? null,
   );
+  const envelopeNote = envelopeOverlay
+    ? `<div class="envnote" data-envelope-disclosure="1">${escapeHtml(
+        envelopeOverlay.basisDisplayText ||
+          "Modelled from the setback table on record. The area is not stated.",
+      )}</div>`
+    : "";
   const drawn =
     groundWrapHtml(svg, groundOutcome.plan, groundOn === undefined ? true : groundOn) +
+    envelopeNote +
     (groundOutcome.plan || !groundOutcome.reason ? "" : singleGroundNoteHtml(groundOutcome.reason));
   const tip = svg ? `<div class="tip" data-tip="1">${EDGE_TIP_HINT}</div>${frameNoteHtml(model.frame ?? null)}` : "";
   const edgeList = (model.edges ?? []).length
@@ -2631,11 +2781,12 @@ export function renderParcelDraw(
   for (let i = 0; i < sections.length; i++) {
     const s = sections[i];
     if (s && s.id === "flood") {
-      floodFacts = floodFactsHtml(s, i);
+      floodFacts = floodFactsHtml(s, i, floodOverlayOf(model.overlays)?.sfha);
       break;
     }
   }
-  return `${node}${model.label ? `<div class="pl">${escapeHtml(model.label)}</div>` : ""}${drawn}${tip}${edgeList}${rows}${floodFacts}${offCanvasHtml(model)}`;
+  const situs = customerSitus(model.label);
+  return `${node}${situs ? `<div class="pl">${escapeHtml(situs)}</div>` : ""}${drawn}${tip}${edgeList}${rows}${floodFacts}${offCanvasHtml(model)}`;
 }
 
 export function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
@@ -2653,6 +2804,10 @@ export function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
     if (typeof rec.sfha === "boolean") row.sfha = rec.sfha;
     const drawKind = stringOrNull(rec.draw);
     if (drawKind) row.draw = drawKind;
+    const geom = ringFromGeom(rec.geom);
+    if (geom.length >= 3) row.geom = geom;
+    const basisText = stringOrNull(rec.basisDisplayText);
+    if (basisText) row.basisDisplayText = basisText;
     /* F5 F1: provenance, vintage and https citations as the wire carries them */
     const provenance = stringOrNull(rec.provenance);
     if (provenance) row.provenance = provenance;
@@ -2691,10 +2846,38 @@ export function zoningFromDraw(draw: Record<string, unknown>, host: Record<strin
   if (!v) return null;
   return {
     v,
-    jurisdiction: stringOrNull(zoning.jurisdiction),
+    jurisdiction: cityNameFromHost(host),
     state: stringOrNull(zoning.state) ?? "unknown",
     url: zoningCitationUrl(host),
   };
+}
+
+function jurisdictionShown(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || /_/.test(trimmed) || /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function cityNameFromHost(host: Record<string, unknown>): string | null {
+  const fact = asRecord(host.cityLimitsFact);
+  const name = fact ? stringOrNull(fact.cityName) : null;
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed || /_/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function ringFromGeom(geom: unknown): RingPt[] {
+  if (!Array.isArray(geom)) return [];
+  const out: RingPt[] = [];
+  for (const raw of geom) {
+    if (!Array.isArray(raw) || raw.length < 2) continue;
+    const x = numberOrNull(raw[0]);
+    const y = numberOrNull(raw[1]);
+    if (x !== null && y !== null) out.push({ x, y });
+  }
+  return out;
 }
 
 export function frameFromDraw(draw: Record<string, unknown>): DrawFrame | null {

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { customerProseViolations } from "./prose-violations.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const htmlPath = process.env.APP_HTML_PATH?.trim() || path.join(here, "app-from-server.html");
@@ -229,11 +230,9 @@ for (const [sn, seq] of Object.entries(sequences)) {
     await page.setContent(hostPage({ seq, result }));
     await page.waitForTimeout(3500);
     const frame = page.frames().find((fr) => fr !== page.mainFrame());
-    const body = frame
-      ? (await frame.evaluate(() => document.body.innerText))
-          .replace(/\s+/g, " ")
-          .slice(0, 160)
-      : "no frame";
+    const fullText = frame ? await frame.evaluate(() => document.body.innerText) : "";
+    const body = fullText.replace(/\s+/g, " ").slice(0, 160) || "no frame";
+    const prose = customerProseViolations(fullText, "48021:27246");
     const ring = frame
       ? await frame.evaluate(() =>
           document.body.innerHTML.includes('aria-label="parcel ring"'),
@@ -241,10 +240,10 @@ for (const [sn, seq] of Object.entries(sequences)) {
       : false;
     const stuck = /Reading this tool result/i.test(body);
     const label = `${sn}/${rn}`;
-    if (errors.length || stuck || !ring) {
+    if (errors.length || stuck || !ring || prose.length) {
       failures += 1;
       console.error(
-        JSON.stringify({ variant: label, stuck, ring, errors, bodyPreview: body }),
+        JSON.stringify({ variant: label, stuck, ring, errors, prose, bodyPreview: body }),
       );
     } else {
       console.log(JSON.stringify({ variant: label, ok: true }));

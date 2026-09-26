@@ -64,7 +64,7 @@ import {
   zoneFamily,
   ABSENCE_UNVERIFIED,
   AS_OF_MISSING,
-  CITATION_DEGRADED,
+  CITATION_NOT_LINKED,
   BFE_NONE,
   SAVE_STATUSES,
   WHY_TURN_OPENER,
@@ -491,10 +491,7 @@ describe("Wave I look up", () => {
     const caps = (withEdges.edges ?? []).map(edgeCaption);
     expect(caps.filter((c) => /PINE/i.test(c))).toEqual([]);
     expect(caps.some((c) => c.includes("alley"))).toBe(true);
-    expect(caps.some((c) => c.includes("48021:34169"))).toBe(true);
-    expect(caps.some((c) => c.includes("48021:road:15113284"))).toBe(true);
-    expect(caps.some((c) => c.includes("48021:road:129017865"))).toBe(true);
-    expect(caps.some((c) => c.includes("48021:road:925036023"))).toBe(true);
+    expect(caps.some((c) => c.includes("48021:"))).toBe(false);
     const drawn = renderParcelDraw(withEdges);
     expect(drawn).toContain("stroke-dasharray");
     expect(drawn).toContain("Withheld, setbacks unruled");
@@ -857,13 +854,13 @@ describe("P-91 v2 drawing (exported twins)", () => {
     expect(e0).toContain("alley");
     expect(e0).toContain("98.98 ft");
     expect(e0).toContain("S 89°52&#39; W");
-    expect(e0).toContain("48021:road:925036023");
+    expect(e0).not.toContain("48021:road:925036023");
     expect(e0).toContain('data-edge-tip="0"');
     expect(e0).not.toContain('data-act="open"');
     const e3 = edgeTipHtml(GOLD_V2_EDGES[3]!, 3);
     expect(e3).toContain("corner side");
     expect(e3).toContain("right of way");
-    expect(e3).toContain("48021:road:129017865");
+    expect(e3).not.toContain("48021:road:129017865");
     expect(e3).toContain("local");
     expect(e3).not.toContain(ACROSS_ROW);
     expect(edgeWord("side_corner")).toBe("corner side");
@@ -889,9 +886,9 @@ describe("P-91 v2 drawing (exported twins)", () => {
     expect(door).not.toContain("48021:road:");
     expect(edgeDoor(GOLD_V2_EDGES[1]!)).toBe("48021:34169");
     const row = edgeTipHtml(GOLD_V2_EDGES[2]!, 2);
-    expect(row).toContain("48021:34121");
+    expect(row).not.toContain("48021:34121");
     expect(row).toContain(ACROSS_ROW);
-    expect(row).toContain("48021:road:15113284");
+    expect(row).not.toContain("48021:road:15113284");
     expect(row).not.toContain('data-act="open"');
     expect(edgeIsRow(GOLD_V2_EDGES[2]!)).toBe(true);
     expect(edgeDoor(GOLD_V2_EDGES[2]!)).toBeNull();
@@ -921,7 +918,7 @@ describe("P-91 v2 drawing (exported twins)", () => {
     expect(pdd).toContain('stroke="var(--ss-t3)" stroke-width="2"/>');
     expect(pdd).not.toContain("data-zone-family");
     expect(pdd).toContain('data-zoning="PDD"');
-    expect(pdd).toContain(">bastrop_city_tx</text>");
+    expect(pdd).not.toContain("bastrop_city_tx");
     const notPresent = ringSvg(ring, [], { zoning: { v: "SF-1", jurisdiction: "x", state: "unknown", url: null } });
     expect(notPresent).not.toContain("data-zoning");
     expect(notPresent).not.toContain("data-zone-family");
@@ -971,7 +968,8 @@ describe("P-91 v2 drawing (exported twins)", () => {
     const withFrame = ringSvg(ring, [], { frame: { units: "ft", quality: "gis-approximate" } });
     expect(withFrame).toContain('data-north="up"');
     expect(withFrame).toContain('data-scale-ft="50"');
-    expect(withFrame).toContain(`50 ft <tspan class="sm">${UNIT_REFERENCE}</tspan>`);
+    expect(withFrame).toContain(">50 ft</text>");
+    expect(withFrame).not.toContain(UNIT_REFERENCE);
     const poly = /<polygon class="ring-fill" points="([^"]+)"/.exec(withFrame)?.[1] ?? "";
     const xs = poly.split(" ").map((p) => Number(p.split(",")[0]));
     const ringPx = Math.max(...xs) - Math.min(...xs);
@@ -993,7 +991,7 @@ describe("P-91 v2 drawing (exported twins)", () => {
   it("parses attrs.zoning, the zoning section's first https citation, frame, and the flood overlay's sfha and draw", () => {
     const model = parseToolResult(JSON.stringify(GOLD_V2));
     expect(model.kind).toBe("parcel");
-    expect(model.zoning).toEqual({ v: "SF-1", jurisdiction: "bastrop_city_tx", state: "present", url: ZONING_URL });
+    expect(model.zoning).toEqual({ v: "SF-1", jurisdiction: null, state: "present", url: ZONING_URL });
     expect(model.frame).toEqual({ units: "ft", quality: "gis-approximate" });
     expect(model.overlays[0]).toMatchObject({ id: "flood", sfha: false, draw: "tint-ring" });
     expect(model.overlays[1]?.sfha).toBeUndefined();
@@ -1183,7 +1181,7 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     expect(citationHtml(["https://a.test/1"], false)).toBe('<button type="button" class="cite" data-act="cite" data-url="https://a.test/1" onclick="window.__ss&&window.__ss.cite(this)">citation</button>');
     expect(citationHtml(["https://a.test/1", "https://a.test/2"], false)).toContain(">citation 2</button>");
     expect(citationHtml(["http://a.test/1", 'https://a.test/"x'], false)).toBe('<button type="button" class="cite" data-act="cite" data-url="https://a.test/&quot;x" onclick="window.__ss&&window.__ss.cite(this)">citation</button>');
-    expect(citationHtml(["https://a.test/1"], true)).toBe(`<span class="cite-deg" data-cite-degraded="1">${CITATION_DEGRADED}</span>`);
+    expect(citationHtml(["https://a.test/1"], true)).toBe(`<span class="cite-deg" data-cite-degraded="1">${CITATION_NOT_LINKED}</span>`);
     expect(citationHtml([], false)).toBe("");
     const model = parseToolResult(JSON.stringify(GOLD_FACTS_V2));
     const flood = floodFactsHtml(model.sections![2]!, 2);
@@ -1192,16 +1190,16 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
     expect(flood).toContain('data-fact-subtype="FLOODWAY"');
     expect(flood).toContain('data-fact-sfha="yes"');
     expect(flood).toContain('data-fact-bfe="372.5"');
-    expect(flood).toContain('data-fact-adapter="adapter:flood-test"');
-    expect(flood).toContain('data-fact-vintage="NFHL_48_20260101"');
-    expect(flood).toContain('data-fact-evaluated="2026-08-29"');
-    expect(flood).toContain(CITATION_DEGRADED);
+    expect(flood).not.toContain("adapter");
+    expect(flood).toContain('data-fact-vintage="2026-01-01"');
+    expect(flood).not.toContain("NFHL_");
+    expect(flood).toContain(CITATION_NOT_LINKED);
     expect(flood).not.toContain("data-zone-exposure");
     expect(flood).not.toContain('data-act="why"');
     const noBfe = floodFactsHtml({ ...model.sections![2]!, data: { floodZone: "X" } }, 2);
     expect(noBfe).toContain(`data-fact-bfe="${BFE_NONE}"`);
     expect(noBfe).toContain('data-fact-sfha="unstated"');
-    expect(noBfe).toContain('data-fact-subtype="unstated"');
+    expect(noBfe).not.toContain("data-fact-subtype");
     const unread = floodFactsHtml(model.sections![4]!, 4);
     expect(unread).toContain('data-flood-state="unread"');
     expect(unread).not.toContain("data-fact-zone");
