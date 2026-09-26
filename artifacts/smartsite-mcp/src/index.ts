@@ -2,6 +2,11 @@ import dotenv from "dotenv";
 
 import { SERVER_NAME } from "./constants.js";
 import {
+  MAPBOX_CARD_TOKEN_ENV_NAME,
+  MapboxCardTokenError,
+  requireMapboxCardToken,
+} from "./mapbox-card-token.js";
+import {
   PARCEL_TILES_ORIGIN_ENV_NAME,
   ParcelTilesOriginError,
   requireParcelTilesOrigin,
@@ -16,17 +21,23 @@ export function assertParcelTilesOriginConfigured(): void {
   requireParcelTilesOrigin();
 }
 
+/** P-462: refuse to boot without a public Mapbox card token. No Esri fallback. */
+export function assertMapboxCardTokenConfigured(): void {
+  requireMapboxCardToken();
+}
+
 async function main(): Promise<void> {
   try {
     assertParcelTilesOriginConfigured();
+    assertMapboxCardTokenConfigured();
   } catch (err) {
-    if (err instanceof ParcelTilesOriginError) {
+    if (err instanceof ParcelTilesOriginError || err instanceof MapboxCardTokenError) {
       console.error(
         JSON.stringify({
           event: "smartsite_mcp_boot_refused",
           refusal: err.refusal,
           message: err.message,
-          env: PARCEL_TILES_ORIGIN_ENV_NAME,
+          env: err instanceof MapboxCardTokenError ? MAPBOX_CARD_TOKEN_ENV_NAME : PARCEL_TILES_ORIGIN_ENV_NAME,
         }),
       );
       process.exit(1);

@@ -4,6 +4,7 @@
  * which htmlContractViolations refuses on the served page). Values are pinned
  * to the package by tests/vocabulary.test.ts. */
 import type { AnchorReadStatus, ParcelAnchor } from "../parcel-anchor.js";
+import { requireMapboxCardToken } from "../mapbox-card-token.js";
 
 export const CITATION_DEGRADED = "citation degraded";
 /** Customer sentence. The wire token stays CITATION_DEGRADED and is not printed. */
@@ -921,13 +922,15 @@ export function frameNoteHtml(frame: DrawFrame | null | undefined): string {
  */
 
 /**
- * Esri orders this path z / row / column, which is z / y / x, NOT z/x/y.
+ * Mapbox Raster Tiles orders this path z / column / row, which is z / x / y.
  * Transposing the last two segments fetches real imagery of the wrong place,
- * which renders beautifully and is a confident lie. This string is the single
- * source for both the fetched url and the origin declared in the resource CSP.
+ * which renders beautifully and is a confident lie. The token is not in this
+ * string: it is data from MAPBOX_CARD_TOKEN, appended when the url is built.
+ * This string is the single source for both the fetched url and the origin
+ * declared in the resource CSP.
  */
 export const GROUND_TILE_URL_TEMPLATE =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+  "https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.jpg90";
 
 /** Derived from the template above, never a second copy of the host.
  * Parsed without `new URL` so the browser IIFE does not throw in hosts (and
@@ -962,11 +965,8 @@ export const US_SURVEY_FOOT_M = 1200 / 3937;
 export const GROUND_ZOOM_MIN = 14;
 
 /**
- * Esri publishes World Imagery to level 19 broadly and past 19 only in selected
- * areas, where an over zoomed request answers with a placeholder rather than
- * imagery. 19 is the last level that is imagery everywhere we serve, so it is
- * the cap, and a small parcel is honestly upscaled rather than dishonestly
- * detailed.
+ * Mapbox Satellite publishes past this level. The card stays at 19 so a small
+ * parcel is upscaled rather than a denser mosaic that trips the tile cap.
  */
 export const GROUND_ZOOM_MAX = 19;
 
@@ -976,21 +976,31 @@ export const GROUND_SUPERSAMPLE = 2;
 /** A mosaic larger than this is refused rather than painted. */
 export const GROUND_MAX_TILES = 36;
 
-export const GROUND_SOURCE_LABEL = "Aerial: Esri World Imagery";
-/**
- * P-444: Mapbox Satellite stays off this iframe until a single stable origin
- * is measured. The public token is URL-restricted to smartsite.cloud and
- * mcp.smartsite.cloud; Claude's host Referer is not that origin (or is blank),
- * and wildcards are refused. Never use MAPBOX_SERVER_TOKEN to go around it.
- */
-export const GROUND_MAPBOX_HOLD_NOTE =
-  "Mapbox held: Claude iframe origin is {32-hex}.claudemcpcontent.com (not mcp.smartsite.cloud); URL restrictions refuse wildcards; no-Referer is 403 and iOS omits Referer.";
-/** Esri publishes no per tile capture date, so we state that we do not know it. */
-export const GROUND_VINTAGE_NOTE = "capture date unstated";
-/** No licence string is on the imagery read. Unknown stays unstated. */
-export const GROUND_LICENCE_NOTE = "licence unstated";
+/** Mapbox Product Terms 1.4. Each credit is its own link. */
+export const MAPBOX_WORDMARK_HREF = "https://www.mapbox.com/";
+export const MAPBOX_ATTRIBUTION_LINKS = [
+  { label: "© Mapbox", href: "https://www.mapbox.com/about/maps/" },
+  { label: "© OpenStreetMap", href: "https://www.openstreetmap.org/copyright" },
+  { label: "© Maxar", href: "https://www.maxar.com/" },
+  { label: "Improve this map", href: "https://apps.mapbox.com/feedback/" },
+] as const;
+
+export function mapboxAttributionHtml(): string {
+  const word =
+    `<a class="wordmark" data-mapbox-wordmark="1" href="${MAPBOX_WORDMARK_HREF}" target="_blank" rel="noopener noreferrer">Mapbox</a>`;
+  let links = "";
+  for (let i = 0; i < MAPBOX_ATTRIBUTION_LINKS.length; i++) {
+    const link = MAPBOX_ATTRIBUTION_LINKS[i];
+    if (!link) continue;
+    links +=
+      `<a data-mapbox-credit="1" href="${link.href}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`;
+  }
+  return `<span class="mapbox-credit" data-mapbox-attribution="1">${word}${links}</span>`;
+}
+
+/** Plain text of the credit, for the prose check. The links are the credit. */
 export function groundCreditText(): string {
-  return GROUND_SOURCE_LABEL + ", " + GROUND_VINTAGE_NOTE + ", " + GROUND_LICENCE_NOTE;
+  return "Mapbox " + MAPBOX_ATTRIBUTION_LINKS.map((link) => link.label).join(" ");
 }
 export const GROUND_TOGGLE_LABEL = "Aerial";
 
@@ -1032,11 +1042,13 @@ export function groundTileId(lat: number, lon: number, z: number): { z: number; 
   };
 }
 
-/** z / y / x. The row goes before the column. */
+/** z / x / y, then the public token as a query value. The browser requests it. */
 export function groundTileUrl(z: number, x: number, y: number): string {
-  return GROUND_TILE_URL_TEMPLATE.replace("{z}", String(z))
-    .replace("{y}", String(y))
-    .replace("{x}", String(x));
+  const token = requireMapboxCardToken();
+  const path = GROUND_TILE_URL_TEMPLATE.replace("{z}", String(z))
+    .replace("{x}", String(x))
+    .replace("{y}", String(y));
+  return path + "?access_token=" + encodeURIComponent(token);
 }
 
 /**
@@ -1197,18 +1209,17 @@ export function groundLayerHtml(plan: GroundPlan): string {
       ";height:" +
       groundPct(t.size, fit.h);
     imgs +=
-      `<img class="gt" alt="" draggable="false" decoding="async" data-tile="${t.z}/${t.y}/${t.x}"` +
+      `<img class="gt" alt="" draggable="false" decoding="async" referrerpolicy="origin" data-tile="${t.z}/${t.x}/${t.y}"` +
       ` src="${escapeHtml(t.url)}" style="${style}">`;
   }
   return `<div class="ground" aria-hidden="true" data-ground-z="${plan.z}" data-ground-tiles="${plan.tiles.length}">${imgs}</div>`;
 }
 
-/** Source and vintage, then the toggle. The vintage is stated as unknown, never implied. */
+/** Mapbox credit, then the toggle. The credit stays in the flow at every width. */
 export function groundNoteHtml(plan: GroundPlan | null, on: boolean): string {
   if (!plan) return "";
-  const label = groundCreditText();
   return (
-    `<div class="gnote" data-ground-note="1"><span data-ground-source="1">${escapeHtml(label)}</span>` +
+    `<div class="gnote" data-ground-note="1">${mapboxAttributionHtml()}` +
     `<button type="button" class="btn${on ? " on" : ""}" data-act="ground" data-ground-on="${on ? "1" : "0"}"` +
     ` onclick="window.__ss&&window.__ss.ground()">${GROUND_TOGGLE_LABEL}</button></div>`
   );

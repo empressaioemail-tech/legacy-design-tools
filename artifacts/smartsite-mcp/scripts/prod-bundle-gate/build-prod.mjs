@@ -14,6 +14,21 @@ const outFile = path.join(here, "prod-mcp-app.mjs");
 process.env.PARCEL_TILES_ORIGIN =
   process.env.PARCEL_TILES_ORIGIN ||
   "https://hauska-artifacts.nyc3.digitaloceanspaces.com";
+// Gate fixture only. Product boot refuses when MAPBOX_CARD_TOKEN is unset.
+process.env.MAPBOX_CARD_TOKEN =
+  process.env.MAPBOX_CARD_TOKEN || "pk.gate-mapbox-card-not-a-secret";
+
+const distDir = path.join(pkgRoot, "dist");
+fs.mkdirSync(distDir, { recursive: true });
+await esbuild.build({
+  entryPoints: [path.join(pkgRoot, "src/card/app-entry.ts")],
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  minifyWhitespace: true,
+  outfile: path.join(distDir, "card.iife.js"),
+  logLevel: "warning",
+});
 
 await esbuild.build({
   entryPoints: [path.join(pkgRoot, "src/mcp-app.ts")],
