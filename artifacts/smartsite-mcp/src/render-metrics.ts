@@ -1,4 +1,4 @@
-/**
+﻿/**
  * P-446 / P-456b. Map render telemetry: server records *sent*; the MCP App
  * reports drawn / fallback / failed. Counts are in-process on this instance;
  * operators aggregate JSON log lines across replicas.
@@ -8,6 +8,8 @@ import type { McpRenderHostKey } from "./mcp-host-key.js";
 
 export type MapRenderServerOutcome = "sent" | "no_map";
 export type MapRenderCardOutcome = "drawn" | "fallback" | "failed";
+/** P-447 tier probe; kept for host-tier-result and host-tiers tests. */
+export type MapRenderOutcome = "card" | "fallback" | "no_map";
 
 export type MapRenderReportPayload = {
   correlationId: string;
@@ -24,6 +26,7 @@ type HostBucket = {
   failed: number;
   no_map: number;
   byReason: Record<string, number>;
+  byUiCapable: { true: number; false: number };
 };
 
 type PendingSent = {
@@ -64,6 +67,7 @@ function bucketFor(host: McpRenderHostKey): HostBucket {
       failed: 0,
       no_map: 0,
       byReason: {},
+      byUiCapable: { true: 0, false: 0 },
     };
     s.buckets.set(host, b);
   }
@@ -173,6 +177,7 @@ export function snapshotMapRenderMetrics(): Record<
     failed: number;
     no_map: number;
     byReason: Record<string, number>;
+    byUiCapable: { true: number; false: number };
   }
 > {
   const out: Record<
@@ -185,6 +190,7 @@ export function snapshotMapRenderMetrics(): Record<
       failed: number;
       no_map: number;
       byReason: Record<string, number>;
+      byUiCapable: { true: number; false: number };
     }
   > = {};
   for (const [host, b] of store().buckets) {
@@ -196,6 +202,7 @@ export function snapshotMapRenderMetrics(): Record<
       failed: b.failed,
       no_map: b.no_map,
       byReason: { ...b.byReason },
+      byUiCapable: { ...b.byUiCapable },
     };
   }
   return out as Record<McpRenderHostKey, (typeof out)[string]>;
@@ -208,13 +215,23 @@ export function resetMapRenderMetricsForTests(): void {
 }
 
 /** @deprecated P-446 name; use recordMapRenderSent / recordMapRenderNoMap. */
+function bumpUiCapable(
+  b: HostBucket,
+  opts?: { uiCapable?: boolean },
+): void {
+  if (opts?.uiCapable === true) b.byUiCapable.true += 1;
+  else if (opts?.uiCapable === false) b.byUiCapable.false += 1;
+}
+
 export function recordMapRenderEvent(
   host: string,
   tool: string,
-  outcome: "card" | "fallback" | "no_map",
+  outcome: MapRenderOutcome,
   reasonCode: string,
+  opts?: { uiCapable?: boolean },
 ): void {
   const key = (host.trim() || "other") as McpRenderHostKey;
+  bumpUiCapable(bucketFor(key), opts);
   if (outcome === "no_map") {
     recordMapRenderNoMap(key, tool, reasonCode);
     return;
