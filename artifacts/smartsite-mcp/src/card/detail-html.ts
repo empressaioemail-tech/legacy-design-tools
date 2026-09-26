@@ -17,6 +17,7 @@ import {
   groundPlan,
   landUseCustomerName,
   mapboxAttributionHtml,
+  nearestNeighborsListHtml,
   ringFit,
   ringSvg,
   sourceOf,
@@ -75,9 +76,20 @@ function sectionValue(s: BriefSection): string {
   return displayState(s.paint);
 }
 
+function citationSourceLabel(s: BriefSection): string | null {
+  if (!Array.isArray(s.citations)) return null;
+  for (const raw of s.citations) {
+    if (typeof raw !== "string" || !/^https:\/\//i.test(raw.trim())) continue;
+    if (/arcgis\.com/i.test(raw)) return `${s.title || s.id} (county GIS)`;
+    const named = customerSource(raw);
+    if (named && !/^https:\/\//i.test(named)) return named;
+  }
+  return null;
+}
+
 function sourceLine(s: BriefSection): string {
   const bits: string[] = [];
-  const source = customerSource(sourceOf(s));
+  const source = citationSourceLabel(s) ?? customerSource(sourceOf(s));
   if (source) bits.push(source);
   const dated = dateLong(customerDate(s.asOf));
   if (dated) bits.push(dated);
@@ -147,6 +159,12 @@ function panelHtml(model: PanelModel): string {
     groups +
     unknownHtml +
     ownerDetailSectionHtml(model.ownerDisplay) +
+    (model.nearestNeighbors && model.nearestNeighbors.length > 0
+      ? nearestNeighborsListHtml(
+          model.nearestSubjectParcelNodeId ?? model.parcelNodeId ?? null,
+          model.nearestNeighbors,
+        )
+      : "") +
     `<p class="ss-disclaimer">${escapeHtml(DISCLAIMER)}</p>` +
     `<button type="button" class="btn" data-act="collapse" onclick="window.__ss&&window.__ss.collapse()">Back</button>` +
     `</aside>`

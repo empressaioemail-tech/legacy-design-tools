@@ -16,6 +16,7 @@ import {
   groundPlan,
   gwrapAspectAttr,
   mapboxAttributionHtml,
+  nearestNeighborsListHtml,
   ringFit,
   ringSvg,
   LOADING_PANEL_TITLE,
@@ -132,6 +133,10 @@ export function answerFirstSingleHtml(model: PanelModel): string {
   if (!card) return "";
   const aerial = aerialHtml(model.ring ?? [], model.anchor, model.anchorRead, model.overlays, false);
   const address = card.title ? `<p class="ss-address">${escapeHtml(card.title)}</p>` : "";
+  const nearest =
+    model.nearestNeighbors && model.nearestNeighbors.length > 0
+      ? nearestNeighborsListHtml(model.nearestSubjectParcelNodeId ?? model.parcelNodeId ?? null, model.nearestNeighbors)
+      : "";
   return (
     `<div class="af" data-inline="1" data-layout="single">` +
     aerial.html +
@@ -139,6 +144,7 @@ export function answerFirstSingleHtml(model: PanelModel): string {
     address +
     `<p class="af-answer" data-answer="1">${escapeHtml(card.answer)}</p>` +
     factsHtml(card) +
+    nearest +
     `</div>` +
     actionButtons(card, true) +
     `</div>`

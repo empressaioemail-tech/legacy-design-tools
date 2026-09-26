@@ -320,6 +320,15 @@ export type PanelModel = {
   ownerDisplay?: OwnerPanelDisplay;
   /** P-474: address lookup or tool failure card. */
   lookup?: LookupCard;
+  /** P-474 / P-452: nearest-parcel list on find_nearest_parcels reads. */
+  nearestSubjectParcelNodeId?: string;
+  nearestNeighbors?: NearestNeighborRow[];
+};
+
+export type NearestNeighborRow = {
+  parcelNodeId: string;
+  label: string;
+  distanceFt: number | null;
 };
 
 /** A-331. Parsed from `ownerFact`; rendered only in fullscreen detail. */
@@ -1371,42 +1380,41 @@ function lookupHeadlineFromMissClass(rec: Record<string, unknown>): LookupCard {
   };
 }
 
+function lookupOutageFromHtmlBody(rec: Record<string, unknown>): PanelModel | null {
+  const brief = typeof rec.brief === "string" ? rec.brief : null;
+  const reason = stringOrNull(rec.reason);
+  if (brief && /<html/i.test(brief) && (reason === "upstream_non_json" || reason === "upstream_html")) {
+    return {
+      kind: "lookup",
+      rows: [],
+      overlays: [],
+      ring: [],
+      edges: [],
+      lookup: {
+        state: "outage",
+        headline: "Smart Site could not reach the server",
+        detail: "Try again in a moment.",
+      },
+    };
+  }
+  return null;
+}
+
 export function lookupCardFrom(rec: Record<string, unknown>): PanelModel | null {
   if (Array.isArray(rec.hits) && rec.hits.length === 0) {
+    const outage = lookupOutageFromHtmlBody(rec);
+    if (outage) return outage;
     const lookup = lookupHeadlineFromMissClass(rec);
     return { kind: "lookup", rows: [], overlays: [], ring: [], edges: [], lookup };
   }
   const declared = declaredFrom(rec);
   if (declared) {
     if (declared.reason === "upstream_non_json" && declared.brief && /<html/i.test(declared.brief)) {
-      return {
-        kind: "lookup",
-        rows: [],
-        overlays: [],
-        ring: [],
-        edges: [],
-        lookup: {
-          state: "outage",
-          headline: "Smart Site could not reach the server",
-          detail: "Try again in a moment.",
-        },
-      };
-    }
-    if (declared.status === "error" || declared.status === "degraded") {
-      const reason = declared.reason ?? "error";
-      const isTimeout = /timeout/i.test(reason);
-      return {
-        kind: "lookup",
-        rows: [],
-        overlays: [],
-        ring: [],
-        edges: [],
-        lookup: {
-          state: isTimeout ? "timeout" : "refused",
-          headline: isTimeout ? "This request timed out" : "This request was refused",
-          detail: declared.message ?? null,
-        },
-      };
+      const lookupShaped =
+        Array.isArray(rec.hits) ||
+        rec.missClass != null ||
+        (typeof rec.mapPanelNote === "string" && !asRecord(rec.draw) && !Array.isArray(rec.parcels));
+      if (lookupShaped) return lookupOutageFromHtmlBody({ ...rec, brief: declared.brief, reason: declared.reason });
     }
   }
   return null;
@@ -3469,6 +3477,7 @@ function parseToolResultInner(text: string): PanelModel {
       if (setBatch) model.anchorBatch = setBatch;
     }
     attachOwnerDisplay(model, rec);
+    attachNearestNeighbors(model, rec);
     return model;
   }
 
@@ -3546,6 +3555,7 @@ function parseToolResultInner(text: string): PanelModel {
         if (anchor) model.anchor = anchor;
       }
       attachOwnerDisplay(model, rec);
+      attachNearestNeighbors(model, rec);
       return model;
     }
   }
@@ -3572,6 +3582,74 @@ export function ownerDisplayFrom(ownerFact: unknown): OwnerPanelDisplay | null {
 function attachOwnerDisplay(model: PanelModel, rec: Record<string, unknown>): void {
   const owner = ownerDisplayFrom(rec.ownerFact);
   if (owner) model.ownerDisplay = owner;
+}
+
+function nearestDistanceLabel(ft: number | null): string {
+  if (ft === null || !Number.isFinite(ft)) return "—";
+  if (ft < 1) return "Adjacent";
+  return `${Math.round(ft)} ft`;
+}
+
+export function nearestNeighborsFrom(rec: Record<string, unknown>): {
+  subjectId: string | null;
+  rows: NearestNeighborRow[];
+} | null {
+  const subjectId =
+    stringOrNull(rec.nearestSubjectParcelNodeId) ?? stringOrNull(rec.subjectParcelNodeId);
+  const src = Array.isArray(rec.nearestNeighbors)
+    ? rec.nearestNeighbors
+    : subjectId && Array.isArray(rec.parcels)
+      ? rec.parcels
+      : null;
+  if (!src || src.length === 0) return null;
+  const rows: NearestNeighborRow[] = [];
+  for (const raw of src) {
+    const row = asRecord(raw);
+    if (!row) continue;
+    const parcelNodeId = stringOrNull(row.parcelNodeId);
+    if (!parcelNodeId) continue;
+    const label =
+      stringOrNull(row.label) ??
+      (asRecord(row.draw) ? stringOrNull(asRecord(row.draw)!.label) : null) ??
+      parcelNodeId;
+    rows.push({
+      parcelNodeId,
+      label: customerSitus(label) || label,
+      distanceFt: numberOrNull(row.distanceFt),
+    });
+  }
+  if (rows.length === 0) return null;
+  return { subjectId, rows };
+}
+
+export function nearestNeighborsListHtml(
+  subjectId: string | null,
+  rows: NearestNeighborRow[],
+): string {
+  const subj = subjectId
+    ? `<p class="ss-nearest-sub">Subject parcel <span class="pn ss-clip">${escapeHtml(subjectId)}</span></p>`
+    : "";
+  const items = rows
+    .map(
+      (r) =>
+        `<li class="ss-nearest-row" data-node="${escapeHtml(r.parcelNodeId)}">` +
+        `<span class="ss-nearest-lbl">${escapeHtml(r.label)}</span>` +
+        `<span class="ss-nearest-dist">${escapeHtml(nearestDistanceLabel(r.distanceFt))}</span>` +
+        `</li>`,
+    )
+    .join("");
+  return (
+    `<section class="ss-nearest" data-nearest="1">` +
+    `<h3 class="ss-nearest-h">Nearest parcels</h3>${subj}` +
+    `<ul class="ss-nearest-list">${items}</ul></section>`
+  );
+}
+
+function attachNearestNeighbors(model: PanelModel, rec: Record<string, unknown>): void {
+  const nearest = nearestNeighborsFrom(rec);
+  if (!nearest) return;
+  model.nearestSubjectParcelNodeId = nearest.subjectId ?? undefined;
+  model.nearestNeighbors = nearest.rows;
 }
 
 export function parseToolResult(text: string): PanelModel {

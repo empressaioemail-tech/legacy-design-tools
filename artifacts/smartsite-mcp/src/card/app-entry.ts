@@ -661,7 +661,7 @@ declare const __SS_CARD_DATA__: {
         return hdr+sortBoardRows(grp.rows,sortKey,sortDir).map(function(r){
         var i=pos++;
         var open=r.parcelNodeId&&r.resolution==="resolved"
-          ?'<button type="button" class="btn" data-act="open" data-url="'+esc(parcelPageUrl(r.parcelNodeId))+'" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
+          ?'<button type="button" class="btn" data-act="open" data-node="'+esc(r.parcelNodeId)+'" onclick="window.__ss&&window.__ss.open(this)">Open</button>'
           :'<div class="slot">'+NOTHING_TO_OPEN+"</div>"+lookupControlHtml(r);
         return '<tr class="row" data-i="'+i+'"><td>'+queryCell(r)+'</td><td class="pn atom idcol">'+esc(r.parcelNodeId||"—")+"</td>"+RAILS.map(function(k){
           var g=glyph(r.rails[k]);
@@ -898,10 +898,14 @@ declare const __SS_CARD_DATA__: {
     clip.call(navigator.clipboard,url).then(function(){ btn.textContent="Link copied"; }).catch(function(){ openLink(url); });
   }
   function sendOpen(btn){
-    var url=attr(btn,"data-url");
-    if(url){ openLink(url); return; }
     var node=btn&&btn.getAttribute("data-node");
     if(!node) return;
+    if(model.kind==="board"&&btn.getAttribute("data-act")==="open"){
+      openLink(parcelPageUrl(node));
+      return;
+    }
+    var url=attr(btn,"data-url");
+    if(url){ openLink(url); return; }
     armOpenWait(node);
     host.sendMessage(openParcelMessage(node));
   }

@@ -756,7 +756,14 @@ svg.ring .sm{fill:var(--ss-t6)}
 .ss-map-viewport .ss-layers,.ss-map-viewport+.ss-layers{position:relative}
 .lookup-card{padding:8px 0}
 .lookup-head{margin:0 0 6px;font-size:14px;line-height:20px;color:var(--color-text-primary,var(--ss-t3))}
-.lookup-detail{margin:0;font-size:13px;line-height:18px;color:var(--color-text-secondary,var(--ss-t5))}
+.lookup-detail{margin:0;font-size:var(--ss-fs-meta);line-height:1.4;color:var(--color-text-secondary,var(--ss-t5))}
+.ss-nearest{margin:12px 0 0;padding:0}
+.ss-nearest-h{margin:0 0 8px;font-size:14px;line-height:20px;font-weight:600;color:var(--color-text-primary,var(--ss-t3))}
+.ss-nearest-sub{margin:0 0 8px;font-size:var(--ss-fs-meta);color:var(--color-text-secondary,var(--ss-t5))}
+.ss-nearest-list{margin:0;padding:0;list-style:none}
+.ss-nearest-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary,var(--ss-line-14))}
+.ss-nearest-lbl{flex:1;font-size:14px;line-height:20px;color:var(--color-text-primary,var(--ss-t3))}
+.ss-nearest-dist{flex:0 0 auto;font-size:var(--ss-fs-meta);color:var(--color-text-secondary,var(--ss-t5))}
 .ground{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .ground img{position:absolute;display:block;max-width:none;user-select:none}
 /* The ring's void fill is a 55 percent scrim, which is right over nothing and
