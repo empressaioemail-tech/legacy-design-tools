@@ -1526,9 +1526,9 @@ CREATE TABLE @@SCHEMA@@.pe_stripe_webhook_events (
     owner_user_id text,
     received_at timestamp with time zone DEFAULT now() NOT NULL,
     outcome text NOT NULL,
-    CONSTRAINT pe_stripe_webhook_events_stripe_event_id_chk CHECK ((stripe_event_id <> ''::text)),
     CONSTRAINT pe_stripe_webhook_events_event_type_chk CHECK ((event_type <> ''::text)),
-    CONSTRAINT pe_stripe_webhook_events_outcome_chk CHECK ((outcome <> ''::text))
+    CONSTRAINT pe_stripe_webhook_events_outcome_chk CHECK ((outcome <> ''::text)),
+    CONSTRAINT pe_stripe_webhook_events_stripe_event_id_chk CHECK ((stripe_event_id <> ''::text))
 );
 
 
