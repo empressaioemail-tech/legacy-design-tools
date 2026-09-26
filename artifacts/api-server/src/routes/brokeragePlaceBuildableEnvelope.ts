@@ -1651,6 +1651,50 @@ async function deriveAndRespond(args: {
     return;
   }
 
+  if (outcome.sanity) {
+    res.status(200).json(
+      withPlace(
+        {
+          status: "geometry-validation-failed",
+          reason: outcome.sanity.sentence,
+          sanityReasons: outcome.sanity.reasons,
+          layer: "buildable-envelope",
+          parcel_node_id: parcelNodeId,
+          setbacks: {
+            front_ft: outcome.resolved.scalars.front_ft,
+            side_ft: outcome.resolved.scalars.side_ft,
+            rear_ft: outcome.resolved.scalars.rear_ft,
+            ...(typeof outcome.resolved.scalars.side_corner_ft === "number"
+              ? { side_corner_ft: outcome.resolved.scalars.side_corner_ft }
+              : {}),
+            district: outcome.effectiveZoningCode,
+          },
+          ...wrapEngineEnvelope(
+            {
+              geojson: { type: "FeatureCollection", features: [] },
+              district: outcome.derived.district,
+              approximate: true,
+              empty: true,
+              citationUrl: outcome.derived.citationUrl,
+              parcel: {
+                apn: parcel.apn,
+                situsAddress: parcel.situsAddress,
+                zoningCode: parcel.zoningCode,
+                effectiveZoningCode: outcome.effectiveZoningCode,
+                parcel_node_id: parcelNodeId,
+                provider: parcelGeo.provider ?? null,
+                notSurveyGrade: true,
+              },
+            },
+            outcome.honesty,
+          ),
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
   await respondWithDrawnEnvelope({
     res,
     ctx,

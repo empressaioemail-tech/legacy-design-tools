@@ -119,6 +119,11 @@ export type EnvelopeDrawRefusal = {
   chain: EnvelopeDrawChain;
   /** The route's own answer when it reached one (`deriveBuildableEnvelope`'s `wireStatus`). */
   declinedBy?: string | null;
+  /**
+   * Machine basis for a shape the sanity guard withheld. The customer sentence
+   * stays in `declinedBy`. This string is the source note, not the face.
+   */
+  sourceNote?: string | null;
 };
 
 export type EnvelopeDrawOutcome =

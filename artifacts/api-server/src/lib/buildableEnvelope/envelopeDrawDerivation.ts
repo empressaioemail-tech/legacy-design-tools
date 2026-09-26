@@ -65,7 +65,11 @@ import {
 } from "./composeBuildableEnvelopeDerivation";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import { labelEdges } from "./edgeLabeling";
-import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT } from "./geometry";
+import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT, type Ring } from "./geometry";
+import {
+  ENVELOPE_SHAPE_UNRESOLVED,
+  envelopeSanityReasons,
+} from "./envelopeSanityGuard";
 import { decideEnvelopeFromLedger } from "./ledgerEnvelopeRails";
 import type { EnvelopeDrawChain, EnvelopeDrawStep } from "./envelopeDrawOutcome";
 import {
@@ -199,6 +203,12 @@ export type EnvelopeDrawDerivation =
       wireStatus: ComposedEnvelope["wireStatus"];
       honesty: ComposedEnvelope["honesty"];
       derivePath: ComposedEnvelope["derivePath"];
+      /**
+       * Set when a polygon was derived and then withheld. `wireStatus` is
+       * `geometry-validation-failed`. The customer sentence is `sanity.sentence`;
+       * `sanity.reasons` is the machine basis and must not replace the sentence.
+       */
+      sanity?: { sentence: string; reasons: string[] };
     };
 
 /** A derivation that ran and answered — the shape the route's drawn renderer takes. */
@@ -326,7 +336,38 @@ export async function deriveEnvelopeDraw(
     stageAtThrow = "derivation-threw";
     const composed = drawn.composed!;
     const labeling = drawn.labeling!;
-    const { derived, wireStatus, honesty, derivePath } = composed;
+    let { derived, wireStatus, honesty, derivePath } = composed;
+    let sanity: { sentence: string; reasons: string[] } | undefined;
+    const envelopeCoords = derived.geojson.features[0]?.geometry?.coordinates?.[0];
+    if (wireStatus === "ok" && !derived.empty && envelopeCoords && envelopeCoords.length >= 4) {
+      const reasons = envelopeSanityReasons({
+        cleanedRing: drawn.ring,
+        originalRing: parcel.ring,
+        envelopeRing: envelopeCoords as Ring,
+        insetFeet: derived.insetFeetPerEdge,
+        edgeSignal: labeling.signal,
+      });
+      if (reasons.length > 0) {
+        const feature = derived.geojson.features[0]!;
+        feature.geometry = null;
+        feature.properties = {
+          ...feature.properties,
+          disclosure: ENVELOPE_SHAPE_UNRESOLVED,
+          emptyReason: ENVELOPE_SHAPE_UNRESOLVED,
+        };
+        derived = { ...derived, empty: true, geojson: derived.geojson };
+        wireStatus = "geometry-validation-failed";
+        honesty = {
+          ...honesty,
+          coverage: {
+            ...honesty.coverage,
+            degraded: true,
+            reason: reasons.join(", "),
+          },
+        };
+        sanity = { sentence: ENVELOPE_SHAPE_UNRESOLVED, reasons };
+      }
+    }
 
     return {
       state: "drawn",
@@ -343,6 +384,7 @@ export async function deriveEnvelopeDraw(
       wireStatus,
       honesty,
       derivePath,
+      ...(sanity ? { sanity } : {}),
     };
   } catch (error) {
     return { state: "threw", step: stageAtThrow, error };

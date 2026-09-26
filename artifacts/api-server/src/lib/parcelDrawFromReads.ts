@@ -301,6 +301,13 @@ export function tryAssembleParcelDrawFromReads(args: {
         ? { state: args.buildingFootprint.state, source: args.buildingFootprint.source, sourceVintage: "sourceVintage" in args.buildingFootprint ? args.buildingFootprint.sourceVintage : null }
         : null,
     });
+    if (
+      envelopeOutcome?.state === "declined" &&
+      envelopeOutcome.refusal.sourceNote
+    ) {
+      const overlay = draw.overlays.find((o) => o.id === "envelope");
+      if (overlay) overlay.provenance = envelopeOutcome.refusal.sourceNote;
+    }
     return mergeOnRecordAttrs(
       draw,
       serializeTwinOnRecord(

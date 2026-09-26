@@ -146,9 +146,15 @@ export async function tryComposeEnvelopeModelForDraw(args: {
   const declined = (
     step: EnvelopeDrawStep,
     declinedBy?: string | null,
+    sourceNote?: string | null,
   ): EnvelopeDrawOutcome => ({
     state: "declined",
-    refusal: declinedBy == null ? { step, chain } : { step, chain, declinedBy },
+    refusal: {
+      step,
+      chain,
+      ...(declinedBy != null ? { declinedBy } : {}),
+      ...(sourceNote ? { sourceNote } : {}),
+    },
   });
 
   const point = args.queryPoint;
@@ -233,6 +239,13 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       return declined("derivation-not-drawn", "ungeometric-parcel");
     case "drawn": {
       chain = outcome.chain;
+      if (outcome.sanity) {
+        return declined(
+          "derivation-not-drawn",
+          outcome.sanity.sentence,
+          outcome.sanity.reasons.join(", "),
+        );
+      }
       // P60b's split, carried through rather than flattened: "no-buildable-area"
       // is a consume-lot MEASUREMENT and "geometry-validation-failed" is a gate
       // decline. Neither is a withhold and neither may be reported as one, so the
