@@ -61,6 +61,8 @@ export const SCREEN_STUB_CONCURRENCY = 8;
  * its end. Nothing about the stub pass is stored.
  */
 export const SCREEN_STUB_BUDGET_MS = 6_000;
+/** Per wave of {@link SCREEN_STUB_CONCURRENCY} resolved rows on one screen. */
+export const SCREEN_STUB_BUDGET_WAVE_MS = SCREEN_STUB_BUDGET_MS;
 export const CREATE_SCREEN_V1_SOURCES = ["pasted", "map-selection"] as const;
 export const ADD_TO_SCREEN_V1_SOURCES = ["walk", "saved", "pasted"] as const;
 export const V2_INTAKE_SOURCES = ["chrome", "gmail", "file"] as const;
@@ -521,7 +523,16 @@ export async function resolveQueryRow(
   const isNodeQuery = parseParcelNodeId(trimmed) !== null;
   let timed: { ok: true; value: ResolveHit[] } | { ok: false };
   try {
-    timed = await withTimeout(resolver(trimmed), CREATE_SCREEN_RESOLVE_TIMEOUT_MS);
+    // Node ids are a single indexed parcel-row read; they must not share the
+    // situs-search timeout that exhausts under parallel map-selection batches.
+    if (isNodeQuery) {
+      timed = { ok: true, value: await resolver(trimmed) };
+    } else {
+      timed = await withTimeout(
+        resolver(trimmed),
+        CREATE_SCREEN_RESOLVE_TIMEOUT_MS,
+      );
+    }
   } catch (err) {
     // The existence lookup did not answer. A row written unresolved here is
     // a durable false absence for a parcel that may exist, so the whole
@@ -895,12 +906,15 @@ export async function attachScreenStubs(
   screen.rows.forEach((row, i) => {
     if (row.resolution === "resolved") resolvedIndexes.push(i);
   });
+  const stubBudgetMs =
+    SCREEN_STUB_BUDGET_WAVE_MS *
+    Math.max(1, Math.ceil(resolvedIndexes.length / SCREEN_STUB_CONCURRENCY));
   const reads = await mapPool(
     resolvedIndexes,
     SCREEN_STUB_CONCURRENCY,
     async (rowIndex): Promise<StubReadResult> => {
       const row = screen.rows[rowIndex]!;
-      if (now() - startedAt >= SCREEN_STUB_BUDGET_MS) {
+      if (now() - startedAt >= stubBudgetMs) {
         return { stub: allRails("unread"), stubRead: "skipped" };
       }
       if (row.parcelNodeId === null) {

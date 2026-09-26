@@ -212,6 +212,30 @@ describe("normalizeStreetLineCandidates (F4f comma-less query key)", () => {
     expect(cands).toContain("100 MAIN ST");
     expect(cands.every((c) => c.split(" ").length >= 2)).toBe(true);
   });
+
+  it("P-475: comma-less city without state/ZIP yields the stored street line", () => {
+    expect(normalizeStreetLineCandidates("1503 Water St Bastrop")).toContain(
+      "1503 WATER ST",
+    );
+    expect(normalizeStreetLineCandidates("1503 Water St, Bastrop, TX 78602")).toContain(
+      "1503 WATER ST",
+    );
+  });
+
+  it("P-475: missing street-type suffix still keys the situs line", () => {
+    expect(normalizeStreetLineCandidates("1201 Water Bastrop")).toContain(
+      "1201 WATER ST",
+    );
+    expect(normalizeStreetLineCandidates("1308 Farm Bastrop")).toContain(
+      "1308 FARM ST",
+    );
+  });
+
+  it("P-475: Austin comma-less city without state/ZIP", () => {
+    expect(
+      normalizeStreetLineCandidates("1600 Congress Ave Austin"),
+    ).toContain("1600 CONGRESS AVE");
+  });
 });
 
 describe("normalizeSitusSearchPrefix", () => {
@@ -241,6 +265,16 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
       zip: "78602",
     });
     expect(parsePlaceSearchLocality("908 Pine St Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
+    });
+    expect(parsePlaceSearchLocality("1201 Water Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
+    });
+    expect(parsePlaceSearchLocality("1308 Farm Bastrop")).toEqual({
       city: "BASTROP",
       state: null,
       zip: null,
