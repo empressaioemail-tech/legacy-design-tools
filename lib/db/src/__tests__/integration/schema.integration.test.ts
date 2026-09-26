@@ -264,9 +264,9 @@ describe("lib/db schema integration", () => {
         "pe_stripe_webhook_events",
         "pe_team_invitations",
         "pe_team_members",
-        "pe_user_entitlements",
         // P-480 — superseded entitlement snapshots keyed to webhook events.
         "pe_user_entitlement_history",
+        "pe_user_entitlements",
         "pe_user_identities",
         "pe_workbench_state",
         // PLR-11 — atomic tenant-scoped permit-number counter.
