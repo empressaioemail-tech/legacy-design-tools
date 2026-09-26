@@ -38,11 +38,10 @@ import {
   users,
 } from "@workspace/db";
 
-let getApp: () => Express;
+let getApp!: () => Express;
 setupRouteTests((g) => {
   getApp = g;
 });
-void getApp;
 
 const USER = "user-p480-r14";
 const WEBHOOK_SECRET = "whsec_test_p480_ledger";
