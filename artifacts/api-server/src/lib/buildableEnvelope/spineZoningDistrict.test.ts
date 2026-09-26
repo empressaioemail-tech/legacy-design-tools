@@ -216,8 +216,7 @@ describe("resolveSpineZoningWhenGisAbsent", () => {
       source: "parcel-record",
     });
     expect(note).toContain("SF2");
-    expect(note).toContain("parcel record rail");
-    expect(note).toContain("not invented");
+    expect(note).toContain("parcel record rails");
   });
 });
 

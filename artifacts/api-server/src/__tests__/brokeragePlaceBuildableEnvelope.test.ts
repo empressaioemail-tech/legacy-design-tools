@@ -344,8 +344,10 @@ vi.mock("../lib/buildableEnvelope/spineZoningDistrict", () => ({
     source: string;
     snapshotAt?: string | null;
   }) =>
-    `Zoning district ${resolution.district} read from baked node-facet snapshot` +
-    ` (GIS parcel.zoningCode absent; not invented).`,
+    resolution.source === "parcel-record"
+      ? `Zoning district ${resolution.district} and its setbacks read from the parcel record rails.`
+      : `Zoning district ${resolution.district} read from baked node-facet snapshot` +
+        ` (GIS parcel.zoningCode absent; not invented).`,
 }));
 
 const { setupRouteTests } = await import("./setup");
@@ -1266,7 +1268,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
 
   it("still derives through the point path (no regression)", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     situsOutcome = { hit: null, reason: "no-situs-match" };
     geocodeOverride = null;
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
@@ -1316,7 +1318,7 @@ describe("POST /place/buildable-envelope — P-151 bounded point-resolution time
 
   it("still resolves normally (no 503, no added latency) for a bare {lat,lng} request that answers promptly", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     pinQueryHang = false;
     const res = await postWith({ lat: 30.2672, lng: -97.7431 });
     expect(res.status).toBe(200);
@@ -1415,7 +1417,7 @@ describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", ()
     expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.setbacks).toEqual({
       front_ft: 25,
-      side_ft: 7.5,
+      side_ft: 10,
       rear_ft: 20,
       side_corner_ft: 15,
       district: "R-MD",

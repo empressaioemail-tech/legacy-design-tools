@@ -56,7 +56,10 @@ function reasonOf(read: ZoningFactRead | SetbacksFactRead): {
   if (read.state === "absent") {
     return { ledgerReason: read.absence.reason, ledgerCode: read.absence.kind };
   }
-  return { ledgerReason: read.reason, ledgerCode: read.code };
+  if (read.state === "refused") {
+    return { ledgerReason: read.reason, ledgerCode: read.code };
+  }
+  return { ledgerReason: UNSERVED, ledgerCode: "unserved" };
 }
 
 function decline(
@@ -123,10 +126,19 @@ export async function decideEnvelopeFromLedger(
     };
   }
 
+  const frontFt = setbacks.frontFt;
+  if (frontFt == null) {
+    return {
+      state: "declined",
+      ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackFrontFt is not a readable number. Refusing rather than inventing one.`,
+      ledgerCode: "parcel-record-malformed-cell",
+      rail: "setbackFrontFt",
+    };
+  }
   const cornerFt = setbacks.cornerFt;
   const districtRow: SetbackDistrict = {
     district_name: zoning.district,
-    front_ft: setbacks.frontFt,
+    front_ft: frontFt,
     side_ft: setbacks.sideFt,
     rear_ft: setbacks.rearFt,
     side_corner_ft: cornerFt ?? 0,
@@ -160,7 +172,7 @@ export async function decideEnvelopeFromLedger(
   const vintage = setbacks.sourceVintage ?? zoning.sourceVintage ?? "unreadable";
   const resolved: AuthoritativeSetbackResolution = {
     scalars: {
-      front_ft: setbacks.frontFt,
+      front_ft: frontFt,
       side_ft: setbacks.sideFt,
       rear_ft: setbacks.rearFt,
       ...(cornerFt == null ? {} : { side_corner_ft: cornerFt }),

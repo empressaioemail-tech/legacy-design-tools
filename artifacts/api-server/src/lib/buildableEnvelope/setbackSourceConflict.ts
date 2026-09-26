@@ -71,7 +71,8 @@ export const SETBACK_SOURCE_CONFLICT_NOTE =
 export type SetbackSourceConflictKind =
   | "codified-ordinance"
   | "gis-per-parcel"
-  | "atom-chain";
+  | "atom-chain"
+  | "parcel-record";
 
 export type SetbackSourceConflictCandidate = {
   sourceKind: SetbackSourceConflictKind;

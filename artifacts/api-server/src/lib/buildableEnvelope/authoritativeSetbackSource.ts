@@ -196,7 +196,7 @@ function scalarsFromAtomRule(rule: AtomChainSetbackWire): SetbackScalars | null 
   };
 }
 
-function atomSourceKind(rule: AtomChainSetbackWire): SetbackSourceKind {
+function atomSourceKind(rule: AtomChainSetbackWire): "gis-per-parcel" | "atom-chain" {
   const adapter = (rule.sourceAdapter ?? rule.sourceCitation ?? "").toLowerCase();
   if (
     adapter.includes("layer-23") ||
