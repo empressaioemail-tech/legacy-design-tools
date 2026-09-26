@@ -1514,6 +1514,24 @@ CREATE TABLE @@SCHEMA@@.pe_share_grants (
 );
 
 
+-- Name: pe_stripe_webhook_events; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_stripe_webhook_events (
+    stripe_event_id text NOT NULL,
+    event_type text NOT NULL,
+    checkout_session_id text,
+    amount_total_cents integer,
+    currency text,
+    livemode boolean NOT NULL,
+    owner_user_id text,
+    received_at timestamp with time zone DEFAULT now() NOT NULL,
+    outcome text NOT NULL,
+    CONSTRAINT pe_stripe_webhook_events_event_type_chk CHECK ((event_type <> ''::text)),
+    CONSTRAINT pe_stripe_webhook_events_outcome_chk CHECK ((outcome <> ''::text)),
+    CONSTRAINT pe_stripe_webhook_events_stripe_event_id_chk CHECK ((stripe_event_id <> ''::text))
+);
+
+
 -- Name: pe_team_invitations; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_team_invitations (
@@ -1535,6 +1553,25 @@ CREATE TABLE @@SCHEMA@@.pe_team_members (
     role text NOT NULL,
     joined_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT pe_team_members_role_chk CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
+);
+
+
+-- Name: pe_user_entitlement_history; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_user_entitlement_history (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    tenant_id text NOT NULL,
+    access_tier text NOT NULL,
+    dev_role boolean NOT NULL,
+    entitlement_source text,
+    stripe_customer_id text,
+    subscription_tier text,
+    seats_purchased integer,
+    billing_interval text,
+    superseded_at timestamp with time zone DEFAULT now() NOT NULL,
+    stripe_event_id text NOT NULL,
+    CONSTRAINT pe_user_entitlement_history_billing_interval_chk CHECK (((billing_interval IS NULL) OR (billing_interval = ANY (ARRAY['month'::text, 'year'::text]))))
 );
 
 
@@ -3122,6 +3159,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
     ADD CONSTRAINT pe_share_grants_pkey PRIMARY KEY (id);
 
 
+-- Name: pe_stripe_webhook_events pe_stripe_webhook_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_stripe_webhook_events
+    ADD CONSTRAINT pe_stripe_webhook_events_pkey PRIMARY KEY (stripe_event_id);
+
+
 -- Name: pe_team_invitations pe_team_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
@@ -3132,6 +3175,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
     ADD CONSTRAINT pe_team_members_pkey PRIMARY KEY (account_owner_user_id, member_user_id);
+
+
+-- Name: pe_user_entitlement_history pe_user_entitlement_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
+    ADD CONSTRAINT pe_user_entitlement_history_pkey PRIMARY KEY (id);
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4188,6 +4237,11 @@ CREATE INDEX pe_share_grants_grantor_idx ON @@SCHEMA@@.pe_share_grants USING btr
 CREATE INDEX pe_share_grants_parcel_idx ON @@SCHEMA@@.pe_share_grants USING btree (parcel_node_id);
 
 
+-- Name: pe_stripe_webhook_events_owner_user_id_received_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_stripe_webhook_events_owner_user_id_received_at_idx ON @@SCHEMA@@.pe_stripe_webhook_events USING btree (owner_user_id, received_at);
+
+
 -- Name: pe_team_invitations_account_email_uidx; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX pe_team_invitations_account_email_uidx ON @@SCHEMA@@.pe_team_invitations USING btree (account_owner_user_id, email);
@@ -4216,6 +4270,11 @@ CREATE UNIQUE INDEX pe_team_members_account_member_uidx ON @@SCHEMA@@.pe_team_me
 -- Name: pe_team_members_member_uidx; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX pe_team_members_member_uidx ON @@SCHEMA@@.pe_team_members USING btree (member_user_id);
+
+
+-- Name: pe_user_entitlement_history_owner_user_id_superseded_at_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_user_entitlement_history_owner_user_id_superseded_at_idx ON @@SCHEMA@@.pe_user_entitlement_history USING btree (owner_user_id, superseded_at);
 
 
 -- Name: pe_user_entitlements_tenant_idx; Type: INDEX; Schema: public; Owner: -
@@ -5003,6 +5062,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_share_grants
     ADD CONSTRAINT pe_share_grants_grantor_user_id_users_id_fk FOREIGN KEY (grantor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
+-- Name: pe_stripe_webhook_events pe_stripe_webhook_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_stripe_webhook_events
+    ADD CONSTRAINT pe_stripe_webhook_events_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE SET NULL;
+
+
 -- Name: pe_team_invitations pe_team_invitations_account_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_team_invitations
@@ -5019,6 +5084,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_team_members
     ADD CONSTRAINT pe_team_members_member_user_id_users_id_fk FOREIGN KEY (member_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_user_entitlement_history pe_user_entitlement_history_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
+    ADD CONSTRAINT pe_user_entitlement_history_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_user_entitlement_history pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlement_history
+    ADD CONSTRAINT pe_user_entitlement_history_stripe_event_id_pe_stripe_webhook_e FOREIGN KEY (stripe_event_id) REFERENCES @@SCHEMA@@.pe_stripe_webhook_events(stripe_event_id) ON DELETE RESTRICT;
 
 
 -- Name: pe_user_entitlements pe_user_entitlements_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

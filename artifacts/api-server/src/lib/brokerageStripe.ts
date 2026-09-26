@@ -20,7 +20,10 @@ import {
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
-import { setPeAccessTierFromStripe } from "./peIdentity";
+import {
+  commitPeStripeEntitlementChange,
+  recordPeStripeWebhookOutcome,
+} from "./peStripeWebhookLedger";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
 import { emitPaidFromStripeWebhook } from "./peLifecycleHooks";
 import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
@@ -480,6 +483,57 @@ function resolvePeGrantTier(meta: {
  * positive `total_details.amount_discount` on the session object the
  * webhook payload already carries — no extra Stripe API round-trip needed.
  */
+function stripeEventLivemode(
+  event: { livemode?: boolean },
+  obj: Record<string, unknown>,
+): boolean {
+  if (typeof event.livemode === "boolean") return event.livemode;
+  if (typeof obj.livemode === "boolean") return obj.livemode;
+  return false;
+}
+
+function stripeCheckoutSessionId(obj: Record<string, unknown>): string | null {
+  if (typeof obj.id !== "string") return null;
+  if (obj.object === "checkout.session") return obj.id;
+  return null;
+}
+
+function stripeAmountTotalCents(obj: Record<string, unknown>): number | null {
+  return typeof obj.amount_total === "number" ? obj.amount_total : null;
+}
+
+function requireStripeEventId(eventId: string | undefined): string | null {
+  const id = eventId?.trim();
+  return id ? id : null;
+}
+
+async function applyPeEntitlementFromWebhook(input: {
+  stripeEventId: string;
+  eventType: string;
+  obj: Record<string, unknown>;
+  livemode: boolean;
+  ownerUserId: string;
+  outcome: string;
+  entitlement: Parameters<typeof commitPeStripeEntitlementChange>[1];
+}): Promise<"applied" | "duplicate"> {
+  return commitPeStripeEntitlementChange(
+    {
+      stripeEventId: input.stripeEventId,
+      eventType: input.eventType,
+      checkoutSessionId: stripeCheckoutSessionId(input.obj),
+      amountTotalCents: stripeAmountTotalCents(input.obj),
+      currency:
+        typeof input.obj.currency === "string"
+          ? input.obj.currency.toUpperCase()
+          : null,
+      livemode: input.livemode,
+      ownerUserId: input.ownerUserId,
+      outcome: input.outcome,
+    },
+    input.entitlement,
+  );
+}
+
 function checkoutSessionHadDiscount(obj: Record<string, unknown>): boolean {
   const totalDetails = obj.total_details as
     | { amount_discount?: number }
@@ -508,6 +562,7 @@ export async function handleStripeWebhook(
   let event: {
     id?: string;
     type: string;
+    livemode?: boolean;
     data: { object: Record<string, unknown> };
   };
 
@@ -573,10 +628,28 @@ export async function handleStripeWebhook(
     // vs full-price is recorded in `entitlement_source` for the pinned
     // `/entitlement` contract's `source` field.
     if (peMeta.peUserId) {
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
       const grantTier = resolvePeGrantTier(peMeta);
       if (!grantTier) {
-        // FAIL CLOSED: an unknown subscription_tier grants nothing. The
-        // non-2xx response makes Stripe retry and surfaces the miss.
+        const ledger = await recordPeStripeWebhookOutcome({
+          stripeEventId,
+          eventType: type,
+          checkoutSessionId: stripeCheckoutSessionId(obj),
+          amountTotalCents: stripeAmountTotalCents(obj),
+          currency:
+            typeof obj.currency === "string"
+              ? obj.currency.toUpperCase()
+              : null,
+          livemode: stripeEventLivemode(event, obj),
+          ownerUserId: peMeta.peUserId,
+          outcome: `refused:unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        });
+        if (ledger === "duplicate") {
+          return { handled: true, eventType: "duplicate_replay", peUserId: peMeta.peUserId };
+        }
         logger.error(
           {
             peUserId: peMeta.peUserId,
@@ -601,15 +674,31 @@ export async function handleStripeWebhook(
         metadataSeats: peMeta.seatsPurchased,
         subscriptionId,
       });
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: "paid",
-        subscriptionTier: grantTier,
-        source,
-        stripeCustomerId: customerId,
-        seatsPurchased: billing.seatsPurchased,
-        billingInterval: billing.billingInterval,
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: "pe_subscription_active",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: "paid",
+          subscriptionTier: grantTier,
+          source,
+          stripeCustomerId: customerId,
+          seatsPurchased: billing.seatsPurchased,
+          billingInterval: billing.billingInterval,
+        },
       });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          installId,
+          peUserId: peMeta.peUserId,
+        };
+      }
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
       }
@@ -665,10 +754,30 @@ export async function handleStripeWebhook(
     // 2026-08 ladder work a PE user stayed "paid" forever after one payment.
     const peMeta = peMetadataFromObject(obj);
     if (peMeta.peUserId) {
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
       const status = typeof obj.status === "string" ? obj.status : "";
       const active = status === "active" || status === "trialing";
       const grantTier = resolvePeGrantTier(peMeta);
       if (active && !grantTier) {
+        const ledger = await recordPeStripeWebhookOutcome({
+          stripeEventId,
+          eventType: type,
+          checkoutSessionId: null,
+          amountTotalCents: stripeAmountTotalCents(obj),
+          currency:
+            typeof obj.currency === "string"
+              ? obj.currency.toUpperCase()
+              : null,
+          livemode: stripeEventLivemode(event, obj),
+          ownerUserId: peMeta.peUserId,
+          outcome: `refused:unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        });
+        if (ledger === "duplicate") {
+          return { handled: true, eventType: "duplicate_replay", peUserId: peMeta.peUserId };
+        }
         logger.error(
           { peUserId: peMeta.peUserId, subscriptionTier: peMeta.subscriptionTierRaw },
           "stripe: PE subscription active with unknown subscription_tier — refusing to grant",
@@ -692,15 +801,31 @@ export async function handleStripeWebhook(
             subscriptionId: typeof obj.id === "string" ? obj.id : null,
           })
         : { seatsPurchased: null, billingInterval: null };
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: active ? "paid" : "free",
-        subscriptionTier: active ? grantTier : null,
-        source: "stripe_sub",
-        stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
-        seatsPurchased: billing.seatsPurchased,
-        billingInterval: billing.billingInterval,
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: active ? "pe_subscription_active" : "pe_churned",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: active ? "paid" : "free",
+          subscriptionTier: active ? grantTier : null,
+          source: "stripe_sub",
+          stripeCustomerId:
+            typeof obj.customer === "string" ? obj.customer : null,
+          seatsPurchased: billing.seatsPurchased,
+          billingInterval: billing.billingInterval,
+        },
       });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          peUserId: peMeta.peUserId,
+        };
+      }
       await emitPaidFromStripeWebhook({
         userId: peMeta.peUserId,
         stripeEventId: event.id ?? `subupd:${peMeta.peUserId}:${status}`,
@@ -763,15 +888,34 @@ export async function handleStripeWebhook(
   if (type === "customer.subscription.deleted") {
     const peMeta = peMetadataFromObject(obj);
     if (peMeta.peUserId) {
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: "free",
-        subscriptionTier: null,
-        source: "stripe_sub",
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: "pe_churned",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: "free",
+          subscriptionTier: null,
+          source: "stripe_sub",
+        },
       });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          peUserId: peMeta.peUserId,
+        };
+      }
       await emitPaidFromStripeWebhook({
         userId: peMeta.peUserId,
-        stripeEventId: event.id ?? `subdel:${peMeta.peUserId}`,
+        stripeEventId,
         kind: "plan",
         plan: "free",
         billing: "none",
@@ -1006,6 +1150,7 @@ function parseStripeEvent(
   const parsed = JSON.parse(rawBody.toString("utf8")) as {
     id?: string;
     type: string;
+    livemode?: boolean;
     data: { object: Record<string, unknown> };
   };
   return parsed;

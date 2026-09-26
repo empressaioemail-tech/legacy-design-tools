@@ -95,8 +95,11 @@ function signedWebhookPayload(body: Record<string, unknown>): {
 
 function checkoutCompletedEvent(
   object: Record<string, unknown>,
+  eventId = "evt_test_ladder_default",
 ): Record<string, unknown> {
   return {
+    id: eventId,
+    livemode: false,
     type: "checkout.session.completed",
     data: { object: { id: "cs_test_ladder", object: "checkout.session", ...object } },
   };
@@ -759,6 +762,8 @@ describe("webhook entitlement mapping (granular tiers)", () => {
       .where(eq(peUserEntitlements.ownerUserId, USER));
 
     const { raw, signature } = signedWebhookPayload({
+      id: "evt_test_sub_updated_interval",
+      livemode: false,
       type: "customer.subscription.updated",
       data: {
         object: {
@@ -786,6 +791,8 @@ describe("webhook entitlement mapping (granular tiers)", () => {
       .where(eq(peUserEntitlements.ownerUserId, USER));
 
     const { raw, signature } = signedWebhookPayload({
+      id: "evt_test_sub_deleted_interval",
+      livemode: false,
       type: "customer.subscription.deleted",
       data: {
         object: {
@@ -824,6 +831,8 @@ describe("webhook entitlement mapping (granular tiers)", () => {
       .where(eq(peUserEntitlements.ownerUserId, USER));
 
     const { raw, signature } = signedWebhookPayload({
+      id: "evt_test_sub_deleted_ladder",
+      livemode: false,
       type: "customer.subscription.deleted",
       data: {
         object: {
@@ -926,6 +935,8 @@ describe("webhook entitlement mapping (granular tiers)", () => {
       .where(eq(peUserEntitlements.ownerUserId, USER));
 
     const { raw, signature } = signedWebhookPayload({
+      id: "evt_test_sub_deleted_seats_clear",
+      livemode: false,
       type: "customer.subscription.deleted",
       data: {
         object: {

@@ -95,6 +95,8 @@ export * from "./peTeamMembers";
 export * from "./peTeamInvitations";
 export * from "./peAiConnections";
 export * from "./peActivationEvents";
+export * from "./peStripeWebhookEvents";
+export * from "./peUserEntitlementHistory";
 export * from "./peAccountActivations";
 export * from "./peSavedProperties";
 export * from "./peScreens";

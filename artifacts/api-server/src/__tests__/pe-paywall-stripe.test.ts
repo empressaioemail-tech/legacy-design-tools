@@ -73,8 +73,11 @@ function signedWebhookPayload(body: Record<string, unknown>): {
 
 function checkoutCompletedEvent(
   object: Record<string, unknown>,
+  eventId = "evt_test_paywall_default",
 ): Record<string, unknown> {
   return {
+    id: eventId,
+    livemode: false,
     type: "checkout.session.completed",
     data: { object: { id: "cs_test_1", object: "checkout.session", ...object } },
   };
