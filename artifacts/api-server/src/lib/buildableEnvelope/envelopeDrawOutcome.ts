@@ -152,22 +152,17 @@ export type EnvelopeDrawOutcome =
 export function envelopeDrawRefusalReason(refusal: EnvelopeDrawRefusal): string {
   switch (refusal.step) {
     case "no-zoning-code":
-      // An EXISTING humanised row ("No zoning district observed for parcel -
-      // honest absence, no fallback district invented."). The old path fell
-      // through to the bake's `atom_path_pending` here, which said nothing
-      // about the missing district the customer was actually looking at.
-      return "no-zoning-stamp";
+      // The ledger cell's own sentence when the derivation supplied one
+      // (P-465 / A-324). The token remains only for a caller that declined
+      // without a cell reason.
+      return refusal.declinedBy ?? "no-zoning-stamp";
     case "derivation-not-drawn":
       return refusal.declinedBy ?? "geometry-validation-failed";
     case "setbacks-unresolved":
-      // The route's own token when it reached one — P-257's
-      // `planned-development`, which names WHY the district refuses a table
-      // rather than leaving a shapeless "no source". Otherwise the ONE
-      // surviving use of `atom_path_pending`, and the only case where its
-      // vocabulary meaning is literally true: with no property atom chain there
-      // is no rule anywhere to report. With a chain present the honest answer is
-      // that this call site did not resolve a table — a different claim, and the
-      // one the surface was previously making silently.
+      // The ledger cell's own sentence when the derivation supplied one.
+      // `declinedBy` is that sentence (or, on the retired table path, P-257's
+      // planned-development token). With neither, a missing chain is still
+      // `atom_path_pending` and a present chain is `setbacks-unresolved`.
       return (
         refusal.declinedBy ??
         (refusal.chain === "absent" ? "atom_path_pending" : "setbacks-unresolved")

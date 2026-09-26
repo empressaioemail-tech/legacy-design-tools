@@ -195,6 +195,12 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       // reached: a throw from a later stage reported as a missing ring would be
       // the same defect as `atom_path_pending` beside a chain, one layer down.
       return unreached(outcome.step);
+    case "ledger-declined":
+      chain = outcome.chain;
+      return declined(
+        outcome.rail === "zoningDistrict" ? "no-zoning-code" : "setbacks-unresolved",
+        outcome.ledgerReason,
+      );
     case "no-zoning-stamp":
       // The route's own terminal answer (`status: "declined"`,
       // `declineReason: "no-zoning-stamp"`). It read the chain and resolved

@@ -324,8 +324,16 @@ export function deriveBuildableEnvelope(
   const buildableAreaPct =
     parcelAreaSqFt > 0 ? round((buildableAreaSqFt / parcelAreaSqFt) * 100, 1) : 0;
 
-  const maxLotCoveragePct =
-    typeof d.max_lot_coverage_pct === "number" ? d.max_lot_coverage_pct : null;
+  const coverageFlag = d.provenance?.["max_lot_coverage_pct"];
+  const coverageSilent =
+    !!coverageFlag &&
+    typeof coverageFlag === "object" &&
+    (coverageFlag as { not_specified?: boolean }).not_specified === true;
+  const maxLotCoveragePct = coverageSilent
+    ? null
+    : typeof d.max_lot_coverage_pct === "number"
+      ? d.max_lot_coverage_pct
+      : null;
   // P-299: a flagged (or bare-sentinel) height is ABSENT, not 999 feet. The
   // sentinel is the code's way of saying "no feet scalar here" (Round Rock
   // states these heights in stories), so it must reach the wire as absence.

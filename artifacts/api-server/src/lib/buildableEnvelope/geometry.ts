@@ -126,6 +126,96 @@ export function projectRing(ring: Ring): ProjectedRing | null {
   return { points, originLng, originLat, mPerDegLng, mPerDegLat };
 }
 
+/**
+ * Ring cleaning before any inset (P-465). Stated tolerances:
+ * - an edge shorter than {@link STUB_MAX_FT} feet is dropped;
+ * - a vertex whose deflection from straight is at most
+ *   {@link COLLINEAR_MERGE_TURN_DEG} degrees is dropped, until the dropped
+ *   run's accumulated deflection would pass
+ *   {@link COLLINEAR_MERGE_ACCUM_TURN_DEG} degrees.
+ * Grouping in edgeLabeling.ts is labeling-only and does not rewrite the ring,
+ * so the inset used to offset every original chord, including sub-2 ft stubs.
+ */
+export const STUB_MAX_FT = 2;
+export const COLLINEAR_MERGE_TURN_DEG = 10;
+export const COLLINEAR_MERGE_ACCUM_TURN_DEG = 45;
+
+function deflectionDeg(a: XY, b: XY, c: XY): number {
+  const v1x = b.x - a.x;
+  const v1y = b.y - a.y;
+  const v2x = c.x - b.x;
+  const v2y = c.y - b.y;
+  const l1 = Math.hypot(v1x, v1y);
+  const l2 = Math.hypot(v2x, v2y);
+  if (l1 < 1e-9 || l2 < 1e-9) return 0;
+  const cos = Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (l1 * l2)));
+  return (Math.acos(cos) * 180) / Math.PI;
+}
+
+function edgeLenM(a: XY, b: XY): number {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function dropShortEdges(pts: XY[]): XY[] {
+  let cur = pts;
+  for (let guard = 0; guard < 64 && cur.length > 3; guard++) {
+    let shortAt = -1;
+    for (let i = 0; i < cur.length; i++) {
+      const a = cur[i]!;
+      const b = cur[(i + 1) % cur.length]!;
+      if (edgeLenM(a, b) < feetToMeters(STUB_MAX_FT)) {
+        shortAt = i;
+        break;
+      }
+    }
+    if (shortAt < 0) break;
+    const drop = (shortAt + 1) % cur.length;
+    cur = cur.filter((_, i) => i !== drop);
+  }
+  return cur;
+}
+
+function dropCollinearVertices(pts: XY[]): XY[] {
+  if (pts.length <= 3) return pts;
+  const n = pts.length;
+  const turns = pts.map((_, i) =>
+    deflectionDeg(pts[(i - 1 + n) % n]!, pts[i]!, pts[(i + 1) % n]!),
+  );
+  const start = turns.findIndex((t) => t > COLLINEAR_MERGE_TURN_DEG);
+  if (start < 0) return pts;
+  const keep = new Array<boolean>(n).fill(false);
+  keep[start] = true;
+  let acc = 0;
+  for (let k = 1; k < n; k++) {
+    const i = (start + k) % n;
+    const t = turns[i]!;
+    if (t > COLLINEAR_MERGE_TURN_DEG || acc + t > COLLINEAR_MERGE_ACCUM_TURN_DEG) {
+      acc = 0;
+      keep[i] = true;
+    } else {
+      acc += t;
+    }
+  }
+  const next = pts.filter((_, i) => keep[i]);
+  return next.length >= 3 ? next : pts;
+}
+
+/**
+ * Merge sub-2 ft edges and collinear runs, then close the ring. Returns the
+ * input unchanged when the ring is degenerate or cleaning would leave fewer
+ * than 3 vertices.
+ */
+export function cleanParcelRing(ring: Ring): Ring {
+  const proj = projectRing(ring);
+  if (!proj) return ring;
+  const cleaned = dropCollinearVertices(dropShortEdges(proj.points));
+  if (cleaned.length < 3) return ring;
+  const closed = cleaned.map((p) => unproject(p, proj));
+  const first = closed[0]!;
+  closed.push([first[0], first[1]]);
+  return closed;
+}
+
 /** Invert a local XY point back to lng/lat. */
 function unproject(p: XY, proj: ProjectedRing): LngLat {
   return [

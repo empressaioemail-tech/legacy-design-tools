@@ -62,7 +62,14 @@ export type SetbackScalars = {
 export type SetbackSourceKind =
   | "codified-ordinance"
   | "gis-per-parcel"
-  | "atom-chain";
+  | "atom-chain"
+  /**
+   * P-465 / OPS-16 A-324. The draw path no longer resolves a district against
+   * `getSetbackTableForZoning` or this file's `resolveAuthoritativeSetbacks`.
+   * It reads the parcel-record rails. This kind names that read. The function
+   * below is retired from the serving derivation; its own tests still call it.
+   */
+  | "parcel-record";
 
 /** One candidate as named in a `conflict` disclosure — never a value the caller should treat as settled. */
 export type SetbackConflictCandidate = {
@@ -129,6 +136,9 @@ const TIER_RANK: Record<SetbackSourceKind, number> = {
   "codified-ordinance": 3,
   "gis-per-parcel": 2,
   "atom-chain": 1,
+  // Not a candidate this resolver ranks. Present so the record stays total
+  // after the draw path gained a ledger source kind.
+  "parcel-record": 0,
 };
 
 /**

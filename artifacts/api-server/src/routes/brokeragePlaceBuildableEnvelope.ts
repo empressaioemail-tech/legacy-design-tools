@@ -1529,6 +1529,51 @@ async function deriveAndRespond(args: {
 
   const { parcel, parcelNodeId } = outcome;
 
+  if (outcome.state === "ledger-declined") {
+    res.status(200).json(
+      withPlace(
+        {
+          status: "declined",
+          declineReason: outcome.ledgerCode,
+          reason: outcome.ledgerReason,
+          layer: "buildable-envelope",
+          parcel_node_id: parcelNodeId,
+          ...wrapEngineEnvelope(
+            {
+              geojson: {
+                type: "FeatureCollection",
+                features: [],
+              },
+              district: null,
+              approximate: true,
+              empty: true,
+              citationUrl: "",
+              parcel: {
+                apn: parcel.apn,
+                situsAddress: parcel.situsAddress,
+                zoningCode: parcel.zoningCode,
+                parcel_node_id: parcelNodeId,
+                provider: parcelGeo.provider ?? null,
+                notSurveyGrade: true,
+              },
+            },
+            {
+              confidence: { value: 0, kind: "asserted" },
+              dataVintage: new Date().toISOString().slice(0, 10),
+              coverage: { degraded: true, reason: outcome.ledgerReason },
+              source: {
+                adapter: "brokerage:buildable-envelope:parcel-record",
+                citationIds: [],
+              },
+            },
+          ),
+        },
+        ctx,
+      ),
+    );
+    return;
+  }
+
   if (outcome.state === "no-zoning-stamp") {
     res.status(200).json(
       withPlace(

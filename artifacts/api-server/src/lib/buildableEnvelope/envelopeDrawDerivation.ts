@@ -55,43 +55,26 @@
  * unchanged.
  */
 
-import { getSetbackTableForZoning } from "@workspace/adapters";
-import { canonicalZoningJurisdictionKey } from "@workspace/cad-ingest/zoning-layers";
-import { keyFromEngagementOrSynthesize } from "@workspace/codes";
 import type { EngineHonesty } from "@workspace/engine-core";
 import {
-  resolveAuthoritativeSetbacks,
   type AuthoritativeSetbackResolution,
 } from "./authoritativeSetbackSource";
 import {
   composeBuildableEnvelopeDerivation,
   firstParcelRing,
 } from "./composeBuildableEnvelopeDerivation";
-import {
-  districtCodeHasExactRow,
-  firstResolvableDistrictCode,
-} from "./districtMapping";
 import type { EdgeLabelingResult } from "./edgeLabeling";
 import { labelEdges } from "./edgeLabeling";
+import { cleanParcelRing } from "./geometry";
+import { decideEnvelopeFromLedger } from "./ledgerEnvelopeRails";
 import type { EnvelopeDrawChain, EnvelopeDrawStep } from "./envelopeDrawOutcome";
-import {
-  cityStateFromSitus,
-  jurisdictionKeyFromParcelNode,
-} from "./envelopeJurisdiction";
 import {
   fetchPropertyAtomChain,
   type PropertyAtomChainWire,
 } from "./fetchPropertyAtomChain";
-import {
-  plannedDevelopmentSetbackRefusalFor,
-  type PlannedDevelopmentSetbackRefusal,
-} from "./plannedDevelopmentSetback";
+import type { PlannedDevelopmentSetbackRefusal } from "./plannedDevelopmentSetback";
 import { fetchNearbyRoads, namedRoadsToCandidates } from "./roads";
-import {
-  recordJurisdictionKeyForDistrict,
-  resolveSpineZoningWhenGisAbsent,
-  type SpineZoningResolution,
-} from "./spineZoningDistrict";
+import type { SpineZoningResolution } from "./spineZoningDistrict";
 
 type ComposedEnvelope = ReturnType<typeof composeBuildableEnvelopeDerivation>;
 
@@ -159,6 +142,21 @@ export type EnvelopeDrawDerivation =
       atomChain: PropertyAtomChainWire | null;
       spineZoning: SpineZoningResolution | null;
       honesty: EngineHonesty;
+    }
+  /**
+   * The ledger rails declined. `ledgerReason` is the cell's own sentence.
+   * This replaces the old `no-zoning-stamp` / `no-district` answers, which
+   * re-derived a district and then missed the table.
+   */
+  | {
+      state: "ledger-declined";
+      parcel: EnvelopeDrawParcel;
+      parcelNodeId: string | null;
+      chain: ReadChain;
+      atomChain: PropertyAtomChainWire | null;
+      ledgerReason: string;
+      ledgerCode: string;
+      rail: "zoningDistrict" | "setbackFrontFt" | "setbackSideFt" | "setbackRearFt";
     }
   /** A district resolved, but no setback source covers it in this jurisdiction. */
   | {
@@ -246,207 +244,29 @@ export async function deriveEnvelopeDraw(
       : null;
     const chain: ReadChain = atomChain ? "present" : "absent";
 
-    const gisZoning = (parcel.zoningCode ?? "").trim();
-    const spineZoning: SpineZoningResolution | null = gisZoning
-      ? null
-      : await resolveSpineZoningWhenGisAbsent(
-          parcelNodeIdValue,
-          parcel.zoningCode,
-        );
-
-    /**
-     * The ordered district-code signals, most specific first — the same order
-     * this site has always used (the parcel's own GIS zoning stamp, then
-     * Spine's zoning fact, then the atom chain's zoning fact, then its setback
-     * rule).
-     */
-    const districtCodeSignals: Array<string | null> = [
-      gisZoning || null,
-      spineZoning?.district ?? null,
-      typeof atomChain?.zoningFact?.district === "string"
-        ? atomChain.zoningFact.district
-        : null,
-      typeof atomChain?.setbackRule?.districtCode === "string"
-        ? atomChain.setbackRule.districtCode
-        : null,
-    ];
-    const firstSignal =
-      districtCodeSignals.find((c) => (c ?? "").trim() !== "") ?? "";
-
-    /**
-     * P-340 — read the engagement key BEFORE probing any table. The table probe
-     * below must run against the same jurisdiction key this site will resolve
-     * with, so a code that names no row can never move a parcel between
-     * jurisdictions.
-     */
-    const situsCityState = cityStateFromSitus(parcel.situsAddress);
-    const fromCityState = keyFromEngagementOrSynthesize({
-      jurisdictionCity: input.jurisdictionCity ?? situsCityState.city,
-      jurisdictionState: input.jurisdictionState ?? situsCityState.state,
-      address: input.address ?? undefined,
-    });
-
-    /**
-     * P-339/P-366 residual (OPS-24, 2026-09-21) — THE JURISDICTION THAT STAMPED
-     * THE DISTRICT LEADS.
-     *
-     * THE DEFECT. The key below is the one both the district probe and the table
-     * lookup run against, and it was derived from the situs city, then a
-     * geocoded city, then the county's unique district hit — never from the
-     * source that stamped the district. On `48491:R415488` (Williamson) those
-     * two disagree: the zoning stamp is `SF-S` off Pflugerville's own zoning
-     * layer (`pflugerville-tx`, served by the record rail beside the district
-     * code), while the situs/geocode city resolves to Round Rock. The route
-     * probed Round Rock's table for a Pflugerville district, found no row, and
-     * refused `no-district` — while its own card served that district's
-     * Pflugerville row (25/7.5/20/15) at the same time. Same shape on
-     * `48453:352594` (Buda): the stamp is `R2`/`buda-tx` and the derivation fell
-     * through to a district-uniqueness guess in another city.
-     *
-     * THE RULE. A setback table belongs to the jurisdiction whose ordinance
-     * stamped the district. When the source that held the district also names
-     * that jurisdiction (`SpineZoningResolution.jurisdictionKey`, read beside
-     * the district off the same cell — the ledger is the serving path), it is
-     * the key. A situs city is a postal place name and a geocoded city is where
-     * a pin landed; neither is an authority, so they keep their place BELOW the
-     * stamp rather than above it. Where no source names a jurisdiction (an
-     * atom-chain stamp, or GIS's own `zoningCode`), the derivation is unchanged:
-     * city/state, then the county's unique district hit.
-     *
-     * P-340's rule is kept, and this is the same rule applied to the key's
-     * source: the key is read BEFORE any table is probed and is the one both the
-     * probe and the lookup use, so a code that names no row can never move a
-     * parcel between jurisdictions.
-     *
-     * SECOND SOURCE FOR THE SAME PAIR (same lane, same day). The county parcel
-     * sources DO stamp a `zoningCode` (`payload.parcel.zoningCode: "SF"` on
-     * `48453:367134`, `"SF-S"` on `48453:280210`), and a GIS stamp suppresses
-     * `resolveSpineZoningWhenGisAbsent` entirely — so on those parcels the
-     * record cell was never read and the key fell to the situs city (absent on
-     * CAD lines like `1006 WISTERIA CIR`) or to the county-wide
-     * district-uniqueness guess. Measured live on the identity path the map
-     * sends after P-383, four buckets that PASS today answered `no-district`:
-     * `48453:239852` (record: SF-3 / austin-tx), `48453:523600`
-     * (SU / cedar-park-tx), `48055:40428` (P / san-marcos-tx) and `48055:27929`
-     * (R1 / martindale-tx) — each with its corpus row present and its card
-     * drawing. `recordJurisdictionKeyForDistrict` therefore reads the pair
-     * whenever the spine did not already carry one, and returns it only for the
-     * district being probed. It reads a value beside the district; it never
-     * searches jurisdictions for one that answers.
-     *
-     * P-406 (OPS-25, 2026-09-22) — AND THE STAMP IS RESOLVED THROUGH THE
-     * REGISTRY'S OWN `cityKey`. Both values below are whatever the source
-     * wrote, and a source that writes the NAME of a zoning-layer ENTRY instead
-     * of the `cityKey` that entry declares is accepted by every comparison in
-     * this site — the two strings are identical for 23 of the registry's 26
-     * entries, and `ZONING_LAYERS` resolves either. They are not identical for
-     * the three entries that carry one city across several counties, and that
-     * is exactly the indirection those entries exist to perform:
-     * `elgin-tx-travis` (48453) declares `cityKey: "elgin-tx"`, the one string
-     * `isElginCityJurisdiction` routes the ratified Elgin table on. Measured
-     * live: the record cell for `48453:959606` (Elgin, Travis side) carries
-     * `elgin-tx-travis`, so the rule above shipped the entry name as the key,
-     * the Elgin table was never reached, and the parcel refused `no-district`
-     * while PROD drew it R-3. Reading the value through
-     * `canonicalZoningJurisdictionKey` is what the registry's own comment says
-     * `cityKey` is for; it fixes all three entries at once and is a no-op for
-     * every other key, including table-owning keys like
-     * `elgin-development-code`.
-     */
-    const fromDistrictStamp = canonicalZoningJurisdictionKey(
-      spineZoning?.jurisdictionKey,
-    );
-    const fromRecordCell = fromDistrictStamp
-      ? null
-      : canonicalZoningJurisdictionKey(
-          await recordJurisdictionKeyForDistrict(parcelNodeIdValue, firstSignal),
-        );
-    const provisionalJurisdictionKey =
-      fromDistrictStamp ??
-      fromRecordCell ??
-      fromCityState ??
-      jurisdictionKeyFromParcelNode({
-        parcelNodeId: parcelNodeIdValue,
-        districtCode: firstSignal,
-      });
-
-    /**
-     * P-340 — A BASE CODE IS NOT A DISTRICT DETERMINATION. See that lane's own
-     * note on the two measured Austin parcels; the rule is unchanged here.
-     */
-    const effectiveZoningCode = firstResolvableDistrictCode(
-      districtCodeSignals,
-      provisionalJurisdictionKey,
-      (key, code) => getSetbackTableForZoning(key, code),
-    );
-
-    if (!effectiveZoningCode.trim()) {
-      const honesty: EngineHonesty = {
-        confidence: { value: 0, kind: "asserted" },
-        dataVintage: new Date().toISOString().slice(0, 10),
-        coverage: {
-          degraded: true,
-          reason:
-            "No zoning stamp on this parcel — honest absence; no district invented.",
-        },
-        source: {
-          adapter: "brokerage:buildable-envelope",
-          citationIds: [],
-        },
-      };
+    const ledger = await decideEnvelopeFromLedger(parcelNodeIdValue);
+    if (ledger.state === "declined") {
       return {
-        state: "no-zoning-stamp",
+        state: "ledger-declined",
         parcel,
         parcelNodeId: parcelNodeIdValue,
         chain,
         atomChain,
-        spineZoning,
-        honesty,
+        ledgerReason: ledger.ledgerReason,
+        ledgerCode: ledger.ledgerCode,
+        rail: ledger.rail,
       };
     }
 
-    /**
-     * P-340: the SAME key the district signals were probed against above
-     * (`provisionalJurisdictionKey`) — this site must not re-derive it from the
-     * resolved district code, or the code the fallback picked could move the
-     * parcel to a different jurisdiction than the one its row was checked in.
-     */
-    const jurisdictionKey = provisionalJurisdictionKey;
-
-    const resolved = resolveAuthoritativeSetbacks({
-      jurisdictionKey,
-      districtCode: effectiveZoningCode,
-      atomRule: atomChain?.setbackRule ?? null,
-    });
-
-    if (!resolved) {
-      /**
-       * P-257 — say which kind of nothing this is. A planned-development code
-       * refuses a setback table for a REASON (its standards live in its own
-       * ordinance and development plan), and that reason has to reach the
-       * reader.
-       */
-      const plannedDevelopment = plannedDevelopmentSetbackRefusalFor(
-        { jurisdictionKey, districtCode: effectiveZoningCode },
-        (code) => {
-          const table = jurisdictionKey
-            ? getSetbackTableForZoning(jurisdictionKey, code)
-            : null;
-          return !!table && districtCodeHasExactRow(table, code);
-        },
-      );
-      return {
-        state: "no-district",
-        parcel,
-        parcelNodeId: parcelNodeIdValue,
-        chain,
-        atomChain,
-        spineZoning,
-        effectiveZoningCode,
-        jurisdictionKey,
-        plannedDevelopment,
-      };
-    }
+    const spineZoning: SpineZoningResolution = {
+      district: ledger.district,
+      source: "parcel-record",
+      jurisdictionKey: ledger.jurisdictionKey,
+    };
+    const effectiveZoningCode = ledger.district;
+    const jurisdictionKey = ledger.jurisdictionKey;
+    const resolved = ledger.resolved;
+    const ring = cleanParcelRing(parcel.ring);
 
     const hasPoint = point !== null;
     let roads = [] as ReturnType<typeof namedRoadsToCandidates>;
@@ -457,7 +277,7 @@ export async function deriveEnvelopeDraw(
     }
     stageAtThrow = "edge-labeling-unavailable";
     const labeling = labelEdges({
-      ring: parcel.ring,
+      ring,
       roads,
       refPoint: hasPoint ? { lng: point.lng, lat: point.lat } : null,
       situsAddress: parcel.situsAddress,
@@ -483,7 +303,7 @@ export async function deriveEnvelopeDraw(
      */
     const { derived, wireStatus, honesty, derivePath } =
       composeBuildableEnvelopeDerivation({
-        ring: parcel.ring,
+        ring,
         table: resolved.table,
         district: resolved.district,
         labeling,
