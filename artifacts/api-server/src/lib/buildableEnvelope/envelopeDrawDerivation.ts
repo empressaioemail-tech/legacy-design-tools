@@ -344,7 +344,7 @@ export async function deriveEnvelopeDraw(
         cleanedRing: drawn.ring,
         originalRing: parcel.ring,
         envelopeRing: envelopeCoords as Ring,
-        insetFeet: derived.insetFeetPerEdge,
+        insetFeet: derived.insetFeetPerEdge ?? null,
         edgeSignal: labeling.signal,
       });
       if (reasons.length > 0) {
