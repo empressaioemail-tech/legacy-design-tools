@@ -255,8 +255,7 @@ export function spineZoningProvenanceNote(
 ): string {
   if (resolution.source === "parcel-record") {
     return (
-      `Zoning district ${resolution.district} read from the parcel record rail ` +
-      `(GIS parcel.zoningCode absent; not invented).`
+      `Zoning district ${resolution.district} and its setbacks read from the parcel record rails.`
     );
   }
   if (resolution.source === "baked-snapshot") {

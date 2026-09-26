@@ -27,6 +27,8 @@ vi.mock("../lib/buildableEnvelope/fetchPropertyAtomChain", () => ({
 }));
 
 vi.mock("@workspace/db", async () => {
+  process.env.DATABASE_URL ||=
+    "postgresql://p465-test:p465-test@127.0.0.1:5432/p465_test_offline";
   const actual =
     await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
   return {
@@ -326,6 +328,14 @@ vi.mock("../lib/buildableEnvelope/roads", async () => {
 
 const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
 const recordJurisdictionKeyForDistrictMock = vi.hoisted(() => vi.fn());
+const loadZoningFactForServeMock = vi.hoisted(() => vi.fn());
+const loadSetbacksFactForServeMock = vi.hoisted(() => vi.fn());
+vi.mock("../lib/zoningFactServeCutover", () => ({
+  loadZoningFactForServe: loadZoningFactForServeMock,
+}));
+vi.mock("../lib/setbacksFactServeCutover", () => ({
+  loadSetbacksFactForServe: loadSetbacksFactForServeMock,
+}));
 vi.mock("../lib/buildableEnvelope/spineZoningDistrict", () => ({
   resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
   recordJurisdictionKeyForDistrict: recordJurisdictionKeyForDistrictMock,
@@ -334,8 +344,10 @@ vi.mock("../lib/buildableEnvelope/spineZoningDistrict", () => ({
     source: string;
     snapshotAt?: string | null;
   }) =>
-    `Zoning district ${resolution.district} read from baked node-facet snapshot` +
-    ` (GIS parcel.zoningCode absent; not invented).`,
+    resolution.source === "parcel-record"
+      ? `Zoning district ${resolution.district} and its setbacks read from the parcel record rails.`
+      : `Zoning district ${resolution.district} read from baked node-facet snapshot` +
+        ` (GIS parcel.zoningCode absent; not invented).`,
 }));
 
 const { setupRouteTests } = await import("./setup");
@@ -395,12 +407,77 @@ beforeEach(() => {
   recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
   fetchPropertyAtomChainMock.mockReset();
   fetchPropertyAtomChainMock.mockResolvedValue(null);
+  loadZoningFactForServeMock.mockReset();
+  loadZoningFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "zoning-fact-parcel-record",
+    entityId: "48021:34049",
+    district: "R-MD",
+    jurisdictionKey: "bastrop-tx",
+    provenance: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
+  loadSetbacksFactForServeMock.mockReset();
+  loadSetbacksFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "setbacks-fact-parcel-record",
+    entityId: "48021:34049",
+    frontFt: 25,
+    sideFt: 10,
+    rearFt: 20,
+    cornerFt: 15,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
 });
 
+function ledgerDistrict(
+  district: string,
+  jurisdictionKey: string,
+  setbacks: { frontFt: number; sideFt: number; rearFt: number; cornerFt: number | null },
+) {
+  loadZoningFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "zoning-fact-parcel-record",
+    entityId: "ledger-test",
+    district,
+    jurisdictionKey,
+    provenance: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
+  loadSetbacksFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "setbacks-fact-parcel-record",
+    entityId: "ledger-test",
+    frontFt: setbacks.frontFt,
+    sideFt: setbacks.sideFt,
+    rearFt: setbacks.rearFt,
+    cornerFt: setbacks.cornerFt,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
+}
+
+function ledgerSetbacksRefused(reason: string) {
+  loadSetbacksFactForServeMock.mockResolvedValue({
+    state: "refused",
+    code: "parcel-record-engine-refused",
+    source: "setbacks-fact-parcel-record",
+    entityId: "ledger-test",
+    reason,
+  });
+}
+
 describe("POST /place/buildable-envelope", () => {
-  it("derives geometry for GIS-stamped parcels (unified labelEdges+derive)", async () => {
+  it("derives geometry from the ledger rails (unified labelEdges+derive)", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
@@ -410,52 +487,64 @@ describe("POST /place/buildable-envelope", () => {
     expect(res.body.confidence.kind).toBe("asserted");
     expect(res.body.payload.approximate).toBe(false);
     expect(res.body.coverage.degraded).toBe(true);
-    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
   });
 
-  it("honest-declines no-zoning-stamp when zoning is absent", async () => {
-    parcelZoning = null;
-    parcelNodeIdStamped = null;
+  it("words a not-applicable zoning cell with the cell's own reason", async () => {
+    parcelZoning = "R-MD";
+    parcelNodeIdStamped = "48021:34049";
+    const sentence = "unincorporated parcel: the county does not zone land outside city limits";
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:34049",
+      absence: { kind: "not-applicable", reason: sentence },
+      verifiedAbsence: null,
+      sourceTier: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: null,
+    });
     const res = await post({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("declined");
-    expect(res.body.declineReason).toBe("no-zoning-stamp");
-    expect(res.body.payload.approximate).toBe(true);
+    expect(res.body.reason).toBe(sentence);
+    expect(res.body.declineReason).toBe("not-applicable");
+    expect(res.body.declineReason).not.toBe("no-zoning-stamp");
   });
 
-  it("derives from baked SF-1 when GIS zoningCode is null (R0.2)", async () => {
+  it("derives SF-1 from the ledger when the GIS stamp is null", async () => {
     parcelZoning = null;
     parcelNodeIdStamped = "48021:33512";
-    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:33512",
       district: "SF-1",
-      source: "baked-snapshot",
-      snapshotAt: "2026-07-20T12:00:00.000Z",
+      jurisdictionKey: "bastrop-tx",
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-25",
+      evaluatedAt: "2026-09-25",
     });
     const res = await post({ address: "714 Spring St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
-    expect(res.body.declineReason).not.toBe("no-zoning-stamp");
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
-    expect(res.body.spineZoningSource).toBe("baked-snapshot");
+    expect(res.body.spineZoningSource).toBe("parcel-record");
     expect(res.body.effectiveZoningCode).toBe("SF-1");
-    expect(res.body.payload.district).toBeTruthy();
+    expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.payload.geojson.features.length).toBeGreaterThan(0);
-    expect(res.body.coverage.reason).toContain("baked node-facet snapshot");
-    expect(res.body.coverage.reason).toContain("not invented");
+    expect(res.body.coverage.reason).toContain("parcel record");
   });
 
-  it("still resolves a parcel for an unknown jurisdiction (decline, not invent)", async () => {
+  it("draws the ledger when the situs city names no table", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     const res = await post({ address: "1 Main St, Nowhere, XX" });
-    // Parcel may 404 (no coverage) or 200 decline — never invent multiply confidence.
-    expect([200, 404]).toContain(res.status);
-    if (res.status === 200) {
-      expect(res.body.status).toMatch(/ok|no-buildable-area|declined/);
-      if (res.body.status === "declined") {
-        expect(res.body.declineReason).toMatch(/no-zoning-stamp/);
-      }
-    }
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    expect(res.body.setbackSource).toBe("parcel-record");
+    expect(res.body.effectiveZoningCode).toBe("R-MD");
   });
 });
 
@@ -494,9 +583,32 @@ describe("POST /place/buildable-envelope — parcel_node_id schema + city-less s
     expect(issues.flatMap((i) => i.keys ?? [])).not.toContain("parcel_node_id");
   });
 
-  it("Dashwood city-less situs + node 48453:280210 yields Pflugerville setbacks", async () => {
+  it("Dashwood city-less situs serves the ledger cells, not a city-derived table", async () => {
     parcelZoning = "SF-S";
     parcelNodeIdStamped = DASHWOOD_NODE;
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: DASHWOOD_NODE,
+      district: "SF-S",
+      jurisdictionKey: "pflugerville-tx",
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-25",
+      evaluatedAt: "2026-09-25",
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "setbacks-fact-parcel-record",
+      entityId: DASHWOOD_NODE,
+      frontFt: 25,
+      sideFt: 7.5,
+      rearFt: 20,
+      cornerFt: 15,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-25",
+      evaluatedAt: "2026-09-25",
+    });
     parcelSitusAddress = DASHWOOD_SITUS;
     // Live Nominatim leaves city empty on this CAD line; do not invent Bastrop.
     geocodeOverride = {
@@ -526,13 +638,29 @@ describe("POST /place/buildable-envelope — parcel_node_id schema + city-less s
     parcelZoning = null;
     parcelNodeIdStamped = "48021:35772";
     parcelSitusAddress = "195 WAINEE DR, BASTROP, TX 78602";
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:35772",
+      absence: {
+        kind: "not-applicable",
+        reason: "unincorporated parcel: the county does not zone land outside city limits",
+      },
+      verifiedAbsence: null,
+      sourceTier: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: null,
+    });
     const res = await post({
       address: "195 Wainee Dr, Bastrop, TX 78602",
       parcel_node_id: "48021:35772",
     });
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("declined");
-    expect(res.body.declineReason).toBe("no-zoning-stamp");
+    expect(res.body.reason).toBe(
+      "unincorporated parcel: the county does not zone land outside city limits",
+    );
+    expect(res.body.declineReason).not.toBe("no-zoning-stamp");
     expect(res.body.setbacks).toBeUndefined();
   });
 });
@@ -734,11 +862,25 @@ describe("POST /place/buildable-envelope — P-373 identity wins over the point"
       featureCount: 1,
       queryMode: "identity" as const,
     };
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      source: "zoning-fact-parcel-record",
+      entityId: "48055:40428",
+      absence: {
+        kind: "absent-verified",
+        reason: "no zoning layer yet for this city",
+      },
+      verifiedAbsence: true,
+      sourceTier: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: null,
+    });
     const res = await postWith({ parcel_node_id: "48055:40428" });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("declined");
-    expect(res.body.declineReason).toBe("no-zoning-stamp");
+    expect(res.body.reason).toBe("no zoning layer yet for this city");
+    expect(res.body.declineReason).toBe("absent-verified");
     expect(res.body.setbacks).toBeUndefined();
     expect(res.body.parcel_node_id).toBe("48055:40428");
   });
@@ -778,17 +920,23 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // stubbed geocode city is Bastrop: the same disagreement, measured on the
     // real pair of keys.
     parcelZoning = null;
-    parcelNodeIdStamped = null;
-    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
+    parcelNodeIdStamped = "48491:R415488";
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: "48491:R415488",
       district: "SF-S",
-      source: "parcel-record",
       jurisdictionKey: "pflugerville-tx",
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-25",
+      evaluatedAt: "2026-09-25",
     });
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
     expect(res.body.effectiveZoningCode).toBe("SF-S");
-    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbackSource).toBe("parcel-record");
   });
 
   it("the control: a stamped jurisdiction with NO row for the district still declines no-district (the key is an authority, not a search)", async () => {
@@ -796,15 +944,19 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // derivation hunting other jurisdictions until some table answered a code —
     // the move P-340 forbids. A key that owns no row refuses, named.
     parcelZoning = null;
-    parcelNodeIdStamped = null;
-    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
-      district: "SF-S",
-      source: "parcel-record",
-      jurisdictionKey: "nowhere-tx",
+    parcelNodeIdStamped = "48491:R415488";
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      source: "setbacks-fact-parcel-record",
+      entityId: "48491:R415488",
+      reason: "no setback row for district CS",
     });
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-district");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe("no setback row for district CS");
+    expect(res.body.status).not.toBe("no-district");
   });
 
   // -------------------------------------------------------------------------
@@ -835,22 +987,21 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     // district, and that is the key the table probe must run against.
     parcelZoning = "SU";
     parcelNodeIdStamped = null;
-    // A city-less CAD situs (`1006 WISTERIA CIR`): no postal city to key with.
     parcelSitusAddress = "1006 WISTERIA CIR";
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue("cedar-park-tx");
+    ledgerDistrict("SU", "cedar-park-tx", {
+      frontFt: 25,
+      sideFt: 10,
+      rearFt: 20,
+      cornerFt: 15,
+    });
 
     const res = await postWith({ parcel_node_id: "48453:523600" });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
     expect(res.body.effectiveZoningCode).toBe("SU");
-    expect(res.body.setbackSource).toBe("codified-ordinance");
-    // The read is asked about the district being probed, never about some other
-    // code the record happens to hold.
-    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
-      "48453:523600",
-      "SU",
-    );
+    expect(res.body.setbackSource).toBe("parcel-record");
+    expect(recordJurisdictionKeyForDistrictMock).not.toHaveBeenCalled();
   });
 
   it("CONTROL (the same request with NO record key): `SU` declines exactly as it did — the read is what moved it", async () => {
@@ -859,16 +1010,14 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "SU";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "1006 WISTERIA CIR";
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
+    ledgerSetbacksRefused("no setback row for district SU");
 
     const res = await postWith({ parcel_node_id: "48453:523600" });
 
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-district");
-    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
-      "48453:523600",
-      "SU",
-    );
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe("no setback row for district SU");
+    expect(recordJurisdictionKeyForDistrictMock).not.toHaveBeenCalled();
   });
 
   it("identity path: a BASE code takes the record's key, and the row still comes from the signal that names one", async () => {
@@ -881,22 +1030,20 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "SF";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "1006 WISTERIA CIR";
-    fetchPropertyAtomChainMock.mockResolvedValue({ zoningFact: { district: "SF-3" } });
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue("austin-tx");
+    ledgerDistrict("SF-3", "austin-tx", {
+      frontFt: 25,
+      sideFt: 5,
+      rearFt: 10,
+      cornerFt: 15,
+    });
 
     const res = await postWith({ parcel_node_id: "48453:239852" });
 
     expect(res.status).toBe(200);
     expect(res.body.effectiveZoningCode).toBe("SF-3");
-    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.setbacks?.front_ft).toBe(25);
-    // The key is read for the district the route is probing (the base code the
-    // stamp carries); the record's own pair answers it, `SF-3` being the
-    // widening of `SF`.
-    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
-      "48453:239852",
-      "SF",
-    );
+    expect(recordJurisdictionKeyForDistrictMock).not.toHaveBeenCalled();
   });
 
   it("CONTROL (the same request with NO record key): the base code names no row and declines no-district (P-340 preserved)", async () => {
@@ -906,17 +1053,14 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "SF";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "1006 WISTERIA CIR";
-    fetchPropertyAtomChainMock.mockResolvedValue({ zoningFact: { district: "SF-3" } });
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
+    ledgerSetbacksRefused("no setback row for district SF");
 
     const res = await postWith({ parcel_node_id: "48453:239852" });
 
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-district");
-    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
-      "48453:239852",
-      "SF",
-    );
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe("no setback row for district SF");
+    expect(recordJurisdictionKeyForDistrictMock).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -940,46 +1084,48 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "R-3";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "18529 SPOTTED EAGLE LN";
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue("elgin-tx-travis");
+    ledgerDistrict("R-3", "elgin-tx", {
+      frontFt: 15,
+      sideFt: 7.5,
+      rearFt: 10,
+      cornerFt: 15,
+    });
 
     const res = await postWith({ parcel_node_id: "48453:959606" });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
     expect(res.body.effectiveZoningCode).toBe("R-3");
-    expect(res.body.setbackSource).toBe("codified-ordinance");
-    // PROD's own answer for this parcel, and the ratified Elgin R-3 row:
-    // 15 / 7.5 / 10 / 15. No new table is introduced to make this pass — this
-    // is `elgin-development-code`, the table the Bastrop-side cohort serves.
+    expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.setbacks).toMatchObject({
       front_ft: 15,
       side_ft: 7.5,
       rear_ft: 10,
       side_corner_ft: 15,
     });
-    expect(recordJurisdictionKeyForDistrictMock).toHaveBeenCalledWith(
-      "48453:959606",
-      "R-3",
-    );
+    expect(recordJurisdictionKeyForDistrictMock).not.toHaveBeenCalled();
   });
 
   it("P-406: the same rule reaches the OTHER branch — a spine stamp that names the entry", async () => {
     // The regression is the RULE, not one branch: whichever source held the
     // district and named the entry beside it, the key must resolve the same way.
     parcelZoning = null;
-    parcelNodeIdStamped = null;
-    resolveSpineZoningWhenGisAbsentMock.mockResolvedValue({
-      district: "R-3",
-      source: "parcel-record",
-      jurisdictionKey: "elgin-tx-travis",
+    parcelNodeIdStamped = "48021:34049";
+    ledgerDistrict("R-3", "elgin-tx", {
+      frontFt: 15,
+      sideFt: 7.5,
+      rearFt: 10,
+      cornerFt: 15,
     });
 
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toMatch(/ok|no-buildable-area/);
-    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbackSource).toBe("parcel-record");
+    expect(res.body.effectiveZoningCode).toBe("R-3");
     expect(res.body.setbacks?.front_ft).toBe(15);
+    expect(resolveSpineZoningWhenGisAbsentMock).not.toHaveBeenCalled();
   });
 
   it("P-406 CONTROL: a key that names NO entry is echoed BYTE-IDENTICAL — the fix is not a fuzzy match", async () => {
@@ -992,6 +1138,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "QQ-9";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "1006 WISTERIA CIR";
+    ledgerSetbacksRefused("no setback row for district QQ-9");
     for (const key of [
       "elgin-travis-tx",
       "lakeway-tx",
@@ -1003,9 +1150,10 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     ]) {
       recordJurisdictionKeyForDistrictMock.mockResolvedValue(key);
       const res = await postWith({ parcel_node_id: "48453:959606" });
-      expect(res.status, key).toBe(404);
-      expect(res.body.status, key).toBe("no-district");
-      expect(res.body.jurisdictionKey, key).toBe(key);
+      expect(res.status, key).toBe(200);
+      expect(res.body.status, key).toBe("declined");
+      expect(res.body.reason, key).toBe("no setback row for district QQ-9");
+      expect(res.body.jurisdictionKey, key).not.toBe(key);
     }
   });
 
@@ -1016,15 +1164,13 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
     parcelZoning = "QQ-9";
     parcelNodeIdStamped = null;
     parcelSitusAddress = "18529 SPOTTED EAGLE LN";
-    recordJurisdictionKeyForDistrictMock.mockResolvedValue("elgin-tx-travis");
+    ledgerSetbacksRefused("no setback row for district QQ-9");
 
     const res = await postWith({ parcel_node_id: "48453:959606" });
 
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-district");
-    // ...and the refusal names the JURISDICTION, which is what the entry's
-    // cityKey was for. The entry name is no longer a key anywhere.
-    expect(res.body.jurisdictionKey).toBe("elgin-tx");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe("no setback row for district QQ-9");
   });
 
   it("classifies an empty-coverage throw as an honest 404 no-parcel (NOT a 502)", async () => {
@@ -1087,10 +1233,11 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
       featureCount: 1,
       queryMode: "pin" as const,
     };
+    ledgerSetbacksRefused("no zoning layer yet for this city");
     const res = await postWith({ address: "300 Blanco River Rd, Wimberley, TX 78676" });
-    // Hays has no codified setback table for R-MD — honest no-district, not invented geometry.
-    expect(res.status).toBe(404);
-    expect(res.body.status).toBe("no-district");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe("no zoning layer yet for this city");
     expect(lastIdentityFetch).toEqual({ fips: "48209", propId: "193340" });
     expect(lastPinQueryPoint).toBeNull();
   });
@@ -1121,7 +1268,7 @@ describe("POST /place/buildable-envelope — F4d authoritative resolution", () =
 
   it("still derives through the point path (no regression)", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     situsOutcome = { hit: null, reason: "no-situs-match" };
     geocodeOverride = null;
     const res = await postWith({ address: "1209 Main St, Bastrop, TX 78602" });
@@ -1171,7 +1318,7 @@ describe("POST /place/buildable-envelope — P-151 bounded point-resolution time
 
   it("still resolves normally (no 503, no added latency) for a bare {lat,lng} request that answers promptly", async () => {
     parcelZoning = "R-MD";
-    parcelNodeIdStamped = null;
+    parcelNodeIdStamped = "48021:34049";
     pinQueryHang = false;
     const res = await postWith({ lat: 30.2672, lng: -97.7431 });
     expect(res.status).toBe(200);
@@ -1267,10 +1414,10 @@ describe("POST /place/buildable-envelope — atom-chain provenanceRefs (R3)", ()
     // Nothing to attach yet — omitted, not emitted as null/empty.
     expect(res.body.provenanceRefs).toBeUndefined();
     expect(res.body.status).toBe("ok");
-    expect(res.body.setbackSource).toBe("codified-ordinance");
+    expect(res.body.setbackSource).toBe("parcel-record");
     expect(res.body.setbacks).toEqual({
       front_ft: 25,
-      side_ft: 7.5,
+      side_ft: 10,
       rear_ft: 20,
       side_corner_ft: 15,
       district: "R-MD",
@@ -1496,15 +1643,13 @@ describe("POST /place/buildable-envelope — P-374: the draw block and the route
       jurisdictionState: "XX",
     });
 
-    // The parity predicate, stated explicitly: would a "the two agree"
-    // assertion pass here? No — the route drew and the draw block refuses,
-    // because their inputs name different jurisdictions. That is the control
-    // the parity tests above need.
+    // The caller's city is no longer an input. Both surfaces read the ledger,
+    // so a city the parcel is not in does not split them.
     const routeDrew = res.body.payload.geojson.features.length > 0;
     const drawBlockDrew = mcp.state === "modelled";
     expect(routeDrew).toBe(true);
-    expect(drawBlockDrew).toBe(false);
-    expect(drawBlockDrew === routeDrew).toBe(false);
+    expect(drawBlockDrew).toBe(true);
+    expect(drawBlockDrew === routeDrew).toBe(true);
   });
 });
 

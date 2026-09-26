@@ -173,6 +173,13 @@ export interface BuildableEnvelopeResult {
   /** P-270 (OPS-24 X11) + P-354: the declaration, present only when the citation is undated or not yet in force. See `BuildableEnvelopeProps`. */
   citationVintage?: SetbackCitationVintageDeclaration;
   district: string;
+  /**
+   * The per-edge feet the inset applied, in projectRing order. Not a wire
+   * field: the route names setbacks explicitly and does not spread this.
+   * Optional so a caller that rebuilds the result without it leaves the area
+   * check unmeasured rather than failing it.
+   */
+  insetFeetPerEdge?: number[];
 }
 
 export interface DeriveInput {
@@ -324,8 +331,16 @@ export function deriveBuildableEnvelope(
   const buildableAreaPct =
     parcelAreaSqFt > 0 ? round((buildableAreaSqFt / parcelAreaSqFt) * 100, 1) : 0;
 
-  const maxLotCoveragePct =
-    typeof d.max_lot_coverage_pct === "number" ? d.max_lot_coverage_pct : null;
+  const coverageFlag = d.provenance?.["max_lot_coverage_pct"];
+  const coverageSilent =
+    !!coverageFlag &&
+    typeof coverageFlag === "object" &&
+    (coverageFlag as { not_specified?: boolean }).not_specified === true;
+  const maxLotCoveragePct = coverageSilent
+    ? null
+    : typeof d.max_lot_coverage_pct === "number"
+      ? d.max_lot_coverage_pct
+      : null;
   // P-299: a flagged (or bare-sentinel) height is ABSENT, not 999 feet. The
   // sentinel is the code's way of saying "no feet scalar here" (Round Rock
   // states these heights in stories), so it must reach the wire as absence.
@@ -479,6 +494,7 @@ export function deriveBuildableEnvelope(
       : {}),
     ...(citationVintage ? { citationVintage } : {}),
     district: d.district_name,
+    insetFeetPerEdge: insetFeet,
   };
 }
 

@@ -2250,7 +2250,12 @@ export function overlayRowHtml(o: OverlayRow, i: number): string {
   const degraded = o.citationsDegraded === true || (p.paint === "present" && citations.length === 0);
   const cites = citationHtml(citations, degraded);
   const ask = whyControlHtml("overlay", p.paint, { i: String(i) });
-  return `<div class="ovl${extra}" data-overlay="${escapeHtml(o.id)}" data-paint="${p.paint}"><span class="g ${glyphClass(p.paint)}" title="${stateWord(p.paint)}"></span> <span class="key">${escapeHtml(overlayTitle(o.id))}</span> <span class="lbl">${escapeHtml(overlayCustomerLabel(o))}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(null, null, o.vintage, null)}${why}${note}</div>`;
+  const sourceLine =
+    o.id === "envelope" &&
+    o.reason === "Envelope not drawn: the parcel's shape could not be resolved"
+      ? o.provenance ?? null
+      : null;
+  return `<div class="ovl${extra}" data-overlay="${escapeHtml(o.id)}" data-paint="${p.paint}"><span class="g ${glyphClass(p.paint)}" title="${stateWord(p.paint)}"></span> <span class="key">${escapeHtml(overlayTitle(o.id))}</span> <span class="lbl">${escapeHtml(overlayCustomerLabel(o))}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(null, sourceLine, o.vintage, null)}${why}${note}</div>`;
 }
 
 /** F2: the flood row under the drawing, every value read off the flood section's data; a non-present section prints its state. */

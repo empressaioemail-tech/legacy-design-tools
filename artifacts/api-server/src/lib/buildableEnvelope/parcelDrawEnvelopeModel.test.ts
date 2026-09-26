@@ -36,7 +36,7 @@
  * uses for the Anthropic client. `pg.Pool` connects lazily; this never
  * dials out.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { feetToMeters } from "./geometry";
 
 process.env.DATABASE_URL ||=
@@ -158,6 +158,14 @@ vi.mock("./roads", async () => {
  */
 const resolveSpineZoningWhenGisAbsentMock = vi.hoisted(() => vi.fn());
 const recordJurisdictionKeyForDistrictMock = vi.hoisted(() => vi.fn());
+const loadZoningFactForServeMock = vi.hoisted(() => vi.fn());
+const loadSetbacksFactForServeMock = vi.hoisted(() => vi.fn());
+vi.mock("../zoningFactServeCutover", () => ({
+  loadZoningFactForServe: loadZoningFactForServeMock,
+}));
+vi.mock("../setbacksFactServeCutover", () => ({
+  loadSetbacksFactForServe: loadSetbacksFactForServeMock,
+}));
 vi.mock("./spineZoningDistrict", () => ({
   resolveSpineZoningWhenGisAbsent: resolveSpineZoningWhenGisAbsentMock,
   recordJurisdictionKeyForDistrict: recordJurisdictionKeyForDistrictMock,
@@ -170,6 +178,32 @@ const { tryComposeEnvelopeModelForDraw } = await import(
 const { assembleParcelDraw } = await import("../parcelDrawStub");
 const { envelopeDrawRefusalReason } = await import("./envelopeDrawOutcome");
 
+function presentLedger() {
+  loadZoningFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "zoning-fact-parcel-record",
+    entityId: BASTROP_PARCEL_NODE_ID,
+    district: "R-MD",
+    jurisdictionKey: "bastrop-tx",
+    provenance: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
+  loadSetbacksFactForServeMock.mockResolvedValue({
+    state: "present",
+    source: "setbacks-fact-parcel-record",
+    entityId: BASTROP_PARCEL_NODE_ID,
+    frontFt: 30,
+    sideFt: 10,
+    rearFt: 30,
+    cornerFt: 15,
+    sourceAdapter: "parcel_record",
+    sourceVintage: "2026-09-25",
+    evaluatedAt: "2026-09-25",
+  });
+}
+
 afterEach(() => {
   parcelZoning = "R-MD";
   parcelNodeIdStamped = BASTROP_PARCEL_NODE_ID;
@@ -180,6 +214,10 @@ afterEach(() => {
   resolveSpineZoningWhenGisAbsentMock.mockResolvedValue(null);
   recordJurisdictionKeyForDistrictMock.mockReset();
   recordJurisdictionKeyForDistrictMock.mockResolvedValue(null);
+});
+
+beforeEach(() => {
+  presentLedger();
   queryGisLayerGeoJsonMock.mockClear();
   fetchPropertyAtomChainMock.mockClear();
   fetchNearbyRoadsMock.mockClear();
@@ -244,8 +282,24 @@ describe("tryComposeEnvelopeModelForDraw — positive control (48021:34049-shape
   });
 });
 
+const LEDGER_UNINC =
+  "unincorporated parcel: the county does not zone land outside city limits";
+
+function ledgerNotApplicable() {
+  loadZoningFactForServeMock.mockResolvedValue({
+    state: "absent",
+    source: "zoning-fact-parcel-record",
+    entityId: "48453:474034",
+    absence: { kind: "not-applicable", reason: LEDGER_UNINC },
+    verifiedAbsence: null,
+    sourceTier: null,
+    sourceAdapter: "parcel_record",
+    sourceVintage: null,
+  });
+}
+
 describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shaped, no district anywhere)", () => {
-  it("reads the ring and the chain, then names the ROUTE's own no-zoning-stamp — a decline, not an unreached attempt", async () => {
+  it("reads the ring and the chain, then words the ledger cell — a decline, not an unreached attempt", async () => {
     // P-374: this case used to be decided by the caller's own bake facet with
     // NO I/O at all. It is now the shared derivation's terminal answer, which
     // means the ring and the chain are read (the spine is read too, and mocked
@@ -253,6 +307,7 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
     // is the route's, not a null handed back for "the caller's facet was
     // empty".
     parcelZoning = null;
+    ledgerNotApplicable();
     // The ring must stamp the SAME node the draw block is for (the identity
     // guard), which is what the real 48453:474034 case does.
     parcelNodeIdStamped = "48453:474034";
@@ -274,8 +329,9 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
     expect(fetchNearbyRoadsMock).not.toHaveBeenCalled();
   });
 
-  it("falsifier's other half: the no-district overlay names the MISSING DISTRICT, not unruled setbacks", async () => {
+  it("falsifier's other half: the overlay names the ledger's sentence, not unruled setbacks", async () => {
     parcelZoning = null;
+    ledgerNotApplicable();
     parcelNodeIdStamped = "48453:474034";
     atomChainResult = { setbackRule: null };
     const result = await tryComposeEnvelopeModelForDraw({
@@ -289,11 +345,8 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
     });
     if (result.state !== "declined") throw new Error("unreachable");
     const reason = envelopeDrawRefusalReason(result.refusal);
-    // The defect, exactly: this used to be the bake's stored
-    // `atom_path_pending`, which `envelopeHuman` renders "Withheld, setbacks
-    // unruled" — a claim about a setback table this parcel was never asked
-    // about, when the real gap was that no district was observed at all.
-    expect(reason).toBe("no-zoning-stamp");
+    expect(reason).toBe(LEDGER_UNINC);
+    expect(reason).not.toBe("no-zoning-stamp");
     expect(reason).not.toBe("atom_path_pending");
 
     const draw = assembleParcelDraw({
@@ -320,7 +373,7 @@ describe("tryComposeEnvelopeModelForDraw — negative control (48453:474034-shap
       geom: "none",
       draw: "suppress-setback-line",
       state: "refused",
-      reason: "no-zoning-stamp",
+      reason: LEDGER_UNINC,
     });
   });
 });
@@ -378,18 +431,16 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     });
   });
 
-  it("names `setbacks-unresolved` for an unresolvable jurisdiction — and with no chain that is the ONE honest `atom_path_pending`", async () => {
+  it("draws the ledger's setbacks when the situs city names no table (the retired lookup would have declined)", async () => {
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
-    expect(result).toMatchObject({
-      state: "declined",
-      refusal: { step: "setbacks-unresolved", chain: "absent" },
-    });
-    if (result.state !== "declined") throw new Error("unreachable");
-    expect(envelopeDrawRefusalReason(result.refusal)).toBe("atom_path_pending");
+    expect(result.state).toBe("modelled");
+    if (result.state !== "modelled") throw new Error("unreachable");
+    expect(result.model.setbacks.front_ft).toBe(30);
+    expect(result.model.setbacks.district).toBe("R-MD");
   });
 });
 
@@ -399,13 +450,21 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
  * inexpressible against the pre-P-339 code, whose only answer was `null`.
  */
 describe("P-339 — the route's own outcome decides the reason (falsifiers)", () => {
-  it("FALSIFIER: chain PRESENT + no usable table is NOT `atom_path_pending` (the measured defect)", async () => {
+  it("FALSIFIER: a refused setback cell is the cell's sentence, not `atom_path_pending`", async () => {
     // A parcel that HAS an atom path, whose jurisdiction/district has no wired
     // table and whose chain carries no usable rule. Pre-P-339 this returned
     // `null` and the overlay fell back to the bake's token, so the customer
     // read "Withheld, setbacks unruled" about a parcel with a live atom chain.
     atomChainResult = { setbackRule: null };
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
+    const SETBACK_REASON = "no setback row for this district";
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      source: "setbacks-fact-parcel-record",
+      entityId: BASTROP_PARCEL_NODE_ID,
+      reason: SETBACK_REASON,
+    });
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
@@ -416,20 +475,30 @@ describe("P-339 — the route's own outcome decides the reason (falsifiers)", ()
     });
     if (result.state !== "declined") throw new Error("unreachable");
     const reason = envelopeDrawRefusalReason(result.refusal);
-    expect(reason).toBe("setbacks-unresolved");
+    expect(reason).toBe(SETBACK_REASON);
     expect(reason).not.toBe("atom_path_pending");
+    expect(reason).not.toBe("no-zoning-stamp");
   });
 
-  it("the ONE surviving `atom_path_pending`: the same step with the chain ABSENT", async () => {
+  it("the same refused cell, chain absent, still says the cell's sentence", async () => {
     atomChainResult = null;
     parcelSitusAddress = "1 Main St, Nowhere, XX 00000";
+    const SETBACK_REASON = "no setback row for this district";
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      source: "setbacks-fact-parcel-record",
+      entityId: BASTROP_PARCEL_NODE_ID,
+      reason: SETBACK_REASON,
+    });
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
     if (result.state !== "declined") throw new Error("unreachable");
     expect(result.refusal.chain).toBe("absent");
-    expect(envelopeDrawRefusalReason(result.refusal)).toBe("atom_path_pending");
+    expect(envelopeDrawRefusalReason(result.refusal)).toBe(SETBACK_REASON);
+    expect(envelopeDrawRefusalReason(result.refusal)).not.toBe("atom_path_pending");
   });
 
   it("P60b's split survives the re-pointing: a real derivation refusal serves the route's own wireStatus, unflattened", () => {
@@ -533,7 +602,7 @@ describe("P-374 — the route's inputs and the draw block's inputs reach ONE ans
     // resolver's underscore form; the setback adapter normalizes it, which is
     // why the table resolves below). Asserted so a future change that silently
     // drops the city seed fails HERE rather than as a district mismatch.
-    expect(route.jurisdictionKey).toBe("bastrop_tx");
+    expect(route.jurisdictionKey).toBe("bastrop-tx");
     // THE PARITY ASSERTION: district, the four axes, and the polygon.
     expect(drawBlock.model.setbacks.district).toBe(route.effectiveZoningCode);
     expect(drawBlock.model.setbacks).toEqual({
@@ -551,10 +620,7 @@ describe("P-374 — the route's inputs and the draw block's inputs reach ONE ans
     expect(drawBlock.model.ringLngLat).toEqual(routeFeature.geometry.coordinates[0]);
   });
 
-  it("THE PARITY CHECK CAN FAIL: a jurisdiction the route never used makes the two answers differ", async () => {
-    // The control. If the two callers could not disagree, the test above would
-    // prove nothing — so here is a case where they must not agree, and the
-    // equality the test above asserts is the thing that breaks.
+  it("a city the parcel is not in does not change the ledger answer", async () => {
     parcelSitusAddress = "1209 Main St";
     parcelZoning = "R-MD";
     parcelNodeIdStamped = BASTROP_PARCEL_NODE_ID;
@@ -562,16 +628,17 @@ describe("P-374 — the route's inputs and the draw block's inputs reach ONE ans
     const route = await routeStyleDerivation();
     const drawBlock = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
-      // A jurisdiction the parcel is not in.
       jurisdictionCity: "Nowhere",
       jurisdictionState: "XX",
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
     });
 
-    const routeDrew = route.state === "drawn";
-    const drawBlockDrew = drawBlock.state === "modelled";
-    expect(routeDrew).toBe(true);
-    expect(drawBlockDrew).toBe(false);
-    expect(drawBlockDrew === routeDrew).toBe(false);
+    expect(route.state).toBe("drawn");
+    expect(drawBlock.state).toBe("modelled");
+    if (route.state !== "drawn" || drawBlock.state !== "modelled") {
+      throw new Error("unreachable");
+    }
+    expect(drawBlock.model.setbacks.district).toBe(route.effectiveZoningCode);
+    expect(drawBlock.model.setbacks.front_ft).toBe(route.resolved.scalars.front_ft);
   });
 });
