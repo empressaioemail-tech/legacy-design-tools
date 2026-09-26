@@ -42,6 +42,9 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  // P-480 — entitlement history references webhook events.
+  "pe_user_entitlement_history",
+  "pe_stripe_webhook_events",
   // P-87 Claude Sync -- written by the MCP server, read by the PE card.
   "pe_ai_connections",
   // P-98 next-action rail -- shown/acted per ladder rung. Cascades off
