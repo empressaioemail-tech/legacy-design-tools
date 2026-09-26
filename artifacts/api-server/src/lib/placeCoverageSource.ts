@@ -107,6 +107,33 @@ function isValidBody(body: unknown): body is CoverageCheckResponseBody {
 }
 
 /**
+ * HOW LONG THIS CLIENT WILL WAIT (P-479). It used to wait forever.
+ *
+ * `fetch` was called with no `signal` and no timeout, so this tier had no
+ * opinion about latency at all and simply inherited the retrieval service's
+ * own deadline, which was 150_000 ms. Its caller is
+ * hauska-map `apps/property-explorer/api/pe-situs-search.ts`, whose
+ * `UPSTREAM_TIMEOUT_MS` is 9_000 and which aborts the WHOLE cortex call.
+ *
+ * So the deadlines were ordered backwards, and the consequence was not a hang
+ * but a MISLABEL: on `coverage:austin` the customer got
+ * `coverage_check_unavailable: cortex timed out after 9000ms`, naming cortex,
+ * while cortex was healthy and waiting on a 71-second sequential scan two
+ * tiers down (measured 2026-09-26; fixed at the root by legacy-design-tools
+ * migration 0108 and hauska-engine's own deadline change). A tier with no
+ * budget cannot report who was slow, so the top of the chain gets blamed for
+ * everything underneath it.
+ *
+ * 6_000 sits below the caller's 9_000 -- leaving that caller room to still
+ * return its own named class rather than being aborted mid-answer -- and above
+ * hauska-engine's `COVERAGE_CHECK_CALLER_BUDGET_MS`-bounded 5_000 geo-resolution
+ * deadline, so the SERVER's named `indeterminate` is what normally arrives and
+ * this abort is the backstop rather than the usual path. That ordering is the
+ * whole point: every tier can name its own refusal.
+ */
+export const COVERAGE_FETCH_BUDGET_MS = 6_000;
+
+/**
  * Real client for the endpoint this lane's close specifies as the CONTRACT
  * for a follow-on `hauska-engine` lane. Does not exist server-side yet —
  * every call today either skips (no key/no locality signal) or gets a
@@ -114,9 +141,16 @@ function isValidBody(body: unknown): body is CoverageCheckResponseBody {
  * the fail-closed contract by construction, not a special case: there is no
  * branch here that can return `covered` or `not-covered` without a real,
  * well-formed answer from the server.
+ *
+ * `budgetMs` is a parameter with a default rather than a bare constant read so
+ * the abort path can be tested in milliseconds instead of by waiting six
+ * seconds. A timeout branch that is too slow to test is a timeout branch that
+ * does not get tested (DEV-PROCESS 2.2: a gating behaviour is proven able to
+ * fire before it is trusted).
  */
-async function fetchCoverageFromRetrievalApi(
+export async function fetchCoverageFromRetrievalApi(
   input: CoverageCheckInput,
+  budgetMs: number = COVERAGE_FETCH_BUDGET_MS,
 ): Promise<CoverageVerdict> {
   if (!input.city && !input.state && !input.zip) {
     return {
@@ -140,10 +174,16 @@ async function fetchCoverageFromRetrievalApi(
   if (input.city) params.set("city", input.city);
   if (input.state) params.set("state", input.state);
   if (input.zip) params.set("zip", input.zip);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), budgetMs);
   try {
     const res = await fetch(
       `${baseUrl}/parcel-record-gate-verdict/coverage/check?${params.toString()}`,
-      { method: "GET", headers: { Authorization: `Bearer ${key}`, Accept: "application/json" } },
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+        signal: controller.signal,
+      },
     );
     if (!res.ok) {
       return { status: "indeterminate", reason: `coverage endpoint returned HTTP ${res.status}` };
@@ -169,13 +209,27 @@ async function fetchCoverageFromRetrievalApi(
     }
     return { status: "indeterminate", reason: body.reason ?? "coverage endpoint declined to determine coverage" };
   } catch (err) {
+    // The budget expiring is NAMED as itself, separately from a transport
+    // failure. Both are `indeterminate` -- neither is `covered` and neither is
+    // `not-covered` -- but "the coverage endpoint did not answer within 6000ms"
+    // and "the coverage endpoint could not be reached" send a reader to two
+    // different places, and collapsing them is how P-479's real cause sat
+    // behind a message about cortex for two days.
+    if (controller.signal.aborted) {
+      return {
+        status: "indeterminate",
+        reason: `coverage endpoint did not answer within ${budgetMs}ms`,
+      };
+    }
     return {
       status: "indeterminate",
       reason: `coverage endpoint call failed: ${err instanceof Error ? err.message : String(err)}`,
     };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export const retrievalApiCoverageSource: CoverageSource = {
-  checkCoverage: fetchCoverageFromRetrievalApi,
+  checkCoverage: (input) => fetchCoverageFromRetrievalApi(input),
 };
