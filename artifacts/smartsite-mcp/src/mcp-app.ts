@@ -2,6 +2,7 @@
 
 import { mapGroundReasonWords } from "./map-reason-words.js";
 import { mapRenderReportUrl } from "./oauth-metadata.js";
+import { requireMapboxCardToken } from "./mapbox-card-token.js";
 import { requireParcelTilesOrigin } from "./parcel-tiles-origin.js";
 import { loadCardIife } from "./card/load-card-iife.js";
 export * from "./card/panel-lib.js";
@@ -30,15 +31,14 @@ import {
   EMPTY_BOARD_BODY,
   EMPTY_BOARD_TITLE,
   GROUND_EQUATOR_MPP,
-  GROUND_LICENCE_NOTE,
   GROUND_MAX_TILES,
-  GROUND_SOURCE_LABEL,
+  MAPBOX_ATTRIBUTION_LINKS,
+  MAPBOX_WORDMARK_HREF,
   GROUND_SUPERSAMPLE,
   GROUND_TILE_ORIGIN,
   GROUND_TILE_PX,
   GROUND_TILE_URL_TEMPLATE,
   GROUND_TOGGLE_LABEL,
-  GROUND_VINTAGE_NOTE,
   GROUND_ZOOM_MAX,
   GROUND_ZOOM_MIN,
   HUMAN_ATOM_PATH_PENDING,
@@ -166,7 +166,7 @@ export function parcelTilesProbeUrl(): string {
 /** The p559 map-ground net channels, as they are embedded into the served page. */
 export function probeNetTargets(): Array<{ key: string; url: string }> {
   return [
-    { key: "esri", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0" },
+    { key: "mapbox", url: "https://api.mapbox.com/v4/mapbox.satellite/0/0/0.jpg90" },
     { key: "tiles", url: parcelTilesProbeUrl() },
     { key: "svc7", url: "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Zoned_Parcels/FeatureServer/83?f=json" },
     { key: "self", url: "https://mcp.smartsite.cloud/health" },
@@ -183,7 +183,7 @@ export function probeNetTargets(): Array<{ key: string; url: string }> {
 export function probeCspDomains(): string[] {
   const tilesOrigin = requireParcelTilesOrigin();
   return [
-    "https://server.arcgisonline.com",
+    "https://api.mapbox.com",
     tilesOrigin,
     "https://services7.arcgis.com",
     "https://mcp.smartsite.cloud",
@@ -431,17 +431,24 @@ export function htmlContractViolations(html: string): string[] {
     !html.includes("function groundPlan") ||
     !html.includes("function groundWrapHtml") ||
     !html.includes(GROUND_TILE_URL_TEMPLATE) ||
-    !html.includes(GROUND_VINTAGE_NOTE) ||
-    !html.includes(GROUND_LICENCE_NOTE) ||
+    !html.includes(MAPBOX_WORDMARK_HREF) ||
+    !html.includes('data-mapbox-wordmark="1"') ||
+    MAPBOX_ATTRIBUTION_LINKS.some((link) => !html.includes(link.href)) ||
+    !html.includes("OpenStreetMap") ||
+    !html.includes("Maxar") ||
+    !html.includes("Improve this map") ||
     html.includes("Mapbox held") ||
     html.includes("claudemcpcontent")
   ) {
     violations.push("ground_unbound");
   }
-  /* Esri orders the path z / row / column. A transposed template fetches real
-   * imagery of the wrong place, so the transposition is refused at the page. */
-  if (!html.includes("/tile/{z}/{y}/{x}") || html.includes("/tile/{z}/{x}/{y}")) {
+  /* Mapbox orders the path z / column / row. A transposed template fetches
+   * real imagery of the wrong place, so the transposition is refused at the page. */
+  if (!html.includes("/{z}/{x}/{y}") || html.includes("/{z}/{y}/{x}")) {
     violations.push("ground_tile_axis_transposed");
+  }
+  if (html.toLowerCase().includes("arcgisonline") || html.includes("World_Imagery")) {
+    violations.push("esri_imagery_host");
   }
   /* M-4: the canvas, the two named lists and the truncation note must each be in
    * the served script, or the set view is a claim. The undrawn list is checked
@@ -672,6 +679,7 @@ export function buildAppHtml(): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="origin">
 <title>Smart Site board</title>
 <style>
 :root{
@@ -750,6 +758,9 @@ svg.ring .sm{fill:var(--ss-t6)}
 .gwrap[data-ground="on"] .ring-fill{fill-opacity:.16}
 .gnote{font:var(--ss-fs-meta)/1.4 ui-monospace,Consolas,monospace;color:var(--ss-t6);margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .gnote .btn{padding:3px 8px;font-size:var(--ss-fs-meta)}
+.mapbox-credit{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font:11px/1.35 var(--ss-ui);color:var(--ss-t3)}
+.mapbox-credit a{color:var(--ss-t5);text-decoration:underline}
+.mapbox-credit a.wordmark{color:var(--ss-t3);font-weight:700;letter-spacing:.04em;text-decoration:none;flex-shrink:0}
 /* M-4 set canvas. The rings reuse .ring-fill, so the ground-on scrim rule above
    applies to them unchanged. The hit polygon carries no paint of its own: it is
    the click target and nothing else, so it can never be mistaken for a drawn
@@ -921,6 +932,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var UPSTREAM_KEY=${JSON.stringify(UPSTREAM_KEY)};
   var SORT_COMPLETENESS_LABEL=${JSON.stringify(SORT_COMPLETENESS_LABEL)};
   var DECLARED_STATUSES=${JSON.stringify(DECLARED_STATUSES)};
+  var MAPBOX_CARD_TOKEN=${JSON.stringify(requireMapboxCardToken())};
   var GROUND_TILE_URL_TEMPLATE=${JSON.stringify(GROUND_TILE_URL_TEMPLATE)};
   var GROUND_TILE_PX=${JSON.stringify(GROUND_TILE_PX)};
   var GROUND_EQUATOR_MPP=${JSON.stringify(GROUND_EQUATOR_MPP)};
@@ -929,9 +941,6 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   var GROUND_ZOOM_MAX=${JSON.stringify(GROUND_ZOOM_MAX)};
   var GROUND_SUPERSAMPLE=${JSON.stringify(GROUND_SUPERSAMPLE)};
   var GROUND_MAX_TILES=${JSON.stringify(GROUND_MAX_TILES)};
-  var GROUND_SOURCE_LABEL=${JSON.stringify(GROUND_SOURCE_LABEL)};
-  var GROUND_LICENCE_NOTE=${JSON.stringify(GROUND_LICENCE_NOTE)};
-  var GROUND_VINTAGE_NOTE=${JSON.stringify(GROUND_VINTAGE_NOTE)};
   var GROUND_TOGGLE_LABEL=${JSON.stringify(GROUND_TOGGLE_LABEL)};
   var MULTI_MIN_DRAWN=${JSON.stringify(MULTI_MIN_DRAWN)};
   var MULTI_GROUND_MAX_EXTENT_FT=${JSON.stringify(MULTI_GROUND_MAX_EXTENT_FT)};

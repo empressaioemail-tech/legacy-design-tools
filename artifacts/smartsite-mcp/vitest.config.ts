@@ -11,6 +11,9 @@ export default defineConfig({
       // never be mistaken for the real Spaces origin D-42 creates. The unset
       // refusal is proven separately in tests/parcel-tiles-origin.test.ts.
       PARCEL_TILES_ORIGIN: "https://tiles.test.invalid",
+      // P-462: a public fixture token. The unset refusal is proven in
+      // tests/mapbox-card-token.test.ts. This value is not a real credential.
+      MAPBOX_CARD_TOKEN: "pk.test-mapbox-card-not-a-secret",
       SMARTSITE_MAP_WIRE: "0",
     },
   },

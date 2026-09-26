@@ -19,15 +19,13 @@ import {
   ACROSS_ROW,
   GROUND_EQUATOR_MPP,
   GROUND_MAX_TILES,
-  GROUND_SOURCE_LABEL,
-  GROUND_LICENCE_NOTE,
-  GROUND_MAPBOX_HOLD_NOTE,
+  MAPBOX_ATTRIBUTION_LINKS,
+  MAPBOX_WORDMARK_HREF,
   GROUND_SUPERSAMPLE,
   GROUND_TILE_ORIGIN,
   GROUND_TILE_PX,
   GROUND_TILE_URL_TEMPLATE,
   GROUND_TOGGLE_LABEL,
-  GROUND_VINTAGE_NOTE,
   GROUND_ZOOM_MAX,
   GROUND_ZOOM_MIN,
   US_SURVEY_FOOT_M,
@@ -168,7 +166,7 @@ describe("M-2 Mercator round trip", () => {
   });
 });
 
-describe("M-2 tile path order is z / y / x", () => {
+describe("M-2 tile path order is z / x / y", () => {
   const z = 19;
 
   it("the tile id matches the asinh form of the slippy map formula", () => {
@@ -181,12 +179,13 @@ describe("M-2 tile path order is z / y / x", () => {
     expect(mine.x).not.toBe(mine.y);
   });
 
-  it("the url puts the row before the column", () => {
+  it("the url puts the column before the row and carries the public token", () => {
     const t = groundTileId(ANCHOR.lat, ANCHOR.lon, z);
     const url = groundTileUrl(t.z, t.x, t.y);
-    expect(url).toBe(`${GROUND_TILE_ORIGIN}/ArcGIS/rest/services/World_Imagery/MapServer/tile/19/216130/120403`);
-    const tail = url.split("/tile/")[1] ?? "";
-    expect(tail.split("/")).toEqual(["19", String(t.y), String(t.x)]);
+    expect(url).toContain(`${GROUND_TILE_ORIGIN}/v4/mapbox.satellite/19/120403/216130.jpg90?access_token=`);
+    expect(url).not.toContain("/mapbox.satellite/19/216130/120403");
+    expect(url).not.toContain("arcgisonline");
+    expect(url.startsWith("https://api.mapbox.com/")).toBe(true);
   });
 
   it("swapping the last two segments names a DIFFERENT tile, so the order check cannot pass on a transposition", () => {
@@ -210,10 +209,11 @@ describe("M-2 tile path order is z / y / x", () => {
     const mine = plan.tiles.filter((t) => t.x === home.x && t.y === home.y);
     expect(mine).toHaveLength(1);
     const url = mine[0]?.url ?? "";
-    const parts = (url.split("/tile/")[1] ?? "").split("/");
-    const decodedZ = Number(parts[0]);
-    const decodedRow = Number(parts[1]);
-    const decodedCol = Number(parts[2]);
+    const marker = "/mapbox.satellite/";
+    const path = (url.slice(url.indexOf(marker) + marker.length).split(".")[0] ?? "").split("/");
+    const decodedZ = Number(path[0]);
+    const decodedCol = Number(path[1]);
+    const decodedRow = Number(path[2]);
     expect(decodedZ).toBe(plan.z);
     const centre = groundLatLon(
       (decodedCol + 0.5) * GROUND_TILE_PX,
@@ -233,8 +233,9 @@ describe("M-2 tile path order is z / y / x", () => {
      * either resolve at import (crash the connector on an unset variable) or
      * silently omit the entry (a dark parcel ground with nothing saying why). */
     expect(resourceCspDomains()).toContain(GROUND_TILE_ORIGIN);
-    expect(GROUND_TILE_URL_TEMPLATE).toContain("/tile/{z}/{y}/{x}");
-    expect(GROUND_TILE_URL_TEMPLATE).not.toContain("/tile/{z}/{x}/{y}");
+    expect(GROUND_TILE_URL_TEMPLATE).toContain("/{z}/{x}/{y}");
+    expect(GROUND_TILE_URL_TEMPLATE).not.toContain("/{z}/{y}/{x}");
+    expect(GROUND_TILE_URL_TEMPLATE).not.toContain("access_token");
   });
 });
 
@@ -516,7 +517,7 @@ describe("M-2 the painted ground", () => {
     const imgs = on.match(/<img class="gt"/g) ?? [];
     expect(imgs).toHaveLength(plan.tiles.length);
     for (const t of plan.tiles) {
-      expect(on).toContain(`data-tile="${t.z}/${t.y}/${t.x}"`);
+      expect(on).toContain(`data-tile="${t.z}/${t.x}/${t.y}"`);
       expect(on).toContain(`src="${t.url}"`);
     }
     expect(on).toContain(`data-ground-z="${plan.z}"`);
@@ -533,16 +534,19 @@ describe("M-2 the painted ground", () => {
     expect(layer).toContain(`width:${((t.size / plan.fit.w) * 100).toFixed(4)}%`);
   });
 
-  it("names its source and states the vintage as unknown, implying no capture date", () => {
-    expect(on).toContain(GROUND_SOURCE_LABEL);
-    expect(on).toContain(GROUND_VINTAGE_NOTE);
-    expect(on).not.toMatch(/\b(19|20)\d\d\b/);
-  });
-
-  it("credits provider, capture date, and licence, and leaves the engineering note off the credit", () => {
-    expect(on).toContain(GROUND_LICENCE_NOTE);
-    expect(on).not.toContain(GROUND_MAPBOX_HOLD_NOTE);
-    expect(on).not.toContain("api.mapbox.com");
+  it("credits Mapbox with a linked wordmark and the four required links", () => {
+    expect(on).toContain('data-mapbox-wordmark="1"');
+    expect(on).toContain(`href="${MAPBOX_WORDMARK_HREF}"`);
+    expect(on).toContain(">Mapbox</a>");
+    for (const link of MAPBOX_ATTRIBUTION_LINKS) {
+      expect(on).toContain(`href="${link.href}"`);
+      expect(on).toContain(link.label);
+    }
+    expect(on).toContain("api.mapbox.com");
+    expect(on).not.toContain("Mapbox held");
+    expect(on).not.toContain("claudemcpcontent");
+    expect(on).not.toContain("arcgisonline");
+    expect(on).not.toContain("licence unstated");
   });
 
   it("carries a toggle that reads its own state", () => {
@@ -556,9 +560,10 @@ describe("M-2 the painted ground", () => {
   it("off removes every tile from the html rather than hiding it, and keeps the way back", () => {
     expect(off).not.toContain("<img");
     expect(off).not.toContain("arcgisonline");
+    expect(off).not.toContain("api.mapbox.com");
     expect(off).not.toContain("data-tile");
     expect(off).toContain('data-act="ground"');
-    expect(off).toContain(GROUND_SOURCE_LABEL);
+    expect(off).toContain('data-mapbox-wordmark="1"');
   });
 
   it("the drawing on top is byte identical to the drawing with no ground", () => {
@@ -629,7 +634,7 @@ describe("M-2 reads the wire the M-1 lane writes", () => {
     expect(model.anchor?.lon).toBe(ANCHOR.lon);
     expect(model.anchor?.precision).toBe("1e-5-deg");
     expect(model.anchor?.source).toBe("bake-latlng-index");
-    expect(renderParcelDraw(model)).toContain("arcgisonline");
+    expect(renderParcelDraw(model)).toContain("api.mapbox.com/v4/mapbox.satellite");
   });
 
   it("a skipped read from the producer paints no ground", () => {
@@ -679,10 +684,12 @@ describe("M-2 the served page", () => {
   it("the ground rules fire on violated copies", () => {
     expect(htmlContractViolations(html.replace(/data-act="ground"/g, 'data-act="aerial"'))).toContain("ground_unbound");
     expect(htmlContractViolations(html.replace(/function toggleGround/g, "function flipGround"))).toContain("ground_unbound");
-    expect(htmlContractViolations(html.split(GROUND_VINTAGE_NOTE).join("flown 2024"))).toContain("ground_unbound");
-    const transposed = html.split("/tile/{z}/{y}/{x}").join("/tile/{z}/{x}/{y}");
+    expect(htmlContractViolations(html.split("https://www.mapbox.com/about/maps/").join("https://example.invalid/maps/"))).toContain("ground_unbound");
+    const transposed = html.split("/{z}/{x}/{y}").join("/{z}/{y}/{x}");
     expect(transposed).not.toBe(html);
     expect(htmlContractViolations(transposed)).toContain("ground_tile_axis_transposed");
+    expect(htmlContractViolations(html)).not.toContain("esri_imagery_host");
+    expect(htmlContractViolations(html + "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0")).toContain("esri_imagery_host");
   });
 
   it("embeds the ground helpers by source, not by hand", () => {

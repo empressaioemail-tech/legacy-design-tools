@@ -11,7 +11,6 @@ import {
   floodFactsHtml,
   frameNoteHtml,
   groundCreditText,
-  GROUND_MAPBOX_HOLD_NOTE,
   landUseCustomerName,
   landUseNameFromCode,
   overlayCustomerLabel,
@@ -56,7 +55,7 @@ Zone A
 read at a point on the parcel
 corner side · right of way · gravel road · 176.66 ft
 Not known whether a pipeline is within 500 ft
-Aerial: Esri World Imagery, capture date unstated, licence unstated
+Mapbox © Mapbox © OpenStreetMap © Maxar Improve this map
 `;
     expect(customerProseViolations(clean, "48021:32342")).toEqual([]);
   });
@@ -205,12 +204,16 @@ describe("card plain words", () => {
     }
   });
 
-  it("keeps the imagery credit to provider, date, and licence", () => {
+  it("keeps the imagery credit to the Mapbox wordmark and the four links", () => {
     const credit = groundCreditText();
-    expect(credit).toContain("Esri World Imagery");
-    expect(credit).toContain("capture date unstated");
-    expect(credit).toContain("licence unstated");
-    expect(credit).not.toContain(GROUND_MAPBOX_HOLD_NOTE);
+    expect(credit).toContain("Mapbox");
+    expect(credit).toContain("© Mapbox");
+    expect(credit).toContain("© OpenStreetMap");
+    expect(credit).toContain("© Maxar");
+    expect(credit).toContain("Improve this map");
+    expect(credit).not.toContain("Mapbox held");
+    expect(credit).not.toContain("Esri");
+    expect(credit).not.toContain("claudemcpcontent");
   });
 });
 

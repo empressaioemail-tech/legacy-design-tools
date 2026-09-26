@@ -88,6 +88,10 @@ services:
       # (ENGINE_API_GATE_TOKEN / RETRIEVAL_API_KEY / SERVICE_API_KEY /
       # HAUSKA_MCP_SERVICE_KEY) is four distinct values; two variables sharing one
       # value in a new spec is P-405 returning.
+      # P-462. Public pk token, URL-restricted. Vault item MAPBOX_CARD_TOKEN.
+      # Allow https://claudemcpcontent.com and https://smartsite.cloud.
+      # Unset refuses boot. The card does not fall back to Esri. Never an sk token.
+      - { key: MAPBOX_CARD_TOKEN, scope: RUN_TIME, type: SECRET }
       - { key: HAUSKA_MCP_SERVICE_KEY, scope: RUN_TIME, type: SECRET }
       - { key: SERVICE_API_KEY, scope: RUN_TIME, type: SECRET }
       - { key: WORKOS_CLIENT_ID, scope: RUN_TIME, type: SECRET }

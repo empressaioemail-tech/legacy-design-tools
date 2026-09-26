@@ -84,6 +84,9 @@ const env = {
   PARCEL_TILES_ORIGIN:
     process.env.PARCEL_TILES_ORIGIN ||
     "https://hauska-artifacts.nyc3.digitaloceanspaces.com",
+  // Gate fixture only. Product boot refuses when MAPBOX_CARD_TOKEN is unset.
+  MAPBOX_CARD_TOKEN:
+    process.env.MAPBOX_CARD_TOKEN || "pk.gate-mapbox-card-not-a-secret",
 };
 
 const printed = spawnSync(process.execPath, ["dist/server.mjs", "--print-app-html"], {
