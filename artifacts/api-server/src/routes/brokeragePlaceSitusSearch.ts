@@ -73,6 +73,10 @@ brokeragePlaceSitusSearchRouter.get(
             ...(result.coverageCheckUnavailableReason
               ? { coverageCheckUnavailableReason: result.coverageCheckUnavailableReason }
               : {}),
+            // P-483 / A-340: carried on county_unconfirmed. Never the outage sentence.
+            ...(result.missClassDisplayText
+              ? { missClassDisplayText: result.missClassDisplayText }
+              : {}),
           }
         : { hits: result.hits },
     );

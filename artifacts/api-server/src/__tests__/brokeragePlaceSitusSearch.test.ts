@@ -191,6 +191,26 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
     expect(res.body.missClass).not.toBe("no-hit");
   });
 
+  it("county-unconfirmed empty carries missClass county_unconfirmed and the confirm-the-county sentence, never the outage class", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "county_unconfirmed",
+      missClassDisplayText: "We can't confirm the county for this ZIP; add the full address",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "Georgetown, TX 78633" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "county_unconfirmed",
+      missClassDisplayText: "We can't confirm the county for this ZIP; add the full address",
+    });
+    expect(res.body.missClass).not.toBe("coverage_check_unavailable");
+    expect(JSON.stringify(res.body)).not.toMatch(/couldn't check coverage/i);
+  });
+
   it("coverage-check-unavailable empty carries missClass coverage_check_unavailable plus coverageCheckUnavailableReason (P-205 / P-210)", async () => {
     searchMock.mockResolvedValueOnce({
       hits: [],

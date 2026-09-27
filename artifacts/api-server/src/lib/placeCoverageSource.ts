@@ -66,9 +66,16 @@ import { retrievalBaseUrlFromEnv, retrievalBaseUrlUnsetReason } from "./retrieva
  * A consumer that cannot tell "unknown" from "yes" is exactly the
  * presence-shaped-check defect P-205's own falsifier #3 warns against.
  */
+export const COUNTY_UNCONFIRMED_REASON =
+  "we can't confirm the county for this ZIP; add the full address";
+
+export const COUNTY_UNCONFIRMED_DISPLAY =
+  "We can't confirm the county for this ZIP; add the full address";
+
 export type CoverageVerdict =
   | { status: "covered" }
   | { status: "not-covered"; countyFips: string; countyName: string; state: string }
+  | { status: "county-unconfirmed"; reason: string }
   | { status: "indeterminate"; reason: string };
 
 export interface CoverageCheckInput {
@@ -93,7 +100,7 @@ function resolveApiKey(): string | undefined {
 }
 
 type CoverageCheckResponseBody = {
-  status: "covered" | "not-covered" | "indeterminate";
+  status: "covered" | "not-covered" | "county-unconfirmed" | "indeterminate";
   countyFips?: string;
   countyName?: string;
   state?: string;
@@ -103,7 +110,12 @@ type CoverageCheckResponseBody = {
 function isValidBody(body: unknown): body is CoverageCheckResponseBody {
   if (!body || typeof body !== "object") return false;
   const status = (body as { status?: unknown }).status;
-  return status === "covered" || status === "not-covered" || status === "indeterminate";
+  return (
+    status === "covered" ||
+    status === "not-covered" ||
+    status === "county-unconfirmed" ||
+    status === "indeterminate"
+  );
 }
 
 /**
@@ -205,6 +217,12 @@ export async function fetchCoverageFromRetrievalApi(
         countyFips: body.countyFips,
         countyName: body.countyName,
         state: body.state,
+      };
+    }
+    if (body.status === "county-unconfirmed") {
+      return {
+        status: "county-unconfirmed",
+        reason: body.reason ?? COUNTY_UNCONFIRMED_REASON,
       };
     }
     return { status: "indeterminate", reason: body.reason ?? "coverage endpoint declined to determine coverage" };
