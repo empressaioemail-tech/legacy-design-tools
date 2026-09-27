@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ENVELOPE_SHAPE_UNRESOLVED,
   envelopeSanityReasons,
+  fatalEnvelopeSanityReasons,
   outsideMaxFt,
 } from "./envelopeSanityGuard";
 import type { Ring } from "./geometry";
@@ -127,5 +128,20 @@ describe("envelope sanity guard", () => {
     });
     expect(reasons).not.toContain("envelope-outside-ring");
     expect(outsideMaxFt(hair, parcel)!).toBeLessThan(1);
+  });
+
+  it("P-484: a point front is disclosure, not a fatal blank", () => {
+    const reasons = envelopeSanityReasons({
+      cleanedRing: parcel,
+      originalRing: parcel,
+      envelopeRing: inset,
+      insetFeet: feet,
+      edgeSignal: "point",
+    });
+    expect(reasons).toEqual(["front-from-point"]);
+    expect(fatalEnvelopeSanityReasons(reasons)).toEqual([]);
+    expect(
+      fatalEnvelopeSanityReasons(["front-from-point", "ring-stub-edge"]),
+    ).toEqual(["ring-stub-edge"]);
   });
 });

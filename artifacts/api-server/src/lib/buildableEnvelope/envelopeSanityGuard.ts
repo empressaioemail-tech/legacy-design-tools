@@ -34,6 +34,25 @@ export const SANITY_OUTSIDE_MAX_SQFT = 1;
 export const SANITY_OUTSIDE_MAX_FT = 1;
 export const SANITY_AREA_BAND = 0.35;
 
+/**
+ * P-484. Reasons that blank the drawn polygon. Front-signal codes
+ * (`front-from-point`, `front-from-shape`, `front-signal-absent`) are
+ * labeling confidence, not a broken ring. ENVELOPE DRAWN, FIGURE REFUSED
+ * draws wherever a district and setback table exist; those codes travel on
+ * honesty.coverage.reason. Geometric gates from P-465 stay fatal.
+ */
+export const FATAL_SANITY_REASONS = [
+  "ring-stub-edge",
+  "envelope-outside-ring",
+  "envelope-area-outside-band",
+] as const;
+
+export function fatalEnvelopeSanityReasons(reasons: string[]): string[] {
+  return reasons.filter((r) =>
+    (FATAL_SANITY_REASONS as readonly string[]).includes(r),
+  );
+}
+
 const FT_PER_M = 3.280839895;
 const CELL_M = 20;
 

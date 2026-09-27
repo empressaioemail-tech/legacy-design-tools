@@ -69,6 +69,7 @@ import { cleanParcelRing, COLLINEAR_MERGE_MAX_FT, COLLINEAR_MERGE_RETRY_FT, type
 import {
   ENVELOPE_SHAPE_UNRESOLVED,
   envelopeSanityReasons,
+  fatalEnvelopeSanityReasons,
 } from "./envelopeSanityGuard";
 import { decideEnvelopeFromLedger } from "./ledgerEnvelopeRails";
 import type { EnvelopeDrawChain, EnvelopeDrawStep } from "./envelopeDrawOutcome";
@@ -347,7 +348,8 @@ export async function deriveEnvelopeDraw(
         insetFeet: derived.insetFeetPerEdge ?? null,
         edgeSignal: labeling.signal,
       });
-      if (reasons.length > 0) {
+      const fatal = fatalEnvelopeSanityReasons(reasons);
+      if (fatal.length > 0) {
         const feature = derived.geojson.features[0]!;
         feature.geometry = null;
         feature.properties = {
@@ -365,7 +367,16 @@ export async function deriveEnvelopeDraw(
             reason: reasons.join(", "),
           },
         };
-        sanity = { sentence: ENVELOPE_SHAPE_UNRESOLVED, reasons };
+        sanity = { sentence: ENVELOPE_SHAPE_UNRESOLVED, reasons: fatal };
+      } else if (reasons.length > 0) {
+        honesty = {
+          ...honesty,
+          coverage: {
+            ...honesty.coverage,
+            degraded: true,
+            reason: reasons.join(", "),
+          },
+        };
       }
     }
 

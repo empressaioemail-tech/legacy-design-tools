@@ -27,7 +27,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchPropertyAtomChain } from "./fetchPropertyAtomChain";
+import {
+  ATOM_CHAIN_DRAW_BUDGET_MS,
+  fetchPropertyAtomChain,
+} from "./fetchPropertyAtomChain";
 import {
   RETRIEVAL_BASE_URL_UNSET_REFUSAL,
   isRetrievalBaseUrlUnsetError,
@@ -133,5 +136,47 @@ describe("fetchPropertyAtomChain (D-25: no default retrieval host)", () => {
     );
     expect(capturedAuth).toBe("Bearer brief-key");
     expect(wire).toEqual({ zoningFact: { district: "SF-3" } });
+  });
+});
+
+describe("fetchPropertyAtomChain P-484 budget", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null when the chain misses the draw budget, and does not wait the chain out", async () => {
+    process.env.HAUSKA_RETRIEVAL_API_URL = "https://retrieval.test";
+    process.env.HAUSKA_RETRIEVAL_API_KEY = "rk";
+
+    vi.stubGlobal(
+      "fetch",
+      async (_input: string, init?: { signal?: AbortSignal }) => {
+        await new Promise<void>((_resolve, reject) => {
+          const fail = () =>
+            reject(Object.assign(new Error("aborted"), { name: "TimeoutError" }));
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            fail();
+            return;
+          }
+          const timer = setTimeout(fail, ATOM_CHAIN_DRAW_BUDGET_MS + 5_000);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              fail();
+            },
+            { once: true },
+          );
+        });
+        return new Response("{}", { status: 200 });
+      },
+    );
+
+    const started = Date.now();
+    const chain = await fetchPropertyAtomChain("48491:R405006");
+    const elapsed = Date.now() - started;
+    expect(chain).toBeNull();
+    expect(elapsed).toBeLessThan(ATOM_CHAIN_DRAW_BUDGET_MS + 800);
   });
 });

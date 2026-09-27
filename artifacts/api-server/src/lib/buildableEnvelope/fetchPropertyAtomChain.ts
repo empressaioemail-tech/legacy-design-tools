@@ -61,6 +61,13 @@ export type PropertyAtomChainWire = {
   }> | null;
 };
 
+/**
+ * P-484. The draw must not wait on a slow chain. Ledger district and table
+ * already decide the inset; the chain is reconcile-only. A timeout returns
+ * null (chain absent), never a fabricated envelope.
+ */
+export const ATOM_CHAIN_DRAW_BUDGET_MS = 2_500;
+
 export async function fetchPropertyAtomChain(
   parcelNodeId: string,
 ): Promise<PropertyAtomChainWire | null> {
@@ -92,6 +99,7 @@ export async function fetchPropertyAtomChain(
           Authorization: `Bearer ${key}`,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(ATOM_CHAIN_DRAW_BUDGET_MS),
       },
     );
     if (!upstream.ok) return null;
