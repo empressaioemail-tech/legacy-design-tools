@@ -369,7 +369,7 @@ function parseTrailingCityWithoutAnchor(raw: string): string | null {
     const canonical = STREET_TYPE_ABBR[t] ?? t;
     if (STREET_TYPE_SUFFIXES.has(canonical)) {
       const cityTokens = tokens.slice(i + 1);
-      if (cityTokens.length >= 1 && cityTokens.length <= 3) {
+      if (cityTokens.length >= 1 && cityTokens.length <= 4) {
         return normalizeLocalityToken(cityTokens.join(" "));
       }
       break;
@@ -431,6 +431,14 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
     return { city: null, state: null, zip };
   }
   const state = maybeState;
+
+  const beforeStateZip = trimmed
+    .replace(new RegExp(`\\s+${state}\\s+${zip}\\s*$`, "i"), "")
+    .trim();
+  const anchoredCity = parseTrailingCityWithoutAnchor(beforeStateZip);
+  if (anchoredCity) {
+    return { city: anchoredCity, state, zip };
+  }
 
   let end = tokens.length - 2; // strip state + zip
   const withoutAnchor = tokens.slice(0, end);
