@@ -192,6 +192,33 @@ describe("retrievalApiCoverageSource (P-205 / P-210 fail-closed default)", () =>
     expect(verdict).toEqual({ status: "covered" });
   });
 
+  it("a well-formed county-unconfirmed response is honored — never remapped to indeterminate / outage", async () => {
+    configureRetrievalEndpoint();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          status: "county-unconfirmed",
+          reason: "we can't confirm the county for this ZIP; add the full address",
+        }),
+      })),
+    );
+
+    const verdict = await retrievalApiCoverageSource.checkCoverage({
+      city: "Georgetown",
+      state: "TX",
+      zip: "78633",
+      rawQuery: "Georgetown, TX 78633",
+    });
+
+    expect(verdict).toEqual({
+      status: "county-unconfirmed",
+      reason: "we can't confirm the county for this ZIP; add the full address",
+    });
+    expect(verdict.status).not.toBe("indeterminate");
+  });
+
   it("a well-formed not-covered response is honored", async () => {
     configureRetrievalEndpoint();
     vi.stubGlobal(

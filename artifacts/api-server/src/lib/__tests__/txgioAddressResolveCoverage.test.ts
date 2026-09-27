@@ -256,6 +256,25 @@ describe("P-205 / P-210: fail-closed coverage decline (operator ruling, 2026-09-
     expect(result.coverageCheckUnavailableReason).toMatch(/simulated coverage source outage/);
   });
 
+  it("county-unconfirmed is its own miss, never the outage class", async () => {
+    const result = await searchPlaceByPrefix({
+      query: "1 Main St, Georgetown, TX 78633",
+      database: emptyDb() as never,
+      coverageSource: fixedCoverageSource({
+        status: "county-unconfirmed",
+        reason: "we can't confirm the county for this ZIP; add the full address",
+      }),
+    });
+    expect(result).toEqual({
+      hits: [],
+      missClass: "county_unconfirmed",
+      missClassDisplayText: "We can't confirm the county for this ZIP; add the full address",
+    });
+    expect(result.missClass).not.toBe("coverage_check_unavailable");
+    expect(result.missClass).not.toBe("no-hit");
+    expect(JSON.stringify(result)).not.toMatch(/couldn't check coverage/i);
+  });
+
   it("a real, confirmed NOT-COVERED verdict names the county — the fix this lane cannot ship yet, proven ready for the day a real source exists", async () => {
     const result = await searchPlaceByPrefix({
       query: "301 W Avenue B, Killeen, TX 76541",

@@ -66,6 +66,7 @@ import {
 import { parcelNodeId, parseParcelNodeId } from "./parcelNodeId";
 import { isPunctuationOnlySitus } from "./situsCompose";
 import {
+  COUNTY_UNCONFIRMED_DISPLAY,
   retrievalApiCoverageSource,
   type CoverageSource,
 } from "./placeCoverageSource";
@@ -1180,6 +1181,7 @@ export type SitusSearchMissClass =
   | "no-hit"
   | "out_of_coverage"
   | "county_out_of_coverage"
+  | "county_unconfirmed"
   | "coverage_check_unavailable"
   | typeof SITUS_SEARCH_BUDGET_ERROR;
 
@@ -1196,6 +1198,8 @@ export type PlaceSearchResult = {
   outOfCoverageCounty?: { countyFips: string; countyName: string; state: string };
   /** Present only when `missClass` is `"coverage_check_unavailable"`: why the coverage source could not answer. P-205/P-210. */
   coverageCheckUnavailableReason?: string;
+  /** Present on `county_unconfirmed` and on MCP-enriched misses. Never the outage sentence. */
+  missClassDisplayText?: string;
 };
 
 function formatAddressPointLabel(row: {
@@ -1476,6 +1480,13 @@ export async function searchPlaceByPrefix(input: {
           countyName: verdict.countyName,
           state: verdict.state,
         },
+      };
+    }
+    if (verdict.status === "county-unconfirmed") {
+      return {
+        hits: [],
+        missClass: "county_unconfirmed",
+        missClassDisplayText: COUNTY_UNCONFIRMED_DISPLAY,
       };
     }
     return {
