@@ -150,7 +150,7 @@ describe("fetchPropertyAtomChain P-484 budget", () => {
 
     vi.stubGlobal(
       "fetch",
-      async (_input: RequestInfo | URL, init?: RequestInit) => {
+      async (_input: string, init?: { signal?: AbortSignal }) => {
         await new Promise<void>((_resolve, reject) => {
           const fail = () =>
             reject(Object.assign(new Error("aborted"), { name: "TimeoutError" }));
