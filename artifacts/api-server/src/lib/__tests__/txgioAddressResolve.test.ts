@@ -323,6 +323,19 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
     });
     expect(placeSearchLocalityMatches(stored, query)).toBe(true);
   });
+
+  it("parses Marble Falls for coverage when state and ZIP sit in their own comma segment (P-486)", () => {
+    expect(parsePlaceSearchLocality("99999 ZZYZX RD MARBLE FALLS, TX 78654")).toEqual({
+      city: "MARBLE FALLS",
+      state: "TX",
+      zip: "78654",
+    });
+    expect(parsePlaceSearchLocality("99999 ZZYZX RD MARBLE FALLS TX 78654")).toEqual({
+      city: "MARBLE FALLS",
+      state: "TX",
+      zip: "78654",
+    });
+  });
 });
 
 describe("isOutOfCoverageStateCode (P-107 / OPS-16 A-072)", () => {

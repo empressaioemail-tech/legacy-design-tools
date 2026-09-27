@@ -402,7 +402,12 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
 
   const commaParts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
   if (commaParts.length >= 2) {
-    return parseLocalityTail(commaParts.slice(1).join(", "));
+    const tail = parseLocalityTail(commaParts.slice(1).join(", "));
+    if (!tail.city && commaParts.length === 2) {
+      const city = parseTrailingCityWithoutAnchor(commaParts[0]!);
+      if (city) return { city, state: tail.state, zip: tail.zip };
+    }
+    return tail;
   }
 
   const flat = trimmed.replace(/,/g, " ");
@@ -442,6 +447,21 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
     }
   }
   if (streetTokenCount == null) {
+    for (let i = withoutAnchor.length - 1; i >= 1; i--) {
+      const t = withoutAnchor[i]!;
+      const canonical = STREET_TYPE_ABBR[t] ?? t;
+      if (STREET_TYPE_SUFFIXES.has(canonical)) {
+        const cityTokens = withoutAnchor.slice(i + 1);
+        if (cityTokens.length >= 1 && cityTokens.length <= 4) {
+          return {
+            city: normalizeLocalityToken(cityTokens.join(" ")),
+            state,
+            zip,
+          };
+        }
+        break;
+      }
+    }
     return { city: null, state, zip };
   }
   const cityTokens = withoutAnchor.slice(streetTokenCount);
