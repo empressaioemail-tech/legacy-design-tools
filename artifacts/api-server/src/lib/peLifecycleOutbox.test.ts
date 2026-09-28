@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertPaidEventFromWebhook,
+  e3IdempotencyKey,
   e6IdempotencyKey,
   enqueueLifecycleEvent,
   memoryOutboxStore,
@@ -82,6 +83,62 @@ describe("outbox retry", () => {
     expect(first.enqueued).toBe(true);
     expect(second.enqueued).toBe(false);
     expect((await store.listSendable()).map((r) => r.id)).toEqual(["evt-1"]);
+    expect(second.eventId).toBe(first.eventId);
+  });
+});
+
+describe("ShareSent / LotSaved Meta dedup — browser event_id must match server send", () => {
+  const E3_APPLY = {
+    email: "sharer@example.com",
+    event: "e3_share_sent" as const,
+    shares: 1,
+  };
+
+  it("duplicate e3 enqueue returns the stored row id for browser/server Meta dedup", async () => {
+    const store = memoryOutboxStore();
+    const grantId = "e19115aa-bbbb-4ccc-dddd-eeeeeeeeeeee";
+    const key = e3IdempotencyKey(grantId);
+    const first = await enqueueLifecycleEvent(
+      {
+        userId: "u-sharer",
+        email: "sharer@example.com",
+        event: "e3_share_sent",
+        idempotencyKey: key,
+        apply: E3_APPLY,
+        eventId: "764b690a-dd75-41c7-877a-2673fb494561",
+      },
+      store,
+    );
+    const second = await enqueueLifecycleEvent(
+      {
+        userId: "u-sharer",
+        email: "sharer@example.com",
+        event: "e3_share_sent",
+        idempotencyKey: key,
+        apply: E3_APPLY,
+      },
+      store,
+    );
+    expect(first.enqueued).toBe(true);
+    expect(second.enqueued).toBe(false);
+    expect(second.eventId).toBe(first.eventId);
+
+    let metaEventId: string | undefined;
+    await processLifecycleOutbox({
+      store,
+      applyGhl: async () => ({
+        ok: true as const,
+        contactId: "c1",
+        stage: "Sharer" as const,
+        tags: ["ss_sharer"],
+        sourceTag: null,
+      }),
+      sendMeta: async (input) => {
+        metaEventId = input.eventId;
+        return { ok: true as const, eventName: "ShareSent" };
+      },
+    });
+    expect(metaEventId).toBe(second.eventId);
   });
 });
 

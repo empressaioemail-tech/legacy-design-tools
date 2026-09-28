@@ -24,6 +24,14 @@ export function drizzleOutboxStore(): OutboxStore {
         throw err;
       }
     },
+    async findIdByIdempotencyKey(idempotencyKey) {
+      const found = await db
+        .select({ id: peLifecycleOutbox.id })
+        .from(peLifecycleOutbox)
+        .where(eq(peLifecycleOutbox.idempotencyKey, idempotencyKey))
+        .limit(1);
+      return found[0]?.id ?? null;
+    },
     async listSendable() {
       const found = await db
         .select()

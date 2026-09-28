@@ -29,6 +29,7 @@ export type OutboxRecord = {
 
 export type OutboxStore = {
   insert(row: OutboxRecord): Promise<"inserted" | "duplicate">;
+  findIdByIdempotencyKey(idempotencyKey: string): Promise<string | null>;
   listSendable(): Promise<OutboxRecord[]>;
   markSent(id: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
@@ -43,6 +44,9 @@ export function memoryOutboxStore(seed: OutboxRecord[] = []): OutboxStore {
       }
       rows.push({ ...row });
       return "inserted";
+    },
+    async findIdByIdempotencyKey(idempotencyKey) {
+      return rows.find((r) => r.idempotencyKey === idempotencyKey)?.id ?? null;
     },
     async listSendable() {
       return rows.filter((r) => r.status === "pending" || r.status === "failed");
@@ -93,7 +97,14 @@ export async function enqueueLifecycleEvent(
     attempts: 0,
     lastError: null,
   });
-  return { eventId, enqueued: result === "inserted" };
+  if (result === "duplicate") {
+    const existingId = await store.findIdByIdempotencyKey(input.idempotencyKey);
+    if (!existingId) {
+      throw new Error("outbox_duplicate_without_row");
+    }
+    return { eventId: existingId, enqueued: false };
+  }
+  return { eventId, enqueued: true };
 }
 
 export type ProcessDeps = {
