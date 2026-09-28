@@ -112,6 +112,25 @@ function nextStage(input: LifecycleApplyInput): LifecycleStage {
   }
 }
 
+/**
+ * GoHighLevel contact upsert replaces the contact's tag set with the `tags`
+ * array we send. E2/E6 only touch counters or last-active fields — sending
+ * stage tags on those events would wipe the E1 `ss_src_*` tag written ms
+ * earlier on the same sign-in (live: SbKwZXrHYOB7sZA0SOE3, ss_explorer only).
+ */
+function includeTagsOnUpsert(event: LifecycleEventType): boolean {
+  switch (event) {
+    case "e1_account_created":
+    case "e3_share_sent":
+    case "e4_unlock_bought":
+    case "e5_plan_started":
+      return true;
+    case "e2_lot_saved":
+    case "e6_last_active":
+      return false;
+  }
+}
+
 function tagsFor(
   stage: LifecycleStage,
   input: LifecycleApplyInput,
@@ -224,7 +243,7 @@ export async function applyLifecycleToGhl(
     locationId: config.locationId,
     email,
     ...(input.displayName ? { name: input.displayName } : {}),
-    tags,
+    ...(includeTagsOnUpsert(input.event) ? { tags } : {}),
     customFields,
   };
   assertLifecyclePayloadSafe(upsertBody);

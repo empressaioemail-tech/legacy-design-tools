@@ -89,6 +89,24 @@ describe("applyLifecycleToGhl E1", () => {
     expect(result.tags).toEqual(["ss_explorer", "ss_src_direct"]);
   });
 
+  it("E6 upsert omits tags so GHL does not replace away ss_src_*", async () => {
+    const { fetchImpl, calls } = mockGhlFetch();
+    const result = await applyLifecycleToGhl(
+      {
+        email: "d@example.com",
+        event: "e6_last_active",
+        lastActive: "2026-09-28",
+      },
+      { fetchImpl, config: { apiKey: "k", locationId: "loc_1" } },
+    );
+    expect(result.ok).toBe(true);
+    const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
+    expect(upsert).toBeTruthy();
+    const body = upsert!.body as Record<string, unknown>;
+    expect(body["tags"]).toBeUndefined();
+    expect(body["customFields"]).toBeTruthy();
+  });
+
   it("a plan with no share skips to Solo", async () => {
     const { fetchImpl, calls } = mockGhlFetch();
     const result = await applyLifecycleToGhl(
