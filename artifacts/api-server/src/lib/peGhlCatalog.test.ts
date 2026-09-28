@@ -34,9 +34,19 @@ export function mockGhlFetch(opts?: {
   upsert?: Record<string, unknown>;
   opportunityStatus?: number;
   failCatalogPath?: string;
-}): { fetchImpl: typeof fetch; calls: { url: string; method: string; body: unknown }[] } {
+  /** Tags already on the contact before lifecycle runs (manual / workflow tags). */
+  seedContactTags?: string[];
+  contactId?: string;
+}): {
+  fetchImpl: typeof fetch;
+  calls: { url: string; method: string; body: unknown }[];
+  contactTags: () => string[];
+} {
   const catalog = opts?.catalog ?? completeGhlCatalogBodies();
   const calls: { url: string; method: string; body: unknown }[] = [];
+  const contactId = opts?.contactId ?? "ghl_c1";
+  let contactTags = [...(opts?.seedContactTags ?? [])];
+
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -48,15 +58,34 @@ export function mockGhlFetch(opts?: {
     if (url.includes("/opportunities/pipelines")) {
       return jsonResponse({ pipelines: catalog.pipelines });
     }
-    if (url.includes("/tags")) {
+    if (url.includes("/locations/") && url.includes("/tags")) {
       return jsonResponse({ tags: catalog.tags });
     }
     if (url.includes("/customFields")) {
       return jsonResponse({ customFields: catalog.customFields });
     }
+    const contactTagPath = url.match(/\/contacts\/([^/]+)\/tags$/);
+    if (contactTagPath) {
+      const listed = body?.tags;
+      const names = Array.isArray(listed)
+        ? listed.filter((t): t is string => typeof t === "string")
+        : [];
+      if (method === "POST") {
+        for (const name of names) {
+          if (!contactTags.includes(name)) contactTags.push(name);
+        }
+      } else if (method === "DELETE") {
+        const drop = new Set(names);
+        contactTags = contactTags.filter((t) => !drop.has(t));
+      }
+      return jsonResponse({ tags: [...contactTags] });
+    }
     if (url.includes("/contacts/upsert")) {
+      if (Array.isArray(body?.tags)) {
+        throw new Error("mockGhlFetch: upsert must not send tags");
+      }
       return jsonResponse(
-        opts?.upsert ?? { new: true, contact: { id: "ghl_c1" } },
+        opts?.upsert ?? { new: true, contact: { id: contactId } },
         201,
       );
     }
@@ -65,7 +94,7 @@ export function mockGhlFetch(opts?: {
     }
     return jsonResponse({ message: "unexpected" }, 500);
   };
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, contactTags: () => [...contactTags] };
 }
 
 afterEach(() => {

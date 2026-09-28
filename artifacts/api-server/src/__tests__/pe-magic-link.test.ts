@@ -336,7 +336,7 @@ describe("verify -> GHL new-signup hook", () => {
   });
 
   it("fires exactly once on a brand-new magic-link signup, with no tier-* tag", async () => {
-    const { fetchImpl, calls } = mockGhlFetch();
+    const { fetchImpl, calls, contactTags } = mockGhlFetch();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       if (String(url).includes("leadconnectorhq.com")) {
         return fetchImpl(url, init);
@@ -372,7 +372,8 @@ describe("verify -> GHL new-signup hook", () => {
     expect(upsert).toBeTruthy();
     const body = upsert!.body as Record<string, unknown>;
     expect(body["email"]).toBe(email);
-    const tags = body["tags"] as string[];
+    expect(body["tags"]).toBeUndefined();
+    const tags = contactTags();
     expect(tags).toEqual(["ss_explorer", "ss_src_direct"]);
     expect(tags.some((t) => t.startsWith("tier-") || t.startsWith("source-"))).toBe(
       false,

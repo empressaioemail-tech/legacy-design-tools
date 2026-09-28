@@ -30,7 +30,7 @@ describe("applyLifecycleToGhl E1", () => {
     const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
     expect(upsert).toBeTruthy();
     const body = upsert!.body as Record<string, unknown>;
-    expect(body["tags"]).toEqual(["ss_explorer", "ss_src_ad"]);
+    expect(body["tags"]).toBeUndefined();
     expect(JSON.stringify(body)).not.toMatch(/source-organic|tier-free/);
     const fields = body["customFields"] as { id: string; field_value: string }[];
     const values = fields.map((f) => f.field_value);
@@ -52,7 +52,7 @@ describe("applyLifecycleToGhl E1", () => {
   });
 
   it("unmapped UTMs write no source tag and still create Explorer", async () => {
-    const { fetchImpl, calls } = mockGhlFetch();
+    const { fetchImpl, calls, contactTags } = mockGhlFetch();
     const result = await applyLifecycleToGhl(
       {
         email: "u@example.com",
@@ -68,13 +68,12 @@ describe("applyLifecycleToGhl E1", () => {
     expect(result.tags).toEqual(["ss_explorer"]);
     expect(result.sourceTag).toBeNull();
     const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
-    expect((upsert!.body as Record<string, unknown>)["tags"]).toEqual([
-      "ss_explorer",
-    ]);
+    expect((upsert!.body as Record<string, unknown>)["tags"]).toBeUndefined();
+    expect(contactTags()).toEqual(["ss_explorer"]);
   });
 
-  it("no UTMs write ss_src_direct", async () => {
-    const { fetchImpl } = mockGhlFetch();
+  it("no UTMs write ss_src_direct via additive tag POST", async () => {
+    const { fetchImpl, contactTags } = mockGhlFetch();
     const result = await applyLifecycleToGhl(
       {
         email: "d@example.com",
@@ -87,6 +86,28 @@ describe("applyLifecycleToGhl E1", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.tags).toEqual(["ss_explorer", "ss_src_direct"]);
+    expect(contactTags()).toEqual(["ss_explorer", "ss_src_direct"]);
+  });
+
+  it("E6 upsert omits tags and does not mutate contact tags", async () => {
+    const { fetchImpl, calls, contactTags } = mockGhlFetch({
+      seedContactTags: ["ss_explorer", "ss_src_direct", "ss_quiet"],
+    });
+    const result = await applyLifecycleToGhl(
+      {
+        email: "d@example.com",
+        event: "e6_last_active",
+        lastActive: "2026-09-28",
+      },
+      { fetchImpl, config: { apiKey: "k", locationId: "loc_1" } },
+    );
+    expect(result.ok).toBe(true);
+    const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
+    expect(upsert).toBeTruthy();
+    const body = upsert!.body as Record<string, unknown>;
+    expect(body["tags"]).toBeUndefined();
+    expect(body["customFields"]).toBeTruthy();
+    expect(contactTags()).toEqual(["ss_explorer", "ss_src_direct", "ss_quiet"]);
   });
 
   it("a plan with no share skips to Solo", async () => {
