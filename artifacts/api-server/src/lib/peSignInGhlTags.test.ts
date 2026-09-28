@@ -1,69 +1,25 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { resetGhlCatalogCache } from "./peGhlCatalog";
-import { completeGhlCatalogBodies } from "./peGhlCatalog.test";
+import { mockGhlFetch } from "./peGhlCatalog.test";
 import {
   enqueueLifecycleEvent,
   e1IdempotencyKey,
+  e3IdempotencyKey,
+  e5IdempotencyKey,
   e6IdempotencyKey,
   processLifecycleOutbox,
   memoryOutboxStore,
 } from "./peLifecycleOutbox";
 import { applyLifecycleToGhl } from "./peGhlLifecycle";
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-/**
- * GHL upsert replaces the contact tag list with the request body. Tracks
- * what a contact would still have after E1 then E6 in one sign-in request.
- */
-function mockGhlFetchReplacingTags(): {
-  fetchImpl: typeof fetch;
-  contactTags: () => string[];
-} {
-  const catalog = completeGhlCatalogBodies();
-  let tags: string[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? JSON.parse(String(init.body)) : null;
-    if (url.includes("/opportunities/pipelines")) {
-      return jsonResponse({ pipelines: catalog.pipelines });
-    }
-    if (url.includes("/tags")) {
-      return jsonResponse({ tags: catalog.tags });
-    }
-    if (url.includes("/customFields")) {
-      return jsonResponse({ customFields: catalog.customFields });
-    }
-    if (url.includes("/contacts/upsert") && method === "POST") {
-      const next = body?.tags;
-      if (Array.isArray(next)) {
-        tags = next.filter((t): t is string => typeof t === "string");
-      }
-      return jsonResponse({ contact: { id: "ghl_c1" } }, 201);
-    }
-    if (url.includes("/opportunities")) {
-      return jsonResponse({ opportunity: { id: "opp_1" } }, 201);
-    }
-    return jsonResponse({ message: "unexpected" }, 500);
-  };
-  return { fetchImpl, contactTags: () => [...tags] };
-}
-
 afterEach(() => {
   resetGhlCatalogCache();
 });
 
-describe("sign-in E1 then E6 must not strip ss_src_* from GHL", () => {
-  it("leaves ss_src_direct on the contact after the E6 upsert", async () => {
-    process.env["GOHIGHLEVEL_API_KEY"] = "test_ghl_key";
-    process.env["GOHIGHLEVEL_LOCATION_ID"] = "test_ghl_location";
+describe("GHL lifecycle tags are additive (never upsert tags)", () => {
+  const ghlConfig = { apiKey: "test_ghl_key", locationId: "test_ghl_location" };
 
+  it("E1 then E6 on sign-in keeps ss_src_direct", async () => {
     const store = memoryOutboxStore();
     const userId = "u-signin-1";
     const email = "nickdraft6@gmail.com";
@@ -100,19 +56,85 @@ describe("sign-in E1 then E6 must not strip ss_src_* from GHL", () => {
       store,
     );
 
-    const { fetchImpl, contactTags } = mockGhlFetchReplacingTags();
+    const { fetchImpl, contactTags } = mockGhlFetch();
     const sendMeta = async () => ({ ok: true as const, eventName: "CompleteRegistration" });
-    const ghlConfig = { apiKey: "test_ghl_key", locationId: "test_ghl_location" };
     const applyGhl = (input: Parameters<typeof applyLifecycleToGhl>[0]) =>
       applyLifecycleToGhl(input, { fetchImpl, config: ghlConfig });
 
     const result = await processLifecycleOutbox({ store, applyGhl, sendMeta });
     expect(result.sent).toBe(2);
-
     expect(contactTags()).toContain("ss_explorer");
     expect(contactTags()).toContain("ss_src_direct");
+  });
 
-    delete process.env["GOHIGHLEVEL_API_KEY"];
-    delete process.env["GOHIGHLEVEL_LOCATION_ID"];
+  it("E1 → E3 → E5 keeps ss_src_direct and a pre-existing foreign tag", async () => {
+    const store = memoryOutboxStore();
+    const userId = "u-lifecycle-1";
+    const email = "lifecycle@example.com";
+    const foreignTag = "ss_quiet";
+
+    await enqueueLifecycleEvent(
+      {
+        userId,
+        email,
+        event: "e1_account_created",
+        idempotencyKey: e1IdempotencyKey(userId),
+        apply: {
+          email,
+          event: "e1_account_created",
+          plan: "free",
+          billing: "none",
+        },
+      },
+      store,
+    );
+    await enqueueLifecycleEvent(
+      {
+        userId,
+        email,
+        event: "e3_share_sent",
+        idempotencyKey: e3IdempotencyKey("grant-1"),
+        apply: {
+          email,
+          event: "e3_share_sent",
+          shares: 1,
+        },
+      },
+      store,
+    );
+    await enqueueLifecycleEvent(
+      {
+        userId,
+        email,
+        event: "e5_plan_started",
+        idempotencyKey: e5IdempotencyKey("stripe_evt_1"),
+        apply: {
+          email,
+          event: "e5_plan_started",
+          plan: "solo",
+          billing: "annual",
+          currentStage: "Sharer",
+        },
+      },
+      store,
+    );
+
+    const { fetchImpl, contactTags } = mockGhlFetch({
+      seedContactTags: [foreignTag],
+    });
+    const sendMeta = async () => ({ ok: true as const, eventName: "ShareSent" });
+    const applyGhl = (input: Parameters<typeof applyLifecycleToGhl>[0]) =>
+      applyLifecycleToGhl(input, { fetchImpl, config: ghlConfig });
+
+    const result = await processLifecycleOutbox({ store, applyGhl, sendMeta });
+    expect(result.sent).toBe(3);
+
+    const tags = contactTags();
+    expect(tags).toContain(foreignTag);
+    expect(tags).toContain("ss_src_direct");
+    expect(tags).toContain("ss_solo");
+    expect(tags).toContain("ss_annual");
+    expect(tags).not.toContain("ss_explorer");
+    expect(tags).not.toContain("ss_sharer");
   });
 });

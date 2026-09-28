@@ -113,22 +113,68 @@ function nextStage(input: LifecycleApplyInput): LifecycleStage {
 }
 
 /**
- * GoHighLevel contact upsert replaces the contact's tag set with the `tags`
- * array we send. E2/E6 only touch counters or last-active fields — sending
- * stage tags on those events would wipe the E1 `ss_src_*` tag written ms
- * earlier on the same sign-in (live: SbKwZXrHYOB7sZA0SOE3, ss_explorer only).
+ * GoHighLevel `/contacts/upsert` replaces the contact's entire tag list when
+ * `tags` is present. Lifecycle therefore upserts fields only and mutates tags
+ * through POST/DELETE `/contacts/{id}/tags` (additive; foreign tags preserved).
  */
-function includeTagsOnUpsert(event: LifecycleEventType): boolean {
-  switch (event) {
-    case "e1_account_created":
-    case "e3_share_sent":
-    case "e4_unlock_bought":
-    case "e5_plan_started":
-      return true;
-    case "e2_lot_saved":
-    case "e6_last_active":
-      return false;
+function lifecycleTagChanges(
+  event: LifecycleEventType,
+  stage: LifecycleStage,
+  input: LifecycleApplyInput,
+  sourceTag: string | null,
+): { add: string[]; remove: string[] } {
+  if (event === "e2_lot_saved" || event === "e6_last_active") {
+    return { add: [], remove: [] };
   }
+  const add = tagsFor(stage, input, sourceTag);
+  const remove: string[] = [];
+  const stageTag = STAGE_TAGS[stage];
+  for (const t of Object.values(STAGE_TAGS)) {
+    if (t !== stageTag) remove.push(t);
+  }
+  if (input.billing === "monthly") remove.push(BILLING_TAGS.annual);
+  if (input.billing === "annual") remove.push(BILLING_TAGS.monthly);
+  const addSet = new Set(add);
+  return { add, remove: remove.filter((t) => !addSet.has(t)) };
+}
+
+async function applyContactTagChanges(
+  fetchImpl: FetchLike,
+  config: GhlConfig,
+  contactId: string,
+  changes: { add: string[]; remove: string[] },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (changes.remove.length > 0) {
+    const del = await ghlJson(
+      fetchImpl,
+      config,
+      `/contacts/${encodeURIComponent(contactId)}/tags`,
+      { method: "DELETE", body: { tags: changes.remove } },
+    );
+    if (!del.ok) {
+      const message =
+        typeof del.body["message"] === "string"
+          ? del.body["message"]
+          : `GHL HTTP ${del.status}`;
+      return { ok: false, error: message };
+    }
+  }
+  if (changes.add.length > 0) {
+    const post = await ghlJson(
+      fetchImpl,
+      config,
+      `/contacts/${encodeURIComponent(contactId)}/tags`,
+      { method: "POST", body: { tags: changes.add } },
+    );
+    if (!post.ok) {
+      const message =
+        typeof post.body["message"] === "string"
+          ? post.body["message"]
+          : `GHL HTTP ${post.status}`;
+      return { ok: false, error: message };
+    }
+  }
+  return { ok: true };
 }
 
 function tagsFor(
@@ -236,14 +282,14 @@ export async function applyLifecycleToGhl(
   }
 
   const stage = nextStage(input);
-  const tags = tagsFor(stage, input, source.tag);
+  const tagChanges = lifecycleTagChanges(input.event, stage, input, source.tag);
+  const tags = tagChanges.add;
   const customFields = fieldsFor(catalog, input, source.campaign);
 
   const upsertBody: Record<string, unknown> = {
     locationId: config.locationId,
     email,
     ...(input.displayName ? { name: input.displayName } : {}),
-    ...(includeTagsOnUpsert(input.event) ? { tags } : {}),
     customFields,
   };
   assertLifecyclePayloadSafe(upsertBody);
@@ -264,6 +310,14 @@ export async function applyLifecycleToGhl(
     const contactId =
       typeof contact?.["id"] === "string" ? contact["id"] : "";
     if (!contactId) return { ok: false, error: "ghl_response_missing_contact_id" };
+
+    const tagWrite = await applyContactTagChanges(
+      fetchImpl,
+      config,
+      contactId,
+      tagChanges,
+    );
+    if (!tagWrite.ok) return tagWrite;
 
     const opportunityBody = {
       locationId: config.locationId,

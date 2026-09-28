@@ -67,7 +67,7 @@ afterEach(() => {
 
 describe("session-exchange -> GHL contact on new signup", () => {
   it("a new signup upserts Explorer + ss_src_direct, never a retired source-* or tier-* tag", async () => {
-    const { fetchImpl, calls } = mockGhlFetch();
+    const { fetchImpl, calls, contactTags } = mockGhlFetch();
     vi.spyOn(globalThis, "fetch").mockImplementation(fetchImpl);
 
     const res = await exchangeAuth(
@@ -88,15 +88,16 @@ describe("session-exchange -> GHL contact on new signup", () => {
     expect(body["locationId"]).toBe("test_ghl_location");
     expect(body["email"]).toBe("ghl-new-1@example.com");
     expect(body["name"]).toBe("GHL New User");
-    expect(body["tags"]).toEqual(["ss_explorer", "ss_src_direct"]);
-    const tags = body["tags"] as string[];
+    expect(body["tags"]).toBeUndefined();
+    const tags = contactTags();
+    expect(tags).toEqual(["ss_explorer", "ss_src_direct"]);
     expect(tags.some((t) => t.startsWith("tier-") || t.startsWith("source-"))).toBe(
       false,
     );
   });
 
   it("a paid-ad campaign on session-exchange writes ss_src_ad and stores the UTMs", async () => {
-    const { fetchImpl, calls } = mockGhlFetch();
+    const { fetchImpl, calls, contactTags } = mockGhlFetch();
     vi.spyOn(globalThis, "fetch").mockImplementation(fetchImpl);
 
     const res = await exchangeAuth(
@@ -112,7 +113,8 @@ describe("session-exchange -> GHL contact on new signup", () => {
     expect(res.status).toBe(201);
     const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
     const body = upsert!.body as Record<string, unknown>;
-    expect(body["tags"]).toEqual(["ss_explorer", "ss_src_ad"]);
+    expect(body["tags"]).toBeUndefined();
+    expect(contactTags()).toEqual(["ss_explorer", "ss_src_ad"]);
     const values = (
       body["customFields"] as { field_value: string }[]
     ).map((f) => f.field_value);
