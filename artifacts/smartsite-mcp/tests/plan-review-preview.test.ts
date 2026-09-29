@@ -88,3 +88,16 @@ describe("plan review preview page", () => {
     expect(html).toContain("ui/notifications/size-changed");
   });
 });
+
+describe("plan review preview ICC links", () => {
+  const html = buildPlanReviewPreviewHtml();
+  it("deep-links only the chapters confirmed in Chrome, and labels the book link as the book", () => {
+    expect(html).toContain("chapter-10-means-of-egress#IBC2018P6_Ch10_Sec1001.1");
+    expect(html).toContain("chapter-7-fire-and-smoke-protection-features#IBC2018P6_Ch07_Sec705.5");
+    expect(html).not.toContain("content/IBC2018#");
+    expect(html).toContain("Open the 2018 IBC on ICC Digital Codes");
+  });
+  it("opens links through the host, not by navigating the card", () => {
+    expect(html).toContain("ui/open-link");
+  });
+});
