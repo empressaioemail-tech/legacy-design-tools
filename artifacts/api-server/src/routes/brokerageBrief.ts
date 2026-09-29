@@ -1501,7 +1501,7 @@ brokerageV1.post(
         atomDid: parcelNodeId,
         entityId: parcelNodeId,
         snippet: subjectConstraintsText,
-        label: `Parcel record — ${situs} (Hauska property atom chain)`,
+        label: `Parcel record · ${situs}`,
       });
     }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RESEARCH_AREA_CONTEXT,
+  envelopeAreaIsWithheld,
   formatResearchAreaContextForLlm,
   formatSubjectConstraintsForLlm,
 } from "../brokerageResearchAreaContext";
@@ -195,5 +196,23 @@ describe("formatResearchAreaContextForLlm — subject parcel constraints", () =>
     expect(
       formatSubjectConstraintsForLlm({ parcelNodeId: "x", address: "y" }),
     ).toBe("");
+  });
+
+  it("withholds buildable area numbers when envelopeAreaWithheld is set (defence in depth)", () => {
+    const out = formatSubjectConstraintsForLlm({
+      setbacks: { front_ft: 30, side_ft: 10, rear_ft: 20, district: "SF-1" },
+      envelope: {
+        buildableAreaSqFt: 13788,
+        buildableAreaPct: 63.5,
+        envelopeAreaWithheld: true,
+        disclosure: "Live derive pending",
+      },
+    });
+    expect(out).not.toContain("13788");
+    expect(out).not.toContain("63.5%");
+    expect(out).toContain("area figure withheld");
+    expect(envelopeAreaIsWithheld({ envelope: { envelopeAreaWithheld: true } })).toBe(
+      true,
+    );
   });
 });

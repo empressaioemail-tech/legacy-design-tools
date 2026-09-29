@@ -29,6 +29,38 @@ export const RESEARCH_AREA_SUBJECT_PARCEL_FACTS = z.object({
   landUseCode: z.string().nullish(),
   landUseDescription: z.string().nullish(),
   zoningDistrict: z.string().nullish(),
+  briefFactLines: z.array(z.string().max(500)).max(40).nullish(),
+  jurisdictionLabel: z.string().nullish(),
+  cityLimitsNote: z.string().nullish(),
+  floodSfha: z.string().nullish(),
+  schoolDistrict: z.string().nullish(),
+  maxImperviousCoverPct: z.number().nullish(),
+  buildingFootprintSqFt: z.number().nullish(),
+  setbackCitationUrl: z.string().nullish(),
+});
+
+export const RESEARCH_AREA_RECORDS_INSTRUMENT = z.object({
+  recordingRef: z.string(),
+  documentType: z.string(),
+  recordedAt: z.string().nullish(),
+  parties: z.string().nullish(),
+  readDepth: z.string(),
+  source: z.enum(["classified", "index-hit"]),
+});
+
+export const RESEARCH_AREA_RECORDS_REQUEST = z.object({
+  phase: z.string(),
+  jobId: z.string().nullish(),
+  searchedAt: z.string().nullish(),
+  instrumentCount: z.number().nullish(),
+  verdictKind: z.enum(["verified-absent", "could-not-search"]).nullish(),
+  instruments: z.array(RESEARCH_AREA_RECORDS_INSTRUMENT).max(50).optional(),
+});
+
+export const RESEARCH_AREA_ACTIVE_REPORT = z.object({
+  kind: z.enum(["feasibility", "flood-drainage", "xray"]),
+  savedAt: z.string(),
+  summaryLines: z.array(z.string().max(800)).max(20),
 });
 
 export const RESEARCH_AREA_SUBJECT = z.object({
@@ -69,9 +101,12 @@ export const RESEARCH_AREA_SUBJECT = z.object({
           note: z.string(),
         })
         .nullish(),
+      envelopeAreaWithheld: z.boolean().nullish(),
     })
     .nullish(),
   parcelFacts: RESEARCH_AREA_SUBJECT_PARCEL_FACTS.nullish(),
+  recordsRequest: RESEARCH_AREA_RECORDS_REQUEST.nullish(),
+  activeParcelReports: z.array(RESEARCH_AREA_ACTIVE_REPORT).max(5).nullish(),
 });
 
 export const RESEARCH_AREA_CONTEXT = z
@@ -97,6 +132,16 @@ export const RESEARCH_AREA_CONTEXT = z
   .optional();
 
 export type ResearchAreaContext = z.infer<typeof RESEARCH_AREA_CONTEXT>;
+
+/** Ruling B — withhold buildable area sqft/% when the client flags atom-pending. */
+export function envelopeAreaIsWithheld(
+  subject: z.infer<typeof RESEARCH_AREA_SUBJECT> | null | undefined,
+): boolean {
+  if (!subject?.envelope) return false;
+  if (subject.envelope.envelopeAreaWithheld === true) return true;
+  const disclosure = (subject.envelope.disclosure ?? "").toLowerCase();
+  return disclosure.includes("live derive");
+}
 
 export function isAreaResearchChatEligible(
   areaContext: ResearchAreaContext | undefined,
@@ -216,6 +261,27 @@ export function formatSubjectConstraintsForLlm(
   if (pf?.floodZoneLabel) {
     detail.push(`- Flood zone: ${pf.floodZoneLabel}`);
   }
+  if (pf?.floodSfha) detail.push(`- SFHA: ${pf.floodSfha}`);
+  if (pf?.jurisdictionLabel) {
+    detail.push(`- Jurisdiction: ${pf.jurisdictionLabel}`);
+  }
+  if (pf?.cityLimitsNote) {
+    detail.push(`- City limits / ETJ: ${pf.cityLimitsNote}`);
+  }
+  if (pf?.schoolDistrict) {
+    detail.push(`- School district: ${pf.schoolDistrict}`);
+  }
+  if (pf?.maxImperviousCoverPct != null) {
+    detail.push(`- Max impervious cover: ${pf.maxImperviousCoverPct}%`);
+  }
+  if (pf?.buildingFootprintSqFt != null) {
+    detail.push(
+      `- Building footprint: ${pf.buildingFootprintSqFt.toLocaleString("en-US")} sqft`,
+    );
+  }
+  if (pf?.setbackCitationUrl) {
+    detail.push(`- Setback citation: ${pf.setbackCitationUrl}`);
+  }
 
   const landUseCode = pf?.landUseCode;
   const landUseDescription = pf?.landUseDescription;
@@ -234,12 +300,19 @@ export function formatSubjectConstraintsForLlm(
   if (setbackParts.length) detail.push(`- Setbacks: ${setbackParts.join(", ")}`);
 
   const envParts: string[] = [];
-  if (env?.buildableAreaSqFt != null) {
-    const pct =
-      env.buildableAreaPct != null ? ` (${env.buildableAreaPct}% of lot)` : "";
-    envParts.push(`buildable area ${env.buildableAreaSqFt} sqft${pct}`);
-  } else if (env?.buildableAreaPct != null) {
-    envParts.push(`buildable area ${env.buildableAreaPct}% of lot`);
+  const areaWithheld = envelopeAreaIsWithheld(subject);
+  if (!areaWithheld) {
+    if (env?.buildableAreaSqFt != null) {
+      const pct =
+        env.buildableAreaPct != null ? ` (${env.buildableAreaPct}% of lot)` : "";
+      envParts.push(`buildable area ${env.buildableAreaSqFt} sqft${pct}`);
+    } else if (env?.buildableAreaPct != null) {
+      envParts.push(`buildable area ${env.buildableAreaPct}% of lot`);
+    }
+  } else {
+    envParts.push(
+      "buildable envelope modelled from setbacks — area figure withheld pending an atom",
+    );
   }
   if (env?.maxFootprintSqFt != null) {
     envParts.push(`max footprint ${env.maxFootprintSqFt} sqft`);
@@ -273,6 +346,39 @@ export function formatSubjectConstraintsForLlm(
   // vintage is known, so a dated citation is unchanged.
   if (env?.citationVintage?.note) detail.push(`- ${env.citationVintage.note}`);
 
+  const briefLines = pf?.briefFactLines ?? [];
+  if (briefLines.length) {
+    detail.push("- App brief facts (same as the property brief panel):");
+    for (const line of briefLines.slice(0, 40)) {
+      detail.push(`  · ${line}`);
+    }
+  }
+
+  const reportSummaries = subject.activeParcelReports ?? [];
+  if (reportSummaries.length) {
+    detail.push(
+      "- SUBJECT PARCEL REPORT SUMMARIES (restate only — do not add findings):",
+    );
+    for (const report of reportSummaries) {
+      detail.push(`  · ${report.kind} (${report.savedAt.slice(0, 10)}):`);
+      for (const line of report.summaryLines) {
+        detail.push(`    - ${line}`);
+      }
+    }
+  }
+
+  const records = subject.recordsRequest;
+  if (records && records.phase === "complete" && records.instruments?.length) {
+    detail.push(
+      `- County records search (${records.searchedAt ?? "date unknown"}): ${records.instruments.length} instrument(s) on file.`,
+    );
+    for (const inst of records.instruments.slice(0, 8)) {
+      detail.push(
+        `  · ${inst.documentType} · rec. ${inst.recordingRef}${inst.parties ? ` · ${inst.parties}` : ""}`,
+      );
+    }
+  }
+
   // Nothing usable to render (no PII in this shape by contract).
   if (!detail.length) return "";
 
@@ -286,8 +392,11 @@ export function formatSubjectConstraintsForLlm(
     "When the user asks about setbacks / ADU / additions / lot size / flood / " +
     "land use and SUBJECT PARCEL CONSTRAINTS are present, " +
     `${citeInstruction}; state they ` +
-    "are approximate and to verify with the city. If absent, say the setbacks " +
-    "aren't resolved for this parcel yet — do not fabricate.";
+    "are approximate and to verify with the city. When setback dimensions are " +
+    "listed here, cite them even if code retrieval returned no ADU or use " +
+    "provisions — say plainly which provisions are not on file yet. Never " +
+    "claim no local regulations exist when setbacks or brief facts are present. " +
+    "If absent, say the setbacks aren't resolved for this parcel yet — do not fabricate.";
 
   return [header, ...detail, instruction].join("\n");
 }

@@ -8,6 +8,7 @@ import {
   BRIEFING_ANTHROPIC_MODEL,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
+import { logger } from "./logger";
 import {
   formatBrokerageContextForLlm,
   type BrokerageSiteContext,
@@ -17,8 +18,14 @@ import {
   type PresentationMode,
 } from "./propertyBriefLaySummary";
 
-export const PROPERTY_BRIEF_DISCLAIMER =
-  "Property intel from Hauska municipal code catalog. Not legal advice. Verify with city staff and applicable zoning before client representations.";
+import {
+  RESEARCH_CHAT_CUSTOMER_DISCLAIMER,
+  sanitizeResearchChatCustomerText,
+} from "./brokerageResearchChatSanitize";
+
+export const PROPERTY_BRIEF_DISCLAIMER = RESEARCH_CHAT_CUSTOMER_DISCLAIMER;
+
+export { sanitizeResearchChatCustomerText } from "./brokerageResearchChatSanitize";
 
 /** @deprecated Use PROPERTY_BRIEF_DISCLAIMER */
 export const BROKERAGE_DISCLAIMER = PROPERTY_BRIEF_DISCLAIMER;
@@ -554,9 +561,15 @@ function finalizeResearchChatAnswer(
   generatedAt: string,
   method: "grok" | "anthropic" | "rules-v1",
 ): ResearchChatResult {
-  const citations = parseInlineCitations(answer, atoms);
+  const sanitizedAnswer = sanitizeResearchChatCustomerText(answer);
+  if (/\bHauska\b/i.test(answer)) {
+    logger.warn("research chat: Hauska leaked in model answer; sanitized");
+  }
+  const citations = parseInlineCitations(sanitizedAnswer, atoms);
   const consumer = presentationMode === "consumer";
-  const plain = consumer ? stripInlineCitations(answer) : answer;
+  const plain = consumer
+    ? stripInlineCitations(sanitizedAnswer)
+    : sanitizedAnswer;
 
   // Grounding-derived sources: the atoms actually supplied to the prompt,
   // independent of marker survival. Populates `sources` in EVERY
@@ -685,6 +698,7 @@ export async function generateResearchChat(input: {
 
   const system = [
     "You are a Texas property intel assistant (lay-friendly Carfax-for-property).",
+    "Never name internal systems, product codenames, or catalog infrastructure in the answer.",
     presentationMode === "consumer"
       ? "Answer in plain English for a homebuyer. Do NOT include [n] citation markers or statute numbers in the answer text."
       : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
@@ -697,7 +711,7 @@ export async function generateResearchChat(input: {
         a.atomDid.startsWith("websearch:") ||
         a.atomDid.startsWith("reasoning:"),
     )
-      ? "Sources whose id starts with websearch: or that carry a web-search disclosure are a labeled web-search backup, not a Hauska catalog atom. Do not present them as verified corpus. Never fabricate ICC or code body."
+      ? "Sources whose id starts with websearch: or that carry a web-search disclosure are a labeled web-search backup, not a verified code record. Do not present them as verified corpus. Never fabricate ICC or code body."
       : null,
     hasPrivate
       ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."
