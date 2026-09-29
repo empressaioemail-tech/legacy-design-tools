@@ -39,7 +39,8 @@ const SUMMARY_TEXT = [
   "3 and 4 Side and rear setbacks - Unchecked: section not in the corpus, so no citation can be built.",
   "6 Driveway width - Fail by a reviewer, held back: no citation yet, so it cannot be issued.",
   "Correction notice (draft): 1 correction, 1 escalated, 10 not evaluated, 1 held back. None of this is an approval.",
-  "The card shows the review console, how finding 1 was reached, and the draft correction notice. Present it as a preview of plan review in Claude; do not describe it as a real review.",
+  "How we treat the code: each finding carries a canonical citation, an atom id and a confidence object, and no ICC body text; ICC text is refused to Claude (accessPolicy platform-internal) and replaced by a deep link to codes.iccsafe.org; every reference is metered by source, book and section ($0.01 is a proof-of-concept fixture, not a quoted price).",
+  "The card shows the review console, how finding 1 was reached, the draft correction notice, and how the code is treated. Present it as a preview of plan review in Claude; do not describe it as a real review.",
 ].join("\n");
 
 export function buildPlanReviewPreviewHtml(): string {
@@ -130,6 +131,7 @@ pre{margin:0;padding:10px 12px;font:12px/1.5 var(--mono);background:#f6f8fa;over
     <button role="tab" data-v="console" aria-selected="true">Console</button>
     <button role="tab" data-v="finding" aria-selected="false">Finding 1</button>
     <button role="tab" data-v="letter" aria-selected="false">Correction notice</button>
+    <button role="tab" data-v="codes" aria-selected="false">How we treat the code</button>
   </div>
 </div>
 <div id="view"></div>
@@ -199,6 +201,30 @@ pre{margin:0;padding:10px 12px;font:12px/1.5 var(--mono);background:#f6f8fa;over
       +'<div><div class="panel tally"><div class="ph"><b>What goes in</b><span class="m">13 findings</span></div><div><b style="color:var(--red)">1 accepted</b><span>printed as a correction</span></div><div><b style="color:var(--vio)">1 escalated</b><span>own heading, no action asked</span></div><div><b>10 not evaluated</b><span>summarised by reason</span></div><div><b style="color:var(--amb)">1 held back</b><span>reviewer finding with no citation yet</span></div><div style="display:block"><span class="cite">1 + 1 + 10 + 1 = 13</span></div></div>'
       +'<div class="panel" style="margin-top:12px"><div class="ph"><b>Resubmittal manifest</b><span class="m">machine-readable, attached</span></div><pre>{\\n  "engagement": "PR-2026-0418",\\n  "cycle": 1,\\n  "corrections": [\\n    { "finding": 1, "sheet": "A-101",\\n      "bookId": "BASTROP-UDC",\\n      "sectionNumber": "14-02-003" }\\n  ]\\n}</pre></div></div></div>';
    }
+  };
+  V.codes=function(){
+    var did='did:hauska:code-section:icc-model-code/2018-international-building-code-6th-printing/705-5';
+    return '<div class="head"><h1>How we treat the code</h1><span class="meta">finding 2 \\u00b7 IBC-2018 Section 705.5 \\u00b7 cited, never republished</span></div>'
+     +'<div class="steps"><span class="on">1 Cite</span>\\u2192<span class="on">2 Withhold the text</span>\\u2192<span class="on">3 Meter every reference</span></div>'
+     +'<div class="wrap"><div>'
+     +'<div class="panel"><div class="ph"><b>1. The formal reference</b><span class="m">what the finding carries</span></div>'
+     +'<div class="row"><div class="k">CITATION</div><div>2018 International Building Code, Section 705.5 (IBC-2018)<div class="cite">edition declared at intake \\u00b7 sheet A-101 \\u00b7 finding 2</div></div></div>'
+     +'<div class="row"><div class="k">ATOM ID</div><div><span class="cite" style="word-break:break-all">'+did+'</span></div></div>'
+     +'<div class="row"><div class="k">CONFIDENCE</div><div><pre style="background:none;padding:0">{ "state": "uncertain",\\n  "basis": "two adopted authorities conflict",\\n  "source": "reviewer override, 12 Sep",\\n  "adjudicator": "reviewer" }</pre></div></div>'
+     +'<div class="row"><div class="k">BODY TEXT</div><div><b>None.</b><div class="why">Not stored with the review, not sent to Claude, not printed on the letter. A paraphrase in our words may sit beside the citation; ICC\\u2019s text never does.</div></div></div></div>'
+     +'<div class="panel" style="margin-top:12px"><div class="ph"><b>2. What Claude is allowed to read</b><span class="m">our layer sits in between</span></div>'
+     +'<pre>get_atom '+did.replace('did:hauska:code-section:','\\u2026')+'\\n  caller: anonymous\\n\\u2192 refused\\n  accessPolicy: platform-internal\\n  returned instead: citation + deep link\\n  codes.iccsafe.org/content/IBC2018#IBC2018P6_Ch07_Sec705.5</pre>'
+     +'<div class="why" style="padding:0 12px 12px">A licensed reviewer follows the link to read the section on ICC\\u2019s own site. The model gets the reference and the reasoning, never the book.</div></div>'
+     +'</div><div>'
+     +'<div class="panel"><div class="ph"><b>3. Every reference is metered</b><span class="m">the usage ledger, per book and section</span></div>'
+     +'<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--mut);font-family:var(--mono);font-size:11px"><th style="padding:8px 12px">SOURCE</th><th>BOOK</th><th>SECTION</th><th style="text-align:right;padding-right:12px">RATE</th></tr></thead><tbody>'
+     +[['MCP (this card)','IBC-2018','705.5'],['Plan review UI','IBC-2018','705.5'],['Plan review UI','IBC-2018','1001.1'],['MCP','IBC-2018','1001.1']].map(function(r){return '<tr style="border-top:1px solid var(--line)"><td style="padding:8px 12px">'+r[0]+'</td><td class="cite">'+r[1]+'</td><td class="cite">'+r[2]+'</td><td class="cite" style="text-align:right;padding-right:12px">$0.01</td></tr>';}).join('')
+     +'</tbody></table><div class="why" style="padding:10px 12px;border-top:1px solid var(--line)">Illustrative rows. <b>$0.01 is a proof-of-concept fixture, not a quoted price.</b> The live ledger is in the ICC portal\\u2019s activity page.</div></div>'
+     +'<div class="panel" style="margin-top:12px"><div class="ph"><b>What the review admits it does not know</b></div>'
+     +'<div class="row"><div class="k">UNCERTAIN</div><div>1 \\u00b7 escalated to a reviewer, not guessed</div></div>'
+     +'<div class="row"><div class="k">UNCHECKED</div><div>9 \\u00b7 each with its reason: not in corpus, not licensed, no check built</div></div>'
+     +'<div class="row"><div class="k">REVIEWER</div><div>Every finding can be accepted, edited or dismissed with a reason. The human stays in the loop.</div></div></div>'
+     +'</div></div>';
   };
   var mode='inline', cur='console', rpc=1;
   function post(m){try{parent.postMessage(m,'*');}catch(e){}}
