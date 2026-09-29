@@ -59,7 +59,8 @@ type PreviewServer = {
     name: string,
     config: Record<string, unknown>,
     handler: () => Promise<{
-      content: Array<{ type: "text"; text: string }>;
+      content: Array<{ type: "text"; text: string } | { type: "resource_link"; uri: string; name: string; mimeType: string; description: string }>;
+      _meta?: Record<string, unknown>;
       structuredContent?: Record<string, unknown>;
     }>,
   ) => void;
@@ -91,7 +92,19 @@ export function registerPlanReviewPreview(server: PreviewServer): boolean {
       _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
     },
     async () => ({
-      content: [{ type: "text" as const, text: SUMMARY_TEXT }],
+      content: [
+        { type: "text" as const, text: SUMMARY_TEXT },
+        // Same shape the Smart Site board returns, so hosts that key on the
+        // result's link render the card the same way.
+        {
+          type: "resource_link" as const,
+          uri: PLAN_REVIEW_PREVIEW_URI,
+          name: "Plan review preview",
+          mimeType: APP_MIME,
+          description: "Interactive plan review console: findings matrix, finding detail, correction notice, code library.",
+        },
+      ],
+      _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
       structuredContent: {
         fixture: true,
         engagement: "PR-2026-0418",
