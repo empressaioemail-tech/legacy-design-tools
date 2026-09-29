@@ -67,7 +67,7 @@ describe("P-100 item 2: the Smart Site share plane emits", () => {
     // point of this guard is "still exactly one writer", not "never grows
     // again". Bump this number, deliberately, whenever a future card adds
     // to the allowlist.
-    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(11);
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(12);
   });
 });
 
@@ -88,7 +88,7 @@ describe("P-118: the Help widget emits through the SAME writer, not a second one
     // / share_viewed). Two were added for the Help widget and nothing else —
     // same single insert(gtmEvents) site the property-explorer events route
     // already owns.
-    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(11);
+    expect(PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES).toHaveLength(12);
   });
 });
 
