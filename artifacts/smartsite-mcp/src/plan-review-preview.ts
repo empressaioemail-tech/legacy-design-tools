@@ -50,9 +50,13 @@ export function buildPlanReviewPreviewHtml(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Plan review preview</title>
 <style>
-:root{--ink:#16202a;--mut:#5b6773;--line:#dde3e8;--bg:#f3f5f7;--card:#fff;--teal:#0e6b72;--teal-bg:#e3f1f2;--red:#b42318;--red-bg:#fdecea;--vio:#5b3fb0;--vio-bg:#efeafb;--amb:#9a6700;--amb-bg:#fff4d6;--gry-bg:#eef1f4;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+:root{--ink:#16202a;--mut:#5b6773;--line:#dde3e8;--bg:#f3f5f7;--card:#fff;--teal:#0B5940;--teal-bg:#e7f1ed;--red:#b42318;--red-bg:#fdecea;--vio:#5b3fb0;--vio-bg:#efeafb;--amb:#9a6700;--amb-bg:#fff4d6;--gry-bg:#eef1f4;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.icc{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;background:#0B5940;color:#fff}
+.logo-slot{display:inline-flex;align-items:center;justify-content:center;height:33px;padding:0 12px;border:1px dashed rgba(255,255,255,.7);border-radius:4px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.9}
+.icc-name{font-weight:600;font-size:15px;letter-spacing:.01em}
+.icc-sub{font-size:12.5px;opacity:.85;margin-left:auto}
 .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--card);border-bottom:1px solid var(--line)}
 .brand{font-weight:600}
 .city{color:var(--mut);font-family:var(--mono);font-size:12px}
@@ -112,6 +116,11 @@ pre{margin:0;padding:10px 12px;font:12px/1.5 var(--mono);background:#f6f8fa;over
 </style>
 </head>
 <body class="inline">
+<div class="icc">
+  <span class="logo-slot" title="Licensed ICC logo art to be supplied by ICC">ICC logo</span>
+  <span class="icc-name">International Code Council</span>
+  <span class="icc-sub">Plan review in Claude &middot; concept</span>
+</div>
 <div class="top">
   <span class="brand">Plan Review</span>
   <span class="city">Bastrop, TX</span>
@@ -125,13 +134,13 @@ pre{margin:0;padding:10px 12px;font:12px/1.5 var(--mono);background:#f6f8fa;over
 </div>
 <div id="view"></div>
 <div class="more"><button class="btn pri" id="expand">Open the full review</button></div>
-<div class="foot"><b>PLACEHOLDER</b>An illustrative review on a fixture engagement. The plan sheet is a drawing made for this design, not a real submitted drawing, and no finding here is a determination.</div>
+<div class="foot"><b>PLACEHOLDER</b>An illustrative review on a fixture engagement. The plan sheet is a drawing made for this design, not a real submitted drawing, and no finding here is a determination. A concept prepared for the International Code Council; the ICC name is used to identify the audience and does not imply ICC approval or endorsement.</div>
 <script>
 (function(){
   var SHEET='<svg viewBox="0 0 560 470" role="img" aria-label="Site plan A-101, placeholder">'
    +'<rect x="100" y="20" width="330" height="370" fill="none" stroke="#16202a" stroke-width="2.5"/>'
-   +'<rect x="125" y="105" width="245" height="200" fill="#e3f1f2" stroke="#0e6b72" stroke-width="2"/>'
-   +'<text x="247" y="200" text-anchor="middle" font-size="13" fill="#0e6b72" font-weight="600">PROPOSED RESIDENCE</text>'
+   +'<rect x="125" y="105" width="245" height="200" fill="#e7f1ed" stroke="#0B5940" stroke-width="2"/>'
+   +'<text x="247" y="200" text-anchor="middle" font-size="13" fill="#0B5940" font-weight="600">PROPOSED RESIDENCE</text>'
    +'<text x="247" y="220" text-anchor="middle" font-size="11" fill="#5b6773" font-family="monospace">60\\u2032 x 48\\u2032 \\u00b7 2,880 SF</text>'
    +'<line x1="247" y1="20" x2="247" y2="105" stroke="#56616c" stroke-dasharray="4 4"/>'
    +'<line x1="247" y1="305" x2="247" y2="390" stroke="#b42318" stroke-dasharray="4 4"/>'
