@@ -46,6 +46,7 @@ export const PROPERTY_EXPLORER_FUNNEL_EVENT_TYPES = [
   "share_viewed",
   "pe_help_widget_opened",
   "pe_help_widget_message_sent",
+  "pe_chat_subject_build_error",
 ] as const;
 
 export type PropertyExplorerFunnelEventType =
