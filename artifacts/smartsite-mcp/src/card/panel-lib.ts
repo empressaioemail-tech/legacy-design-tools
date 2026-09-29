@@ -3,6 +3,7 @@
  * `@empressaio/atom-contract/display` (that module contains `atom_path_pending`,
  * which htmlContractViolations refuses on the served page). Values are pinned
  * to the package by tests/vocabulary.test.ts. */
+import type { PrecheckData } from "./precheck-html.js";
 import type { AnchorReadStatus, ParcelAnchor } from "../parcel-anchor.js";
 import { requireMapboxCardToken } from "../mapbox-card-token.js";
 
@@ -241,7 +242,8 @@ export type PanelKind =
   | "unreadable"
   | "screens"
   | "declared"
-  | "lookup";
+  | "lookup"
+  | "precheck";
 
 /** P-474. find_parcel / declared failures with distinct customer copy. */
 export type LookupCard = {
@@ -323,6 +325,8 @@ export type PanelModel = {
   /** P-474 / P-452: nearest-parcel list on find_nearest_parcels reads. */
   nearestSubjectParcelNodeId?: string;
   nearestNeighbors?: NearestNeighborRow[];
+  /** ICC preview (operator-only): the plan precheck view. */
+  precheck?: PrecheckData;
 };
 
 export type NearestNeighborRow = {
@@ -383,7 +387,8 @@ export function mapCardOutcomeFromModel(model: PanelModel): {
     model.kind === "parcel" ||
     model.kind === "parcels" ||
     model.kind === "board" ||
-    model.kind === "screens"
+    model.kind === "screens" ||
+    model.kind === "precheck"
   ) {
     return { outcome: "drawn", reasonCode: "ok" };
   }
@@ -3388,6 +3393,10 @@ function parseToolResultInner(text: string): PanelModel {
   }
   const rec = asRecord(parsed);
   if (!rec) return emptyModel("unreadable");
+  const precheck = asRecord(rec.precheck);
+  if (precheck && Array.isArray(precheck.findings)) {
+    return { kind: "precheck", rows: [], overlays: [], ring: [], edges: [], precheck: precheck as unknown as PrecheckData };
+  }
   if (Array.isArray(rec.savedProperties) && !rec.rows && !rec.screens) {
     return emptyModel("empty");
   }

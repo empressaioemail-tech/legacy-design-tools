@@ -152,6 +152,7 @@ import {
 } from "./panel-lib.js";
 import { answerFirstCarouselHtml, answerFirstSingleHtml, loadingSkeletonHtml } from "./answer-first-html.js";
 import { detailHtml } from "./detail-html.js";
+import { precheckInlineHtml, precheckDeepHtml, PRECHECK_CARD_TITLE } from "./precheck-html.js";
 
 declare const __SS_CARD_DATA__: {
   probeNet: Array<{ key: string; url: string }>;
@@ -630,7 +631,7 @@ declare const __SS_CARD_DATA__: {
   function card(title,inner,fit,extra){
     var diag=showDebug?' <span data-script="ran" class="diag">script-ran</span>':"";
     var cls=(fit?"card af-fit":"card")+(extra?" "+extra:"");
-    if(extra==="ss-board"){
+    if(extra&&extra.indexOf("ss-board")===0){
       var brand='<span class="ss-brand" data-wordmark="1"><span class="ss-smart">SMART</span> <span class="ss-site">SITE</span></span> ';
       return '<div class="'+cls+'"><div class="hdr">'+brand+title+diag+"</div>"+inner+"</div>";
     }
@@ -651,6 +652,9 @@ declare const __SS_CARD_DATA__: {
     } else if(model.inlineCard&&model.inlineCard.layout==="single"&&model.kind==="parcel"){
       root.innerHTML=cardV2(stateLines()+answerFirstSingleHtml(model),model.parcelNodeId||"");
       bindDrawing();
+    } else if(model.kind==="precheck"&&model.precheck){
+      /* ICC preview (operator-only): the plan precheck, inline and in the deep view */
+      root.innerHTML=card(esc(PRECHECK_CARD_TITLE),stateLines()+(deepView?precheckDeepHtml(model.precheck):precheckInlineHtml(model.precheck)),false,"ss-board ss-precheck"+(deepView?" pc-deep":""));
     } else if(model.kind==="board"){
       /* B4 B5: groups by county prefix when there is more than one; each group in the local sort order; Open only on a resolved row */
       var grouping=boardGroups(model.rows);
