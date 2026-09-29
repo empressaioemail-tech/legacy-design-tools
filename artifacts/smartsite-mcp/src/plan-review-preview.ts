@@ -1,22 +1,20 @@
 /**
  * ICC plan review preview (demo only).
  *
- * A fixture plan review rendered as an MCP App, to show what plan review would
- * look like inside the connector. Nothing here reads a real submission: the
- * engagement, sheet and findings are the SmartCity design fixture
- * (PR-2026-0418, 908 PINE ST), and the card says so on every view.
+ * Returns a fixture City of Bastrop plan precheck (908 PINE ST) that the Smart
+ * Site card renders as its own "precheck" view (card/precheck-html.ts), inline
+ * and in the fullscreen deep view. Content follows the SmartCity design canvas
+ * artboards PrecheckStart and PrecheckFindings. Nothing reads a real
+ * submission, and the card says so.
  *
  * Registered only for the emails in PLAN_REVIEW_PREVIEW_EMAILS. With the
- * variable unset, neither the tool nor its resource exists, so no customer
- * session ever lists it. The HTML is self-contained (no card bundle, no
- * external origins), so it cannot disturb the Smart Site board.
+ * variable unset the tool does not exist, so no customer session lists it.
  */
+import { APP_MIME, APP_RESOURCE_URI } from "./card/panel-lib.js";
+import type { PrecheckData } from "./card/precheck-html.js";
 import { getAuthContext } from "./request-context.js";
-import { buildPlanReviewPreviewPage } from "./plan-review-preview-page.js";
 
 export const PLAN_REVIEW_PREVIEW_TOOL = "plan_review_preview";
-export const PLAN_REVIEW_PREVIEW_URI = "ui://smartsite/plan-review-preview-v3.html";
-const APP_MIME = "text/html;profile=mcp-app";
 
 export function planReviewPreviewAllowed(
   email: string | null | undefined,
@@ -31,22 +29,41 @@ export function planReviewPreviewAllowed(
     .includes(want);
 }
 
-const SUMMARY_TEXT = [
-  "ILLUSTRATIVE PREVIEW - the City of Bastrop plan precheck on a fixture engagement (908 PINE ST, 48021:34137, new single-family home), not a review of any real submission.",
-  "The card opens on the precheck: lot facts from the city record with their sources, the project type, the plan upload, and what the check covers. Run the check opens the Findings: 2 suggested before you submit (front setback 22 ft against a 25 ft minimum; building height could not be read), 3 the city reviews (not checked here, each with its reason), 4 with no issue found. Every number is labelled an AI reading to compare against the sheet; it is not a plan review, a permit or an approval.",
-  "Reply in one or two sentences inviting the user to click through the card (Run the check, then Expand for full screen). Do not repeat the findings as a list, and never describe this as a real review.",
-].join("\n");
+const BDC = "City of Bastrop Building Block B3 Section 14-02-003 (bastrop_tx-bdc-2026-adopted)";
 
-export function buildPlanReviewPreviewHtml(): string {
-  return buildPlanReviewPreviewPage();
-}
+export const PRECHECK_FIXTURE: PrecheckData = {
+  address: "908 PINE ST",
+  city: "Bastrop, TX",
+  parcelNodeId: "48021:34137",
+  project: "New single-family home",
+  precheckId: "PC-7K2F-9QD4",
+  version: "version 1 · 8 Sep 2026",
+  when: "8 Sep 2026, 14:12",
+  lot: [
+    { label: "Zoning district", value: "SF-1", source: "City record" },
+    { label: "Lot area", value: "7,200 SF", source: "City record" },
+    { label: "FEMA flood zone", value: "X", source: "FEMA map" },
+    { label: "Front / side / rear", value: "25′ / 5′ / 20′ min", source: "City record" },
+    { label: "Height, coverage", value: "35′ / 45% max", source: "City record" },
+  ],
+  sheets: ["A-101", "A-102", "A-201", "S-101", "C-101", "E-101"],
+  findings: [
+    { n: 1, title: "Front setback", status: "suggestion", reading: "22′-0″", rule: "25′-0″ minimum", sheet: "A-101", note: "Your site plan shows 22′-0″ where this lot requires 25′-0″ minimum. Move the house back, or plan to ask the city about it.", citation: BDC },
+    { n: 5, title: "Building height", status: "not-read", rule: "35′-0″ maximum", sheet: "A-201", note: "We could not find an overall building height on A-201, your elevation sheet. Add the dimension and run the check again.", citation: BDC },
+    { n: 7, title: "Permitted use", status: "city-reviews", note: "Use is not a measurement, so nothing here can check it automatically. The city reviews it.", citation: "City of Bastrop Building Block B3 Section 14-02-008 (bastrop_tx-bdc-2026-adopted)" },
+    { n: 8, title: "Exterior walls", status: "city-reviews", note: "The city has not set its residential code edition in this check, so no citation can be built and the rule does not run.", citation: "No citation (R302.1, edition not set)" },
+    { n: 9, title: "Driveway width", status: "city-reviews", note: "Not part of this check yet. The city reviews it.", citation: "No citation" },
+    { n: 2, title: "Side setback, west", status: "no-issue", reading: "6′-0″", rule: "5′-0″ minimum", sheet: "A-101", note: "Meets the minimum.", citation: BDC },
+    { n: 3, title: "Side setback, east", status: "no-issue", reading: "14′-0″", rule: "5′-0″ minimum", sheet: "A-101", note: "Meets the minimum.", citation: BDC },
+    { n: 4, title: "Rear setback", status: "no-issue", reading: "20′-0″", rule: "20′-0″ minimum", sheet: "A-101", note: "Meets the minimum exactly.", citation: BDC },
+    { n: 6, title: "Lot coverage", status: "no-issue", reading: "2,880 SF footprint", rule: "45% maximum", sheet: "A-101", note: "40.0% of the 7,200 SF lot on the city record.", citation: BDC },
+  ],
+};
 
-type ResourceHandler = (uri: { href: string }) => Promise<{
-  contents: Array<{ uri: string; mimeType: string; text: string; _meta?: Record<string, unknown> }>;
-}>;
+const SUMMARY =
+  "ILLUSTRATIVE PREVIEW of plan review in Claude: the City of Bastrop plan precheck on a fixture (908 PINE ST, new single-family home), not a review of any real submission. The Smart Site card shows the lot facts with their sources, 9 checks (2 suggested before you submit, 3 the city reviews, 4 no issue found), each with its reading, rule and citation; Open findings shows the A-101 sheet with numbered pins. Every number is an AI reading, not a plan review, permit or approval. Reply in one or two sentences inviting the user to use the card; do not list the findings and never call it a real review.";
 
 type PreviewServer = {
-  registerResource?: (name: string, uri: string, config: Record<string, unknown>, handler: ResourceHandler) => void;
   registerTool: (
     name: string,
     config: Record<string, unknown>,
@@ -58,51 +75,34 @@ type PreviewServer = {
   ) => void;
 };
 
-/** Registers the preview tool and its card only for allow-listed operators. */
+/** Registers the preview tool only for allow-listed operators. The card is the Smart Site app. */
 export function registerPlanReviewPreview(server: PreviewServer): boolean {
   if (!planReviewPreviewAllowed(getAuthContext()?.email)) return false;
-  if (typeof server.registerResource === "function") {
-    server.registerResource("Plan review preview", PLAN_REVIEW_PREVIEW_URI, { mimeType: APP_MIME }, async (uri) => ({
-      contents: [
-        {
-          uri: uri.href,
-          mimeType: APP_MIME,
-          text: buildPlanReviewPreviewHtml(),
-          _meta: { ui: { prefersBorder: false, csp: { connectDomains: [], resourceDomains: [] } } },
-        },
-      ],
-    }));
-  }
+  const payload = { precheck: PRECHECK_FIXTURE, summary: SUMMARY, fixture: true };
   server.registerTool(
     PLAN_REVIEW_PREVIEW_TOOL,
     {
       title: "Plan review preview (demo)",
       description:
-        "DEMO ONLY. Opens the City of Bastrop plan precheck as an interactive card: the lot and project screen, then the Findings for 908 PINE ST (suggested before you submit, what the city reviews, no issue found), drawn from the SmartCity precheck design. Use when the user asks for an ICC review, a plan review, a plan precheck, or a code review of a plan set. Fixture data; present it as a preview of plan review in Claude, never as a real review or a determination.",
+        "DEMO ONLY. Opens a City of Bastrop plan precheck in the Smart Site card: lot facts with sources, the checks with their readings, rules and citations, and the site plan with numbered pins. Use when the user asks for an ICC review, a plan review, a plan precheck, or a code review of a plan set. Fixture data; present it as a preview of plan review in Claude, never as a real review or a determination.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
-      _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
+      _meta: { ui: { resourceUri: APP_RESOURCE_URI } },
     },
     async () => ({
+      // The card reads the first text part as JSON, as for every Smart Site tool.
       content: [
-        { type: "text" as const, text: SUMMARY_TEXT },
-        // Same shape the Smart Site board returns, so hosts that key on the
-        // result's link render the card the same way.
+        { type: "text" as const, text: JSON.stringify(payload) },
         {
           type: "resource_link" as const,
-          uri: PLAN_REVIEW_PREVIEW_URI,
-          name: "Plan review preview",
+          uri: APP_RESOURCE_URI,
+          name: "Smart Site board",
           mimeType: APP_MIME,
-          description: "Interactive City of Bastrop plan precheck: lot and project, then Findings.",
+          description: "Smart Site card: plan precheck preview.",
         },
       ],
-      _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
-      structuredContent: {
-        fixture: true,
-        engagement: "PR-2026-0418",
-        address: "908 PINE ST, Bastrop TX",
-        counts: { total: 13, fail: 2, uncertain: 1, unchecked: 9, pass: 1 },
-      },
+      _meta: { ui: { resourceUri: APP_RESOURCE_URI } },
+      structuredContent: payload as unknown as Record<string, unknown>,
     }),
   );
   return true;
