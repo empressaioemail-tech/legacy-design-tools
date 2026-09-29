@@ -76,28 +76,22 @@ describe("plan review preview gate", () => {
 
 describe("plan review preview page", () => {
   const html = buildPlanReviewPreviewHtml();
-  it("labels itself as a fixture and a placeholder", () => {
+  it("is the precheck design, labelled a fixture", () => {
+    expect(html).toContain("Check your plans before you submit");
+    expect(html).toContain("Findings for 908 PINE ST");
     expect(html).toContain("FIXTURE");
-    expect(html).toContain("PLACEHOLDER");
   });
   it("loads nothing from another origin", () => {
     expect(html).not.toMatch(/(src|href)=["']https?:/);
+    expect(html).not.toContain("support.js");
   });
-  it("does the app handshake and reports its height", () => {
+  it("does the app handshake, reports its height and can ask for fullscreen", () => {
     expect(html).toContain("ui/initialize");
     expect(html).toContain("ui/notifications/size-changed");
+    expect(html).toContain("ui/request-display-mode");
   });
-});
-
-describe("plan review preview ICC links", () => {
-  const html = buildPlanReviewPreviewHtml();
-  it("deep-links only the chapters confirmed in Chrome, and labels the book link as the book", () => {
-    expect(html).toContain("chapter-10-means-of-egress#IBC2018P6_Ch10_Sec1001.1");
-    expect(html).toContain("chapter-7-fire-and-smoke-protection-features#IBC2018P6_Ch07_Sec705.5");
-    expect(html).not.toContain("content/IBC2018#");
-    expect(html).toContain("Open the 2018 IBC on ICC Digital Codes");
-  });
-  it("opens links through the host, not by navigating the card", () => {
-    expect(html).toContain("ui/open-link");
+  it("cannot end its own script early", () => {
+    const body = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
+    expect(body).not.toContain("</script");
   });
 });

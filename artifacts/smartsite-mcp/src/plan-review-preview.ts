@@ -15,7 +15,7 @@ import { getAuthContext } from "./request-context.js";
 import { buildPlanReviewPreviewPage } from "./plan-review-preview-page.js";
 
 export const PLAN_REVIEW_PREVIEW_TOOL = "plan_review_preview";
-export const PLAN_REVIEW_PREVIEW_URI = "ui://smartsite/plan-review-preview-v2.html";
+export const PLAN_REVIEW_PREVIEW_URI = "ui://smartsite/plan-review-preview-v3.html";
 const APP_MIME = "text/html;profile=mcp-app";
 
 export function planReviewPreviewAllowed(
@@ -32,17 +32,9 @@ export function planReviewPreviewAllowed(
 }
 
 const SUMMARY_TEXT = [
-  "ILLUSTRATIVE PREVIEW - a fixture plan review, not a review of any real submission.",
-  "Engagement PR-2026-0418, 908 PINE ST, Bastrop TX, single-family, cycle 1, edition declared at intake.",
-  "13 findings: 12 rules in scope plus 1 added by a reviewer. Fail 2, Uncertain 1, Unchecked 9, Pass 1.",
-  "1 Front setback - Fail, live check: proposed 22'-0\" is below the 25'-0\" SF-1 minimum (City of Bastrop Building Block B3 Section 14-02-003).",
-  "2 Fire separation distance - Uncertain, escalated to a reviewer: two adopted authorities conflict for the west wall (2018 International Building Code Section 705.5; text not reproduced).",
-  "3 and 4 Side and rear setbacks - Unchecked: section not in the corpus, so no citation can be built.",
-  "6 Driveway width - Fail by a reviewer, held back: no citation yet, so it cannot be issued.",
-  "Correction notice (draft): 1 correction, 1 escalated, 10 not evaluated, 1 held back. None of this is an approval.",
-  "How we treat the code: each finding carries a canonical citation, an atom id and a confidence object, and no ICC body text; ICC text is refused to Claude (accessPolicy platform-internal) and replaced by a deep link to codes.iccsafe.org; every reference is metered by source, book and section ($0.01 is a proof-of-concept fixture, not a quoted price).",
-  "The card opens on the findings matrix (Bastrop UDC and IBC-2018 rows, each with its section, atom id, confidence and status; IBC rows marked body withheld). Clicking a row opens how it was reached; the Letter tab is the draft correction notice; the Code tab is the code library entry for IBC 1001.1 with the usage ledger. IBC citations open the section on ICC Digital Codes (1001.1 and 705.5 deep-link to the section; others open the book).",
-  "Reply in one or two sentences inviting the user to click through the card. Present it as a preview of plan review in Claude; do not describe it as a real review, and do not repeat the findings as a list.",
+  "ILLUSTRATIVE PREVIEW - the City of Bastrop plan precheck on a fixture engagement (908 PINE ST, 48021:34137, new single-family home), not a review of any real submission.",
+  "The card opens on the precheck: lot facts from the city record with their sources, the project type, the plan upload, and what the check covers. Run the check opens the Findings: 2 suggested before you submit (front setback 22 ft against a 25 ft minimum; building height could not be read), 3 the city reviews (not checked here, each with its reason), 4 with no issue found. Every number is labelled an AI reading to compare against the sheet; it is not a plan review, a permit or an approval.",
+  "Reply in one or two sentences inviting the user to click through the card (Run the check, then Expand for full screen). Do not repeat the findings as a list, and never describe this as a real review.",
 ].join("\n");
 
 export function buildPlanReviewPreviewHtml(): string {
@@ -86,7 +78,7 @@ export function registerPlanReviewPreview(server: PreviewServer): boolean {
     {
       title: "Plan review preview (demo)",
       description:
-        "DEMO ONLY. Opens an illustrative ICC-style plan review in the card: the review console (plan sheet with pinned findings), how a finding was reached (rule, input, comparison), and the draft correction notice. Use when the user asks for an ICC review, a plan review, a code review of a plan set, or a plan review preview. The data is a fixed fixture (PR-2026-0418, 908 PINE ST, Bastrop TX); it reviews no real submission, and must be presented as a preview of plan review in Claude, never as a real review or a determination.",
+        "DEMO ONLY. Opens the City of Bastrop plan precheck as an interactive card: the lot and project screen, then the Findings for 908 PINE ST (suggested before you submit, what the city reviews, no issue found), drawn from the SmartCity precheck design. Use when the user asks for an ICC review, a plan review, a plan precheck, or a code review of a plan set. Fixture data; present it as a preview of plan review in Claude, never as a real review or a determination.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
       _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
@@ -101,7 +93,7 @@ export function registerPlanReviewPreview(server: PreviewServer): boolean {
           uri: PLAN_REVIEW_PREVIEW_URI,
           name: "Plan review preview",
           mimeType: APP_MIME,
-          description: "Interactive plan review console: findings matrix, finding detail, correction notice, code library.",
+          description: "Interactive City of Bastrop plan precheck: lot and project, then Findings.",
         },
       ],
       _meta: { ui: { resourceUri: PLAN_REVIEW_PREVIEW_URI } },
