@@ -70,6 +70,7 @@ import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
 import peMagicLinkRouter from "./peMagicLink";
 import propertyExplorerRouter from "./propertyExplorer";
+import affiliatesRouter from "./affiliates";
 import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
 import peHelpRouter from "./peHelp";
@@ -80,6 +81,7 @@ router.use(authRouter);
 router.use(peAuthRouter);
 router.use(peMagicLinkRouter);
 router.use(propertyExplorerRouter);
+router.use(affiliatesRouter);
 // P-118 — ungated Help widget chat. Deliberately its OWN router, mounted at
 // the top level (never under brokerageV1), so it can never inherit that
 // surface's session/entitlement/install-id gating by accident.

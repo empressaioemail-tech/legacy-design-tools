@@ -21,6 +21,27 @@ CREATE TABLE @@SCHEMA@@.adapter_response_cache (
 );
 
 
+-- Name: affiliate_partner; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.affiliate_partner (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email text NOT NULL,
+    first_name text,
+    channel_url text,
+    stage text NOT NULL,
+    identified_at timestamp with time zone,
+    contacted_at timestamp with time zone,
+    applied_at timestamp with time zone,
+    approved_at timestamp with time zone,
+    link_issued_at timestamp with time zone,
+    first_conversion_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT affiliate_partner_email_chk CHECK ((email <> ''::text)),
+    CONSTRAINT affiliate_partner_stage_chk CHECK ((stage = ANY (ARRAY['identified'::text, 'contacted'::text, 'applied'::text, 'approved'::text, 'link_issued'::text, 'first_conversion'::text])))
+);
+
+
 -- Name: architect_notification_reads; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.architect_notification_reads (
@@ -1318,7 +1339,8 @@ CREATE TABLE @@SCHEMA@@.pe_chat_message_counts (
 
 CREATE TABLE @@SCHEMA@@.pe_lifecycle_outbox (
     id text NOT NULL,
-    owner_user_id text NOT NULL,
+    owner_user_id text,
+    affiliate_partner_id uuid,
     event_type text NOT NULL,
     idempotency_key text NOT NULL,
     email text NOT NULL,
@@ -1326,11 +1348,27 @@ CREATE TABLE @@SCHEMA@@.pe_lifecycle_outbox (
     status text DEFAULT 'pending'::text NOT NULL,
     attempts integer DEFAULT 0 NOT NULL,
     last_error text,
+    local_status text DEFAULT 'pending'::text NOT NULL,
+    local_attempts integer DEFAULT 0 NOT NULL,
+    local_error text,
+    resend_status text DEFAULT 'pending'::text NOT NULL,
+    resend_attempts integer DEFAULT 0 NOT NULL,
+    resend_error text,
+    meta_status text DEFAULT 'pending'::text NOT NULL,
+    meta_attempts integer DEFAULT 0 NOT NULL,
+    meta_error text,
+    resend_event_json jsonb,
+    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,
+    claimed_until timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     sent_at timestamp with time zone,
     CONSTRAINT pe_lifecycle_outbox_email_chk CHECK ((email <> ''::text)),
     CONSTRAINT pe_lifecycle_outbox_event_type_chk CHECK ((event_type <> ''::text)),
-    CONSTRAINT pe_lifecycle_outbox_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text])))
+    CONSTRAINT pe_lifecycle_outbox_local_status_chk CHECK ((local_status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text, 'dead'::text, 'skipped'::text]))),
+    CONSTRAINT pe_lifecycle_outbox_meta_status_chk CHECK ((meta_status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text, 'dead'::text, 'skipped'::text]))),
+    CONSTRAINT pe_lifecycle_outbox_resend_status_chk CHECK ((resend_status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text, 'dead'::text, 'skipped'::text]))),
+    CONSTRAINT pe_lifecycle_outbox_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'sent'::text, 'failed'::text, 'dead'::text]))),
+    CONSTRAINT pe_lifecycle_outbox_subject_chk CHECK (((owner_user_id IS NULL) <> (affiliate_partner_id IS NULL)))
 );
 
 
@@ -2229,6 +2267,55 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
+-- Name: ss_contact; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.ss_contact (
+    user_id text NOT NULL,
+    email text NOT NULL,
+    first_name text,
+    stage text DEFAULT 'Explorer'::text NOT NULL,
+    plan text DEFAULT 'free'::text NOT NULL,
+    billing text DEFAULT 'none'::text NOT NULL,
+    source text,
+    utm_source text,
+    utm_medium text,
+    utm_campaign text,
+    utm_content text,
+    saved_lots integer DEFAULT 0 NOT NULL,
+    shares integer DEFAULT 0 NOT NULL,
+    last_active date,
+    quiet boolean DEFAULT false NOT NULL,
+    quiet_since timestamp with time zone,
+    claude_connected boolean DEFAULT false NOT NULL,
+    became_sharer_at timestamp with time zone,
+    resend_segment_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ss_contact_billing_chk CHECK ((billing = ANY (ARRAY['monthly'::text, 'annual'::text, 'none'::text]))),
+    CONSTRAINT ss_contact_email_chk CHECK ((email <> ''::text)),
+    CONSTRAINT ss_contact_plan_chk CHECK ((plan = ANY (ARRAY['free'::text, 'unlock'::text, 'solo'::text, 'studio'::text, 'team'::text]))),
+    CONSTRAINT ss_contact_source_chk CHECK (((source IS NULL) OR (source = ANY (ARRAY['ad'::text, 'group'::text, 'page'::text, 'share'::text, 'direct'::text])))),
+    CONSTRAINT ss_contact_stage_chk CHECK ((stage = ANY (ARRAY['Explorer'::text, 'Sharer'::text, 'Unlock'::text, 'Solo'::text, 'Studio'::text, 'Team'::text])))
+);
+
+
+-- Name: ss_lifecycle_drain_run; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.ss_lifecycle_drain_run (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    host text NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    claimed integer DEFAULT 0 NOT NULL,
+    sent integer DEFAULT 0 NOT NULL,
+    failed integer DEFAULT 0 NOT NULL,
+    dead integer DEFAULT 0 NOT NULL,
+    quiet_enqueued integer DEFAULT 0 NOT NULL,
+    claude_enqueued integer DEFAULT 0 NOT NULL,
+    error text
+);
+
+
 -- Name: submission_classifications; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.submission_classifications (
@@ -2623,6 +2710,12 @@ CREATE TABLE @@SCHEMA@@.workspace_settings (
 
 ALTER TABLE ONLY @@SCHEMA@@.adapter_response_cache
     ADD CONSTRAINT adapter_response_cache_pkey PRIMARY KEY (id);
+
+
+-- Name: affiliate_partner affiliate_partner_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.affiliate_partner
+    ADD CONSTRAINT affiliate_partner_pkey PRIMARY KEY (id);
 
 
 -- Name: architect_notification_reads architect_notification_reads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -3411,6 +3504,18 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
 
 
+-- Name: ss_contact ss_contact_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.ss_contact
+    ADD CONSTRAINT ss_contact_pkey PRIMARY KEY (user_id);
+
+
+-- Name: ss_lifecycle_drain_run ss_lifecycle_drain_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.ss_lifecycle_drain_run
+    ADD CONSTRAINT ss_lifecycle_drain_run_pkey PRIMARY KEY (id);
+
+
 -- Name: submission_classifications submission_classifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.submission_classifications
@@ -3545,6 +3650,16 @@ CREATE INDEX adapter_response_cache_expires_idx ON @@SCHEMA@@.adapter_response_c
 -- Name: adapter_response_cache_uniq; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX adapter_response_cache_uniq ON @@SCHEMA@@.adapter_response_cache USING btree (adapter_key, lat_rounded, lng_rounded);
+
+
+-- Name: affiliate_partner_email_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX affiliate_partner_email_uidx ON @@SCHEMA@@.affiliate_partner USING btree (email);
+
+
+-- Name: affiliate_partner_stage_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX affiliate_partner_stage_idx ON @@SCHEMA@@.affiliate_partner USING btree (stage);
 
 
 -- Name: atom_calibration_overlay_class_idx; Type: INDEX; Schema: public; Owner: -
@@ -4147,6 +4262,11 @@ CREATE UNIQUE INDEX pe_ai_connections_owner_client_uidx ON @@SCHEMA@@.pe_ai_conn
 CREATE INDEX pe_ai_connections_owner_idx ON @@SCHEMA@@.pe_ai_connections USING btree (owner_user_id);
 
 
+-- Name: pe_lifecycle_outbox_due_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_lifecycle_outbox_due_idx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (status, next_attempt_at);
+
+
 -- Name: pe_lifecycle_outbox_idempotency_uidx; Type: INDEX; Schema: public; Owner: -
 
 CREATE UNIQUE INDEX pe_lifecycle_outbox_idempotency_uidx ON @@SCHEMA@@.pe_lifecycle_outbox USING btree (idempotency_key);
@@ -4570,6 +4690,16 @@ CREATE INDEX snapshots_engagement_idx ON @@SCHEMA@@.snapshots USING btree (engag
 -- Name: snapshots_received_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX snapshots_received_at_idx ON @@SCHEMA@@.snapshots USING btree (received_at);
+
+
+-- Name: ss_contact_quiet_last_active_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX ss_contact_quiet_last_active_idx ON @@SCHEMA@@.ss_contact USING btree (quiet, last_active);
+
+
+-- Name: ss_lifecycle_drain_run_started_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX ss_lifecycle_drain_run_started_idx ON @@SCHEMA@@.ss_lifecycle_drain_run USING btree (started_at);
 
 
 -- Name: submission_classifications_disciplines_gin_idx; Type: INDEX; Schema: public; Owner: -
@@ -5014,6 +5144,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_chat_message_counts
     ADD CONSTRAINT pe_chat_message_counts_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
+-- Name: pe_lifecycle_outbox pe_lifecycle_outbox_affiliate_partner_id_affiliate_partner_id_f; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
+    ADD CONSTRAINT pe_lifecycle_outbox_affiliate_partner_id_affiliate_partner_id_f FOREIGN KEY (affiliate_partner_id) REFERENCES @@SCHEMA@@.affiliate_partner(id) ON DELETE CASCADE;
+
+
 -- Name: pe_lifecycle_outbox pe_lifecycle_outbox_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_lifecycle_outbox
@@ -5234,6 +5370,16 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_engagement_id_engagements_id_fk FOREIGN KEY (engagement_id) REFERENCES @@SCHEMA@@.engagements(id) ON DELETE CASCADE;
+
+
+-- Name: ss_contact ss_contact_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.ss_contact
+    ADD CONSTRAINT ss_contact_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+
+\unrestrict EPiQUfDdCfQZQorwNlz1DtwDG29V2xmmxvD82hpKd0tpKIFE7ngiKL7SDAFb3S1
 
 
 -- Name: submission_classifications submission_classifications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -12,9 +12,9 @@
  *     with distinct, honest statuses
  *   - a successful verification creates a real session: same response
  *     shape, same `users` row, same entitlement bootstrap as OAuth
-   *   - the GHL new-signup hook upserts Explorer + ss_src_direct on the
-   *     first verification of a brand-new address, and never again on a
-   *     returning sign-in. Retired `source-*` / `tier-*` tags are not written.
+ *   - the lifecycle new-signup hook enqueues one account-created event on
+ *     the first verification of a brand-new address, and never again on a
+ *     returning sign-in (P-492).
  *   - no password anywhere: no password column exists on the new table,
  *     and nothing in this flow ever reads/writes `user_auth_credentials`
  */
@@ -41,8 +41,6 @@ vi.mock("@workspace/db", async () => {
 
 const { setupRouteTests } = await import("./setup");
 const { createMagicLinkToken } = await import("../lib/peMagicLink");
-const { mockGhlFetch } = await import("../lib/peGhlCatalog.test");
-const { resetGhlCatalogCache } = await import("../lib/peGhlCatalog");
 
 let getApp: () => Express;
 setupRouteTests((g) => {
@@ -73,7 +71,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  resetGhlCatalogCache();
   delete process.env["RESEND_API_KEY"];
 });
 
@@ -325,74 +322,60 @@ describe("full request -> email -> verify flow", () => {
   });
 });
 
-describe("verify -> GHL new-signup hook", () => {
-  beforeEach(() => {
-    process.env["GOHIGHLEVEL_API_KEY"] = "test_ghl_key";
-    process.env["GOHIGHLEVEL_LOCATION_ID"] = "test_ghl_location";
-  });
-  afterEach(() => {
-    delete process.env["GOHIGHLEVEL_API_KEY"];
-    delete process.env["GOHIGHLEVEL_LOCATION_ID"];
-  });
+describe("verify -> lifecycle new-signup hook (P-492)", () => {
+  async function e1Rows(userId: string) {
+    const { peLifecycleOutbox } =
+      await vi.importActual<typeof import("@workspace/db")>("@workspace/db");
+    const { and } = await import("drizzle-orm");
+    return ctx.schema!.db
+      .select()
+      .from(peLifecycleOutbox)
+      .where(
+        and(
+          eq(peLifecycleOutbox.ownerUserId, userId),
+          eq(peLifecycleOutbox.eventType, "e1_account_created"),
+        ),
+      );
+  }
 
-  it("fires exactly once on a brand-new magic-link signup, with no tier-* tag", async () => {
-    const { fetchImpl, calls, contactTags } = mockGhlFetch();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      if (String(url).includes("leadconnectorhq.com")) {
-        return fetchImpl(url, init);
-      }
+  it("enqueues exactly one account-created event on a brand-new magic-link signup", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(JSON.stringify({ id: "resend_msg" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     });
 
-    const email = "ghl-magic-link-new@example.com";
+    const email = "lifecycle-magic-link-new@example.com";
     const reqRes = await exchangeAuth(
       request(getApp()).post("/api/auth/email/request"),
     ).send({ email });
     expect(reqRes.status).toBe(200);
 
-    const resendCall = (
-      vi.mocked(globalThis.fetch).mock.calls.find(
-        (c) => !String(c[0]).includes("leadconnectorhq.com"),
-      ) as [string, RequestInit]
-    );
+    const resendCall = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
     const rawToken = tokenFromResendCall({ init: resendCall[1] });
 
     const verifyRes = await exchangeAuth(
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: rawToken });
     expect(verifyRes.status).toBe(201);
-    expect(verifyRes.body.lifecycleEventId).toMatch(
-      /^[0-9a-f-]{36}$/i,
-    );
+    expect(verifyRes.body.lifecycleEventId).toMatch(/^[0-9a-f-]{36}$/i);
 
-    const upsert = calls.find((c) => c.url.includes("/contacts/upsert"));
-    expect(upsert).toBeTruthy();
-    const body = upsert!.body as Record<string, unknown>;
-    expect(body["email"]).toBe(email);
-    expect(body["tags"]).toBeUndefined();
-    const tags = contactTags();
-    expect(tags).toEqual(["ss_explorer", "ss_src_direct"]);
-    expect(tags.some((t) => t.startsWith("tier-") || t.startsWith("source-"))).toBe(
-      false,
-    );
+    const rows = await e1Rows(verifyRes.body.userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(verifyRes.body.lifecycleEventId);
+    expect(rows[0]!.email).toBe(email);
   });
 
-  it("does not fire again for a returning magic-link sign-in", async () => {
-    const { fetchImpl, calls } = mockGhlFetch();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      if (String(url).includes("leadconnectorhq.com")) {
-        return fetchImpl(url, init);
-      }
+  it("does not enqueue again for a returning magic-link sign-in", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(JSON.stringify({ id: "resend_msg" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
     });
 
-    const email = "ghl-magic-link-returning@example.com";
+    const email = "lifecycle-magic-link-returning@example.com";
 
     const first = await createMagicLinkToken(email);
     if (!first.ok) throw new Error("unreachable");
@@ -400,9 +383,6 @@ describe("verify -> GHL new-signup hook", () => {
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: first.rawToken });
     expect(firstVerify.status).toBe(201);
-    const afterFirst = calls.length;
-    expect(afterFirst).toBeGreaterThan(0);
-    expect(calls.some((c) => c.url.includes("/contacts/upsert"))).toBe(true);
 
     const second = await createMagicLinkToken(email);
     if (!second.ok) throw new Error("unreachable");
@@ -413,6 +393,6 @@ describe("verify -> GHL new-signup hook", () => {
     expect(secondVerify.body.userId).toBe(firstVerify.body.userId);
     expect(secondVerify.body.lifecycleEventId).toBeUndefined();
 
-    expect(calls).toHaveLength(afterFirst);
+    expect(await e1Rows(firstVerify.body.userId)).toHaveLength(1);
   });
 });

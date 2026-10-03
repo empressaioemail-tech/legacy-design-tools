@@ -18,6 +18,7 @@ import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSw
 import { startFindingRunsSweep } from "./lib/findingRunsSweep";
 import { startTerrainJobsSweep } from "./lib/terrainGenerationJobsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
+import { startLifecycleDrain } from "./lib/peLifecycleDrain";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
 // CODE_ATOM_QUEUE_TICK_MS (default 10s) for pending entries.
@@ -47,6 +48,13 @@ startTerrainJobsSweep(logger);
 // once and never re-cached. Disabled with
 // ADAPTER_CACHE_SWEEP_INTERVAL_MS=0.
 startAdapterCacheSweepWorker({ log: logger });
+
+// P-492: drain the Smart Site lifecycle outbox on a schedule (retry without
+// waiting for another user's event; quiet and Claude-connected scans). Every
+// tick writes a row to `ss_lifecycle_drain_run`. Rows are claimed with
+// FOR UPDATE SKIP LOCKED, so every instance can run it. See
+// `lib/peLifecycleDrain.ts`.
+startLifecycleDrain(logger);
 
 const app: Express = express();
 

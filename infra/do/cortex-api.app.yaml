@@ -96,6 +96,9 @@ services:
       # No value is carried and none may be: register section 3 forbids a secret
       # value in a lane artifact. The capture's count was 39 secret names, of
       # which 6 were Cotality's and are dead (item 4c below), leaving 33.
+      # P-492 (2026-10-03) removed GOHIGHLEVEL_API_KEY and GOHIGHLEVEL_LOCATION_ID:
+      # GoHighLevel is retired from Smart Site, hard cut, and CI fails if cortex
+      # source names either again. That leaves 31.
       - { key: AI_INTEGRATIONS_ANTHROPIC_API_KEY, scope: RUN_TIME, type: SECRET }
       - { key: ATOMS_DATABASE_URL, scope: RUN_TIME, type: SECRET }
       - { key: BIM_MODEL_SHARED_SECRET, scope: RUN_TIME, type: SECRET }
@@ -108,8 +111,6 @@ services:
       - { key: ENGINE_API_GATE_TOKEN, scope: RUN_TIME, type: SECRET }
       - { key: FACTORY_DATABASE_URL, scope: RUN_TIME, type: SECRET }
       - { key: GATE_CONTEXT_SIGNING_KEY, scope: RUN_TIME, type: SECRET }
-      - { key: GOHIGHLEVEL_API_KEY, scope: RUN_TIME, type: SECRET }
-      - { key: GOHIGHLEVEL_LOCATION_ID, scope: RUN_TIME, type: SECRET }
       - { key: PE_SESSION_EXCHANGE_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: PIPEDRIVE_API_TOKEN, scope: RUN_TIME, type: SECRET }
       - { key: PLAN_REVIEW_API_KEY, scope: RUN_TIME, type: SECRET }
@@ -199,6 +200,14 @@ services:
       #   PRIVATE_OBJECT_DIR         <- D-34 (Spaces adapter). Both were
       #   PUBLIC_OBJECT_SEARCH_PATHS    GCS-backed object paths; the storage
       #                                 platform move is D-34's, which is QUEUED.
+      #   RESEND_SS_SEGMENT_ID       <- P-492: the Resend segment id for Smart Site
+      #   RESEND_AFFILIATE_SEGMENT_ID   contacts and for affiliates. Created in the
+      #                                 operator's Resend account by the integration
+      #                                 seat (scripts/resend-lifecycle-setup.mjs) and
+      #                                 set at deploy. Unset, the lifecycle outbox's
+      #                                 Resend leg refuses by name per row
+      #                                 (`resend_ss_segment_id_unset`) and the drain
+      #                                 retries until the cap; there is no default.
       #
       # ---- ABSENT: vendor dead, and nothing waits on it ----
       # The six Cotality secrets (PROPERTY/RISKMETER/SPATIALTILE key+secret) were

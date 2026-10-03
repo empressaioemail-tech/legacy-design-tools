@@ -1,9 +1,10 @@
 /**
- * GoHighLevel E1 (account created) on a brand-new Property Explorer signup.
+ * E1 (`ss.account_created`) on a brand-new Property Explorer signup.
  *
- * Decision `_decisions/2026-09-24_smart_site_lifecycle_pipeline_in_ghl.md`.
- * Enqueues the event, then tries to send in-request. A GHL/Meta failure
- * never fails sign-up; the outbox keeps the event for retry.
+ * Decision `_decisions/2026-10-03_ghl_retired_lifecycle_to_resend.md` (P-492).
+ * Enqueues the event, then tries this row once, detached. A send failure
+ * never fails sign-up; the outbox keeps the event and the scheduled drain
+ * retries it.
  */
 
 import { logger } from "./logger";
@@ -13,15 +14,15 @@ import { LIFECYCLE_EVENT_ID_FIELD } from "./peLifecycleTypes";
 
 export { LIFECYCLE_EVENT_ID_FIELD };
 
-export type CreateGhlContactInput = {
+export type NewPeSignupInput = {
   userId: string;
   email: string;
   displayName: string;
   campaign?: string;
 };
 
-export async function notifyGhlOfNewPeSignup(
-  input: CreateGhlContactInput,
+export async function notifyLifecycleOfNewPeSignup(
+  input: NewPeSignupInput,
 ): Promise<string | null> {
   try {
     return await dispatchLifecycleEvent({
@@ -33,15 +34,15 @@ export async function notifyGhlOfNewPeSignup(
         email: input.email,
         displayName: input.displayName,
         event: "e1_account_created",
-        campaign: input.campaign,
+        ...(input.campaign ? { campaign: input.campaign } : {}),
         plan: "free",
         billing: "none",
       },
     });
   } catch (err) {
     logger.info(
-      { email: input.email, err },
-      "pe session-exchange: GHL E1 did not complete (fail-open, sign-up unaffected)",
+      { err },
+      "pe sign-in: lifecycle E1 did not complete (fail-open, sign-up unaffected)",
     );
     return null;
   }
