@@ -5378,10 +5378,6 @@ ALTER TABLE ONLY @@SCHEMA@@.ss_contact
     ADD CONSTRAINT ss_contact_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
-
-\unrestrict EPiQUfDdCfQZQorwNlz1DtwDG29V2xmmxvD82hpKd0tpKIFE7ngiKL7SDAFb3S1
-
-
 -- Name: submission_classifications submission_classifications_submission_id_submissions_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.submission_classifications
