@@ -241,3 +241,15 @@ describe("seedContact: a first-seen user starts from what they paid for (P-492b)
       .toEqual({ ok: false, error: "entitlement_tier_unknown:enterprise" });
   });
 });
+
+describe("firstNameFrom rejects an email handle as a name (P-492b)", () => {
+  it("VIOLATION (measured 2026-10-03): an email sign-in's display name is its local part and is not a first name", () => {
+    expect(firstNameFrom("empressaioemail+ssc1", "empressaioemail+ssc1@gmail.com")).toBeNull();
+    expect(firstNameFrom("jsmith", "jsmith@example.com")).toBeNull();
+    expect(firstNameFrom("user_42")).toBeNull();
+  });
+  it("a real name still yields its first token", () => {
+    expect(firstNameFrom("Jane Smith", "jane@example.com")).toBe("Jane");
+    expect(firstNameFrom("Jane", "jsmith@example.com")).toBe("Jane");
+  });
+});

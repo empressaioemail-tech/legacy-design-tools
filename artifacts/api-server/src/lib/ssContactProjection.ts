@@ -103,14 +103,20 @@ function asCount(v: unknown): number | undefined {
 /**
  * First token of the display name, when it looks like a name. A display name
  * that is an email address (or empty) yields no first name rather than a
- * fabricated one.
+ * fabricated one. So does one that is the email's local part, or a handle
+ * carrying digits, "+" or "_": an email sign-in's display name is its address
+ * local part (measured 2026-10-03: "empressaioemail+ssc1"), and a greeting
+ * that reads "Hi empressaioemail+ssc1," is worse than "Hi there,".
  */
-export function firstNameFrom(displayName: unknown): string | null {
+export function firstNameFrom(displayName: unknown, email?: string): string | null {
   if (typeof displayName !== "string") return null;
   const trimmed = displayName.trim();
   if (!trimmed || trimmed.includes("@")) return null;
   const first = trimmed.split(/\s+/)[0] ?? "";
   if (!first || first.length > 40) return null;
+  if (/[0-9+_]/.test(first)) return null;
+  const local = email?.split("@")[0]?.trim().toLowerCase();
+  if (local && (trimmed.toLowerCase() === local || first.toLowerCase() === local)) return null;
   return first;
 }
 
@@ -223,7 +229,7 @@ export function projectEvent(
   let suppressResend: string | undefined;
 
   if (!c.firstName) {
-    const first = firstNameFrom(p["displayName"]);
+    const first = firstNameFrom(p["displayName"], c.email);
     if (first) c.firstName = first;
   }
 

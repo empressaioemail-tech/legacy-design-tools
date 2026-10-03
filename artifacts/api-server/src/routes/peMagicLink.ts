@@ -43,6 +43,8 @@ const router: IRouter = Router();
 
 const RequestBodySchema = z.object({
   email: z.string().min(3).max(254),
+  /** First-touch campaign set; written onto the link (sanitized there). */
+  campaign: z.string().max(512).optional(),
 });
 
 router.post("/auth/email/request", async (req: Request, res: Response) => {
@@ -80,6 +82,7 @@ router.post("/auth/email/request", async (req: Request, res: Response) => {
     to: normalizedEmail,
     rawToken: created.rawToken,
     expiresAt: created.expiresAt,
+    ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
   });
   if (!sent.ok) {
     // Honest failure, never a fake "check your email" success (see
