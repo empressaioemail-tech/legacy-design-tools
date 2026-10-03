@@ -28,6 +28,7 @@ import {
   drizzleOutboxStore,
   projectOutboxRowToContact,
   type CountReader,
+  type EntitlementReader,
 } from "../lib/peLifecycleOutbox.drizzle";
 import { enqueueLifecycleEvent, type LegDeps } from "../lib/peLifecycleOutbox";
 
@@ -71,6 +72,8 @@ beforeAll(async () => {
     // Stand-ins for pe_saved_properties / pe_share_grants: the projection
     // reads counts from the source tables, injected here as countsReader.
     await c.query(`CREATE TABLE p492_saves (owner text NOT NULL); CREATE TABLE p492_shares (grantor text NOT NULL);`);
+    // Stand-in for pe_user_entitlements (P-492b), injected as entitlementsReader.
+    await c.query(`CREATE TABLE p492_ent (owner text PRIMARY KEY, access_tier text NOT NULL, subscription_tier text, billing_interval text);`);
     await c.query(migration("0105_p413_lifecycle_outbox.sql"));
     // A pre-P-492 row: Meta sent under P-413, never seen by Resend.
     await c.query(`INSERT INTO users (id, display_name, email) VALUES ('legacy', 'Legacy', 'legacy@example.com')`);
@@ -96,7 +99,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await poolA.query(
-    `TRUNCATE ss_lifecycle_drain_run, pe_ai_connections, ss_contact, p492_saves, p492_shares RESTART IDENTITY CASCADE;
+    `TRUNCATE ss_lifecycle_drain_run, pe_ai_connections, ss_contact, p492_saves, p492_shares, p492_ent RESTART IDENTITY CASCADE;
      DELETE FROM pe_lifecycle_outbox WHERE id NOT IN ('legacy-row', 'legacy-pending');
      DELETE FROM users WHERE id <> 'legacy';`,
   );
@@ -140,11 +143,26 @@ const countsReader: CountReader = async (tx, userId) => {
   return { savedLots: row.saved, shares: row.shares };
 };
 
+const entitlementsReader: EntitlementReader = async (tx, userId) => {
+  const r = await tx.execute(
+    sql`SELECT access_tier, subscription_tier, billing_interval FROM p492_ent WHERE owner = ${userId}`,
+  );
+  const row = r.rows[0] as
+    | { access_tier: string; subscription_tier: string | null; billing_interval: string | null }
+    | undefined;
+  return {
+    row: row
+      ? { accessTier: row.access_tier, subscriptionTier: row.subscription_tier, billingInterval: row.billing_interval }
+      : null,
+    hasLiveUnlock: false,
+  };
+};
+
 /** Real local projection on the given db; Resend and Meta are counting fakes. */
 function legsOn(db: Db, sends: Map<string, number>, opts: { resendOk?: () => boolean; delayMs?: number } = {}): LegDeps {
   return {
     now: () => T0,
-    project: (row) => projectOutboxRowToContact(row, db, T0, countsReader),
+    project: (row) => projectOutboxRowToContact(row, db, T0, countsReader, entitlementsReader),
     sendMeta: async () => ({ ok: false, error: "meta_capi_token_absent", refusedByName: true }),
     sendResend: async (row) => {
       if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
@@ -330,5 +348,31 @@ describe("derived events on a real table", () => {
     await runLifecycleDrainTick({ db: dbA, legs: { ...legsOn(dbA, sends), now: later }, runScans: false, now: later });
     const c = await poolA.query(`SELECT saved_lots FROM ss_contact WHERE user_id = $1`, [id]);
     expect(c.rows[0]).toEqual({ saved_lots: 3 });
+  });
+});
+
+describe("a first-seen contact is seeded from what the user paid for (P-492b)", () => {
+  it("VIOLATION (production 2026-10-03): a Studio annual subscriber whose first event is not E1 is written as Studio, not free", async () => {
+    const [id] = await seedUsers(1, "paid");
+    await poolA.query(`INSERT INTO p492_ent VALUES ($1, 'paid', 'studio', 'year')`, [id]);
+    await enqueueE2For([id!]);
+    const sends = new Map<string, number>();
+    await runLifecycleDrainTick({ db: dbA, legs: legsOn(dbA, sends), runScans: false, now: () => T0 });
+    const c = await poolA.query(`SELECT stage, plan, billing FROM ss_contact WHERE user_id = $1`, [id]);
+    expect(c.rows[0]).toEqual({ stage: "Studio", plan: "studio", billing: "annual" });
+  });
+
+  it("an unreadable paid row refuses: no contact row is left behind and the local leg records the refusal by name", async () => {
+    const [id] = await seedUsers(1, "odd");
+    await poolA.query(`INSERT INTO p492_ent VALUES ($1, 'paid', NULL, NULL)`, [id]);
+    await enqueueE2For([id!]);
+    const sends = new Map<string, number>();
+    await runLifecycleDrainTick({ db: dbA, legs: legsOn(dbA, sends), runScans: false, now: () => T0 });
+    const c = await poolA.query(`SELECT count(*)::int n FROM ss_contact WHERE user_id = $1`, [id]);
+    expect(c.rows[0]).toEqual({ n: 0 });
+    const o = await poolA.query(`SELECT local_status, local_error FROM pe_lifecycle_outbox WHERE owner_user_id = $1`, [id]);
+    expect(o.rows[0]).toMatchObject({ local_error: "entitlement_paid_without_tier" });
+    expect(o.rows[0].local_status).not.toBe("sent");
+    expect(sends.size).toBe(0);
   });
 });
