@@ -115,8 +115,10 @@ export function firstNameFrom(displayName: unknown, email?: string): string | nu
   const first = trimmed.split(/\s+/)[0] ?? "";
   if (!first || first.length > 40) return null;
   if (/[0-9+_]/.test(first)) return null;
-  const local = email?.split("@")[0]?.trim().toLowerCase();
-  if (local && (trimmed.toLowerCase() === local || first.toLowerCase() === local)) return null;
+  // Exact match only: an email sign-in's display name IS the local part, as
+  // typed. "Jane Smith" with jane@ is a real name and is kept.
+  const local = email?.split("@")[0]?.trim();
+  if (local && trimmed === local) return null;
   return first;
 }
 

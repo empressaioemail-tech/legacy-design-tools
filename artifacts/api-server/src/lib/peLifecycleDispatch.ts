@@ -71,6 +71,17 @@ export function productionLegDeps(db: Db = prodDb): LegDeps {
   };
 }
 
+/**
+ * The detached tries still running. The user's response never waits on them;
+ * a test harness does, before it truncates the tables they hold locks on
+ * (CI 2026-10-03: a truncate under a live projection transaction deadlocked).
+ */
+const detached = new Set<Promise<unknown>>();
+
+export async function settleDetachedLifecycleWork(): Promise<void> {
+  while (detached.size > 0) await Promise.allSettled([...detached]);
+}
+
 export async function dispatchLifecycleEvent(
   input: EnqueueInput & { source?: string },
 ): Promise<string | null> {
@@ -80,14 +91,17 @@ export async function dispatchLifecycleEvent(
     const { eventId, enqueued } = await enqueueLifecycleEvent(input, store);
     if (enqueued) {
       // Detached: the user's response does not wait on Resend or Meta.
-      void processLifecycleOutbox({
+      const work = processLifecycleOutbox({
         store,
         ids: [eventId],
         limit: 1,
         ...productionLegDeps(),
-      }).catch((err: unknown) => {
-        logger.info({ err, eventId }, "pe lifecycle: immediate send failed (outbox kept for the drain)");
-      });
+      })
+        .catch((err: unknown) => {
+          logger.info({ err, eventId }, "pe lifecycle: immediate send failed (outbox kept for the drain)");
+        })
+        .finally(() => detached.delete(work));
+      detached.add(work);
     }
     return eventId;
   } catch (err) {

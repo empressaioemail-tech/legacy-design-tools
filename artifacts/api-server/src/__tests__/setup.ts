@@ -404,6 +404,10 @@ export function setupRouteTests(
 
   afterEach(async () => {
     if (!ctx.schema) return;
+    // A route's detached lifecycle try can still hold a projection transaction;
+    // truncating under it deadlocks (CI 2026-10-03). Let it finish first.
+    const { settleDetachedLifecycleWork } = await import("../lib/peLifecycleDispatch");
+    await settleDetachedLifecycleWork();
     await truncateAll(ctx.schema.pool, TRUNCATE_TABLES);
   });
 
