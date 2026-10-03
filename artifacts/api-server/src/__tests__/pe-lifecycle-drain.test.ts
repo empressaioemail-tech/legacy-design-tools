@@ -23,7 +23,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "@workspace/db/schema";
 import type { db as ProdDb } from "@workspace/db";
 import { runLifecycleDrainTick } from "../lib/peLifecycleDrain";
-import { drizzleOutboxStore, projectOutboxRowToContact } from "../lib/peLifecycleOutbox.drizzle";
+import { sql } from "drizzle-orm";
+import {
+  drizzleOutboxStore,
+  projectOutboxRowToContact,
+  type CountReader,
+} from "../lib/peLifecycleOutbox.drizzle";
 import { enqueueLifecycleEvent, type LegDeps } from "../lib/peLifecycleOutbox";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +68,9 @@ beforeAll(async () => {
       );
     `);
     await c.query(migration("0090_pe_ai_connections.sql"));
+    // Stand-ins for pe_saved_properties / pe_share_grants: the projection
+    // reads counts from the source tables, injected here as countsReader.
+    await c.query(`CREATE TABLE p492_saves (owner text NOT NULL); CREATE TABLE p492_shares (grantor text NOT NULL);`);
     await c.query(migration("0105_p413_lifecycle_outbox.sql"));
     // A pre-P-492 row: Meta sent under P-413, never seen by Resend.
     await c.query(`INSERT INTO users (id, display_name, email) VALUES ('legacy', 'Legacy', 'legacy@example.com')`);
@@ -88,7 +96,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await poolA.query(
-    `TRUNCATE ss_lifecycle_drain_run, pe_ai_connections, ss_contact RESTART IDENTITY CASCADE;
+    `TRUNCATE ss_lifecycle_drain_run, pe_ai_connections, ss_contact, p492_saves, p492_shares RESTART IDENTITY CASCADE;
      DELETE FROM pe_lifecycle_outbox WHERE id NOT IN ('legacy-row', 'legacy-pending');
      DELETE FROM users WHERE id <> 'legacy';`,
   );
@@ -123,11 +131,20 @@ async function enqueueE2For(ids: string[]): Promise<void> {
   }
 }
 
+const countsReader: CountReader = async (tx, userId) => {
+  const r = await tx.execute(
+    sql`SELECT (SELECT count(*) FROM p492_saves WHERE owner = ${userId})::int AS saved,
+               (SELECT count(*) FROM p492_shares WHERE grantor = ${userId})::int AS shares`,
+  );
+  const row = r.rows[0] as { saved: number; shares: number };
+  return { savedLots: row.saved, shares: row.shares };
+};
+
 /** Real local projection on the given db; Resend and Meta are counting fakes. */
 function legsOn(db: Db, sends: Map<string, number>, opts: { resendOk?: () => boolean; delayMs?: number } = {}): LegDeps {
   return {
     now: () => T0,
-    project: (row) => projectOutboxRowToContact(row, db, T0),
+    project: (row) => projectOutboxRowToContact(row, db, T0, countsReader),
     sendMeta: async () => ({ ok: false, error: "meta_capi_token_absent", refusedByName: true }),
     sendResend: async (row) => {
       if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
@@ -263,6 +280,7 @@ describe("scans", () => {
 describe("derived events on a real table", () => {
   it("the first share derives exactly one became_sharer row, in the projection's transaction", async () => {
     const [id] = await seedUsers(1, "share");
+    await poolA.query(`INSERT INTO p492_shares (grantor) VALUES ($1), ($1)`, [id]);
     const store = drizzleOutboxStore(dbA);
     for (const n of [1, 2]) {
       await enqueueLifecycleEvent(
@@ -288,5 +306,29 @@ describe("derived events on a real table", () => {
     expect(rows.every((r) => r.status === "sent")).toBe(true);
     const c = await poolA.query(`SELECT stage, shares FROM ss_contact WHERE user_id = $1`, [id]);
     expect(c.rows[0]).toEqual({ stage: "Sharer", shares: 2 });
+  });
+  it("out-of-order projection cannot regress a count: the newer row projected first still ends on the true count", async () => {
+    const [id] = await seedUsers(1, "order");
+    await poolA.query(`INSERT INTO p492_saves (owner) VALUES ($1), ($1), ($1)`, [id]);
+    const store = drizzleOutboxStore(dbA);
+    // The row carrying savedLots 3 is due FIRST; the stale savedLots 1 row after it.
+    for (const [n, at] of [[3, T0], [1, new Date(T0.getTime() + 1000)]] as const) {
+      await enqueueLifecycleEvent(
+        {
+          userId: id!,
+          email: `${id}@example.com`,
+          event: "e2_lot_saved",
+          idempotencyKey: `e2:${id}:${n}`,
+          apply: { email: `${id}@example.com`, event: "e2_lot_saved", savedLots: n },
+        },
+        store,
+        at,
+      );
+    }
+    const later = () => new Date(T0.getTime() + 5000);
+    const sends = new Map<string, number>();
+    await runLifecycleDrainTick({ db: dbA, legs: { ...legsOn(dbA, sends), now: later }, runScans: false, now: later });
+    const c = await poolA.query(`SELECT saved_lots FROM ss_contact WHERE user_id = $1`, [id]);
+    expect(c.rows[0]).toEqual({ saved_lots: 3 });
   });
 });

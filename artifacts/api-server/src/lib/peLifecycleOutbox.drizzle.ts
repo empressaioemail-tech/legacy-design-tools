@@ -14,9 +14,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import {
   affiliatePartner,
+  peSavedProperties,
+  peShareGrants,
   db as prodDb,
   peLifecycleOutbox,
   ssContact,
@@ -184,10 +186,32 @@ function toContactState(r: SsContact): ContactState {
  * write it, and enqueue the derived events — all in one transaction, so a
  * derived event exists only if the contact change that implies it committed.
  */
+/**
+ * Saved-lot and share counts, read from their own tables. The projection uses
+ * these instead of the count carried in the payload: rows can be projected
+ * out of order (equal timestamps, retries), and an older payload count would
+ * otherwise overwrite a newer one (measured in CI on 2026-10-03: two shares
+ * projected newest-first left ss_shares at 1).
+ */
+export type CountReader = (tx: Tx, userId: string) => Promise<{ savedLots: number; shares: number }>;
+
+export const readLifecycleCounts: CountReader = async (tx, userId) => {
+  const [saved] = await tx
+    .select({ n: count() })
+    .from(peSavedProperties)
+    .where(eq(peSavedProperties.ownerUserId, userId));
+  const [shared] = await tx
+    .select({ n: count() })
+    .from(peShareGrants)
+    .where(eq(peShareGrants.grantorUserId, userId));
+  return { savedLots: Number(saved?.n ?? 0), shares: Number(shared?.n ?? 0) };
+};
+
 export async function projectOutboxRowToContact(
   row: OutboxRecord,
   db: Db = prodDb,
   now: Date = new Date(),
+  readCounts: CountReader = readLifecycleCounts,
 ): Promise<ProjectionResult> {
   if (row.subject.kind !== "user") {
     return { ok: false, error: "projection_requires_user_subject" };
@@ -206,9 +230,17 @@ export async function projectOutboxRowToContact(
       .for("update");
     if (!locked) return { ok: false, error: "ss_contact_missing_after_upsert" } as const;
     const current = created.length > 0 ? null : toContactState(locked);
+    let payload = row.payload;
+    if (row.eventType === "e2_lot_saved" || row.eventType === "e3_share_sent") {
+      const counts = await readCounts(tx, userId);
+      payload =
+        row.eventType === "e2_lot_saved"
+          ? { ...payload, savedLots: counts.savedLots }
+          : { ...payload, shares: counts.shares };
+    }
     const plan = projectEvent(
       current,
-      { userId, email: row.email, eventType: row.eventType, payload: row.payload },
+      { userId, email: row.email, eventType: row.eventType, payload },
       now,
     );
     const c = plan.contact;
