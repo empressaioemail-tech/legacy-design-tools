@@ -21,6 +21,8 @@ import {
   peShareGrants,
   db as prodDb,
   peLifecycleOutbox,
+  pePropertyUnlocks,
+  peUserEntitlements,
   ssContact,
   type PeLifecycleOutbox,
   type SsContact,
@@ -36,8 +38,10 @@ import type {
 import {
   emptyContact,
   projectEvent,
+  seedContact,
   ssContactProperties,
   type ContactState,
+  type EntitlementFacts,
 } from "./ssContactProjection";
 import type { ResendSubject } from "./peResendLifecycle";
 import { RESEND_EVENT_NAMES } from "./peLifecycleTypes";
@@ -207,16 +211,73 @@ export const readLifecycleCounts: CountReader = async (tx, userId) => {
   return { savedLots: Number(saved?.n ?? 0), shares: Number(shared?.n ?? 0) };
 };
 
+/**
+ * What the money tables say about a user (P-492b), read inside the
+ * projection's transaction the first time the record sees them.
+ */
+export type EntitlementReader = (tx: Tx, userId: string, now: Date) => Promise<EntitlementFacts>;
+
+export const readEntitlementFacts: EntitlementReader = async (tx, userId, now) => {
+  const [row] = await tx
+    .select({
+      accessTier: peUserEntitlements.accessTier,
+      subscriptionTier: peUserEntitlements.subscriptionTier,
+      billingInterval: peUserEntitlements.billingInterval,
+    })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.ownerUserId, userId))
+    .limit(1);
+  const [unlock] = await tx
+    .select({ n: count() })
+    .from(pePropertyUnlocks)
+    .where(
+      and(
+        eq(pePropertyUnlocks.ownerUserId, userId),
+        or(isNull(pePropertyUnlocks.expiresAt), sql`${pePropertyUnlocks.expiresAt} > ${now}`),
+      ),
+    );
+  return {
+    row: row
+      ? {
+          accessTier: row.accessTier,
+          subscriptionTier: row.subscriptionTier ?? null,
+          billingInterval: row.billingInterval ?? null,
+        }
+      : null,
+    hasLiveUnlock: Number(unlock?.n ?? 0) > 0,
+  };
+};
+
+/** Thrown inside the transaction so the contact insert rolls back with it. */
+class ContactSeedRefused extends Error {}
+
 export async function projectOutboxRowToContact(
   row: OutboxRecord,
   db: Db = prodDb,
   now: Date = new Date(),
   readCounts: CountReader = readLifecycleCounts,
+  readEntitlements: EntitlementReader = readEntitlementFacts,
 ): Promise<ProjectionResult> {
   if (row.subject.kind !== "user") {
     return { ok: false, error: "projection_requires_user_subject" };
   }
   const userId = row.subject.userId;
+  try {
+    return await projectInTransaction(row, userId, db, now, readCounts, readEntitlements);
+  } catch (err) {
+    if (err instanceof ContactSeedRefused) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+async function projectInTransaction(
+  row: OutboxRecord,
+  userId: string,
+  db: Db,
+  now: Date,
+  readCounts: CountReader,
+  readEntitlements: EntitlementReader,
+): Promise<ProjectionResult> {
   return db.transaction(async (tx: Tx) => {
     const created = await tx
       .insert(ssContact)
@@ -238,10 +299,17 @@ export async function projectOutboxRowToContact(
           ? { ...payload, savedLots: counts.savedLots }
           : { ...payload, shares: counts.shares };
     }
+    let seed: ContactState | undefined;
+    if (current === null) {
+      const seeded = seedContact(userId, row.email, await readEntitlements(tx, userId, now));
+      if (!seeded.ok) throw new ContactSeedRefused(seeded.error);
+      seed = seeded.contact;
+    }
     const plan = projectEvent(
       current,
       { userId, email: row.email, eventType: row.eventType, payload },
       now,
+      seed,
     );
     const c = plan.contact;
     await tx

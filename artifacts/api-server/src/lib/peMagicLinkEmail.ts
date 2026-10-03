@@ -26,6 +26,7 @@
  * "check your email" success. See `routes/peMagicLink.ts`.
  */
 
+import { parseCampaignWire, serializeCampaign } from "./peCampaignSource";
 const RESEND_API_URL = "https://api.resend.com/emails";
 
 export function magicLinkEmailFrom(): string {
@@ -42,15 +43,31 @@ export function magicLinkLoginBaseUrl(): string {
   );
 }
 
-export function buildMagicLinkUrl(rawToken: string): string {
-  return `${magicLinkLoginBaseUrl()}/api/auth/email/verify?token=${encodeURIComponent(rawToken)}`;
+/**
+ * The verify link. A first-touch campaign set, when the visitor arrived with
+ * one, rides on the link as the same utm_* parameters the OAuth start URL
+ * carries, so the attribution survives a phone opening the link in a different
+ * browser from the one that landed on the ad. Re-sanitized here: only the
+ * known keys and values that pass `parseCampaignWire` are written.
+ */
+export function buildMagicLinkUrl(rawToken: string, campaign?: string): string {
+  const base = `${magicLinkLoginBaseUrl()}/api/auth/email/verify?token=${encodeURIComponent(rawToken)}`;
+  if (!campaign) return base;
+  // Same character rule the BFF applies (hauska-map api/_lib/campaign.ts
+  // ALLOWED_VALUE): a value outside it is dropped whole, not escaped.
+  const safe = Object.fromEntries(
+    Object.entries(parseCampaignWire(campaign)).filter(([, v]) => /^[A-Za-z0-9 ._~:+-]+$/.test(v)),
+  );
+  const utms = serializeCampaign(safe);
+  return utms ? `${base}&${utms}` : base;
 }
 
 export function buildMagicLinkEmail(args: {
   rawToken: string;
   expiresAt: Date;
+  campaign?: string;
 }): { subject: string; html: string; text: string } {
-  const link = buildMagicLinkUrl(args.rawToken);
+  const link = buildMagicLinkUrl(args.rawToken, args.campaign);
   const minutes = Math.round(
     (args.expiresAt.getTime() - Date.now()) / (60 * 1000),
   );
@@ -77,6 +94,7 @@ export async function sendMagicLinkEmail(args: {
   to: string;
   rawToken: string;
   expiresAt: Date;
+  campaign?: string;
 }): Promise<SendMagicLinkEmailResult> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
@@ -85,6 +103,7 @@ export async function sendMagicLinkEmail(args: {
   const mail = buildMagicLinkEmail({
     rawToken: args.rawToken,
     expiresAt: args.expiresAt,
+    ...(args.campaign ? { campaign: args.campaign } : {}),
   });
   try {
     const res = await fetch(RESEND_API_URL, {

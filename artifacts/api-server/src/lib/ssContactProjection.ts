@@ -23,7 +23,7 @@ import {
   becameSharerIdempotencyKey,
   cameBackIdempotencyKey,
 } from "./peLifecycleOutbox";
-import { nextStage, type LifecycleStage } from "./ssContactStage";
+import { nextStage, stageForPlan, type LifecycleStage } from "./ssContactStage";
 import type {
   LifecycleEventType,
   SsBilling,
@@ -103,14 +103,22 @@ function asCount(v: unknown): number | undefined {
 /**
  * First token of the display name, when it looks like a name. A display name
  * that is an email address (or empty) yields no first name rather than a
- * fabricated one.
+ * fabricated one. So does one that is the email's local part, or a handle
+ * carrying digits, "+" or "_": an email sign-in's display name is its address
+ * local part (measured 2026-10-03: "empressaioemail+ssc1"), and a greeting
+ * that reads "Hi empressaioemail+ssc1," is worse than "Hi there,".
  */
-export function firstNameFrom(displayName: unknown): string | null {
+export function firstNameFrom(displayName: unknown, email?: string): string | null {
   if (typeof displayName !== "string") return null;
   const trimmed = displayName.trim();
   if (!trimmed || trimmed.includes("@")) return null;
   const first = trimmed.split(/\s+/)[0] ?? "";
   if (!first || first.length > 40) return null;
+  if (/[0-9+_]/.test(first)) return null;
+  // Exact match only: an email sign-in's display name IS the local part, as
+  // typed. "Jane Smith" with jane@ is a real name and is kept.
+  const local = email?.split("@")[0]?.trim();
+  if (local && trimmed === local) return null;
   return first;
 }
 
@@ -137,6 +145,63 @@ export function emptyContact(userId: string, email: string): ContactState {
   };
 }
 
+/**
+ * What the money tables say about a user, read when the contact record first
+ * sees them (P-492b). `row` is their `pe_user_entitlements` row, or null when
+ * none exists. Only the Stripe webhook ledger writes a paid row. Sign-in
+ * inserts a free one. So an absent row means no payment was ever recorded,
+ * and free is a reading of that, not a default.
+ */
+export type EntitlementFacts = {
+  row: {
+    accessTier: string;
+    subscriptionTier: string | null;
+    billingInterval: string | null;
+  } | null;
+  /** An unlock with no expiry or an expiry still in the future. */
+  hasLiveUnlock: boolean;
+};
+
+export type SeedResult = { ok: true; contact: ContactState } | { ok: false; error: string };
+
+const PAID_TIERS: readonly SsPlan[] = ["solo", "studio", "team"];
+
+/**
+ * The contact a user starts from when the record first sees them: plan,
+ * billing and stage derived from what they have paid for. Without this, a
+ * paid subscriber whose first projected event is not E1 (a scan, a save, a
+ * session) was written as free (measured on production 2026-10-03: a Studio
+ * annual subscriber projected as free and Explorer). A paid row that names
+ * no tier or no interval cannot be read and refuses rather than guessing.
+ */
+export function seedContact(userId: string, email: string, facts: EntitlementFacts): SeedResult {
+  const c = emptyContact(userId, email);
+  const row = facts.row;
+  if (row && row.accessTier === "paid") {
+    const tier = row.subscriptionTier;
+    if (tier === null) {
+      // Paid with no tier is an unlock-only grant, or a row this code cannot read.
+      if (!facts.hasLiveUnlock) return { ok: false, error: "entitlement_paid_without_tier" };
+    } else {
+      if (!(PAID_TIERS as readonly string[]).includes(tier)) {
+        return { ok: false, error: `entitlement_tier_unknown:${tier}` };
+      }
+      const billing =
+        row.billingInterval === "year" ? "annual" : row.billingInterval === "month" ? "monthly" : null;
+      if (!billing) return { ok: false, error: "entitlement_paid_without_interval" };
+      c.plan = tier as SsPlan;
+      c.billing = billing;
+      c.stage = stageForPlan(c.plan) ?? "Explorer";
+      return { ok: true, contact: c };
+    }
+  }
+  if (facts.hasLiveUnlock) {
+    c.plan = "unlock";
+    c.stage = "Unlock";
+  }
+  return { ok: true, contact: c };
+}
+
 function daysBetween(isoDate: string, now: Date): number {
   const then = Date.parse(`${isoDate}T00:00:00Z`);
   const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`);
@@ -151,18 +216,22 @@ export function projectEvent(
   current: ContactState | null,
   event: ProjectionEvent,
   now: Date,
+  /** The contact a first-seen user starts from (`seedContact`). Ignored when `current` exists. */
+  seed?: ContactState,
 ): ProjectionPlan {
   const existed = current !== null;
   const c: ContactState = current
     ? { ...current, email: event.email || current.email }
-    : emptyContact(event.userId, event.email);
+    : seed
+      ? { ...seed, email: event.email || seed.email }
+      : emptyContact(event.userId, event.email);
   const p = event.payload;
   const followups: Followup[] = [];
   let resendEvent: Record<string, unknown> | null = null;
   let suppressResend: string | undefined;
 
   if (!c.firstName) {
-    const first = firstNameFrom(p["displayName"]);
+    const first = firstNameFrom(p["displayName"], c.email);
     if (first) c.firstName = first;
   }
 

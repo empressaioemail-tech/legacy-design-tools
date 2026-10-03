@@ -3,6 +3,7 @@ import {
   emptyContact,
   firstNameFrom,
   projectEvent,
+  seedContact,
   ssContactProperties,
   type ContactState,
 } from "./ssContactProjection";
@@ -186,5 +187,69 @@ describe("contract v2 properties as Resend receives them", () => {
         "ss_stage",
       ].sort(),
     );
+  });
+});
+
+describe("seedContact: a first-seen user starts from what they paid for (P-492b)", () => {
+  const studioAnnual = {
+    row: { accessTier: "paid", subscriptionTier: "studio", billingInterval: "year" },
+    hasLiveUnlock: false,
+  };
+
+  it("a Studio annual subscriber seeds as Studio, studio, annual", () => {
+    const s = seedContact("u1", "u1@example.com", studioAnnual);
+    expect(s.ok && s.contact).toMatchObject({ stage: "Studio", plan: "studio", billing: "annual" });
+  });
+
+  it("VIOLATION (the production defect): a Studio subscriber whose first event is claude_connected is not written as free", () => {
+    const s = seedContact("u1", "u1@example.com", studioAnnual);
+    if (!s.ok) throw new Error(s.error);
+    const p = projectEvent(null, ev("claude_connected"), NOW, s.contact);
+    expect(p.contact).toMatchObject({ plan: "studio", billing: "annual", stage: "Studio", claudeConnected: true });
+    // Control: without the seed the same event produces the defaulted record the fix removes.
+    expect(projectEvent(null, ev("claude_connected"), NOW).contact.plan).toBe("free");
+  });
+
+  it("a seeded first event still omits previous_plan: the record did not exist, so nothing is guessed", () => {
+    const s = seedContact("u1", "u1@example.com", studioAnnual);
+    if (!s.ok) throw new Error(s.error);
+    const p = projectEvent(null, ev("e5_plan_started", { plan: "studio", billing: "annual" }), NOW, s.contact);
+    expect(p.resendEvent).toBeNull();
+  });
+
+  it("a free row, and no row at all, read as free (a sign-in row, or no payment ever recorded)", () => {
+    for (const row of [{ accessTier: "free", subscriptionTier: null, billingInterval: null }, null]) {
+      const s = seedContact("u1", "u1@example.com", { row, hasLiveUnlock: false });
+      expect(s.ok && s.contact).toMatchObject({ plan: "free", billing: "none", stage: "Explorer" });
+    }
+  });
+
+  it("a live unlock with no subscription seeds as unlock", () => {
+    const s = seedContact("u1", "u1@example.com", {
+      row: { accessTier: "paid", subscriptionTier: null, billingInterval: null },
+      hasLiveUnlock: true,
+    });
+    expect(s.ok && s.contact).toMatchObject({ plan: "unlock", stage: "Unlock" });
+  });
+
+  it("refuses rather than guesses: paid with no tier and no unlock, a paid tier with no interval, an unknown tier", () => {
+    expect(seedContact("u1", "e", { row: { accessTier: "paid", subscriptionTier: null, billingInterval: null }, hasLiveUnlock: false }))
+      .toEqual({ ok: false, error: "entitlement_paid_without_tier" });
+    expect(seedContact("u1", "e", { row: { accessTier: "paid", subscriptionTier: "solo", billingInterval: null }, hasLiveUnlock: false }))
+      .toEqual({ ok: false, error: "entitlement_paid_without_interval" });
+    expect(seedContact("u1", "e", { row: { accessTier: "paid", subscriptionTier: "enterprise", billingInterval: "year" }, hasLiveUnlock: false }))
+      .toEqual({ ok: false, error: "entitlement_tier_unknown:enterprise" });
+  });
+});
+
+describe("firstNameFrom rejects an email handle as a name (P-492b)", () => {
+  it("VIOLATION (measured 2026-10-03): an email sign-in's display name is its local part and is not a first name", () => {
+    expect(firstNameFrom("empressaioemail+ssc1", "empressaioemail+ssc1@gmail.com")).toBeNull();
+    expect(firstNameFrom("jsmith", "jsmith@example.com")).toBeNull();
+    expect(firstNameFrom("user_42")).toBeNull();
+  });
+  it("a real name still yields its first token", () => {
+    expect(firstNameFrom("Jane Smith", "jane@example.com")).toBe("Jane");
+    expect(firstNameFrom("Jane", "jsmith@example.com")).toBe("Jane");
   });
 });
