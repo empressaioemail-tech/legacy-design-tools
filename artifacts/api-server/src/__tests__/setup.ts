@@ -324,9 +324,15 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // requested before any account exists — the verify path is also how a
   // brand-new signup is created), so nothing else's CASCADE clears it.
   "pe_magic_link_tokens",
-  // P-413 lifecycle outbox. FK to users — listed so a leftover pending
-  // send cannot leak into the next test's GHL assertions.
+  // P-413 / P-492 lifecycle outbox. FK to users — listed so a leftover
+  // pending send cannot leak into the next test's lifecycle assertions.
   "pe_lifecycle_outbox",
+  // P-492 — the contact record (cascades off users, listed per the
+  // invariant), affiliates (no FK to users at all) and the drain's own
+  // per-tick record (no FK).
+  "ss_contact",
+  "affiliate_partner",
+  "ss_lifecycle_drain_run",
 ];
 
 /**

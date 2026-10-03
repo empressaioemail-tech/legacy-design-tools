@@ -6,15 +6,29 @@
 import { count, eq } from "drizzle-orm";
 import { db, peSavedProperties, peShareGrants } from "@workspace/db";
 import { logger } from "./logger";
-import { dispatchLifecycleEvent, paidEventTypeForStripe } from "./peLifecycleDispatch";
+import { dispatchLifecycleEvent } from "./peLifecycleDispatch";
 import {
   e2IdempotencyKey,
   e3IdempotencyKey,
   e4IdempotencyKey,
   e5IdempotencyKey,
+  planCancelledIdempotencyKey,
 } from "./peLifecycleOutbox";
 import { getPeUserEmail } from "./peIdentity";
-import type { SsBilling, SsPlan } from "./peLifecycleTypes";
+import type { LifecycleEventType, SsBilling, SsPlan } from "./peLifecycleTypes";
+
+/**
+ * Which paid event a Stripe webhook outcome is. A webhook that lands the
+ * user on `free` (subscription deleted, or no longer active) is a cancel,
+ * contract v2 `ss.plan_cancelled`, not a plan start.
+ */
+export function paidEventTypeForStripe(
+  kind: "unlock" | "plan",
+  plan: SsPlan,
+): LifecycleEventType {
+  if (kind === "unlock") return "e4_unlock_bought";
+  return plan === "free" ? "plan_cancelled" : "e5_plan_started";
+}
 
 export async function countSavedLots(userId: string): Promise<number> {
   const [row] = await db
@@ -83,11 +97,13 @@ export async function emitPaidFromStripeWebhook(input: {
   try {
     const email = await getPeUserEmail(input.userId);
     if (!email) return null;
-    const event = paidEventTypeForStripe(input.kind);
+    const event = paidEventTypeForStripe(input.kind, input.plan);
     const idempotencyKey =
-      input.kind === "unlock"
+      event === "e4_unlock_bought"
         ? e4IdempotencyKey(input.stripeEventId)
-        : e5IdempotencyKey(input.stripeEventId);
+        : event === "plan_cancelled"
+          ? planCancelledIdempotencyKey(input.stripeEventId)
+          : e5IdempotencyKey(input.stripeEventId);
     return await dispatchLifecycleEvent({
       userId: input.userId,
       email,

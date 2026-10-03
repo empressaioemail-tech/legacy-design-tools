@@ -3,7 +3,7 @@
  * route (`routes/peAuth.ts`) and the magic-link verify route
  * (`routes/peMagicLink.ts`) so an account created through either path is
  * provably indistinguishable afterward: the exact same session-minting
- * call, the exact same isNewUser-gated GHL-new-signup hook, the exact same
+ * call, the exact same isNewUser-gated new-signup lifecycle hook, the exact same
  * anonymous-install-claim behavior. One function, not two copies that can
  * drift — the risk this factoring exists to close.
  */
@@ -14,7 +14,7 @@ import { mintSessionToken } from "./sessionToken";
 import { getPeAccessTier, type PeIdentityResult } from "./peIdentity";
 import { installIdFromRequest } from "./brokerageInstallId";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
-import { notifyGhlOfNewPeSignup } from "./peGhlContact";
+import { notifyLifecycleOfNewPeSignup } from "./peSignupLifecycle";
 import { dispatchLifecycleEvent } from "./peLifecycleDispatch";
 import { e6IdempotencyKey } from "./peLifecycleOutbox";
 import { logger } from "./logger";
@@ -51,7 +51,7 @@ export type PeSignInCompletionBody = {
 };
 
 /**
- * Mint the session, set the cookie, fire the new-signup GHL hook exactly
+ * Mint the session, set the cookie, fire the new-signup lifecycle hook exactly
  * when `identity.isNewUser` (a brand-new `users` row was just created —
  * true for a first OAuth sign-in AND for a first magic-link verification
  * alike), and claim any anonymous install history. Returns the same
@@ -84,7 +84,7 @@ export async function completePeSignIn(
 
   // Real signup only (WDLL/decision-doc signal: isNewUser === a brand-new
   // `users` row was just created by upsertPeOidcIdentity, not a returning
-  // sign-in). Best-effort, fail-open — see peGhlContact.ts.
+  // sign-in). Best-effort, fail-open — see peSignupLifecycle.ts.
   //
   // MEASURED 2026-09-24: a `users` row is created only in
   // `upsertPeOidcIdentity` (Google/Microsoft session-exchange and magic-link
@@ -94,7 +94,7 @@ export async function completePeSignIn(
   let lifecycleEventId: string | undefined;
   if (identity.isNewUser && identity.email) {
     try {
-      const eventId = await notifyGhlOfNewPeSignup({
+      const eventId = await notifyLifecycleOfNewPeSignup({
         userId: identity.userId,
         email: identity.email,
         displayName: identity.displayName,
@@ -104,7 +104,7 @@ export async function completePeSignIn(
     } catch (err) {
       logger.error(
         { err },
-        "pe sign-in: GHL contact hook threw unexpectedly (swallowed, fail-open)",
+        "pe sign-in: lifecycle signup hook threw unexpectedly (swallowed, fail-open)",
       );
     }
   }

@@ -66,6 +66,8 @@ describe("lib/db schema integration", () => {
         // (adapter_key, lat_rounded, lng_rounded) with a TTL gate so
         // re-runs of generate-layers skip the slow upstream feeds.
         "adapter_response_cache",
+        // P-492 3f — Smart Site affiliate pipeline (not users).
+        "affiliate_partner",
         // Per-architect "last viewed the inbox" watermark for the
         // design-tools notification surface. One row per user-kind
         // requestor id; bumped to "now" on POST
@@ -363,6 +365,10 @@ describe("lib/db schema integration", () => {
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",
         "snapshots",
+        // P-492 — Smart Site contact record (system of record for the
+        // lifecycle) and the scheduled drain's per-tick record.
+        "ss_contact",
+        "ss_lifecycle_drain_run",
         // Track 1 — per-submission discipline / classification row.
         "submission_classifications",
         // Task #431 — reviewer↔architect inline reply thread anchored

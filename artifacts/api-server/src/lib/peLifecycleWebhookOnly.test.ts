@@ -15,22 +15,31 @@ function read(rel: string): string {
   return readFileSync(join(here, rel), "utf8");
 }
 
-describe("E4/E5 source lock", () => {
+describe("E4/E5/cancel source lock", () => {
   it("emitPaidFromStripeWebhook is imported only by brokerageStripe.ts", () => {
     const stripe = read("./brokerageStripe.ts");
     expect(stripe).toMatch(/emitPaidFromStripeWebhook/);
 
     const forbiddenImporters = [
       "./peSignInCompletion.ts",
-      "./peGhlContact.ts",
+      "./peSignupLifecycle.ts",
+      "./peLifecycleDrain.ts",
+      "../routes/affiliates.ts",
       "./peScreenSave.ts",
       "../routes/peAuth.ts",
       "../routes/peMagicLink.ts",
       "../routes/propertyExplorer.ts",
     ];
     for (const file of forbiddenImporters) {
-      expect(read(file)).not.toMatch(/emitPaidFromStripeWebhook|e4_unlock_bought|e5_plan_started/);
+      expect(read(file)).not.toMatch(/emitPaidFromStripeWebhook|e4_unlock_bought|e5_plan_started|plan_cancelled/);
     }
+  });
+
+  it("a webhook that lands the user on free is ss.plan_cancelled, not a plan start", async () => {
+    const { paidEventTypeForStripe } = await import("./peLifecycleHooks");
+    expect(paidEventTypeForStripe("plan", "free")).toBe("plan_cancelled");
+    expect(paidEventTypeForStripe("plan", "solo")).toBe("e5_plan_started");
+    expect(paidEventTypeForStripe("unlock", "unlock")).toBe("e4_unlock_bought");
   });
 
   it("a checkout-return shaped call is refused by the runtime guard", async () => {

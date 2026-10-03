@@ -36,6 +36,25 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: check-no-hauska-atom-contract
         run: node scripts/check-no-hauska-atom-contract.mjs
+      # P-492 (OPS-16 A-368): GoHighLevel is retired from Smart Site with a hard
+      # cut. Nothing under cortex-api's source may call it or read its
+      # credentials again. rg exit 0 = a hit (fail), 1 = clean (pass), anything
+      # else = the gate could not run (fail; a broken gate must not read green).
+      - name: GoHighLevel retirement gate (P-492)
+        run: |
+          test -d artifacts/api-server/src || { echo "FAIL: artifacts/api-server/src missing; gate cannot run"; exit 1; }
+          set +e
+          rg -n --hidden -e 'leadconnectorhq\.com' -e 'GOHIGHLEVEL_' artifacts/api-server/src
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAIL: GoHighLevel reference under artifacts/api-server/src (retired by P-492; see _decisions/2026-10-03_ghl_retired_lifecycle_to_resend.md)"
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "FAIL: ripgrep exited $rc; the retirement gate did not run"
+            exit 1
+          fi
+          echo "OK: no leadconnectorhq.com or GOHIGHLEVEL_ under artifacts/api-server/src"
       - name: Typecheck
         run: pnpm run typecheck
   test:

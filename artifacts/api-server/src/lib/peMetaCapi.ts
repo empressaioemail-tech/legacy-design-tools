@@ -19,7 +19,22 @@ const EVENT_NAMES: Record<LifecycleEventType, string | null> = {
   e4_unlock_bought: "Purchase",
   e5_plan_started: "Purchase",
   e6_last_active: null,
+  became_sharer: null,
+  plan_cancelled: null,
+  claude_connected: null,
+  went_quiet: null,
+  came_back: null,
+  affiliate_applied: null,
+  affiliate_approved: null,
 };
+
+/** Refusals that name a missing configuration; recorded on the leg, not retried as a send. */
+export const META_REFUSED_BY_NAME = [
+  "meta_event_not_applicable",
+  "meta_capi_token_absent",
+  "meta_pixel_id_absent",
+  "meta_capi_token_placeholder",
+] as const;
 
 export type MetaCapiConfig = {
   pixelId: string;

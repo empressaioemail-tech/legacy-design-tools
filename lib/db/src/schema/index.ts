@@ -83,6 +83,7 @@ export * from "./txEtjBoundary";
 export * from "./txEtjSource";
 export * from "./peMagicLinkTokens";
 export * from "./peLifecycleOutbox";
+export * from "./ssContact";
 export * from "./txCountyBoundary";
 export * from "./txFemaNfhlFloodZone";
 export * from "./txUtilityTerritoryStaging";
