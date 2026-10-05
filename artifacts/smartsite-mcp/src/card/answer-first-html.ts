@@ -174,7 +174,10 @@ export function answerFirstCarouselHtml(model: PanelModel): string {
       return (
         `<article class="af-slide" data-inline-item="1">` +
         aerial.html +
-        `<p class="af-answer">${escapeHtml(item.answer)}</p>` +
+        (item.title && item.facts && item.facts.length
+          ? `<p class="af-tile-title">${escapeHtml(item.title)}</p>` +
+            `<ul class="af-tile-facts">${item.facts.map((f) => `<li>${markerHtml(f.state)}<span class="af-k">${escapeHtml(f.label)}</span><span class="af-v">${escapeHtml(f.value)}</span></li>`).join("")}</ul>`
+          : `<p class="af-answer">${escapeHtml(item.answer)}</p>`) +
         `<div class="af-acts">${open}</div>` +
         `</article>`
       );

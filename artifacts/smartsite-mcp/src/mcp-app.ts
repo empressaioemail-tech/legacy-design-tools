@@ -860,9 +860,13 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
 .af-v{color:var(--color-text-primary,var(--ss-t3))}
 .af-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;padding:12px 20px;border-top:0.5px solid var(--color-border-tertiary,var(--ss-line-14))}
 .af-note,.af-credit{color:var(--color-text-secondary,var(--ss-t5));font-size:12px;line-height:16px;margin:4px 20px 0}
-.af-carousel{display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:0 20px 4px}
-.af-slide{flex:0 0 78%;max-width:280px;scroll-snap-align:start;border:0.5px solid var(--color-border-tertiary,var(--ss-line-14));border-radius:12px;background:var(--color-background-secondary,#262624);overflow:hidden}
+.af-carousel{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;padding:0 20px 4px}
+.af-slide{min-width:0;border:0.5px solid var(--color-border-tertiary,var(--ss-line-14));border-radius:12px;background:var(--color-background-secondary,#262624);overflow:hidden}
 .af-slide .af-answer{padding:0 12px}
+.af-tile-title{margin:10px 12px 6px;font-weight:650;line-height:1.3;color:var(--color-text-primary,var(--ss-t3))}
+.af-tile-facts{list-style:none;margin:0 12px 8px;padding:0;font-size:var(--ss-fs-meta)}
+.af-tile-facts li{display:grid;grid-template-columns:auto auto 1fr;align-items:baseline;gap:6px;padding:3px 0;border-top:1px solid var(--color-border-secondary,var(--ss-line-06))}
+.af-tile-facts .af-v{text-align:right}
 .af-aerial{position:relative;aspect-ratio:5/2;max-height:none;overflow:hidden;background:var(--color-background-secondary,#262624)}
 .af-aerial.gwrap,.gwrap.af-aerial{aspect-ratio:unset}
 .af-thumb{aspect-ratio:5/2}
@@ -978,7 +982,7 @@ svg.ring.set .pll{stroke:var(--ss-t6);stroke-width:1;stroke-dasharray:2 2;pointe
   .ss-panel{width:100%;border-left:0;border-top:0.5px solid var(--color-border-tertiary,rgba(250,249,245,.15));max-height:360px}
   .ss-detail[data-sheet="high"] .ss-panel{max-height:640px}
   .ss-sheet-handle{display:flex;align-items:center;justify-content:center;min-height:44px;cursor:pointer;font-size:12px;color:var(--color-text-tertiary,#9C9A92)}
-  .af-slide{flex-basis:86%}
+  .af-carousel{grid-template-columns:1fr 1fr;gap:8px}
   .ss-v2 .btn{min-height:44px;min-width:44px}
 }
 @media (prefers-color-scheme:light){

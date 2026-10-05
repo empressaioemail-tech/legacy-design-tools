@@ -34,6 +34,9 @@ export type InlineItem = {
   answer: string;
   actionLabel: "Open";
   actionUrl: string | null;
+  /** Card grid: the tile's heading (the address) and its short fact rows. */
+  title?: string;
+  facts?: InlineFact[];
 };
 
 export type InlineCard = {
@@ -410,6 +413,8 @@ function itemsFromParcels(
       answer: answerLineFromHost(host),
       actionLabel: "Open",
       actionUrl: id ? mint(id) : null,
+      title: addressOf(host),
+      facts: fourFacts(host).filter((f) => f.label !== "Setbacks"),
     });
   }
   return { items, moreCount };
