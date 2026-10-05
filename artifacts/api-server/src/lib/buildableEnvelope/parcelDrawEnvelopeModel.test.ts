@@ -105,6 +105,19 @@ vi.mock("../brokerageGisLayers", async () => {
   return { ...actual, queryGisLayerGeoJson: queryGisLayerGeoJsonMock };
 });
 
+const queryTxCountyParcelByPropIdMock = vi.fn(async () => null as null);
+vi.mock("../brokerageTxParcels", async () => {
+  const actual =
+    await vi.importActual<typeof import("../brokerageTxParcels")>(
+      "../brokerageTxParcels",
+    );
+  return {
+    ...actual,
+    queryTxCountyParcelByPropId: (...args: unknown[]) =>
+      queryTxCountyParcelByPropIdMock(...args),
+  };
+});
+
 /**
  * P-339: mutable so a test can put a chain PRESENT — the case the fix is
  * about. `null` (the default) is "no atom path at all", which is the one
@@ -219,6 +232,8 @@ afterEach(() => {
 beforeEach(() => {
   presentLedger();
   queryGisLayerGeoJsonMock.mockClear();
+  queryTxCountyParcelByPropIdMock.mockReset();
+  queryTxCountyParcelByPropIdMock.mockResolvedValue(null);
   fetchPropertyAtomChainMock.mockClear();
   fetchNearbyRoadsMock.mockClear();
 });
@@ -403,8 +418,9 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
     });
   });
 
-  it("names `parcel-identity-mismatch` when the freshly-fetched parcel's own stamped id disagrees with the requested parcelNodeId (identity guard)", async () => {
+  it("names `parcel-identity-mismatch` when the pin parcel disagrees and identity lookup also misses (identity guard)", async () => {
     parcelNodeIdStamped = "48021:99999";
+    queryTxCountyParcelByPropIdMock.mockResolvedValueOnce(null);
     const result = await tryComposeEnvelopeModelForDraw({
       parcelNodeId: BASTROP_PARCEL_NODE_ID,
       queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
@@ -413,6 +429,37 @@ describe("tryComposeEnvelopeModelForDraw — fail-closed edges", () => {
       state: "unreached",
       refusal: { step: "parcel-identity-mismatch", chain: "unreached" },
     });
+    expect(queryTxCountyParcelByPropIdMock).toHaveBeenCalledWith(
+      expect.objectContaining({ propId: "34049" }),
+    );
+  });
+
+  it("P-496: after a pin identity mismatch, re-fetches the requested parcel by prop id and can model the envelope (48021:33087-shaped)", async () => {
+    parcelNodeIdStamped = "48021:99999";
+    queryTxCountyParcelByPropIdMock.mockResolvedValueOnce({
+      geojson: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: rectParcel().features[0]!.geometry,
+            properties: {
+              parcel_node_id: BASTROP_PARCEL_NODE_ID,
+              zoningCode: "SF-1",
+              situsAddress: "908 PINE ST",
+            },
+          },
+        ],
+      },
+      featureCount: 1,
+      queryMode: "pin" as const,
+    });
+    const result = await tryComposeEnvelopeModelForDraw({
+      parcelNodeId: BASTROP_PARCEL_NODE_ID,
+      queryPoint: { latitude: BASTROP_LAT, longitude: BASTROP_LNG },
+    });
+    expect(result.state).toBe("modelled");
+    expect(queryTxCountyParcelByPropIdMock).toHaveBeenCalled();
   });
 
   it("names `derivation-threw` for a throw AFTER the ring — never `parcel-ring-unavailable`, and never `absent` for a chain it never read", async () => {

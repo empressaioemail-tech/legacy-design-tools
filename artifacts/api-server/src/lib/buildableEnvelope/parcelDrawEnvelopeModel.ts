@@ -48,6 +48,11 @@
  */
 
 import { queryGisLayerGeoJson } from "../brokerageGisLayers";
+import {
+  queryTxCountyParcelByPropId,
+  resolveTxParcelCounty,
+} from "../brokerageTxParcels";
+import { parseParcelNodeId } from "../parcelNodeId";
 import { deriveEnvelopeDraw } from "./envelopeDrawDerivation";
 import type {
   EnvelopeDrawChain,
@@ -180,7 +185,7 @@ export async function tryComposeEnvelopeModelForDraw(args: {
   }
 
   // 2) THE derivation — the route's own body, not a copy of it.
-  const outcome = await deriveEnvelopeDraw({
+  let outcome = await deriveEnvelopeDraw({
     parcelGeo,
     jurisdictionCity: args.jurisdictionCity ?? null,
     jurisdictionState: args.jurisdictionState ?? null,
@@ -189,6 +194,37 @@ export async function tryComposeEnvelopeModelForDraw(args: {
     expectedParcelNodeId: args.parcelNodeId,
     postedParcelNodeId: args.parcelNodeId,
   });
+
+  // P-496: a baked queryPoint can sit on a neighbour tile (48021:33087-shaped).
+  // Re-fetch by county+prop_id identity before refusing — same path as P-373.
+  if (outcome.state === "parcel-identity-mismatch") {
+    const parsed = parseParcelNodeId(args.parcelNodeId);
+    const county = parsed ? resolveTxParcelCounty(parsed.countyFips) : null;
+    if (parsed && county) {
+      try {
+        const byId = await queryTxCountyParcelByPropId({
+          county,
+          propId: parsed.propId,
+        });
+        if (byId?.geojson) {
+          outcome = await deriveEnvelopeDraw({
+            parcelGeo: {
+              geojson: byId.geojson,
+              provider: county.source === "txgio-store" ? "txgio" : "county-gis",
+            },
+            jurisdictionCity: args.jurisdictionCity ?? null,
+            jurisdictionState: args.jurisdictionState ?? null,
+            address: args.address ?? null,
+            point: null,
+            expectedParcelNodeId: args.parcelNodeId,
+            postedParcelNodeId: args.parcelNodeId,
+          });
+        }
+      } catch {
+        return unreached("parcel-ring-unavailable");
+      }
+    }
+  }
 
   switch (outcome.state) {
     case "no-parcel-ring":
