@@ -40,6 +40,7 @@ import {
   peSubscriptionEndLifecycleEvent,
   peSubscriptionUpdatedShouldEmitPlanStarted,
   planStartedIdempotencyKey,
+  stripeSubscriptionIdFromInvoice,
 } from "./peStripeBillingLifecycle";
 import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
 import {
@@ -862,6 +863,7 @@ export async function handleStripeWebhook(
           peSubscriptionUpdatedShouldEmitPlanStarted({
             previousAttributes,
             currentStatus: status,
+            currentSubscription: obj,
           })
         ) {
           await emitPaidFromStripeWebhook({
@@ -1012,8 +1014,7 @@ export async function handleStripeWebhook(
 
   if (type === "invoice.payment_failed") {
     const invoiceId = typeof obj.id === "string" ? obj.id : null;
-    const subId =
-      typeof obj.subscription === "string" ? obj.subscription : null;
+    const subId = stripeSubscriptionIdFromInvoice(obj);
     if (!invoiceId || !subId) {
       return {
         handled: false,

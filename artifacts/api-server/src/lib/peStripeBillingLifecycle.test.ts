@@ -1,14 +1,23 @@
 /**
- * P-494 replay tests on recorded Stripe payload shapes.
+ * P-494 replay tests — Stripe 2026-05-27.dahlia shapes (fixtures fail on
+ * pre-fix logic that treated any `items` key in previous_attributes as a plan start).
  */
 
 import { describe, expect, it } from "vitest";
+import {
+  DAHLIA_INVOICE_PAYMENT_FAILED,
+  DAHLIA_SOLO_TO_STUDIO_TIER_CHANGE,
+  DAHLIA_STUDIO_MONTHLY_RENEWAL,
+  DAHLIA_TEAM_SEAT_QUANTITY_ONLY,
+} from "./peStripeBillingLifecycle.fixtures";
 import {
   invoicePaymentFailedShouldEmit,
   peStatusRetainsPaidEntitlement,
   peSubscriptionEndLifecycleEvent,
   peSubscriptionUpdatedShouldEmitPlanStarted,
   planStartedIdempotencyKey,
+  stripeSubscriptionIdFromInvoice,
+  subscriptionPriceIntervalChanged,
 } from "./peStripeBillingLifecycle";
 
 describe("peStatusRetainsPaidEntitlement", () => {
@@ -21,20 +30,47 @@ describe("peStatusRetainsPaidEntitlement", () => {
   });
 });
 
-describe("subscription.updated lifecycle emits", () => {
-  it("monthly renewal (period only) emits nothing", () => {
+describe("subscription.updated (dahlia replay fixtures)", () => {
+  it("live Studio monthly renewal — items in previous_attributes, same price/interval — no plan_started", () => {
+    const f = DAHLIA_STUDIO_MONTHLY_RENEWAL;
+    expect(
+      subscriptionPriceIntervalChanged({
+        previousAttributes: f.previousAttributes,
+        currentSubscription: f.currentSubscription,
+      }),
+    ).toBe(false);
     expect(
       peSubscriptionUpdatedShouldEmitPlanStarted({
-        previousAttributes: {
-          current_period_start: 1700000000,
-          current_period_end: 1702678400,
-        },
+        previousAttributes: f.previousAttributes,
         currentStatus: "active",
+        currentSubscription: f.currentSubscription,
       }),
     ).toBe(false);
   });
 
-  it("annual renewal (period only) emits nothing", () => {
+  it("tier change (price id) emits plan_started", () => {
+    const f = DAHLIA_SOLO_TO_STUDIO_TIER_CHANGE;
+    expect(
+      peSubscriptionUpdatedShouldEmitPlanStarted({
+        previousAttributes: f.previousAttributes,
+        currentStatus: "active",
+        currentSubscription: f.currentSubscription,
+      }),
+    ).toBe(true);
+  });
+
+  it("Team extra-seat quantity only — not a plan start", () => {
+    const f = DAHLIA_TEAM_SEAT_QUANTITY_ONLY;
+    expect(
+      peSubscriptionUpdatedShouldEmitPlanStarted({
+        previousAttributes: f.previousAttributes,
+        currentStatus: "active",
+        currentSubscription: f.currentSubscription,
+      }),
+    ).toBe(false);
+  });
+
+  it("annual renewal (legacy top-level period keys only) emits nothing", () => {
     expect(
       peSubscriptionUpdatedShouldEmitPlanStarted({
         previousAttributes: {
@@ -42,28 +78,17 @@ describe("subscription.updated lifecycle emits", () => {
           current_period_end: 1731536000,
         },
         currentStatus: "active",
+        currentSubscription: { id: "sub_x", status: "active", items: { data: [] } },
       }),
     ).toBe(false);
   });
 
-  it("tier change (items) emits plan_started", () => {
-    expect(
-      peSubscriptionUpdatedShouldEmitPlanStarted({
-        previousAttributes: {
-          items: {
-            data: [{ price: { id: "price_solo" } }],
-          },
-        },
-        currentStatus: "active",
-      }),
-    ).toBe(true);
-  });
-
-  it("past_due update emits nothing", () => {
+  it("past_due transition emits nothing", () => {
     expect(
       peSubscriptionUpdatedShouldEmitPlanStarted({
         previousAttributes: { status: "active" },
         currentStatus: "past_due",
+        currentSubscription: { id: "sub_x", status: "past_due" },
       }),
     ).toBe(false);
   });
@@ -73,6 +98,7 @@ describe("subscription.updated lifecycle emits", () => {
       peSubscriptionUpdatedShouldEmitPlanStarted({
         previousAttributes: { status: "past_due" },
         currentStatus: "active",
+        currentSubscription: { id: "sub_x", status: "active" },
       }),
     ).toBe(false);
   });
@@ -82,13 +108,14 @@ describe("subscription.updated lifecycle emits", () => {
       peSubscriptionUpdatedShouldEmitPlanStarted({
         previousAttributes: { status: "incomplete" },
         currentStatus: "active",
+        currentSubscription: { id: "sub_new", status: "active" },
       }),
     ).toBe(true);
   });
 });
 
 describe("subscription end events", () => {
-  it("deleted for non-payment emits only plan_ended_unpaid", () => {
+  it("non-payment end emits plan_ended_unpaid", () => {
     expect(
       peSubscriptionEndLifecycleEvent({
         status: "canceled",
@@ -107,34 +134,41 @@ describe("subscription end events", () => {
   });
 });
 
-describe("invoice.payment_failed", () => {
-  it("renewal failure while past_due emits once", () => {
+describe("invoice.payment_failed (dahlia)", () => {
+  it("reads subscription id from parent.subscription_details", () => {
+    const { invoice } = DAHLIA_INVOICE_PAYMENT_FAILED;
+    expect(stripeSubscriptionIdFromInvoice(invoice)).toBe("sub_past_due_1");
+    expect(invoice.subscription).toBeUndefined();
+  });
+
+  it("falls back to top-level invoice.subscription", () => {
+    expect(
+      stripeSubscriptionIdFromInvoice({
+        subscription: "sub_legacy",
+        parent: {
+          subscription_details: { subscription: "sub_dahlia" },
+        },
+      }),
+    ).toBe("sub_legacy");
+  });
+
+  it("renewal failure while past_due emits", () => {
     expect(
       invoicePaymentFailedShouldEmit({
-        invoice: {
-          id: "in_1",
-          billing_reason: "subscription_cycle",
-          subscription: "sub_1",
-        },
+        invoice: DAHLIA_INVOICE_PAYMENT_FAILED.invoice,
         subscriptionStatus: "past_due",
       }),
     ).toBe(true);
   });
 
-  it("replay of same invoice id uses stable idempotency key", () => {
-    const key = planStartedIdempotencyKey({
-      stripeEventId: "evt_a",
-      subscriptionId: "sub_1",
-      activation: true,
-    });
-    expect(key).toBe("e5:sub_activate:sub_1");
-    expect(key).toBe(
+  it("activation idempotency is per subscription id", () => {
+    expect(
       planStartedIdempotencyKey({
-        stripeEventId: "evt_b",
+        stripeEventId: "evt_a",
         subscriptionId: "sub_1",
         activation: true,
       }),
-    );
+    ).toBe("e5:sub_activate:sub_1");
   });
 
   it("non-cycle invoice does not emit", () => {

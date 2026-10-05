@@ -147,6 +147,13 @@ describe("PE checkout routes (WDLL item 3) — simulated mode (no Stripe keys)",
   });
 });
 
+function stripeListSubscriptionsEmpty(): Response {
+  return new Response(JSON.stringify({ object: "list", data: [] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function mockStripeCheckoutSession(payload: Record<string, unknown>): {
   checkoutBodies: URLSearchParams[];
 } {
@@ -154,6 +161,9 @@ function mockStripeCheckoutSession(payload: Record<string, unknown>): {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const path = String(url);
     const body = new URLSearchParams(String(init?.body ?? ""));
+    if (path.includes("/subscriptions")) {
+      return stripeListSubscriptionsEmpty();
+    }
     if (path.includes("/customers")) {
       return new Response(JSON.stringify({ id: "cus_test_unlock_3b" }), {
         status: 200,
@@ -295,6 +305,9 @@ describe("Stripe customer email — Custom Checkout confirm() requires one (2026
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const path = String(url);
       const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
       if (path.includes("/customers")) {
         customerBodies.push(body);
         return new Response(JSON.stringify({ id: "cus_test_email_new" }), {
@@ -341,6 +354,9 @@ describe("Stripe customer email — Custom Checkout confirm() requires one (2026
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const path = String(url);
       const method = init?.method ?? "GET";
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
       if (path.includes("/customers/cus_test_needs_email") && method === "GET") {
         customerGets.push(path);
         return new Response(JSON.stringify({ id: "cus_test_needs_email", email: null }), {
@@ -394,6 +410,9 @@ describe("Stripe customer email — Custom Checkout confirm() requires one (2026
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const path = String(url);
       const method = init?.method ?? "GET";
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
       if (path.includes("/customers/cus_test_already_has_email") && method === "GET") {
         return new Response(
           JSON.stringify({ id: "cus_test_already_has_email", email: "already-set@example.com" }),
@@ -803,6 +822,47 @@ describe("session-exchange claims install history (WDLL item 6)", () => {
 const REFERRAL_METADATA_KEY = "metadata[promotekit_referral]";
 const REFERRAL_SUBSCRIPTION_KEY =
   "subscription_data[metadata][promotekit_referral]";
+
+describe("subscription checkout guard (P-494)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 409 subscription_exists when the customer already has an active subscription", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.includes("/subscriptions")) {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [{ id: "sub_existing", status: "active" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (path.includes("/customers")) {
+        return new Response(JSON.stringify({ id: "cus_has_sub" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("subscription_exists");
+    expect(res.body.billingPortalRoute).toBe("/property-explorer/v1/billing/portal");
+  });
+});
 
 describe("PromoteKit referral forwarded by the PE checkout routes (OPS-16 P-185)", () => {
   afterEach(() => {
