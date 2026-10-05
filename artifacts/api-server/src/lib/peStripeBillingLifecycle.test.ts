@@ -138,7 +138,7 @@ describe("invoice.payment_failed (dahlia)", () => {
   it("reads subscription id from parent.subscription_details", () => {
     const { invoice } = DAHLIA_INVOICE_PAYMENT_FAILED;
     expect(stripeSubscriptionIdFromInvoice(invoice)).toBe("sub_past_due_1");
-    expect(invoice.subscription).toBeUndefined();
+    expect("subscription" in invoice).toBe(false);
   });
 
   it("falls back to top-level invoice.subscription", () => {
