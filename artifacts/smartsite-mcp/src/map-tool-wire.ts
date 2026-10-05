@@ -66,10 +66,17 @@ async function fetchNodeBriefWire(
 ): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
   if (ids.length === 0) return { ok: false, reason: "map_no_parcel_hits" };
   const capIds = ids.slice(0, LIST_NODE_DEPTH_CAP);
+  // Multi-hit find_parcel (street/radius) map wiring reads stub depth so the
+  // panel gets rail dispositions without the full node brief + anchor burst,
+  // which exceeded the connector's wall clock on bare-street searches (P-496).
+  const briefDepth = capIds.length === 1 ? "node" : "stub";
   const res = await cortexFetch(config, `/api/property-explorer/v1/research/brief`, {
     method: "POST",
     userId,
-    body: JSON.stringify({ parcelNodeId: capIds.length === 1 ? capIds[0] : capIds, depth: "node" }),
+    body: JSON.stringify({
+      parcelNodeId: capIds.length === 1 ? capIds[0] : capIds,
+      depth: briefDepth,
+    }),
   });
   const body = await res.text();
   if (!res.ok) {

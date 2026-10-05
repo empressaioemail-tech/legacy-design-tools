@@ -52,12 +52,19 @@ export type UtilityServiceEntry = {
   ccnType: string | null;
 };
 
+export type UtilityServiceSlotAbsence = {
+  kind: "absent-verified";
+  reason: string;
+};
+
 export type UtilityServiceFactPresent = {
   state: "present";
   source: typeof UTILITY_SERVICE_FACT_SOURCE;
   entityId: string;
   /** Independent slots -- see module doc. All three null never reaches this variant (that is `absent`). */
   water: UtilityServiceEntry | null;
+  /** Set when the PUCT CCN sweep found no water polygon at the parcel centroid (P-496). */
+  waterAbsence?: UtilityServiceSlotAbsence | null;
   sewer: UtilityServiceEntry | null;
   electric: UtilityServiceEntry | null;
   sourceAdapter: "parcel_record";
