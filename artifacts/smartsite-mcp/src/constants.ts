@@ -136,6 +136,14 @@ export const SMARTSITE_MCP_TOOLS = [
 
 export type SmartsiteToolName = (typeof SMARTSITE_MCP_TOOLS)[number]["name"];
 
+/**
+ * Operator ruling 2026-10-05 (reverses point 3 of _decisions/2026-09-15_record_request_coming_soon_all_surfaces.md):
+ * parked tools are not listed. They stay in the catalog with their readiness and reason, but are not
+ * registered with the MCP server or published in llms.txt, so neither Claude nor a user sees a tool that
+ * cannot answer.
+ */
+export const LISTED_TOOLS = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness !== "blocked");
+
 export const SERVER_NAME = "Smart Site";
 export const SERVER_VERSION = "0.0.1";
 export const SERVER_WEBSITE_URL = "https://smartsite.cloud";

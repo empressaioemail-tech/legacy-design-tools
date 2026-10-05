@@ -1052,6 +1052,8 @@ export function registerTools(server: McpServer): void {
   // caller's email is in PLAN_REVIEW_PREVIEW_EMAILS.
   registerPlanReviewPreview(server as unknown as Parameters<typeof registerPlanReviewPreview>[0]);
   for (const tool of SMARTSITE_MCP_TOOLS) {
+    // Parked tools are not listed (operator, 2026-10-05). See LISTED_TOOLS.
+    if (tool.readiness === "blocked") continue;
     const uiMeta = appMetaFor(tool.name);
     server.registerTool(
       tool.name,
@@ -1065,18 +1067,6 @@ export function registerTools(server: McpServer): void {
       attachStandingVocabBlock(tool.name, async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
-
-        if (tool.readiness === "blocked") {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: notReadyMessage(tool.name, tool.blockedReason ?? "blocked"),
-              },
-            ],
-            isError: true,
-          };
-        }
 
         switch (tool.name) {
           case "find_nearest_parcels": {

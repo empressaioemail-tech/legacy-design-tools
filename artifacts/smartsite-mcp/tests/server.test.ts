@@ -1,3 +1,4 @@
+import { LISTED_TOOLS } from "../src/constants.js";
 import { describe, expect, it } from "vitest";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -44,23 +45,23 @@ describe("smartsite-mcp HTTP surface", () => {
     });
   });
 
-  it("GET /llms.txt lists exactly seventeen tools", async () => {
+  it("GET /llms.txt lists exactly the listed tools", async () => {
     await withHttpServer(app, async (base) => {
       const res = await fetch(`${base}/llms.txt`);
       expect(res.status).toBe(200);
       const text = await res.text();
-      expect(text).toContain("Tools (17):");
-      for (const tool of SMARTSITE_MCP_TOOLS) {
+      expect(text).toContain(`Tools (${LISTED_TOOLS.length}):`);
+      for (const tool of LISTED_TOOLS) {
         expect(text).toContain(tool.name);
       }
       const toolNameMatches = text.match(/`([a-z_]+)`/g) ?? [];
       const listedNames = toolNameMatches.map((m) => m.replace(/`/g, ""));
-      const catalogNames = SMARTSITE_MCP_TOOLS.map((t) => t.name);
+      const catalogNames = LISTED_TOOLS.map((t) => t.name);
       expect(
         listedNames.filter((n) =>
           catalogNames.includes(n as (typeof catalogNames)[number]),
         ),
-      ).toHaveLength(17);
+      ).toHaveLength(LISTED_TOOLS.length);
     });
   });
 

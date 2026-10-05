@@ -1,3 +1,4 @@
+import { LISTED_TOOLS } from "../src/constants.js";
 import { describe, expect, it } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -1313,7 +1314,7 @@ describe("P-91 v2 facts and actions (exported twins)", () => {
 });
 
 describe("mcp-app registration", () => {
-  it("tools/list stays 16 and only APP_HOST_TOOLS carry the ui resource", async () => {
+  it("tools/list is the listed set and only APP_HOST_TOOLS carry the ui resource", async () => {
     const server = new McpServer({ name: SERVER_NAME, version: "0.0.1" });
     registerTools(server);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -1321,7 +1322,7 @@ describe("mcp-app registration", () => {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(17);
+    expect(tools).toHaveLength(LISTED_TOOLS.length);
     for (const tool of tools) {
       const meta = (tool as { _meta?: { ui?: { resourceUri?: string } } })._meta;
       if ((APP_HOST_TOOLS as readonly string[]).includes(tool.name)) {

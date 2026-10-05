@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { SERVER_NAME, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
+import { SERVER_NAME, LISTED_TOOLS, SMARTSITE_MCP_TOOLS } from "../src/constants.js";
 import type { SmartsiteAuthContext } from "../src/request-context.js";
 import { sanitizeAskTheMapErrorBody } from "../src/tool-honesty.js";
 import { ANCHOR_BATCH_READ_CAP } from "../src/parcel-anchor.js";
@@ -111,12 +111,12 @@ const READ_ONLY_BY_NAME: Record<string, boolean> = {
 };
 
 describe("smartsite-mcp tools/list", () => {
-  it("registers exactly seventeen tools with Smart Site server name", async () => {
+  it("registers exactly the listed tools with Smart Site server name", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(17);
+      expect(tools).toHaveLength(LISTED_TOOLS.length);
       expect(tools.map((t) => t.name).sort()).toEqual(
-        SMARTSITE_MCP_TOOLS.map((t) => t.name).sort(),
+        LISTED_TOOLS.map((t) => t.name).sort(),
       );
     });
   });
@@ -144,7 +144,7 @@ describe("smartsite-mcp tool annotations (P-91 item 1)", () => {
   it("listTools exposes annotations.readOnlyHint on every registered tool", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(17);
+      expect(tools).toHaveLength(LISTED_TOOLS.length);
       expect(namesMissingReadOnlyHint(tools)).toEqual([]);
       for (const tool of tools) {
         expect(tool.annotations?.readOnlyHint).toBe(READ_ONLY_BY_NAME[tool.name]);
@@ -434,6 +434,24 @@ describe("ask_the_map leak closed (P-91 item 10) and blocked (P-91 item 34)", ()
     mockCortexFetch.mockReset();
   });
 
+  it("parked tools are not listed, and calling one fails as an unknown tool (operator, 2026-10-05)", async () => {
+    await withTestClient(async (client) => {
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      for (const parked of ["ask_the_map", "request_records", "check_request", "list_purchased_records", "read_purchased_record"]) {
+        expect(names).not.toContain(parked);
+        let failed = false;
+        try {
+          const r = await client.callTool({ name: parked, arguments: {} });
+          failed = r.isError === true;
+        } catch {
+          failed = true;
+        }
+        expect(failed, parked + " must not answer").toBe(true);
+      }
+    });
+  });
+
   it("falsifier: the synthetic cortex 400 still carries every leak token", () => {
     const raw = JSON.stringify(CORTEX_CHAT_VALIDATION_400);
     for (const token of ASK_THE_MAP_LEAK_TOKENS) {
@@ -451,51 +469,6 @@ describe("ask_the_map leak closed (P-91 item 10) and blocked (P-91 item 34)", ()
       "areaContext",
       "purpose",
     ]);
-  });
-
-  it("publishes a strict two-field schema in tools/list", async () => {
-    await withTestClient(async (client) => {
-      const { tools } = await client.listTools();
-      const tool = tools.find((t) => t.name === "ask_the_map");
-      expect(tool).toBeDefined();
-      const schema = tool!.inputSchema as {
-        additionalProperties?: unknown;
-        properties?: Record<string, unknown>;
-        required?: string[];
-      };
-      expect(schema.additionalProperties).toBe(false);
-      expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
-        "message",
-        "parcelNodeId",
-      ]);
-      expect([...(schema.required ?? [])].sort()).toEqual([
-        "message",
-        "parcelNodeId",
-      ]);
-    });
-  });
-
-  it("extra keys are refused at the schema without echoing their names", async () => {
-    await withTestClient(async (client) => {
-      const result = await client.callTool({
-        name: "ask_the_map",
-        arguments: {
-          parcelNodeId: "48021:34137",
-          message: "what is the flood zone",
-          workspaceDid: "did:hauska:property-workspace:leak",
-          personaBucket: "owner_buyer",
-          starterPromptId: "adu",
-          mls_id: "MLS-LEAK",
-          presentationMode: "consumer",
-        },
-      });
-      expect(result.isError).toBe(true);
-      const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
-      expect(text).toContain("ask_the_map accepts parcelNodeId and message.");
-      assertNoAskTheMapLeakTokens(JSON.stringify(result));
-      assertNoAskTheMapLeakTokens(text);
-      expect(mockCortexFetch).not.toHaveBeenCalled();
-    });
   });
 
   it("MCP-side empty message plus leak fields still omits brokerage internals", async () => {
@@ -518,36 +491,6 @@ describe("ask_the_map leak closed (P-91 item 10) and blocked (P-91 item 34)", ()
     });
   });
 
-  it("a legal call returns not_ready and never reaches cortex", async () => {
-    mockCortexFetch.mockResolvedValue(
-      new Response(JSON.stringify(CORTEX_CHAT_VALIDATION_400), { status: 400 }),
-    );
-
-    await withTestClient(async (client) => {
-      const result = await client.callTool({
-        name: "ask_the_map",
-        arguments: {
-          parcelNodeId: "48021:34137",
-          message: "what is the flood zone",
-        },
-      });
-      expect(result.isError).toBe(true);
-      const text = (result.content?.[0] as { text: string } | undefined)?.text ?? "";
-      const parsed = JSON.parse(text);
-      expect(parsed).toMatchObject({ status: "not_ready", tool: "ask_the_map" });
-      expect(parsed.reason).toContain("P-91 item 34");
-      assertNoAskTheMapLeakTokens(JSON.stringify(result));
-      expect(mockCortexFetch).not.toHaveBeenCalled();
-    });
-  });
-
-  it("tools/list still returns seventeen names with ask_the_map listed", async () => {
-    await withTestClient(async (client) => {
-      const { tools } = await client.listTools();
-      expect(tools).toHaveLength(17);
-      expect(tools.map((t) => t.name)).toContain("ask_the_map");
-    });
-  });
 });
 
 describe("smartsite-mcp tier gates (P-87 item 11)", () => {
@@ -1233,10 +1176,10 @@ describe("P-91 Wave B screen/save tools", () => {
     mockCortexFetch.mockReset();
   });
 
-  it("tools/list is 17 and omits get_screen, unsave_property, delete_screen", async () => {
+  it("tools/list is the listed set and omits get_screen, unsave_property, delete_screen", async () => {
     await withTestClient(async (client) => {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(17);
+      expect(tools).toHaveLength(LISTED_TOOLS.length);
       const names = tools.map((t) => t.name);
       expect(names).toContain("create_screen");
       expect(names).toContain("add_to_screen");
@@ -2368,19 +2311,6 @@ describe("H1 wire half: every non-OK or refused body carries a machine-readable 
     expect(mockCortexFetch).not.toHaveBeenCalled();
   });
 
-  it("notReadyMessage: a blocked tool carries status not_ready, tool, and the plan-row reason", async () => {
-    const res = await callRaw("request_records", { parcelNodeId: "48021:34137" });
-    expect(res.isError).toBe(true);
-    const parsed = JSON.parse(res.text);
-    expectDeclared(parsed);
-    expect(parsed).toMatchObject({
-      status: "not_ready",
-      tool: "request_records",
-      reason: "P-85 item 4",
-    });
-    expect(mockCortexFetch).not.toHaveBeenCalled();
-  });
-
   it("upgradeRequiredResult carries status upgrade_required and a gate reason", async () => {
     mockAuth = { ...defaultAuth, accessTier: "free", subscriptionTier: null };
     const report = JSON.parse((await callRaw("run_report", { parcelNodeId: "48021:34137" })).text);
@@ -2665,21 +2595,6 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
       expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
       expect(second.smartSiteVocabulary.length).toBeGreaterThanOrEqual(15);
       expect(second.smartSiteVocabulary.some((e) => e.token === "unknown")).toBe(true);
-    });
-  });
-
-  it("the standing block also rides on a blocked / not_ready result", async () => {
-    await withTestClient(async (client) => {
-      const result = await client.callTool({
-        name: "check_request",
-        arguments: { jobId: "job-1" },
-      });
-      expect(result.isError).toBe(true);
-      expect(result.content).toHaveLength(2);
-      const first = JSON.parse((result.content?.[0] as { text: string }).text);
-      expect(first.status).toBe("not_ready");
-      const second = JSON.parse((result.content?.[1] as { text: string }).text);
-      expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
     });
   });
 
