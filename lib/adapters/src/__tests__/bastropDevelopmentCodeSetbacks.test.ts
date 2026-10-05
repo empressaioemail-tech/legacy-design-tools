@@ -38,35 +38,16 @@ describe("bastrop-development-code setback router (WDLL STEP 3)", () => {
     }
   });
 
-  it("P-496: GC and MU route to BDC with Sec. 14.02.003 chart rows", () => {
-    const gc = getSetbackTableForZoning("bastrop-tx", "GC")!;
-    expect(gc.jurisdictionKey).toBe("bastrop-development-code");
-    const gcRow = gc.districts.find(
-      (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === "GC",
-    );
-    expect(gcRow?.front_ft).toBe(20);
-    expect(gcRow?.side_ft).toBe(5);
-    expect(gcRow?.rear_ft).toBe(20);
-    expect(gcRow?.max_height_ft).toBe(55);
-
-    const mu = getSetbackTableForZoning("bastrop-tx", "MU")!;
-    const muRow = mu.districts.find(
-      (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === "MU",
-    );
-    expect(muRow?.front_ft).toBe(15);
-    expect(muRow?.side_ft).toBe(5);
-    expect(muRow?.rear_ft).toBe(15);
-    expect(muRow?.max_height_ft).toBe(45);
-  });
-
-  it("PDD routes to BDC table with no chart row (honest-decline)", () => {
-    const table = getSetbackTableForZoning("bastrop-tx", "PDD");
-    expect(table!.jurisdictionKey).toBe("bastrop-development-code");
-    expect(
-      table!.districts.some(
-        (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === "PDD",
-      ),
-    ).toBe(false);
+  it("MU / GC / PDD route to BDC table with no chart rows (honest-decline)", () => {
+    for (const code of ["MU", "GC", "PDD"] as const) {
+      const table = getSetbackTableForZoning("bastrop-tx", code);
+      expect(table!.jurisdictionKey).toBe("bastrop-development-code");
+      expect(
+        table!.districts.some(
+          (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === code,
+        ),
+      ).toBe(false);
+    }
   });
 
   it("P-445: PI routes to BDC and has the Sec. 14.02.003 H chart row", () => {
