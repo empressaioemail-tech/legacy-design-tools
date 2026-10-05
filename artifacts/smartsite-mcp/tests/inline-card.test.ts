@@ -231,3 +231,17 @@ describe("P-448 inline card", () => {
     expect(html).not.toContain("Share");
   });
 });
+
+describe("near mode count (fix register B2)", () => {
+  it("says 5 of 12 when only five of twelve hits carry full records", async () => {
+    const { composeInlineCard } = await import("../src/inline-card.js");
+    const parcel = (n: number) => ({ parcelNodeId: "48021:" + n, draw: { label: n + " WATER ST" }, brief: { sections: [] } });
+    const card = composeInlineCard(
+      { parcels: [1, 2, 3, 4, 5].map(parcel), hits: Array.from({ length: 12 }, (_, i) => ({ parcelNodeId: "48021:" + i })), received: 12 },
+      null,
+      () => null,
+    );
+    expect(card?.title).toBe("5 of 12 parcels");
+    expect(card?.moreCount).toBe(7);
+  });
+});

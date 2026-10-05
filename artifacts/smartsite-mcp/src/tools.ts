@@ -509,7 +509,20 @@ async function withCortex(
       "Smart Site MCP cannot reach the workbench backend.",
     );
   }
-  return fn(config);
+  try {
+    return await fn(config);
+  } catch (err) {
+    // A slow or unreachable backend is a declared answer, never a raw
+    // "This operation was aborted" (QA 2026-09-29, fix register B1).
+    const name = (err as { name?: string } | null)?.name;
+    if (name === "AbortError" || name === "TimeoutError") {
+      return degradedResult("upstream_timeout", "Smart Site took too long to answer. Try again, or narrow the request.");
+    }
+    if (err instanceof TypeError) {
+      return degradedResult("upstream_unreachable", "Smart Site could not reach its data service. Try again shortly.");
+    }
+    throw err;
+  }
 }
 
 type CenterPointOutcome =
@@ -826,7 +839,8 @@ function attachStandingVocabBlock(
     const hostSession = hostSessionFromAuth(auth);
     const { skipStandingVocab, ...result } = await handler(args);
     let shaped = result;
-    if (!skipStandingVocab) {
+    // The vocabulary block explains result tokens; an error result has none (fix register B4).
+    if (!skipStandingVocab && !result.isError) {
       const withVocab = {
         ...shaped,
         content: [...shaped.content, STANDING_VOCAB_CONTENT_PART],

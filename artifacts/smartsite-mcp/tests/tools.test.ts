@@ -2598,7 +2598,16 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
     });
   });
 
-  it("the standing block also rides on a declared upstream error result", async () => {
+  it("a cortex timeout is a declared upstream_timeout, never a raw abort (fix register B1)", async () => {
+    mockCortexFetch.mockRejectedValue(Object.assign(new Error("This operation was aborted"), { name: "AbortError" }));
+    await withTestClient(async (client) => {
+      const result = await client.callTool({ name: "find_parcel", arguments: { query: "1301 Water St, Bastrop, TX" } });
+      const first = JSON.parse((result.content?.[0] as { text: string }).text);
+      expect(first).toMatchObject({ status: "degraded", reason: "upstream_timeout" });
+    });
+  });
+
+  it("an error result carries no vocabulary block (fix register B4)", async () => {
     mockCortexFetch.mockResolvedValue(
       new Response(JSON.stringify({ error: "internal" }), { status: 500 }),
     );
@@ -2608,9 +2617,7 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
         arguments: { query: "908 pine" },
       });
       expect(result.isError).toBe(true);
-      expect(result.content).toHaveLength(2);
-      const second = JSON.parse((result.content?.[1] as { text: string }).text);
-      expect(second.resource).toBe(VOCABULARY_RESOURCE_URI);
+      expect(result.content).toHaveLength(1);
     });
   });
 
