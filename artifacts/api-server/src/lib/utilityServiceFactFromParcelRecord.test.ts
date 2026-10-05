@@ -218,6 +218,37 @@ describe("utilityServiceFactFromParcelRecord", () => {
     expect(result.water?.ccnNo).toBe("10863");
     expect(result.sewer?.ccnNo).toBe("20811");
     expect(result.electric).toBeNull();
+    expect(result.waterAbsence).toBeNull();
+  });
+
+  it("P-496: sewer-only rows declare water absent-verified instead of a silent null", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: "48021:90001",
+            railKey: UTILITY_SERVICE_RAIL_KEY,
+            cellState: { kind: "value", disposition: "rows", rowCount: 1, source: "tx_puct_ccn", vintage: "2026-09-04" },
+          },
+        ],
+        companionRows: [
+          {
+            placeKey: "48021:90001",
+            railKey: UTILITY_SERVICE_RAIL_KEY,
+            rowIndex: 1,
+            payload: { utilityType: "sewer", ccnNo: "20466", utility: "City of Bastrop", status: "Commission Approved", ccnType: "Bounded Service Area" },
+            source: "tx_puct_ccn",
+            vintage: "2026-09-04",
+          },
+        ],
+      }),
+    );
+    const result = await utilityServiceFactFromParcelRecord("48021:90001");
+    expect(result.state).toBe("present");
+    if (result.state !== "present") throw new Error("unreachable");
+    expect(result.water).toBeNull();
+    expect(result.waterAbsence?.kind).toBe("absent-verified");
+    expect(result.waterAbsence?.reason).toMatch(/water CCN/i);
   });
 
   it("THE LOAD-BEARING CASE: unaccounted refuses, never a fabricated absence or a present service", async () => {

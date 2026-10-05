@@ -353,7 +353,17 @@ describe("P-258 lane-c — Bastrop stays an honest decline (withdrawn rows)", ()
     // bastrop-development-code (a cross-repo hash-locked table that asserts
     // their absence), so rows in this file would never be served. The values
     // are recorded as evidence in this file's note instead.
-    for (const code of ["GC", "MU", "IND", "P/OS"] as const) {
+    for (const code of ["GC", "MU"] as const) {
+      const routed = getSetbackTableForZoning("bastrop-tx", code)!;
+      expect(routed.jurisdictionKey, code).toBe("bastrop-development-code");
+      expect(
+        routed.districts.some(
+          (d) => (d.district_name.trim().split(/\s+/)[0] ?? "").toUpperCase() === code,
+        ),
+        code,
+      ).toBe(true);
+    }
+    for (const code of ["IND", "P/OS"] as const) {
       const routed = getSetbackTableForZoning("bastrop-tx", code)!;
       expect(routed.jurisdictionKey, code).toBe("bastrop-development-code");
       expect(

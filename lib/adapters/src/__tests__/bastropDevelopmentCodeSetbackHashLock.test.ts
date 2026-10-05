@@ -4,9 +4,9 @@
  * Engine and LDT must keep identical LF bytes of bastrop-development-code.json.
  *
  * Locked SHA256 (UTF-8, LF newlines, no BOM):
- *   653dcb2f70cde0f5b8aab22de8433e669f05d1868bcc0bdf306271cb24d75020
+ *   83fb82718a6d86af5d84037f85fa7564bfee0a04fc635123a3bd962701c52a7e
  *
- * P-445 (2026-09-25): added PI Public Institutional. Engine mirror lock is
+ * P-496 (2026-10-05): added GC and MU. Engine mirror lock is
  * leave-behind until a hauska-engine PR updates the same bytes.
  *
  * Mirror test: hauska-engine/packages/adapters/src/__tests__/bastropDevelopmentCodeSetbackHashLock.test.ts
@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 /** Canonical SHA256 of bastrop-development-code.json (LF). Keep in sync with engine lock. */
 export const BASTROP_DEVELOPMENT_CODE_SETBACK_SHA256 =
-  "653dcb2f70cde0f5b8aab22de8433e669f05d1868bcc0bdf306271cb24d75020";
+  "83fb82718a6d86af5d84037f85fa7564bfee0a04fc635123a3bd962701c52a7e";
 
 const TABLE_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -37,7 +37,7 @@ describe("bastrop-development-code setback hash lock (WDLL STEP 3)", () => {
     expect(digest).toBe(BASTROP_DEVELOPMENT_CODE_SETBACK_SHA256);
   });
 
-  it("parses as bastrop-development-code with SF-1/SF-2/SF-3/RR and PI", () => {
+  it("parses as bastrop-development-code with SF-1/SF-2/SF-3/RR, PI, GC, and MU", () => {
     const table = JSON.parse(readFileSync(TABLE_PATH, "utf8")) as {
       jurisdictionKey: string;
       districts: Array<{ district_name: string }>;
@@ -49,6 +49,8 @@ describe("bastrop-development-code setback hash lock (WDLL STEP 3)", () => {
       "SF-3 Single-Family Residential",
       "RR Rural Residential",
       "PI Public Institutional",
+      "GC General Commercial",
+      "MU Mixed Use",
     ]);
   });
 });

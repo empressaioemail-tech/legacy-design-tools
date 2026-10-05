@@ -652,6 +652,51 @@ describe("OPS-16 A-096/A-097/A-098: zoning + setbacks not-applicable fix", () =>
     expect(stub.zoning).toBe("refused");
   });
 
+  it("P-496: landUseFact present overrides empty baked landUse for stub rail", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48021:1",
+      facets: { baseFacts: { landUse: null } },
+      landUseFact: {
+        state: "present",
+        source: "land-use-fact",
+        boundAs: "48021:1",
+        tried: ["48021:1", "48021:1.00000000"],
+        entityId: "48021:1:2025",
+        taxYear: 2025,
+        landUseCode: "C1",
+        landUseLabel: "Vacant Commercial",
+        sourceAdapter: "cad",
+        sourceVintage: "2025",
+        evaluatedAt: "2026-01-14",
+      },
+    });
+    expect(stub.landUse).toBe("present");
+  });
+
+  it("P-496: envelopeOutcome refused overrides setbacks-fact present on stub envelope rail", () => {
+    const stub = composeSmartSiteStub({
+      parcelNodeId: "48021:39288",
+      facets: { envelope: { status: "ok" } },
+      parcelRecordSetbacksFact: {
+        state: "present",
+        source: "setbacks-fact-parcel-record",
+        entityId: "48021:39288",
+        frontFt: 20,
+        sideFt: 5,
+        rearFt: 20,
+        cornerFt: 20,
+        sourceAdapter: "parcel_record",
+        sourceVintage: null,
+        evaluatedAt: null,
+      },
+      envelopeOutcome: {
+        state: "declined",
+        refusal: { step: "parcel-identity-mismatch", chain: "unreached" },
+      },
+    });
+    expect(stub.envelope).toBe("refused");
+  });
+
   it("REGRESSION GUARD: every existing call shape (no parcelRecordZoningFact/parcelRecordSetbacksFact at all) is byte-identical to before this card -- the new params are additive and optional", () => {
     const stub = composeSmartSiteStub({
       parcelNodeId: PARCEL,
