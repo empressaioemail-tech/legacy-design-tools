@@ -1,3 +1,4 @@
+import { SMARTSITE_VOICE_LINE } from "./voice.js";
 /**
  * P-437. Tells the model which MCP App card (if any) matches the inline widget,
  * so it never claims a board when only a single-parcel panel is on screen.
@@ -73,7 +74,9 @@ function asScreen(data: Record<string, unknown>): Record<string, unknown> | null
 export function injectCardContract(text: string, view: CardView): { text: string; view: CardView } {
   const sentence = cardContractSentence(view);
   try {
-    const data = JSON.parse(text) as Record<string, unknown>;
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    // answerGuidance leads the result so Claude reads it before the data (voice.ts).
+    const data: Record<string, unknown> = view === "none" ? { ...parsed } : { answerGuidance: SMARTSITE_VOICE_LINE, ...parsed };
     data.cardContract = view;
     data.cardContractText = sentence;
     return { text: JSON.stringify(data), view };

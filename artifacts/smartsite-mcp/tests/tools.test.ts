@@ -99,7 +99,7 @@ const READ_ONLY_BY_NAME: Record<string, boolean> = {
   run_report: true,
   check_request: true,
   ask_the_map: true,
-  export_instrument: true,
+  export_instrument: false,
   request_records: false,
   create_screen: false,
   add_to_screen: false,

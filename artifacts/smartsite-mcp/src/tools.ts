@@ -739,6 +739,7 @@ function annotationsFor(name: SmartsiteToolName) {
   }
   if (
     name === "request_records" ||
+    name === "export_instrument" ||
     name === "create_screen" ||
     name === "add_to_screen" ||
     name === "save_property" ||
@@ -1101,7 +1102,8 @@ export function registerTools(server: McpServer): void {
               const payload: { parcelNodeId: string; cap?: number } = {
                 parcelNodeId: subject,
               };
-              if (cap !== undefined) payload.cap = cap;
+              // Default 8 keeps the result well under the host's size cap (UX review 2026-10-05).
+              payload.cap = cap ?? 8;
               const res = await cortexFetch(
                 config,
                 `/api/property-explorer/v1/research/nearest-parcels`,

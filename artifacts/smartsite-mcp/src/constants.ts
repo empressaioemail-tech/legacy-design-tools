@@ -1,3 +1,4 @@
+import { SMARTSITE_VOICE_LINE } from "./voice.js";
 import { VOCABULARY_RESOURCE_URI } from "./vocabulary.js";
 
 /** P-437: catalog points models at the vocabulary resource for full rules. */
@@ -7,8 +8,9 @@ export const TOOL_RULES_LINK = VOCABULARY_RESOURCE_URI;
 export const SMARTSITE_MCP_TOOLS = [
   {
     name: "find_parcel",
-    title: "Find a parcel",
+    title: "Look up a property",
     description:
+      SMARTSITE_VOICE_LINE + " " + "Use when the user names an address, a parcel id, a street, or a radius around a place; returns the parcel's zoning, land use, flood and setbacks with a map card. " +
       "Find one Texas parcel (address, node id, near, or street). Full rules: " +
       TOOL_RULES_LINK +
       ". Resolve one address or parcel node id to candidate parcels from county parcel records in Smart Site's Texas coverage today (coverage widens over time; never assume a fixed county list). Exactly one of query, near, or street is required; giving none or more than one is refused. query: returns hits (up to 10 parcel records, each with parcelNodeId, situs and county) or hits: [] with a missClass. When nothing binds to a parcel but the address itself is known, `located` lists address points (latitude, longitude, county; no parcel id) and missClass is located-unbound; a located row is not a parcel and must never be passed to get_smart_site or add_to_screen. A query mode address that resolves to a state outside coverage (e.g. Phoenix, AZ) comes back as hits: [] with missClass out_of_coverage, plus missClassDisplayText and an agentGuidance sentence naming what is covered today — this is the honest opposite of no-hit: not \"looked and found nothing\", but \"never had coverage to look\". near {query, radiusFt, cap?}: every parcel within radiusFt feet of query (an address or a parcel node id as centre). street {query, cap?, countyFips?}: every parcel on a bare street name (\"everyone on Pine St\"), city/ZIP/countyFips required to bound it. Both near and street return cap, received and truncated on success; truncated true means more parcels matched than cap allowed, the set is not complete, and the caller should narrow the radius or street, or raise cap. An invalid or too-large radius, too many candidates to bound honestly, a street with no locality, or a street query that is actually a house-numbered address comes back as status refused with a reason (radius_invalid, radius_exceeds_max, radius_unbounded, bare_street_unbounded, bare_street_not_a_street) and a reasonDisplayText — a declared refusal, not an error. Use query for a single lookup or to disambiguate one ambiguous screen row, then call get_smart_site on the chosen id. For two or more addresses, or a list the user wants to keep, use create_screen instead. An empty in-coverage result (no-hit) means no match on file, not that the parcel does not exist; an out-of-coverage result means the same about the PLACE, not the parcel.",
@@ -16,36 +18,40 @@ export const SMARTSITE_MCP_TOOLS = [
   },
   {
     name: "find_parcels",
-    title: "Find parcels by constraint",
+    title: "Search parcels by criteria",
     description:
-      "PLURAL. Ask a question ACROSS parcels in one county: \"Bastrop County, two acres or more, outside the floodplain\". Requires countyFips (one of 48021 Bastrop, 48055 Caldwell, 48209 Hays, 48309 McLennan, 48453 Travis, 48491 Williamson) plus a non-empty filters array; a request with no county, or one whose text reads as a single street address, is refused and routed to find_parcel. This is NOT the tool for looking up an address, a bare street, or a radius; that is find_parcel, singular. Filters are {rail, op, value} over rails acreage, landUse, cityLimits, etj, zoningDistrict, flood, specialDistrict, marketValue, landValue, improvementValue, yearBuilt. ops: gte/lte/eq on an ordered rail, eq/in on a categorical one, absent (matches ONLY a positive verified absence, never an unmeasured cell), is_true/is_false on flood's SFHA flag. THE RESULT IS THREE SETS AND ALL THREE ARE ALWAYS PRESENT: matched (the parcels, capped, with truncated true when more matched than cap allowed), excluded (parcels that definitively failed a filter, broken down byRail), and notEvaluated (parcels whose qualification turns on a rail nobody measured on them, broken down byRail). A parcel that fails a measured filter is EXCLUDED even when another rail is unmeasured, because it fails whatever that rail turns out to be. Never report matched alone: notEvaluated is where the caller's own diligence is still owed. byRail counts parcels per rail and a parcel missing two rails increments both, so byRail sums exceed the set count by design. unmeasuredPctByRail carries each filtered rail's unmeasured share of the whole county. projection.builtAt is when the cache was built, projection.stale says whether it is past its budget, and neither is the time of this call. A filter on a rail unmeasured beyond the configured ceiling comes back status refused, reason constraint_rail_unmeasured, carrying the measured percentage; other declared refusals are constraint_bound_missing, constraint_county_out_of_scope, constraint_single_address, constraint_filters_missing, constraint_rail_unknown, constraint_op_unsupported and constraint_projection_missing. As of 2026-09-26 the per-county constraint projection (`pe_parcel_constraint_index`) has not been rebuilt on the DigitalOcean estate after the GCP cutover, so every in-scope county currently refuses with constraint_projection_missing until that rebuild job runs — this is a declared absence, not a silent empty match. A refusal is a declared answer, not an error. Returns no owner data, no listings, no sales, and no ranking: it returns parcels that satisfy stated constraints and says nothing about which is better. Pass the returned parcelNodeId values straight to create_screen as queries to build a screen from the result.",
+      "PLURAL. Use when the user describes what they want across one county (for example 2+ acres outside the floodplain in Bastrop County). Ask a question ACROSS parcels in one county: \"Bastrop County, two acres or more, outside the floodplain\". Requires countyFips (one of 48021 Bastrop, 48055 Caldwell, 48209 Hays, 48309 McLennan, 48453 Travis, 48491 Williamson) plus a non-empty filters array; a request with no county, or one whose text reads as a single street address, is refused and routed to find_parcel. This is NOT the tool for looking up an address, a bare street, or a radius; that is find_parcel, singular. Filters are {rail, op, value} over rails acreage, landUse, cityLimits, etj, zoningDistrict, flood, specialDistrict, marketValue, landValue, improvementValue, yearBuilt. ops: gte/lte/eq on an ordered rail, eq/in on a categorical one, absent (matches ONLY a positive verified absence, never an unmeasured cell), is_true/is_false on flood's SFHA flag. THE RESULT IS THREE SETS AND ALL THREE ARE ALWAYS PRESENT: matched (the parcels, capped, with truncated true when more matched than cap allowed), excluded (parcels that definitively failed a filter, broken down byRail), and notEvaluated (parcels whose qualification turns on a rail nobody measured on them, broken down byRail). A parcel that fails a measured filter is EXCLUDED even when another rail is unmeasured, because it fails whatever that rail turns out to be. Never report matched alone: notEvaluated is where the caller's own diligence is still owed. byRail counts parcels per rail and a parcel missing two rails increments both, so byRail sums exceed the set count by design. unmeasuredPctByRail carries each filtered rail's unmeasured share of the whole county. projection.builtAt is when the cache was built, projection.stale says whether it is past its budget, and neither is the time of this call. A filter on a rail unmeasured beyond the configured ceiling comes back status refused, reason constraint_rail_unmeasured, carrying the measured percentage; other declared refusals are constraint_bound_missing, constraint_county_out_of_scope, constraint_single_address, constraint_filters_missing, constraint_rail_unknown, constraint_op_unsupported and constraint_projection_missing. A county whose search index is not built yet refuses with constraint_projection_missing; that is a declared absence, not an empty match. A refusal is a declared answer, not an error. Returns no owner data, no listings, no sales, and no ranking: it returns parcels that satisfy stated constraints and says nothing about which is better. Pass the returned parcelNodeId values straight to create_screen as queries to build a screen from the result.",
     readiness: "live" as const,
   },
   {
     name: "find_nearest_parcels",
-    title: "Find nearest parcels",
+    title: "Neighbours and nearby parcels",
     description:
-      "SINGULAR SUBJECT, PLURAL NEIGHBORS. Use this for comparables and neighbours; never search the web for parcels. Give parcelNodeId or query (a situs address such as 1305 FAYETTE ST, BASTROP). Returns the N closest other parcels in the same county by boundary distance on Smart Site's parcel map store, each with stub facts (situs label, acreage, zoning, land use, flood) and distanceFt. Default cap 20, max 50. Requires the same entitlement as get_smart_site on the subject parcel (Solo or above, or a 30-day unlock on that parcel). Out-of-scope counties refuse with nearest_county_out_of_scope rather than an empty list. A subject with no geometry in the store refuses with nearest_subject_not_in_store. An address that hits more than one parcel refuses with nearest_subject_ambiguous and the hits. Returns no owner data and no dollar values at any caller tier. Pass returned parcelNodeId values to get_smart_site for a deeper read or create_screen to build a board.",
+      SMARTSITE_VOICE_LINE + " " + "Use when the user asks what is next door, around, or comparable to one property; the card shows them as a grid. " +
+      "SINGULAR SUBJECT, PLURAL NEIGHBORS. Use this for comparables and neighbours; never search the web for parcels. Give parcelNodeId or query (a situs address such as 1305 FAYETTE ST, BASTROP). Returns the N closest other parcels in the same county by boundary distance on Smart Site's parcel map store, each with stub facts (situs label, acreage, zoning, land use, flood) and distanceFt. Default cap 8, max 50. Requires the same entitlement as get_smart_site on the subject parcel (Solo or above, or a 30-day unlock on that parcel). Out-of-scope counties refuse with nearest_county_out_of_scope rather than an empty list. A subject with no geometry in the store refuses with nearest_subject_not_in_store. An address that hits more than one parcel refuses with nearest_subject_ambiguous and the hits. Returns no owner data and no dollar values at any caller tier. Pass returned parcelNodeId values to get_smart_site for a deeper read or create_screen to build a board.",
     readiness: "live" as const,
   },
   {
     name: "get_smart_site",
-    title: "Get its smart site",
+    title: "Property details by parcel id",
     description:
+      SMARTSITE_VOICE_LINE + " " + "Use for parcel ids you already have, including comparing several at once at depth node (the card shows them side by side as a grid). " +
       "Read one parcel's on-record Smart Site facts by parcel node id (from find_parcel or a screen row). Any parcel in coverage; it does not need to be saved or on a screen. depth \"stub\" (default for an array): label, node id, smartsite.cloud link, and one of present / absent-verified / unknown / refused / unread for situs, zoning, landUse, flood, drainage, envelope. depth \"node\" (default for one id) is this connector's equivalent of the web app's Brief/Inspect dock -- the same basic property snapshot, not a formal report: onRecord (apn, acreage, county, situs state, CAD-roll market/assessed/land/improvement value), structuralFact (living area, year built), the five brief sections (zoning district and jurisdiction, land use, flood zone, setbacks-envelope, drainage) each with disposition and citations -- setbacks-envelope's data carries real setback distances whenever a ruled table exists for that district, never withheld by depth -- plus cityLimitsFact, utilityServiceFact, overlayDistrictsFact, agValuationFact, schoolDistrictFact, maxImperviousCoverPctFact, buildingFootprintFact (each the same present / absent / refused read the dock's own equivalent row shows), and a draw block (ring in local feet, named edges, overlays) the panel renders. Never contains permitted-use tables, listings, or sales. Owner name and mailing address are included for Studio and Team, and on a single-parcel node read when that caller has an active property unlock on the parcel. Every other caller receives ownerFact as a declared refusal and not the owner record. The buildable-envelope outline is included when a setback table exists; the area figure is withheld until an atom backs it. Requires Solo or above, or a 30-day unlock on that parcel; otherwise returns refused with reason upgrade_required. Array cap 50 at depth stub; depth node: array cap 25, because a larger batch exceeds what the host delivers to the panel; over the cap returns refused with reason parcel_batch_cap. Ids with no record come back in notFound with a reason. bakedAt, asOf and stampedAt are the snapshot's bake time, not the time of this call, and runId names that bake, so the same runId repeats across calls on one parcel. hop1 and subgraph are not implemented.",
     readiness: "live" as const,
   },
   {
     name: "list_my_properties",
-    title: "List my properties",
+    title: "My saved properties",
     description:
+      "Use when the user asks what they have saved. " +
       "List parcels the signed-in user has saved in Smart Site. Input is {}. screenId is refused. Returns saved rows only (id, parcel node id, label, situs, stub rails, CRM status, note, updatedAt). A punctuation-only situs falls back to the node id with situs unknown.",
     readiness: "live" as const,
   },
   {
     name: "run_report",
-    title: "Run a report",
+    title: "Property summary",
     description:
+      "Use only when the user asks for the property intelligence summary of a parcel already looked up. " +
       "Read the R1 property intelligence report for a parcel from the baked facet snapshot. Returns synchronously; no async job is started.",
     readiness: "live" as const,
   },
@@ -83,8 +89,9 @@ export const SMARTSITE_MCP_TOOLS = [
   },
   {
     name: "export_instrument",
-    title: "Export an instrument",
+    title: "Download a PDF",
     description:
+      "Use only when the user asks for a file: the dossier, site plan, terrain export or feasibility study PDF. " +
       "Export a site plan, terrain model, feasibility study, or property dossier (X-ray) artifact, each a two-hop refresh-then-download call (P-110; feasibility calls hauska-engine-api directly, the other three go through Hauska's MCP export contract). Site plan, terrain, and feasibility study require Studio or Team, or a 30-day unlock on the parcel. The property dossier (X-ray) requires only Solo or above, or a 30-day unlock on the parcel — matching the web app (P-119; a prior Studio-only gate here on the connector was corrected, OPS-16 A-103). `brief` is accepted as a kind for discoverability but always returns status kind_not_available: Hauska's export contract has no brief kind and never has.",
     readiness: "live" as const,
   },
@@ -99,22 +106,25 @@ export const SMARTSITE_MCP_TOOLS = [
   },
   {
     name: "create_screen",
-    title: "Create a screen",
+    title: "Screen a list of addresses",
     description:
+      "Use when the user pastes or lists two or more addresses to check together and keep (Studio and Team plans). " +
       "Create a named intake screen from pasted queries and open the screening board in the MCP App. source must be exactly one of pasted or map-selection (map-selection is for Property Explorer map multi-select handoff). A query that resolves to a parcel already on the screen is reported in degraded.duplicates and not written twice. Resolved rows carry six rail states. Does not write a save. Unresolved rows keep the original query.",
     readiness: "live" as const,
   },
   {
     name: "add_to_screen",
-    title: "Add to a screen",
+    title: "Add a parcel to a screen",
     description:
+      "Use when the user wants one more parcel on an existing screen. " +
       "Append a parcel node id to an existing screen. source is exactly one of walk, saved, pasted. Idempotent on the same node. A node id with no parcel record is written unresolved with no Open. Does not write a save.",
     readiness: "live" as const,
   },
   {
     name: "list_screens",
-    title: "List screens",
+    title: "My screens",
     description:
+      "Use when the user asks for their saved screens or to reopen one. " +
       "Without screenId, lists the caller's screens (id, name, rowCount, updatedAt) and does not open a board. With screenId, returns that screen's rows, each resolved row carrying its six rail states, and opens the board. To reopen a screen, list first, then call again with the chosen screenId. Soft-deleted screens are omitted. The board reads this screen, not list_my_properties.",
     readiness: "live" as const,
   },
@@ -122,13 +132,15 @@ export const SMARTSITE_MCP_TOOLS = [
     name: "save_property",
     title: "Save a property",
     description:
+      "Use when the user wants to save or bookmark a parcel, optionally with a status. " +
       "Upsert a CRM save for a parcel. status must be exactly one of New, Watching, Chasing, Passed (optional on save). Sets crm status and note columns only. Does not write a screen row and does not replace snapshot.",
     readiness: "live" as const,
   },
   {
     name: "set_property_status",
-    title: "Set property status",
+    title: "Set a saved property's status",
     description:
+      "Use when the user changes the status of a parcel they already saved. " +
       "Update CRM status on an existing save. status must be exactly one of New, Watching, Chasing, Passed. The parcel must already be saved; use save_property with a status otherwise. Does not touch snapshot or screens.",
     readiness: "live" as const,
   },

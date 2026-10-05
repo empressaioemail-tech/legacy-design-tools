@@ -2,6 +2,8 @@ import express, { type Express } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
+import { SMARTSITE_INSTRUCTIONS } from "./voice.js";
+
 import {
   buildMcpAuthMiddleware,
   isAuthConfigured,
@@ -58,7 +60,7 @@ async function buildPerRequestMcp(): Promise<{
   transport: StreamableHTTPServerTransport;
   close: () => Promise<void>;
 }> {
-  const mcpServer = new McpServer(serverImplementation());
+  const mcpServer = new McpServer(serverImplementation(), { instructions: SMARTSITE_INSTRUCTIONS });
   registerTools(mcpServer);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
