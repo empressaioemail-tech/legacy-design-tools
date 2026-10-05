@@ -414,6 +414,14 @@ export function planCancelledIdempotencyKey(stripeEventId: string): string {
   return `cancel:${stripeEventId}`;
 }
 
+export function planEndedUnpaidIdempotencyKey(stripeEventId: string): string {
+  return `ended_unpaid:${stripeEventId}`;
+}
+
+export function paymentFailedIdempotencyKey(invoiceId: string): string {
+  return `payfail:${invoiceId}`;
+}
+
 /** Once per contact, ever. */
 export function becameSharerIdempotencyKey(userId: string): string {
   return `became_sharer:${userId}`;

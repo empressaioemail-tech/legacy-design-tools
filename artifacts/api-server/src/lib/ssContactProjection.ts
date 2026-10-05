@@ -296,13 +296,16 @@ export function projectEvent(
       resendEvent = previous ? { previous_plan: previous } : null;
       break;
     }
-    case "plan_cancelled": {
+    case "plan_cancelled":
+    case "plan_ended_unpaid": {
       const previous = existed ? c.plan : null;
       c.plan = "free";
       c.billing = "none";
       resendEvent = previous ? { previous_plan: previous } : null;
       break;
     }
+    case "payment_failed":
+      break;
     case "claude_connected": {
       if (c.claudeConnected) suppressResend = "already_claude_connected";
       c.claudeConnected = true;

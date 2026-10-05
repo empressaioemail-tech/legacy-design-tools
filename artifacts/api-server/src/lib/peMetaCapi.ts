@@ -21,6 +21,8 @@ const EVENT_NAMES: Record<LifecycleEventType, string | null> = {
   e6_last_active: null,
   became_sharer: null,
   plan_cancelled: null,
+  payment_failed: null,
+  plan_ended_unpaid: null,
   claude_connected: null,
   went_quiet: null,
   came_back: null,

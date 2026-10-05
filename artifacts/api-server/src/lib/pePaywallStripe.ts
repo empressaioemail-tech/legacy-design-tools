@@ -48,6 +48,7 @@ import {
   type StripePriceItem,
 } from "./peTeamSeatsFromStripe";
 import { applyPromotekitReferral } from "./promotekitReferral";
+import { peCustomerHasCheckoutBlockingSubscription } from "./peSubscriptionStripe";
 
 export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
@@ -82,6 +83,14 @@ export class PeCheckoutConfigError extends Error {
     super(`checkout unavailable: ${missing} is not configured`);
     this.name = "PeCheckoutConfigError";
     this.missing = missing;
+  }
+}
+
+/** Customer already holds an active, trialing, or past_due subscription (P-494). */
+export class PeSubscriptionExistsError extends Error {
+  constructor() {
+    super("subscription_exists");
+    this.name = "PeSubscriptionExistsError";
   }
 }
 
@@ -483,6 +492,9 @@ export async function createPeSubscriptionCheckoutSession(input: {
   }
 
   const customerId = await getOrCreatePeStripeCustomer(input);
+  if (await peCustomerHasCheckoutBlockingSubscription(customerId)) {
+    throw new PeSubscriptionExistsError();
+  }
   const params: Record<string, string> = {
     mode: "subscription",
     customer: customerId,

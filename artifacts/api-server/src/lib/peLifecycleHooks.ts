@@ -13,14 +13,15 @@ import {
   e4IdempotencyKey,
   e5IdempotencyKey,
   planCancelledIdempotencyKey,
+  planEndedUnpaidIdempotencyKey,
+  paymentFailedIdempotencyKey,
 } from "./peLifecycleOutbox";
 import { getPeUserEmail } from "./peIdentity";
 import type { LifecycleEventType, SsBilling, SsPlan } from "./peLifecycleTypes";
 
 /**
- * Which paid event a Stripe webhook outcome is. A webhook that lands the
- * user on `free` (subscription deleted, or no longer active) is a cancel,
- * contract v2 `ss.plan_cancelled`, not a plan start.
+ * @deprecated Prefer explicit lifecycle event types from the Stripe webhook;
+ * kept for unlock checkout and tests.
  */
 export function paidEventTypeForStripe(
   kind: "unlock" | "plan",
@@ -85,6 +86,42 @@ export async function emitShareSent(
   }
 }
 
+export async function emitLifecycleFromStripeWebhook(input: {
+  userId: string;
+  event: LifecycleEventType;
+  idempotencyKey: string;
+  plan?: SsPlan;
+  billing?: SsBilling;
+  value?: number;
+  currency?: string;
+}): Promise<string | null> {
+  try {
+    const email = await getPeUserEmail(input.userId);
+    if (!email) return null;
+    return await dispatchLifecycleEvent({
+      userId: input.userId,
+      email,
+      event: input.event,
+      idempotencyKey: input.idempotencyKey,
+      source: "stripe_webhook",
+      apply: {
+        email,
+        event: input.event,
+        ...(input.plan !== undefined ? { plan: input.plan } : {}),
+        ...(input.billing !== undefined ? { billing: input.billing } : {}),
+        value: input.value,
+        currency: input.currency ?? "USD",
+      },
+    });
+  } catch (err) {
+    logger.info(
+      { err, userId: input.userId, event: input.event },
+      "pe lifecycle: stripe emit failed (fail-open)",
+    );
+    return null;
+  }
+}
+
 export async function emitPaidFromStripeWebhook(input: {
   userId: string;
   stripeEventId: string;
@@ -93,34 +130,30 @@ export async function emitPaidFromStripeWebhook(input: {
   billing: SsBilling;
   value?: number;
   currency?: string;
+  /** When set, used instead of deriving from kind/plan (P-494). */
+  lifecycleEvent?: LifecycleEventType;
+  idempotencyKey?: string;
 }): Promise<string | null> {
-  try {
-    const email = await getPeUserEmail(input.userId);
-    if (!email) return null;
-    const event = paidEventTypeForStripe(input.kind, input.plan);
-    const idempotencyKey =
-      event === "e4_unlock_bought"
-        ? e4IdempotencyKey(input.stripeEventId)
-        : event === "plan_cancelled"
-          ? planCancelledIdempotencyKey(input.stripeEventId)
-          : e5IdempotencyKey(input.stripeEventId);
-    return await dispatchLifecycleEvent({
-      userId: input.userId,
-      email,
-      event,
-      idempotencyKey,
-      source: "stripe_webhook",
-      apply: {
-        email,
-        event,
-        plan: input.plan,
-        billing: input.billing,
-        value: input.value,
-        currency: input.currency ?? "USD",
-      },
-    });
-  } catch (err) {
-    logger.info({ err, userId: input.userId }, "pe lifecycle: paid emit failed (fail-open)");
-    return null;
-  }
+  const event =
+    input.lifecycleEvent ?? paidEventTypeForStripe(input.kind, input.plan);
+  const idempotencyKey =
+    input.idempotencyKey ??
+    (event === "e4_unlock_bought"
+      ? e4IdempotencyKey(input.stripeEventId)
+      : event === "plan_cancelled"
+        ? planCancelledIdempotencyKey(input.stripeEventId)
+        : event === "plan_ended_unpaid"
+          ? planEndedUnpaidIdempotencyKey(input.stripeEventId)
+          : event === "payment_failed"
+            ? paymentFailedIdempotencyKey(input.stripeEventId)
+            : e5IdempotencyKey(input.stripeEventId));
+  return emitLifecycleFromStripeWebhook({
+    userId: input.userId,
+    event,
+    idempotencyKey,
+    plan: input.plan,
+    billing: input.billing,
+    value: input.value,
+    currency: input.currency,
+  });
 }

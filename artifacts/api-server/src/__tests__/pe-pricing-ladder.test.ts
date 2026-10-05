@@ -330,6 +330,12 @@ function mockStripeCheckoutSession(payload: Record<string, unknown>): {
     .mockImplementation(async (url, init) => {
       const path = String(url);
       const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/subscriptions")) {
+        return new Response(JSON.stringify({ object: "list", data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       if (path.includes("/customers")) {
         return new Response(JSON.stringify({ id: "cus_test_3b" }), {
           status: 200,

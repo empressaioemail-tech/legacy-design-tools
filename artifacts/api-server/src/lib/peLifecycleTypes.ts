@@ -35,6 +35,8 @@ export const LIFECYCLE_EVENTS = [
   "e6_last_active",
   "became_sharer",
   "plan_cancelled",
+  "payment_failed",
+  "plan_ended_unpaid",
   "claude_connected",
   "went_quiet",
   "came_back",
@@ -49,6 +51,8 @@ export const PAID_LIFECYCLE_EVENTS: readonly LifecycleEventType[] = [
   "e4_unlock_bought",
   "e5_plan_started",
   "plan_cancelled",
+  "payment_failed",
+  "plan_ended_unpaid",
 ];
 
 export const AFFILIATE_LIFECYCLE_EVENTS: readonly LifecycleEventType[] = [
@@ -68,6 +72,8 @@ export const RESEND_EVENT_NAMES: Record<LifecycleEventType, string | null> = {
   e4_unlock_bought: "ss.unlock_bought",
   e5_plan_started: "ss.plan_started",
   plan_cancelled: "ss.plan_cancelled",
+  payment_failed: "ss.payment_failed",
+  plan_ended_unpaid: "ss.plan_ended_unpaid",
   claude_connected: "ss.claude_connected",
   went_quiet: "ss.went_quiet",
   came_back: "ss.came_back",
