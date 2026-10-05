@@ -25,7 +25,22 @@ import {
   recordPeStripeWebhookOutcome,
 } from "./peStripeWebhookLedger";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
-import { emitPaidFromStripeWebhook } from "./peLifecycleHooks";
+import {
+  emitLifecycleFromStripeWebhook,
+  emitPaidFromStripeWebhook,
+} from "./peLifecycleHooks";
+import {
+  planCancelledIdempotencyKey,
+  planEndedUnpaidIdempotencyKey,
+  paymentFailedIdempotencyKey,
+} from "./peLifecycleOutbox";
+import {
+  invoicePaymentFailedShouldEmit,
+  peStatusRetainsPaidEntitlement,
+  peSubscriptionEndLifecycleEvent,
+  peSubscriptionUpdatedShouldEmitPlanStarted,
+  planStartedIdempotencyKey,
+} from "./peStripeBillingLifecycle";
 import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
 import {
   configuredExtraSeatPriceId,
@@ -563,7 +578,10 @@ export async function handleStripeWebhook(
     id?: string;
     type: string;
     livemode?: boolean;
-    data: { object: Record<string, unknown> };
+    data: {
+      object: Record<string, unknown>;
+      previous_attributes?: Record<string, unknown>;
+    };
   };
 
   try {
@@ -710,6 +728,12 @@ export async function handleStripeWebhook(
         billing: billing.billingInterval === "year" ? "annual" : billing.billingInterval === "month" ? "monthly" : "none",
         value: stripeAmount(obj),
         currency: stripeCurrency(obj),
+        lifecycleEvent: "e5_plan_started",
+        idempotencyKey: planStartedIdempotencyKey({
+          stripeEventId: event.id ?? `plan:${peMeta.peUserId}:${grantTier}`,
+          subscriptionId,
+          activation: true,
+        }),
       });
       return {
         handled: true,
@@ -759,9 +783,9 @@ export async function handleStripeWebhook(
         return { handled: false, reason: "missing_stripe_event_id" };
       }
       const status = typeof obj.status === "string" ? obj.status : "";
-      const active = status === "active" || status === "trialing";
+      const retainsPaid = peStatusRetainsPaidEntitlement(status);
       const grantTier = resolvePeGrantTier(peMeta);
-      if (active && !grantTier) {
+      if (retainsPaid && !grantTier) {
         const ledger = await recordPeStripeWebhookOutcome({
           stripeEventId,
           eventType: type,
@@ -793,7 +817,7 @@ export async function handleStripeWebhook(
       // leave a stale "month" on an annual subscriber — and the rail would
       // then upsell annual billing to someone who already bought it. Same
       // rule the seat count follows: never omit the column on update.
-      const billing = active
+      const billing = retainsPaid
         ? await peGrantBillingFacts({
             grantTier,
             obj,
@@ -807,11 +831,11 @@ export async function handleStripeWebhook(
         obj,
         livemode: stripeEventLivemode(event, obj),
         ownerUserId: peMeta.peUserId,
-        outcome: active ? "pe_subscription_active" : "pe_churned",
+        outcome: retainsPaid ? "pe_subscription_active" : "pe_churned",
         entitlement: {
           userId: peMeta.peUserId,
-          tier: active ? "paid" : "free",
-          subscriptionTier: active ? grantTier : null,
+          tier: retainsPaid ? "paid" : "free",
+          subscriptionTier: retainsPaid ? grantTier : null,
           source: "stripe_sub",
           stripeCustomerId:
             typeof obj.customer === "string" ? obj.customer : null,
@@ -826,24 +850,64 @@ export async function handleStripeWebhook(
           peUserId: peMeta.peUserId,
         };
       }
-      await emitPaidFromStripeWebhook({
-        userId: peMeta.peUserId,
-        stripeEventId: event.id ?? `subupd:${peMeta.peUserId}:${status}`,
-        kind: "plan",
-        plan: active && grantTier ? grantTier : "free",
-        billing: active
-          ? billing.billingInterval === "year"
-            ? "annual"
-            : billing.billingInterval === "month"
-              ? "monthly"
-              : "none"
-          : "none",
-        value: active ? stripeAmount(obj) : undefined,
-        currency: stripeCurrency(obj),
-      });
+      const subscriptionId =
+        typeof obj.id === "string" ? obj.id : null;
+      const previousAttributes = event.data.previous_attributes;
+      if (retainsPaid && grantTier) {
+        const prevStatus =
+          typeof previousAttributes?.status === "string"
+            ? previousAttributes.status
+            : null;
+        if (
+          peSubscriptionUpdatedShouldEmitPlanStarted({
+            previousAttributes,
+            currentStatus: status,
+          })
+        ) {
+          await emitPaidFromStripeWebhook({
+            userId: peMeta.peUserId,
+            stripeEventId,
+            kind: "plan",
+            plan: grantTier,
+            billing:
+              billing.billingInterval === "year"
+                ? "annual"
+                : billing.billingInterval === "month"
+                  ? "monthly"
+                  : "none",
+            value: stripeAmount(obj),
+            currency: stripeCurrency(obj),
+            lifecycleEvent: "e5_plan_started",
+            idempotencyKey: planStartedIdempotencyKey({
+              stripeEventId,
+              subscriptionId,
+              activation: prevStatus === "incomplete",
+            }),
+          });
+        }
+      } else if (!retainsPaid) {
+        const endEvent = peSubscriptionEndLifecycleEvent(obj);
+        if (endEvent === "plan_ended_unpaid") {
+          await emitLifecycleFromStripeWebhook({
+            userId: peMeta.peUserId,
+            event: "plan_ended_unpaid",
+            idempotencyKey: planEndedUnpaidIdempotencyKey(stripeEventId),
+            plan: "free",
+            billing: "none",
+          });
+        } else if (endEvent === "plan_cancelled") {
+          await emitLifecycleFromStripeWebhook({
+            userId: peMeta.peUserId,
+            event: "plan_cancelled",
+            idempotencyKey: planCancelledIdempotencyKey(stripeEventId),
+            plan: "free",
+            billing: "none",
+          });
+        }
+      }
       return {
         handled: true,
-        eventType: active ? "pe_subscription_active" : "pe_churned",
+        eventType: retainsPaid ? "pe_subscription_active" : "pe_churned",
         peUserId: peMeta.peUserId,
       };
     }
@@ -913,13 +977,24 @@ export async function handleStripeWebhook(
           peUserId: peMeta.peUserId,
         };
       }
-      await emitPaidFromStripeWebhook({
-        userId: peMeta.peUserId,
-        stripeEventId,
-        kind: "plan",
-        plan: "free",
-        billing: "none",
-      });
+      const endEvent = peSubscriptionEndLifecycleEvent(obj);
+      if (endEvent === "plan_ended_unpaid") {
+        await emitLifecycleFromStripeWebhook({
+          userId: peMeta.peUserId,
+          event: "plan_ended_unpaid",
+          idempotencyKey: planEndedUnpaidIdempotencyKey(stripeEventId),
+          plan: "free",
+          billing: "none",
+        });
+      } else {
+        await emitLifecycleFromStripeWebhook({
+          userId: peMeta.peUserId,
+          event: "plan_cancelled",
+          idempotencyKey: planCancelledIdempotencyKey(stripeEventId),
+          plan: "free",
+          billing: "none",
+        });
+      }
       return { handled: true, eventType: "pe_churned", peUserId: peMeta.peUserId };
     }
 
@@ -933,6 +1008,48 @@ export async function handleStripeWebhook(
       });
     }
     return { handled: true, eventType: "churned", installId };
+  }
+
+  if (type === "invoice.payment_failed") {
+    const invoiceId = typeof obj.id === "string" ? obj.id : null;
+    const subId =
+      typeof obj.subscription === "string" ? obj.subscription : null;
+    if (!invoiceId || !subId) {
+      return {
+        handled: false,
+        reason: "ignored_invoice_payment_failed_non_subscription",
+      };
+    }
+    let sub: Record<string, unknown> = {};
+    try {
+      sub = await fetchStripeSubscription(subId);
+    } catch (err) {
+      logger.warn({ err, subId }, "stripe: invoice.payment_failed subscription fetch failed");
+      return { handled: false, reason: "subscription_fetch_failed" };
+    }
+    const peMeta = peMetadataFromObject(sub);
+    if (!peMeta.peUserId) {
+      return { handled: false, reason: "ignored_invoice_payment_failed_no_pe_user" };
+    }
+    const subStatus = typeof sub.status === "string" ? sub.status : null;
+    if (
+      !invoicePaymentFailedShouldEmit({
+        invoice: obj,
+        subscriptionStatus: subStatus,
+      })
+    ) {
+      return { handled: true, eventType: "invoice_payment_failed_no_emit" };
+    }
+    await emitLifecycleFromStripeWebhook({
+      userId: peMeta.peUserId,
+      event: "payment_failed",
+      idempotencyKey: paymentFailedIdempotencyKey(invoiceId),
+    });
+    return {
+      handled: true,
+      eventType: "pe_payment_failed",
+      peUserId: peMeta.peUserId,
+    };
   }
 
   return { handled: false, reason: `ignored_event_type:${type}` };

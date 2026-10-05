@@ -126,6 +126,7 @@ import { isStripeConfigured } from "../lib/brokerageStripe";
 import {
   createPeBillingPortalSession,
   createPeSubscriptionCheckoutSession,
+  PeSubscriptionExistsError,
   createPePropertyUnlockCheckoutSession,
   defaultPeCheckoutCancelUrl,
   defaultPeCheckoutSuccessUrl,
@@ -1717,6 +1718,14 @@ router.post(
           : "Stripe credentials not configured on cortex — simulated checkout only",
       });
     } catch (err) {
+      if (err instanceof PeSubscriptionExistsError) {
+        res.status(409).json({
+          error: "subscription_exists",
+          billingPortalRoute: PE_BILLING_PORTAL_ROUTE,
+          stripeConfigured: isStripeConfigured(),
+        });
+        return;
+      }
       if (err instanceof PeCheckoutConfigError) {
         // FAIL CLOSED, declared: this tier's price is not configured.
         // Refuse rather than charge any other tier's price.

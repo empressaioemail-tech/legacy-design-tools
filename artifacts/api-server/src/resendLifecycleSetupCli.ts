@@ -32,6 +32,7 @@ const SEGMENTS = ["Smart Site", "Smart Site Affiliates"] as const;
 const EVENT_SCHEMAS: Record<string, Record<string, string>> = {
   "ss.plan_started": { previous_plan: "string" },
   "ss.plan_cancelled": { previous_plan: "string" },
+  "ss.plan_ended_unpaid": { previous_plan: "string" },
 };
 
 const apiKey = process.env["RESEND_API_KEY"]?.trim();

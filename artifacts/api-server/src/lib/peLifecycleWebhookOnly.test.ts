@@ -16,9 +16,10 @@ function read(rel: string): string {
 }
 
 describe("E4/E5/cancel source lock", () => {
-  it("emitPaidFromStripeWebhook is imported only by brokerageStripe.ts", () => {
+  it("stripe paid lifecycle emits are imported only by brokerageStripe.ts", () => {
     const stripe = read("./brokerageStripe.ts");
     expect(stripe).toMatch(/emitPaidFromStripeWebhook/);
+    expect(stripe).toMatch(/emitLifecycleFromStripeWebhook/);
 
     const forbiddenImporters = [
       "./peSignInCompletion.ts",
@@ -31,7 +32,9 @@ describe("E4/E5/cancel source lock", () => {
       "../routes/propertyExplorer.ts",
     ];
     for (const file of forbiddenImporters) {
-      expect(read(file)).not.toMatch(/emitPaidFromStripeWebhook|e4_unlock_bought|e5_plan_started|plan_cancelled/);
+      expect(read(file)).not.toMatch(
+        /emitPaidFromStripeWebhook|emitLifecycleFromStripeWebhook|e4_unlock_bought|e5_plan_started|plan_cancelled|payment_failed|plan_ended_unpaid/,
+      );
     }
   });
 

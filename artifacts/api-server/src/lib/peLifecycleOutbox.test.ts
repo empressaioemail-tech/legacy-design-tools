@@ -305,7 +305,13 @@ describe("sovereignty (falsifier: an APN-shaped payload is refused before insert
 });
 
 describe("paid events only from the Stripe webhook", () => {
-  for (const event of ["e4_unlock_bought", "e5_plan_started", "plan_cancelled"] as const) {
+  for (const event of [
+    "e4_unlock_bought",
+    "e5_plan_started",
+    "plan_cancelled",
+    "payment_failed",
+    "plan_ended_unpaid",
+  ] as const) {
     it(`${event} from any non-webhook source throws`, () => {
       expect(() => assertPaidEventFromWebhook(event, "app")).toThrow(
         new RegExp(`paid_lifecycle_event_refused:${event}:source=app`),

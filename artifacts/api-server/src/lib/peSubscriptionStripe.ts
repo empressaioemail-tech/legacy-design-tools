@@ -103,6 +103,13 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set([
   "unpaid",
 ]);
 
+/** Blocks opening a second PE subscription checkout (P-494). */
+export const CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
 /**
  * Extract exactly the fields this route serves, field by field. Returns
  * `null` -- never a partial result -- if ANY field is absent or the wrong
@@ -134,7 +141,7 @@ function extractSubscriptionFacts(
  * silently inherit and have change under it) -- {@link LIVE_SUBSCRIPTION_STATUSES}
  * below is this route's own, stated rule for what counts as current.
  */
-async function listStripeSubscriptionsForCustomer(
+export async function listStripeSubscriptionsForCustomer(
   customerId: string,
 ): Promise<Record<string, unknown>[]> {
   const json = await stripeGet(
@@ -197,4 +204,14 @@ export async function readPeSubscriptionSnapshot(
     );
   }
   return { kind: "active", ...facts };
+}
+
+export async function peCustomerHasCheckoutBlockingSubscription(
+  customerId: string,
+): Promise<boolean> {
+  const subs = await listStripeSubscriptionsForCustomer(customerId);
+  return subs.some((s) => {
+    const status = typeof s.status === "string" ? s.status : "";
+    return CHECKOUT_BLOCKING_SUBSCRIPTION_STATUSES.has(status);
+  });
 }
