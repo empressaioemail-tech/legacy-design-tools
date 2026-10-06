@@ -42,6 +42,8 @@ export type RadiusSearchOk = {
   received: number;
   truncated: boolean;
   radiusFt: number;
+  /** How distanceFt is measured: from the search point to the nearest edge of each parcel (fix register C4). */
+  distanceMethod: "anchor_point_to_polygon";
 };
 
 export type RadiusSearchRefuse = {
@@ -114,6 +116,35 @@ export function circleBbox(
   };
 }
 
+/** Shortest distance in feet from a point to a polygon's edges, or null when the geometry carries no ring. */
+export function pointToPolygonEdgesFt(lat: number, lng: number, geometry: unknown): number | null {
+  const g = geometry as { type?: string; coordinates?: unknown } | null;
+  if (!g || typeof g !== "object") return null;
+  const polys: unknown[] =
+    g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" && Array.isArray(g.coordinates) ? g.coordinates : [];
+  const kx = FT_PER_DEG_LAT * Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  let best: number | null = null;
+  for (const poly of polys) {
+    if (!Array.isArray(poly)) continue;
+    for (const ring of poly) {
+      if (!Array.isArray(ring)) continue;
+      for (let i = 1; i < ring.length; i++) {
+        const a = ring[i - 1] as number[];
+        const b = ring[i] as number[];
+        if (!Array.isArray(a) || !Array.isArray(b)) continue;
+        const ax = (a[0]! - lng) * kx, ay = (a[1]! - lat) * FT_PER_DEG_LAT;
+        const bx = (b[0]! - lng) * kx, by = (b[1]! - lat) * FT_PER_DEG_LAT;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        const d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (best === null || d < best) best = d;
+      }
+    }
+  }
+  return best;
+}
+
 export function parcelDistanceFt(input: {
   lat: number;
   lng: number;
@@ -136,7 +167,10 @@ export function parcelDistanceFt(input: {
   ) {
     return 0;
   }
-  return pointToBboxDistanceFt(input.lat, input.lng, bbox);
+  // To the parcel's real edges, not its bounding box, which understated the
+  // gap for rotated or L-shaped lots (fix register C4). Bounding box only
+  // when the row carries no ring.
+  return pointToPolygonEdgesFt(input.lat, input.lng, input.geometry) ?? pointToBboxDistanceFt(input.lat, input.lng, bbox);
 }
 
 export function rankRadiusHits(
@@ -326,6 +360,7 @@ export async function searchParcelsByRadius(input: {
     cap,
     received: hits.length,
     truncated,
+    distanceMethod: "anchor_point_to_polygon",
     radiusFt: input.radiusFt,
   };
 }
