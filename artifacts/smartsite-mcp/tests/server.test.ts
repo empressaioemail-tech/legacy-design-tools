@@ -147,3 +147,25 @@ describe("connector card identity (P-91 QA 2026-08-30)", () => {
     await server.close();
   });
 });
+
+describe("GET /files/feasibility/:token (fix register B3/C3)", () => {
+  it("refuses a forged link with 403 and an unsigned server with 403, without calling the engine", async () => {
+    const app = createSmartsiteMcpApp({
+      authConfig: { issuer: "https://example.authkit.app", audience: "https://mcp.smartsite.cloud/mcp", jwksUrl: "https://example.authkit.app/oauth2/jwks", resourceUrl: "https://mcp.smartsite.cloud/mcp" } as never,
+    });
+    const prev = process.env.SMARTSITE_FILE_LINK_SECRET;
+    try {
+      delete process.env.SMARTSITE_FILE_LINK_SECRET;
+      await withHttpServer(app, async (base) => {
+        expect((await fetch(`${base}/files/feasibility/abc.def`)).status).toBe(403);
+      });
+      process.env.SMARTSITE_FILE_LINK_SECRET = "s";
+      await withHttpServer(app, async (base) => {
+        expect((await fetch(`${base}/files/feasibility/abc.def`)).status).toBe(403);
+      });
+    } finally {
+      if (prev === undefined) delete process.env.SMARTSITE_FILE_LINK_SECRET;
+      else process.env.SMARTSITE_FILE_LINK_SECRET = prev;
+    }
+  });
+});

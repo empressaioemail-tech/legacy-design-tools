@@ -67,8 +67,9 @@ import {
   type EngineApiConfig,
 } from "./engine-client.js";
 import { refuseStudioReport, type SmartsiteEntitlementSnapshot } from "./entitlement.js";
+import { mintFileLink } from "./file-links.js";
 
-const FEASIBILITY_PACKAGE_ID = "feasibility-export";
+export const FEASIBILITY_PACKAGE_ID = "feasibility-export";
 const FEASIBILITY_TOOL = "export_instrument";
 const FEASIBILITY_KIND = "feasibility";
 
@@ -400,6 +401,44 @@ async function downloadReady(
       reason: "upstream_error",
       message: text || `engine ${downloadRes.status}`,
     });
+  }
+
+  // B3/C3: hand back a short-lived link instead of the bytes when links are
+  // configured; the PDF is ready, so the link resolves on first click.
+  const link = mintFileLink("feasibility", parcelNodeId);
+  if (link) {
+    const lengthHeader = Number(downloadRes.headers.get("content-length"));
+    await downloadRes.body?.cancel().catch(() => undefined);
+    const linkedGeneratedAt = downloadRes.headers.get("x-feasibility-generated-at") ?? knownCompletedAt ?? undefined;
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: "ok",
+            tool: FEASIBILITY_TOOL,
+            kind: FEASIBILITY_KIND,
+            parcelNodeId,
+            format: "pdf-feasibility",
+            download: {
+              format: "pdf-feasibility",
+              contentType: "application/pdf",
+              url: link.url,
+              expiresAt: link.expiresAt,
+              ...(Number.isFinite(lengthHeader) && lengthHeader > 0 ? { byteCount: lengthHeader } : {}),
+            },
+            pageCount: result?.pageCount,
+            feasibilityPageCount: result?.feasibilityPageCount,
+            sitePlanAppended: result?.sitePlanAppended,
+            sitePlanUnavailableReason: result?.sitePlanUnavailableReason,
+            sectionCount: result?.sectionCount,
+            openItemCount: result?.openItemCount,
+            narrativeIsDeterministicSkeleton: result?.narrativeIsDeterministicSkeleton,
+            ...(linkedGeneratedAt ? { generatedAt: linkedGeneratedAt } : {}),
+          }),
+        },
+      ],
+    };
   }
 
   const arrayBuffer = await downloadRes.arrayBuffer();

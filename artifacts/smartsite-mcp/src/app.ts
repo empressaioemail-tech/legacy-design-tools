@@ -2,6 +2,11 @@ import express, { type Express } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
+import { Readable } from "node:stream";
+
+import { buildEngineGateHeaders, loadEngineApiConfig } from "./engine-client.js";
+import { FEASIBILITY_PACKAGE_ID } from "./feasibility-export.js";
+import { verifyFileLink } from "./file-links.js";
 import { SMARTSITE_INSTRUCTIONS } from "./voice.js";
 
 import {
@@ -97,6 +102,41 @@ export function createSmartsiteMcpApp(
   });
   app.get("/favicon.ico", (_req, res) => {
     res.redirect(302, `${SERVER_WEBSITE_URL}/favicon.ico`);
+  });
+
+  // B3/C3: signed, short-lived export download links (file-links.ts).
+  app.get("/files/feasibility/:token", async (req, res) => {
+    const verified = verifyFileLink("feasibility", req.params.token ?? "");
+    if ("refused" in verified) {
+      res.status(verified.refused === "expired" ? 410 : 403).json({ error: "file_link_" + verified.refused });
+      return;
+    }
+    const config = loadEngineApiConfig();
+    if (!config) {
+      res.status(503).json({ error: "engine_not_configured" });
+      return;
+    }
+    const path = `/v1/property-nodes/${encodeURIComponent(verified.parcelNodeId)}/feasibility-export/download`;
+    try {
+      const upstream = await fetch(`${config.baseUrl}${path}`, {
+        headers: {
+          Authorization: `Bearer ${config.gateToken}`,
+          // The link was minted only after the paid gate passed.
+          ...buildEngineGateHeaders({ packageId: FEASIBILITY_PACKAGE_ID, callerTier: "public-paid" }),
+        },
+      });
+      if (!upstream.ok || !upstream.body) {
+        res.status(upstream.status === 410 ? 410 : 502).json({ error: "file_unavailable", upstreamStatus: upstream.status });
+        return;
+      }
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="feasibility-${verified.parcelNodeId.replace(/[^0-9A-Za-z_-]/g, "_")}.pdf"`);
+      const len = upstream.headers.get("content-length");
+      if (len) res.setHeader("Content-Length", len);
+      Readable.fromWeb(upstream.body as never).pipe(res);
+    } catch {
+      res.status(502).json({ error: "file_unavailable" });
+    }
   });
 
   app.get("/health", (_req, res) => {
