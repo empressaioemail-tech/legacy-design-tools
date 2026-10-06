@@ -53,6 +53,8 @@
 export type EnvelopeModelledDraw = {
   /** WGS84 [lng, lat] outer-ring vertices of the buildable-envelope polygon. */
   ringLngLat: [number, number][];
+  /** WGS84 [lng, lat] outer ring of the parcel the envelope was derived from; registers the draw ring to the anchor. */
+  parcelRingLngLat?: [number, number][];
   setbacks: {
     front_ft: number;
     side_ft: number;

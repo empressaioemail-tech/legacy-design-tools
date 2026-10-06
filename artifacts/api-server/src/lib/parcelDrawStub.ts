@@ -194,6 +194,8 @@ export type AssembleParcelDrawInput = {
   envelopeModelled?: {
     /** WGS84 [lng, lat] outer-ring vertices. */
     ringLngLat: [number, number][];
+    /** WGS84 [lng, lat] outer ring of the parcel itself; registers the draw ring to the anchor. */
+    parcelRingLngLat?: [number, number][];
     setbacks: {
       front_ft: number;
       side_ft: number;
@@ -273,6 +275,35 @@ function projectRelativeToAnchor(
  * Closes the ring (repeats the first point as the last) per this field's
  * own convention — see the doc comment on `DrawOverlay.geom`.
  */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * The translation that lays `ring` (local feet, its own origin) onto
+ * `reference` (local feet, the anchor's origin), or null when none is needed
+ * or none fits. Tries each reference vertex as the partner of ring[0] and keeps
+ * the shift with the smallest mean nearest-vertex distance; applies it only
+ * when that fit is within 3 ft and the shift is over 1 ft.
+ */
+export function registerRingToAnchor(
+  ring: readonly [number, number][],
+  reference: readonly [number, number][],
+): [number, number] | null {
+  if (ring.length < 3 || reference.length < 3) return null;
+  const ref = reference.slice(0, -1).length >= 3 ? reference.slice(0, -1) : reference;
+  const nearest = (x: number, y: number) =>
+    Math.min(...ref.map(([rx, ry]) => Math.hypot(rx - x, ry - y)));
+  let best: { t: [number, number]; cost: number } | null = null;
+  for (const [px, py] of ref) {
+    const t: [number, number] = [px - ring[0]![0], py - ring[0]![1]];
+    const cost = ring.reduce((sum, [x, y]) => sum + nearest(x + t[0], y + t[1]), 0) / ring.length;
+    if (!best || cost < best.cost) best = { t, cost };
+  }
+  if (!best || best.cost > 3 || Math.hypot(best.t[0], best.t[1]) <= 1) return null;
+  return best.t;
+}
+
 export function envelopeRingToLocalFeet(
   ringLngLat: readonly [number, number][],
   anchor: DrawFrameAnchor,
@@ -999,6 +1030,16 @@ export function assembleParcelDraw(
     metresToSurveyFeet(x),
     metresToSurveyFeet(y),
   ]);
+  // The boundary ring's origin is its own corner average after lot-line
+  // scrubbing; the anchor the aerial is centred on averages the raw county
+  // ring's vertices. When scrubbing drops a vertex the two disagree and the
+  // outline slides off the photo (906 FARM ST: 56 ft). Register the ring to the
+  // anchor using the parcel's own lat/lng ring when one came with the envelope.
+  const parcelRing = input.envelopeModelled?.parcelRingLngLat;
+  if (input.anchor && parcelRing && parcelRing.length >= 3) {
+    const shift = registerRingToAnchor(draw.ring, envelopeRingToLocalFeet(parcelRing, input.anchor));
+    if (shift) draw.ring = draw.ring.map(([x, y]) => [round2(x + shift[0]), round2(y + shift[1])]);
+  }
   draw.ringOrder = "ccw";
   draw.edges = edges;
 

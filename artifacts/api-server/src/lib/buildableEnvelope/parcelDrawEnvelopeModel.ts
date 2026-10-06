@@ -263,6 +263,7 @@ export async function tryComposeEnvelopeModelForDraw(args: {
         chain,
         model: {
           ringLngLat: coordinates as [number, number][],
+          ...(outerRingLngLat(parcelGeo.geojson) ? { parcelRingLngLat: outerRingLngLat(parcelGeo.geojson)! } : {}),
           setbacks: {
             front_ft: outcome.resolved.scalars.front_ft,
             side_ft: outcome.resolved.scalars.side_ft,
@@ -280,4 +281,19 @@ export async function tryComposeEnvelopeModelForDraw(args: {
       };
     }
   }
+}
+
+/** The first polygon's outer ring from a Polygon/MultiPolygon or a Feature/FeatureCollection holding one. */
+export function outerRingLngLat(geojson: unknown): [number, number][] | null {
+  const g = geojson as { type?: string; coordinates?: unknown; geometry?: unknown; features?: unknown[] } | null;
+  if (!g || typeof g !== "object") return null;
+  if (g.type === "FeatureCollection" && Array.isArray(g.features)) return outerRingLngLat(g.features[0]);
+  if (g.type === "Feature") return outerRingLngLat(g.geometry);
+  const coords = g.coordinates as unknown;
+  const ring =
+    g.type === "Polygon" && Array.isArray(coords) ? coords[0]
+      : g.type === "MultiPolygon" && Array.isArray(coords) && Array.isArray(coords[0]) ? (coords[0] as unknown[])[0]
+        : null;
+  if (!Array.isArray(ring) || ring.length < 3) return null;
+  return ring.filter((p): p is [number, number] => Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number");
 }
