@@ -638,6 +638,7 @@ router.get(
       rows.map(async (row) => {
         const stub = await assembleStubBody(row.parcelNodeId);
         return {
+          label: typeof (stub as { label?: unknown } | null)?.label === "string" ? ((stub as { label: string }).label) : null,
           situs: stub?.situs ?? "unread",
           zoning: stub?.zoning ?? "unread",
           landUse: stub?.landUse ?? "unread",
@@ -649,14 +650,15 @@ router.get(
     );
     res.json(
       rows.map((row, i) => {
-        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label);
+        const { label: stubLabel, ...stubRails } = stubs[i]!;
+        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label, stubLabel);
         return {
           ...row,
           label: composed.label,
           situs: composed.situs,
           status: row.crmStatus,
           note: row.note,
-          stub: stubs[i],
+          stub: stubRails,
         };
       }),
     );
