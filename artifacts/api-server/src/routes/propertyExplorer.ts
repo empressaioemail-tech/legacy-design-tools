@@ -1411,11 +1411,20 @@ router.post(
         return { id, row };
       }),
     );
+    // Each miss carries its reason (fix register C6). No existence probe runs
+    // here, so a well-formed id with no baked record says exactly that and
+    // leaves whether the parcel exists unmeasured.
+    const notFoundReasons: Record<string, { reason: string; parcelExists: boolean | "unmeasured" }> = {};
     for (const item of results) {
       if (item.row) parcels.push(item.row);
-      else notFound.push(item.id);
+      else {
+        notFound.push(item.id);
+        notFoundReasons[item.id] = isValidParcelNodeId(item.id)
+          ? { reason: "baked_snapshot_not_found", parcelExists: "unmeasured" }
+          : { reason: "invalid_parcel_node_id", parcelExists: false };
+      }
     }
-    res.json({ parcels, notFound });
+    res.json({ parcels, notFound, notFoundReasons });
   },
 );
 
