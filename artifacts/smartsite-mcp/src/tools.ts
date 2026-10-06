@@ -80,6 +80,7 @@ import {
 } from "./render-metrics.js";
 import { mintMapRenderReportToken } from "./seat-metrics-auth.js";
 import { registerPlanReviewPreview } from "./plan-review-preview.js";
+import { registerSmartsitePrompts } from "./prompts.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -1063,6 +1064,7 @@ export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
 export function registerTools(server: McpServer): void {
   registerMcpApp(server);
   registerVocabularyResource(server);
+  registerSmartsitePrompts(server as unknown as Parameters<typeof registerSmartsitePrompts>[0]);
   // Demo card for the ICC plan review preview; registers nothing unless the
   // caller's email is in PLAN_REVIEW_PREVIEW_EMAILS.
   registerPlanReviewPreview(server as unknown as Parameters<typeof registerPlanReviewPreview>[0]);
