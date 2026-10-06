@@ -137,13 +137,19 @@ export type EntitlementGateRefusal = {
   tier: "free" | "paid";
   subscriptionTier: PeSubscriptionTier | null;
   message: string;
+  /** Where the user changes plan (fix register F12): one sentence and this link, no upsell. */
+  plansUrl?: string;
 };
+
+/** Opens the plans dialog in Property Explorer (P-495 ?plans=1). */
+export const SMARTSITE_PLANS_URL = "https://smartsite.cloud/?plans=1";
 
 export function refuseDeepReport(
   snap: SmartsiteEntitlementSnapshot,
 ): EntitlementGateRefusal {
   return {
     status: "upgrade_required",
+    plansUrl: SMARTSITE_PLANS_URL,
     reason: "deep_report",
     tier: snap.tier,
     subscriptionTier: snap.subscriptionTier,
@@ -156,6 +162,7 @@ export function refuseStudioReport(
 ): EntitlementGateRefusal {
   return {
     status: "upgrade_required",
+    plansUrl: SMARTSITE_PLANS_URL,
     reason: "studio_report",
     tier: snap.tier,
     subscriptionTier: snap.subscriptionTier,
@@ -178,6 +185,7 @@ export function refusePurchasedRecordRead(
 ): EntitlementGateRefusal {
   return {
     status: "upgrade_required",
+    plansUrl: SMARTSITE_PLANS_URL,
     reason: "purchased_record_read",
     tier: snap.tier,
     subscriptionTier: snap.subscriptionTier,
@@ -195,6 +203,7 @@ export function refusePropertyExport(
 ): EntitlementGateRefusal {
   return {
     status: "upgrade_required",
+    plansUrl: SMARTSITE_PLANS_URL,
     reason: "property_export",
     tier: snap.tier,
     subscriptionTier: snap.subscriptionTier,
