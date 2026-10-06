@@ -81,6 +81,7 @@ import {
 import { mintMapRenderReportToken } from "./seat-metrics-auth.js";
 import { registerPlanReviewPreview } from "./plan-review-preview.js";
 import { registerSmartsitePrompts } from "./prompts.js";
+import { slimBatchResponseText } from "./batch-slim.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -1509,9 +1510,11 @@ export function registerTools(server: McpServer): void {
                 canSeeOwner,
               );
               const batchOutcome = await batchPromise;
-              const anchored = batchOutcome
+              const anchoredFull = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
+              // F13: a multi-parcel node read drops per-parcel duplicates (batch-slim.ts).
+              const anchored = readsAnchorBatch ? slimBatchResponseText(anchoredFull) : anchoredFull;
               const host = hostKeyFromAuth();
               if (mode === "single-node") {
                 const correlationId = recordToolMapIntent(
