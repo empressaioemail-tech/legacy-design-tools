@@ -122,6 +122,24 @@ export function firstParcelRing(geojson: unknown): {
  * `district`/`labeling`/`atomChain`/`spineZoning` first (network + DB reads)
  * and own sending (or otherwise using) the result.
  */
+/** True when the stored setback-rule atom's front, side or rear differs from the district row this read resolved. */
+export function setbackAtomSuperseded(
+  atom: { front?: number; side?: number; rear?: number } | null,
+  district: DistrictMappingResult,
+): boolean {
+  if (!atom) return false;
+  const row = district.district as { front_ft?: number; side_ft?: number; rear_ft?: number } | null | undefined;
+  if (!row) return false;
+  const pairs: Array<[number | undefined, number | undefined]> = [
+    [atom.front, row.front_ft],
+    [atom.side, row.side_ft],
+    [atom.rear, row.rear_ft],
+  ];
+  return pairs.some(
+    ([a, r]) => typeof a === "number" && typeof r === "number" && Number.isFinite(a) && Number.isFinite(r) && a !== r,
+  );
+}
+
 export function composeBuildableEnvelopeDerivation(args: {
   ring: Ring;
   table: SetbackTable;
@@ -154,10 +172,19 @@ export function composeBuildableEnvelopeDerivation(args: {
   // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
   // state, so the wire's promotion fields travel with the outcome. Absent
   // fields read as unverified (see isEnvelopeAtomVerified).
-  const atomPromotion = {
-    depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
-    sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
-  };
+  // QA 2026-09-29, fix register C7: the PDF refuses an envelope atom whose
+  // setbacks the export no longer follows (engine site-model superseded
+  // check), but the card used to quote its area anyway (1301 Water St: 15,547
+  // sq ft built on 25/5/25 beside a 30/10/30/20 table). One rule for both: a
+  // setback-rule atom that disagrees with the setbacks this read resolved
+  // makes its envelope unverified here, so the figure is withheld.
+  const superseded = setbackAtomSuperseded(atomChain?.setbackRule ?? null, district);
+  const atomPromotion = superseded
+    ? { depthWarmPromotion: null, sourceCitation: null }
+    : {
+        depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
+        sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
+      };
   const reconciled = reconcileWithAtomEnvelope(
     rawDerived,
     atomChain?.buildableEnvelope?.outcome ?? null,
