@@ -308,7 +308,7 @@ describe("A5 create forty keep six / A14 verbatim / A13 walk / I6", () => {
       [2, PINE, GOLD],
     ]);
     expect(result.screen.degraded).toEqual({
-      duplicates: [{ query: COVE, parcelNodeId: NEIGHBOR, keptQuery: CV }],
+      duplicates: [{ query: COVE, parcelNodeId: NEIGHBOR, keptQuery: CV, ordinal: 1 }],
     });
     expect(JSON.stringify(result)).not.toContain("duplicate_resolved_node");
     expect(store.rows.map((r) => r.query)).toEqual([CV, PINE]);
@@ -335,8 +335,8 @@ describe("A5 create forty keep six / A14 verbatim / A13 walk / I6", () => {
     expect(result.screen.rows[0]).toMatchObject({ ordinal: 0, query: CV, parcelNodeId: GOLD });
     expect(result.screen.degraded).toEqual({
       duplicates: [
-        { query: COVE, parcelNodeId: GOLD, keptQuery: CV },
-        { query: GOLD, parcelNodeId: GOLD, keptQuery: CV },
+        { query: COVE, parcelNodeId: GOLD, keptQuery: CV, ordinal: 1 },
+        { query: GOLD, parcelNodeId: GOLD, keptQuery: CV, ordinal: 2 },
       ],
     });
     expect(store.rows).toHaveLength(1);
