@@ -355,6 +355,8 @@ export type InlineItemModel = {
   answer: string;
   actionLabel: string;
   actionUrl: string | null;
+  title?: string;
+  facts?: InlineFactModel[];
 };
 /** P-448. The server's inline card, copied field by field. A missing field is not invented. */
 export type InlineCard = {
@@ -3368,6 +3370,15 @@ function inlineCardFrom(value: unknown): InlineCard | null {
         answer: it.answer,
         actionLabel: it.actionLabel,
         actionUrl: typeof it.actionUrl === "string" ? it.actionUrl : null,
+        ...(typeof it.title === "string" ? { title: it.title } : {}),
+        ...(Array.isArray(it.facts)
+          ? {
+              facts: it.facts
+                .map(asRecord)
+                .filter((f): f is Record<string, unknown> => !!f && typeof f.label === "string" && typeof f.value === "string")
+                .map((f) => ({ label: String(f.label), value: String(f.value), state: typeof f.state === "string" ? f.state : "unstated" })),
+            }
+          : {}),
       });
     }
   }

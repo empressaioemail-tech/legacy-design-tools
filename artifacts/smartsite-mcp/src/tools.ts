@@ -80,6 +80,8 @@ import {
 } from "./render-metrics.js";
 import { mintMapRenderReportToken } from "./seat-metrics-auth.js";
 import { registerPlanReviewPreview } from "./plan-review-preview.js";
+import { registerSmartsitePrompts } from "./prompts.js";
+import { slimBatchResponseText } from "./batch-slim.js";
 
 const SMARTSITE_BATCH_CAP = 50;
 /**
@@ -509,7 +511,20 @@ async function withCortex(
       "Smart Site MCP cannot reach the workbench backend.",
     );
   }
-  return fn(config);
+  try {
+    return await fn(config);
+  } catch (err) {
+    // A slow or unreachable backend is a declared answer, never a raw
+    // "This operation was aborted" (QA 2026-09-29, fix register B1).
+    const name = (err as { name?: string } | null)?.name;
+    if (name === "AbortError" || name === "TimeoutError") {
+      return degradedResult("upstream_timeout", "Smart Site took too long to answer. Try again, or narrow the request.");
+    }
+    if (err instanceof TypeError) {
+      return degradedResult("upstream_unreachable", "Smart Site could not reach its data service. Try again shortly.");
+    }
+    throw err;
+  }
 }
 
 type CenterPointOutcome =
@@ -739,6 +754,7 @@ function annotationsFor(name: SmartsiteToolName) {
   }
   if (
     name === "request_records" ||
+    name === "export_instrument" ||
     name === "create_screen" ||
     name === "add_to_screen" ||
     name === "save_property" ||
@@ -825,7 +841,8 @@ function attachStandingVocabBlock(
     const hostSession = hostSessionFromAuth(auth);
     const { skipStandingVocab, ...result } = await handler(args);
     let shaped = result;
-    if (!skipStandingVocab) {
+    // The vocabulary block explains result tokens; an error result has none (fix register B4).
+    if (!skipStandingVocab && !result.isError) {
       const withVocab = {
         ...shaped,
         content: [...shaped.content, STANDING_VOCAB_CONTENT_PART],
@@ -1048,10 +1065,13 @@ export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
 export function registerTools(server: McpServer): void {
   registerMcpApp(server);
   registerVocabularyResource(server);
+  registerSmartsitePrompts(server as unknown as Parameters<typeof registerSmartsitePrompts>[0]);
   // Demo card for the ICC plan review preview; registers nothing unless the
   // caller's email is in PLAN_REVIEW_PREVIEW_EMAILS.
   registerPlanReviewPreview(server as unknown as Parameters<typeof registerPlanReviewPreview>[0]);
   for (const tool of SMARTSITE_MCP_TOOLS) {
+    // Parked tools are not listed (operator, 2026-10-05). See LISTED_TOOLS.
+    if (tool.readiness === "blocked") continue;
     const uiMeta = appMetaFor(tool.name);
     server.registerTool(
       tool.name,
@@ -1065,18 +1085,6 @@ export function registerTools(server: McpServer): void {
       attachStandingVocabBlock(tool.name, async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
-
-        if (tool.readiness === "blocked") {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: notReadyMessage(tool.name, tool.blockedReason ?? "blocked"),
-              },
-            ],
-            isError: true,
-          };
-        }
 
         switch (tool.name) {
           case "find_nearest_parcels": {
@@ -1111,7 +1119,8 @@ export function registerTools(server: McpServer): void {
               const payload: { parcelNodeId: string; cap?: number } = {
                 parcelNodeId: subject,
               };
-              if (cap !== undefined) payload.cap = cap;
+              // Default 8 keeps the result well under the host's size cap (UX review 2026-10-05).
+              payload.cap = cap ?? 8;
               const res = await cortexFetch(
                 config,
                 `/api/property-explorer/v1/research/nearest-parcels`,
@@ -1501,9 +1510,11 @@ export function registerTools(server: McpServer): void {
                 canSeeOwner,
               );
               const batchOutcome = await batchPromise;
-              const anchored = batchOutcome
+              const anchoredFull = batchOutcome
                 ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
                 : attachAnchorToResponseText(normalized, await anchorPromise);
+              // F13: a multi-parcel node read drops per-parcel duplicates (batch-slim.ts).
+              const anchored = readsAnchorBatch ? slimBatchResponseText(anchoredFull) : anchoredFull;
               const host = hostKeyFromAuth();
               if (mode === "single-node") {
                 const correlationId = recordToolMapIntent(

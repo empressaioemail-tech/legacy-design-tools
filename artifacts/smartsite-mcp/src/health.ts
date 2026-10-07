@@ -1,5 +1,5 @@
 import { isAuthConfigured, loadAuthConfig, type AuthConfig } from "./auth.js";
-import { SERVER_NAME, SERVER_VERSION, SMARTSITE_MCP_TOOLS } from "./constants.js";
+import { LISTED_TOOLS, SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import {
   loadHauskaMcpConfig,
   probeHauskaMcpHealth,
@@ -61,10 +61,7 @@ export async function buildDependenciesHealthReport(): Promise<DependenciesHealt
 }
 
 export function renderLlmsTxt(publicHost = "https://mcp.smartsite.cloud"): string {
-  const toolLines = SMARTSITE_MCP_TOOLS.map(
-    (t) =>
-      `- ${t.title} (\`${t.name}\`)${t.readiness === "blocked" ? " — not ready" : ""}: ${t.description}`,
-  ).join("\n");
+  const toolLines = LISTED_TOOLS.map((t) => `- ${t.title} (\`${t.name}\`): ${t.description}`).join("\n");
 
   return `# Smart Site MCP
 
@@ -74,7 +71,7 @@ Endpoint: ${publicHost}/mcp
 Protocol: Streamable HTTP (MCP 2025-03-26)
 Authorization: OAuth 2.1 + PKCE against the Smart Site account (WorkOS AuthKit). Bearer-without-OAuth is refused.
 
-Tools (${SMARTSITE_MCP_TOOLS.length}):
+Tools (${LISTED_TOOLS.length}):
 ${toolLines}
 
 Hauska MCP (mcp.hauska.dev) remains the developer catalog gate. This server is product-owned and lists only Smart Site tools.

@@ -234,7 +234,11 @@ describe("POST /property-explorer/v1/research/brief miss split", () => {
       .post("/api/property-explorer/v1/research/brief")
       .send({ parcelNodeId: [ABSENT, UNBAKED], depth: "stub" });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ parcels: [], notFound: [ABSENT, UNBAKED] });
+    expect(res.body).toMatchObject({ parcels: [], notFound: [ABSENT, UNBAKED] });
+    // Fix register C6: every miss names its reason; existence stays unmeasured (no probe).
+    for (const id of [ABSENT, UNBAKED]) {
+      expect(res.body.notFoundReasons[id]).toMatchObject({ reason: expect.any(String) });
+    }
     expect(res.body).not.toHaveProperty("absent");
     expect(fakes.probe).not.toHaveBeenCalled();
   });

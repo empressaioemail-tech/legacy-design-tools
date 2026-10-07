@@ -1,3 +1,4 @@
+import { SMARTSITE_PLANS_URL } from "./entitlement.js";
 import type { EntitlementGateRefusal } from "./entitlement.js";
 import { envelopeBasisHuman, envelopeHuman } from "@empressaio/atom-contract/display";
 import {
@@ -883,7 +884,7 @@ export function mapScreensGateNonOk(
     body.subscriptionTier === "team"
       ? body.subscriptionTier
       : null;
-  return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message };
+  return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message, plansUrl: SMARTSITE_PLANS_URL };
 }
 
 /**

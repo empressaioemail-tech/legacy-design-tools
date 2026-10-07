@@ -293,3 +293,21 @@ describe("radius search does not use the 254-county IN list", () => {
     expect(cells!.length).toBeLessThanOrEqual(16);
   });
 });
+
+describe("near-mode distance to the parcel's real edges (fix register C4)", () => {
+  it("measures to the polygon, not its bounding box, for a rotated lot", async () => {
+    const { parcelDistanceFt, pointToPolygonEdgesFt } = await import("./txgioRadiusSearch");
+    // A diamond (a square rotated 45 degrees) about 200 ft across; the point
+    // sits inside its bounding box but outside the diamond, near a corner.
+    const c = { lat: 30.1, lng: -97.3 };
+    const d = 100 / 364000;
+    const k = d / Math.cos((c.lat * Math.PI) / 180);
+    const ring = [[c.lng, c.lat + d], [c.lng + k, c.lat], [c.lng, c.lat - d], [c.lng - k, c.lat], [c.lng, c.lat + d]];
+    const geometry = { type: "Polygon", coordinates: [ring] };
+    const p = { lat: c.lat + d * 0.9, lng: c.lng + k * 0.9 };
+    const edges = pointToPolygonEdgesFt(p.lat, p.lng, geometry)!;
+    expect(edges).toBeGreaterThan(50);
+    const dist = parcelDistanceFt({ ...p, geometry, westLng: c.lng - k, eastLng: c.lng + k, southLat: c.lat - d, northLat: c.lat + d });
+    expect(dist).toBeCloseTo(edges, 6);
+  });
+});

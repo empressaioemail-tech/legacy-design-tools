@@ -18,6 +18,7 @@ const {
   sliceStreetHits,
   streetNameFromSitus,
   declareStreetMatch,
+  STREET_SEARCH_BUDGET_MS,
 } = await import("./txgioStreetSearch");
 const {
   normalizeBareStreetLine,
@@ -169,5 +170,66 @@ describe("declareStreetMatch (keep the breadth, declare the fragment)", () => {
     expect(declared.match).toBe("exact");
     expect(declared.streets).toEqual(["PINE"]);
     expect(declared.matchBasis).toBeUndefined();
+  });
+});
+
+describe("searchParcelsByBareStreet: bounded, timed and ranked (fix register C2)", () => {
+  function capturingDb(rows: unknown[], seen: { where?: unknown }) {
+    return {
+      select: () => ({
+        from: () => ({
+          where: (w: unknown) => {
+            seen.where = w;
+            return { limit: async () => rows };
+          },
+        }),
+      }),
+    };
+  }
+
+  it("puts the queried street ahead of fragment matches", async () => {
+    const rows = [
+      { countyFips: "48021", propId: "1", situsAddress: "10 COOL WATER DR, BASTROP, TX 78602" },
+      { countyFips: "48021", propId: "2", situsAddress: "1301 WATER ST, BASTROP, TX 78602" },
+    ];
+    const result = await searchParcelsByBareStreet({
+      query: "Water St, Bastrop",
+      database: capturingDb(rows, {}) as never,
+      resolveCityCounties: async () => ["48021"],
+    });
+    if ("refused" in result) throw new Error(result.code);
+    expect(result.hits[0]!.situsAddress).toContain("1301 WATER ST");
+  });
+
+  it("asks the city's counties before scanning Texas", async () => {
+    const asked: string[] = [];
+    await searchParcelsByBareStreet({
+      query: "Water St, Bastrop",
+      database: capturingDb([], {}) as never,
+      resolveCityCounties: async (city) => {
+        asked.push(city);
+        return ["48021"];
+      },
+    });
+    expect(asked).toEqual(["BASTROP"]);
+  });
+
+  it("refuses street_search_timeout instead of hanging", async () => {
+    vi.useFakeTimers();
+    try {
+      const never = {
+        select: () => ({ from: () => ({ where: () => ({ limit: () => new Promise(() => {}) }) }) }),
+      };
+      const pending = searchParcelsByBareStreet({
+        query: "Water St, Bastrop",
+        database: never as never,
+        resolveCityCounties: async () => ["48021"],
+      });
+      await vi.advanceTimersByTimeAsync(STREET_SEARCH_BUDGET_MS + 10);
+      const result = await pending;
+      expect(result).toMatchObject({ refused: true, code: "street_search_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

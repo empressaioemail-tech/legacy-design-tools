@@ -12,6 +12,7 @@ const { searchMock } = vi.hoisted(() => ({
       received: 0,
       truncated: false,
       radiusFt: 500,
+      distanceMethod: "anchor_point_to_polygon" as const,
     }),
   ),
 }));
@@ -44,6 +45,7 @@ describe("GET /api/brokerage/v1/place/radius-search", () => {
       received: 1,
       truncated: false,
       radiusFt: 500,
+      distanceMethod: "anchor_point_to_polygon" as const,
     });
   });
 

@@ -278,3 +278,18 @@ describe("resolveSitusCity — P-270 city half", () => {
     expect(incorporatedCityLimitsCity({ status: "unmeasured", cityName: "X" })).toBeNull();
   });
 });
+
+describe("projectSavedPropertyLabel (fix register C5)", () => {
+  it('treats ", TX" as no label, not a present situs', () => {
+    expect(projectSavedPropertyLabel("48021:1", ", TX")).toEqual({ label: "48021:1", situs: "unknown" });
+  });
+  it("falls back to the parcel's own situs label when the save has none", () => {
+    expect(projectSavedPropertyLabel("48021:1", null, "1301 WATER ST, BASTROP, TX 78602")).toEqual({
+      label: "1301 WATER ST, BASTROP, TX 78602",
+      situs: "present",
+    });
+  });
+  it("keeps a real stored label over the fallback", () => {
+    expect(projectSavedPropertyLabel("48021:1", "My lot on Water", "1301 WATER ST")).toMatchObject({ label: "My lot on Water" });
+  });
+});

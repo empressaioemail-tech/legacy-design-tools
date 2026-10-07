@@ -140,6 +140,8 @@ export type ScreenDuplicate = {
   query: string;
   parcelNodeId: string;
   keptQuery: string;
+  /** The paste ordinal this query held; the written rows skip it (fix register C9). */
+  ordinal: number;
 };
 
 /**
@@ -642,6 +644,7 @@ export async function createScreen(
           query: row.query,
           parcelNodeId: row.parcelNodeId,
           keptQuery,
+          ordinal: row.ordinal,
         });
         continue;
       }

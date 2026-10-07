@@ -4,6 +4,8 @@
  * become a label. Fallback is the node id plus situs unknown.
  */
 
+import { situsCarriesStreetComponent } from "./serveGuards";
+
 const PUNCTUATION_ONLY_RE = /^[\s,.\-;:'"`]+$/;
 
 /**
@@ -266,12 +268,19 @@ export function composeSitusLabel(input: {
   return { label: tokens.join(", "), situs: "present" };
 }
 
-/** List-row projection: never emit a punctuation label. */
+/**
+ * List-row projection: never emit a label without a street (", TX" is not an
+ * address; fix register C5). A missing or unusable stored label falls back to
+ * the parcel's own situs label when the caller has one, then to the node id.
+ */
 export function projectSavedPropertyLabel(
   parcelNodeId: string,
   storedLabel: string | null | undefined,
+  fallbackLabel?: string | null,
 ): ComposedSitusLabel {
-  return composeSitusLabel({ parcelNodeId, composed: storedLabel ?? null });
+  const usable = (v: string | null | undefined): string | null =>
+    v != null && situsCarriesStreetComponent(v) ? v : null;
+  return composeSitusLabel({ parcelNodeId, composed: usable(storedLabel) ?? usable(fallbackLabel) });
 }
 
 /**

@@ -46,7 +46,7 @@ export type StreetSearchOk = {
 
 export type StreetSearchRefuse = {
   refused: true;
-  code: "bare_street_unbounded" | "bare_street_not_a_street";
+  code: "bare_street_unbounded" | "bare_street_not_a_street" | "street_search_timeout";
   reason: string;
 };
 
@@ -72,6 +72,21 @@ function spaceBoundedNeedles(variant: string) {
     sql`${normalizedColumnExpr("situs_address")} ILIKE ${"% " + needle + "%"}`,
     sql`${normalizedColumnExpr("situs_address")} ILIKE ${"% " + needle}`,
   ];
+}
+
+/** Street search answers or refuses within this budget (QA 2026-09-29, fix register C2). */
+export const STREET_SEARCH_BUDGET_MS = 8000;
+
+/** Counties a normalised city falls in, most parcels first, from the Factory's daily city_county_counts. */
+async function countiesForCity(city: string): Promise<string[]> {
+  try {
+    const res = (await defaultDb.execute(
+      sql`select county_fips from city_county_counts where city_normalised = ${city} order by parcel_count desc limit 3`,
+    )) as unknown as { rows?: { county_fips: string }[] };
+    return (res.rows ?? []).map((row) => row.county_fips).filter((f) => /^d{5}$/.test(f));
+  } catch {
+    return [];
+  }
 }
 
 function clampCap(raw: number | undefined): number {
@@ -123,6 +138,8 @@ export async function searchParcelsByBareStreet(input: {
   cap?: number;
   countyFips?: string;
   database?: StreetSearchDb;
+  /** Test seam; defaults to city_county_counts. */
+  resolveCityCounties?: (city: string) => Promise<string[]>;
 }): Promise<StreetSearchResult> {
   const variants = situsSearchBareStreetVariants(input.query);
   if (variants.length === 0) {
@@ -151,11 +168,21 @@ export async function searchParcelsByBareStreet(input: {
   const database = input.database ?? defaultDb;
   const needleClauses = variants.flatMap(spaceBoundedNeedles);
 
+  // A city with no county used to scan every Texas county with no index and
+  // no time limit, so "Water St, Bastrop" timed out (fix register C2). Bound
+  // the city to its counties first; keep the city filter when a county is given.
+  const cityCounties =
+    !hasCounty && locality.city ? await (input.resolveCityCounties ?? countiesForCity)(locality.city) : [];
   const localityFilters = [];
   if (hasCounty) {
     localityFilters.push(eq(txgioParcel.countyFips, countyFips));
+    if (locality.city) {
+      localityFilters.push(sql`strpos(upper(${txgioParcel.situsAddress}), ${locality.city}) > 0`);
+    }
   } else {
-    localityFilters.push(inArray(txgioParcel.countyFips, texasCountyFipsList()));
+    localityFilters.push(
+      inArray(txgioParcel.countyFips, cityCounties.length > 0 ? cityCounties : texasCountyFipsList()),
+    );
     if (locality.zip) {
       localityFilters.push(
         sql`${txgioParcel.situsAddress} ~ ${`\\m${locality.zip}\\M`}`,
@@ -168,7 +195,7 @@ export async function searchParcelsByBareStreet(input: {
     }
   }
 
-  const rows = (await database
+  const query = database
     .select({
       countyFips: txgioParcel.countyFips,
       propId: txgioParcel.propId,
@@ -181,11 +208,33 @@ export async function searchParcelsByBareStreet(input: {
         ...localityFilters,
       ),
     )
-    .limit(cap + 1)) as {
-    countyFips: string | null;
-    propId: string | null;
-    situsAddress: string | null;
-  }[];
+    // Over-fetch: several tile rows can belong to one parcel, so a cap+1 limit
+    // before de-duplication under-filled the set and misreported truncation.
+    .limit((cap + 1) * 4) as unknown as Promise<
+    { countyFips: string | null; propId: string | null; situsAddress: string | null }[]
+  >;
+  const timedOut = Symbol("timeout");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const raced = await Promise.race([
+    query,
+    new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), STREET_SEARCH_BUDGET_MS);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (raced === timedOut) {
+    return {
+      refused: true,
+      code: "street_search_timeout",
+      reason: "The street search did not finish in time. Add a ZIP or a county to narrow it.",
+    };
+  }
+  // The queried street first, then fragment matches (WATER ST before COOL WATER DR).
+  const primary = variants[0]!;
+  const rows = [...raced].sort((a, b) => {
+    const rank = (situs: string | null) => (situs && streetNameFromSitus(situs) === primary ? 0 : 1);
+    return rank(a.situsAddress) - rank(b.situsAddress);
+  });
 
   const byParcel = new Map<string, StreetSearchHit>();
   for (const r of rows) {
@@ -194,7 +243,6 @@ export async function searchParcelsByBareStreet(input: {
     const situs = r.situsAddress?.trim();
     if (!fips || !propId || !situs) continue;
     if (
-      !hasCounty &&
       (locality.city || locality.zip) &&
       !placeSearchLocalityMatches(localityFromStoredAddress(situs), locality)
     ) {

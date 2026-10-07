@@ -170,6 +170,7 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
         subscriptionTier: null,
         message:
           "Studio or Team is required to build a screen. Solo answers one parcel; Studio works a list of them.",
+        plansUrl: "https://smartsite.cloud/?plans=1",
       });
       // The sentence survives the hop; the connector does not have to invent one.
       expect(parsed.message).toMatch(/screen/i);

@@ -34,6 +34,9 @@ export type InlineItem = {
   answer: string;
   actionLabel: "Open";
   actionUrl: string | null;
+  /** Card grid: the tile's heading (the address) and its short fact rows. */
+  title?: string;
+  facts?: InlineFact[];
 };
 
 export type InlineCard = {
@@ -410,6 +413,8 @@ function itemsFromParcels(
       answer: answerLineFromHost(host),
       actionLabel: "Open",
       actionUrl: id ? mint(id) : null,
+      title: addressOf(host),
+      facts: fourFacts(host).filter((f) => f.label !== "Setbacks"),
     });
   }
   return { items, moreCount };
@@ -459,11 +464,15 @@ export function composeInlineCard(
   const topBrief = sectionsOf(data).length > 0;
   if (parcels && parcels.length >= CAROUSEL_MIN && !topDraw) {
     const built = itemsFromParcels(parcels, mintParcelLink);
-    const title =
-      parcels.length === built.items.length
-        ? `${built.items.length} parcels`
-        : `${built.items.length} parcels on this card`;
-    return carousel(title, built.items, built.moreCount, shareUrl);
+    // Near and street modes read full records for only some hits; count every
+    // hit, not just the ones on the card (fix register B2: "5 of 12", not "5").
+    const hitsCount = Array.isArray(data.hits) ? data.hits.length : 0;
+    const received = typeof data.received === "number" && Number.isFinite(data.received) ? data.received : 0;
+    const total = Math.max(parcels.length, hitsCount, received);
+    const shown = built.items.length;
+    const more = Math.max(built.moreCount, total - shown);
+    const title = total === shown ? `${shown} parcels` : `${shown} of ${total} parcels`;
+    return carousel(title, built.items, more, shareUrl);
   }
   const rows = Array.isArray(data.rows) ? data.rows : null;
   if (rows && rows.length >= CAROUSEL_MIN && !topDraw) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SMARTSITE_MCP_TOOLS, SERVER_NAME } from "../src/constants.js";
+import { LISTED_TOOLS, SMARTSITE_MCP_TOOLS, SERVER_NAME } from "../src/constants.js";
 import { renderLlmsTxt } from "../src/health.js";
 
 describe("smartsite-mcp constants", () => {
@@ -101,34 +101,19 @@ describe("smartsite-mcp constants", () => {
 });
 
 describe("llms.txt", () => {
-  it("includes hostname and thirteen tool names", () => {
+  it("includes the hostname and every listed tool", () => {
     const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
     expect(txt).toContain("mcp.smartsite.cloud");
-    for (const tool of SMARTSITE_MCP_TOOLS) {
-      expect(txt).toContain(tool.name);
-    }
+    for (const tool of LISTED_TOOLS) expect(txt).toContain(tool.name);
   });
 
-  // P-109 item 3. The advertised catalog must not present a tool as available
-  // when the runtime refuses it. Every blocked tool carries the not-ready
-  // marker on its own line; every live tool does not.
-  it("marks every blocked tool not ready on its own line, and no live tool", () => {
+  // Operator, 2026-10-05: parked tools are not published at all (this replaces
+  // P-109 item 3's "advertised not ready" line).
+  it("publishes no parked tool and no not-ready marker", () => {
     const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
-    const lineFor = (name: string) =>
-      txt.split("\n").find((l) => l.includes(`(\`${name}\`)`)) ?? "";
-    for (const tool of SMARTSITE_MCP_TOOLS) {
-      const line = lineFor(tool.name);
-      expect(line, `${tool.name} has a catalog line`).not.toBe("");
-      if (tool.readiness === "blocked") {
-        expect(line, `${tool.name} is advertised not ready`).toContain(
-          "not ready",
-        );
-      } else {
-        expect(line, `${tool.name} is advertised available`).not.toContain(
-          "not ready",
-        );
-      }
+    for (const tool of SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked")) {
+      expect(txt).not.toContain("`" + tool.name + "`");
     }
-    expect(lineFor("export_instrument")).not.toContain("not ready");
+    expect(txt).not.toContain("not ready");
   });
 });

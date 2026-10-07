@@ -348,7 +348,10 @@ function parseLocalityTail(tail: string): PlaceSearchLocality {
  * City-only tail on a comma-less address with no state/ZIP anchor. Does not
  * call {@link normalizeStreetLineCandidates} (that function calls this).
  */
-function parseTrailingCityWithoutAnchor(raw: string): string | null {
+/** US state and territory codes, for removing a trailing state from a city with no ZIP. */
+const US_STATE_CODES = new Set(["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","PR","GU","VI"]);
+
+function parseTrailingCityWithoutAnchor(raw: string): { city: string | null; state: string | null } | null {
   const flat = raw
     .trim()
     .replace(/,/g, " ");
@@ -369,8 +372,15 @@ function parseTrailingCityWithoutAnchor(raw: string): string | null {
     const canonical = STREET_TYPE_ABBR[t] ?? t;
     if (STREET_TYPE_SUFFIXES.has(canonical)) {
       const cityTokens = tokens.slice(i + 1);
+      // "1301 Water St Bastrop TX": the trailing state is not part of the city
+      // (QA 2026-09-29, fix register C1). Only with a city word before it, so a
+      // street like "Water Ct" never loses its suffix as Connecticut.
+      let state: string | null = null;
+      if (cityTokens.length >= 2 && US_STATE_CODES.has(cityTokens[cityTokens.length - 1]!)) {
+        state = cityTokens.pop()!;
+      }
       if (cityTokens.length >= 1 && cityTokens.length <= 4) {
-        return normalizeLocalityToken(cityTokens.join(" "));
+        return { city: normalizeLocalityToken(cityTokens.join(" ")), state };
       }
       break;
     }
@@ -387,7 +397,7 @@ function parseTrailingCityWithoutAnchor(raw: string): string | null {
     const beforeCanon =
       STREET_TYPE_ABBR[beforeCity] ?? DIRECTIONAL_ABBR[beforeCity] ?? beforeCity;
     if (STREET_TYPE_SUFFIXES.has(beforeCanon)) continue;
-    return normalizeLocalityToken(maybeCity);
+    return { city: normalizeLocalityToken(maybeCity), state: null };
   }
   return null;
 }
@@ -404,7 +414,7 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
   if (commaParts.length >= 2) {
     const tail = parseLocalityTail(commaParts.slice(1).join(", "));
     if (!tail.city && commaParts.length === 2) {
-      const city = parseTrailingCityWithoutAnchor(commaParts[0]!);
+      const city = parseTrailingCityWithoutAnchor(commaParts[0]!)?.city ?? null;
       if (city) return { city, state: tail.state, zip: tail.zip };
     }
     return tail;
@@ -422,8 +432,8 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
 
   const last = tokens[tokens.length - 1]!;
   if (!ZIP_RE.test(last)) {
-    const city = parseTrailingCityWithoutAnchor(trimmed);
-    return { city, state: null, zip: null };
+    const parsedCity = parseTrailingCityWithoutAnchor(trimmed);
+    return { city: parsedCity?.city ?? null, state: parsedCity?.state ?? null, zip: null };
   }
   const zip = last;
   const maybeState = tokens[tokens.length - 2]!;
@@ -435,7 +445,7 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
   const beforeStateZip = trimmed
     .replace(new RegExp(`\\s+${state}\\s+${zip}\\s*$`, "i"), "")
     .trim();
-  const anchoredCity = parseTrailingCityWithoutAnchor(beforeStateZip);
+  const anchoredCity = parseTrailingCityWithoutAnchor(beforeStateZip)?.city ?? null;
   if (anchoredCity) {
     return { city: anchoredCity, state, zip };
   }
@@ -647,7 +657,7 @@ function emitCityOnlyTailStrippedCandidates(
   raw: string,
   push: (toks: string[]) => void,
 ): void {
-  const city = parseTrailingCityWithoutAnchor(raw);
+  const city = parseTrailingCityWithoutAnchor(raw)?.city ?? null;
   if (!city) return;
 
   const flatTokens = baseStreetTokens(raw.replace(/,/g, " "));
@@ -668,7 +678,7 @@ function emitImpliedStreetSuffixCandidates(
   keys: string[],
   push: (toks: string[]) => void,
 ): void {
-  const city = parseTrailingCityWithoutAnchor(raw);
+  const city = parseTrailingCityWithoutAnchor(raw)?.city ?? null;
   for (const key of keys) {
     const tokens = key.split(" ").filter(Boolean);
     if (tokens.length < 2) continue;

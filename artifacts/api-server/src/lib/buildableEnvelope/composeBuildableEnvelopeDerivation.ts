@@ -122,6 +122,47 @@ export function firstParcelRing(geojson: unknown): {
  * `district`/`labeling`/`atomChain`/`spineZoning` first (network + DB reads)
  * and own sending (or otherwise using) the result.
  */
+/** Leading YYYY-MM-DD of a date string, or null when it does not start with one. */
+function isoDay(value: string | null | undefined): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec((value ?? "").trim());
+  return m ? m[1]! : null;
+}
+
+/**
+ * True when the stored setback-rule atom was SUPERSEDED: its front, side or
+ * rear differs from the district row this read resolved AND that row's source
+ * is dated after the atom. A difference alone is not supersession — a verified
+ * atom and the ledger can carry different figures for the same date (P-249's
+ * reconcile fixture), and an undated atom or source proves nothing either way,
+ * so both keep the atom.
+ */
+export function setbackAtomSuperseded(
+  atom: {
+    front?: number;
+    side?: number;
+    rear?: number;
+    sourceVintage?: string | null;
+    extractedAt?: string | null;
+  } | null,
+  district: DistrictMappingResult,
+  resolvedEffectiveDate: string | null,
+): boolean {
+  if (!atom) return false;
+  const row = district.district as { front_ft?: number; side_ft?: number; rear_ft?: number } | null | undefined;
+  if (!row) return false;
+  const atomDay = isoDay(atom.sourceVintage) ?? isoDay(atom.extractedAt);
+  const sourceDay = isoDay(resolvedEffectiveDate);
+  if (!atomDay || !sourceDay || atomDay >= sourceDay) return false;
+  const pairs: Array<[number | undefined, number | undefined]> = [
+    [atom.front, row.front_ft],
+    [atom.side, row.side_ft],
+    [atom.rear, row.rear_ft],
+  ];
+  return pairs.some(
+    ([a, r]) => typeof a === "number" && typeof r === "number" && Number.isFinite(a) && Number.isFinite(r) && a !== r,
+  );
+}
+
 export function composeBuildableEnvelopeDerivation(args: {
   ring: Ring;
   table: SetbackTable;
@@ -154,10 +195,25 @@ export function composeBuildableEnvelopeDerivation(args: {
   // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
   // state, so the wire's promotion fields travel with the outcome. Absent
   // fields read as unverified (see isEnvelopeAtomVerified).
-  const atomPromotion = {
-    depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
-    sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
-  };
+  // QA 2026-09-29, fix register C7: the PDF refuses an envelope atom whose
+  // setbacks the export no longer follows (engine site-model superseded
+  // check), but the card used to quote its area anyway (1301 Water St: 15,547
+  // sq ft built on 25/5/25 beside a 30/10/30/20 table). One rule for both: a
+  // setback-rule atom that disagrees with the setbacks this read resolved
+  // makes its envelope unverified here, so the figure is withheld — but only
+  // when the source the read followed is dated after the atom (CI on #792: a
+  // verified, current atom must still reconcile).
+  const superseded = setbackAtomSuperseded(
+    atomChain?.setbackRule ?? null,
+    district,
+    resolvedEffectiveDate,
+  );
+  const atomPromotion = superseded
+    ? { depthWarmPromotion: null, sourceCitation: null }
+    : {
+        depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
+        sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
+      };
   const reconciled = reconcileWithAtomEnvelope(
     rawDerived,
     atomChain?.buildableEnvelope?.outcome ?? null,

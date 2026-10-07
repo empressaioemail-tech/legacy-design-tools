@@ -638,6 +638,7 @@ router.get(
       rows.map(async (row) => {
         const stub = await assembleStubBody(row.parcelNodeId);
         return {
+          label: typeof (stub as { label?: unknown } | null)?.label === "string" ? ((stub as { label: string }).label) : null,
           situs: stub?.situs ?? "unread",
           zoning: stub?.zoning ?? "unread",
           landUse: stub?.landUse ?? "unread",
@@ -649,14 +650,15 @@ router.get(
     );
     res.json(
       rows.map((row, i) => {
-        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label);
+        const { label: stubLabel, ...stubRails } = stubs[i]!;
+        const composed = projectSavedPropertyLabel(row.parcelNodeId, row.label, stubLabel);
         return {
           ...row,
           label: composed.label,
           situs: composed.situs,
           status: row.crmStatus,
           note: row.note,
-          stub: stubs[i],
+          stub: stubRails,
         };
       }),
     );
@@ -1409,11 +1411,20 @@ router.post(
         return { id, row };
       }),
     );
+    // Each miss carries its reason (fix register C6). No existence probe runs
+    // here, so a well-formed id with no baked record says exactly that and
+    // leaves whether the parcel exists unmeasured.
+    const notFoundReasons: Record<string, { reason: string; parcelExists: boolean | "unmeasured" }> = {};
     for (const item of results) {
       if (item.row) parcels.push(item.row);
-      else notFound.push(item.id);
+      else {
+        notFound.push(item.id);
+        notFoundReasons[item.id] = isValidParcelNodeId(item.id)
+          ? { reason: "baked_snapshot_not_found", parcelExists: "unmeasured" }
+          : { reason: "invalid_parcel_node_id", parcelExists: false };
+      }
     }
-    res.json({ parcels, notFound });
+    res.json({ parcels, notFound, notFoundReasons });
   },
 );
 
