@@ -1318,7 +1318,7 @@ export function registerTools(server: McpServer): void {
                 const res = await cortexFetch(
                   config,
                   `/api/brokerage/v1/place/street-search?${qs.toString()}`,
-                  { userId: auth.userId },
+                  { userId: auth.userId, timeoutMs: 45_000 },
                 );
                 const body = await res.text();
                 if (!res.ok) {

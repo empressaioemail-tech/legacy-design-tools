@@ -8,9 +8,13 @@ import { loadFloodHazardFactForServe } from "./floodHazardFactServeCutover";
 import { loadZoningFactForServe } from "./zoningFactServeCutover";
 import { loadSetbacksFactForServe } from "./setbacksFactServeCutover";
 import { loadCityLimitsFactForServe } from "./cityLimitsFactServeCutover";
+import { loadLandUseFactAtom } from "./landUseFactRead";
+import { tryComposeEnvelopeModelForDraw } from "./buildableEnvelope/parcelDrawEnvelopeModel";
+import { atomPathPending } from "./parcelDrawFromReads";
 import {
   rollSitusCityFromFacets,
   rollSitusCityIsDeclaredAbsent,
+  resolveSitusCity,
 } from "./situsCompose";
 import {
   composeSmartSiteStub,
@@ -36,15 +40,34 @@ export async function assembleSmartSiteStubBody(
   const needsCityLimits = rollSitusCityIsDeclaredAbsent(
     rollSitusCityFromFacets(snapshot.facets),
   );
-  const [floodHazardFact, parcelRecordZoningFact, parcelRecordSetbacksFact, cityLimitsFact] =
-    await Promise.all([
-      loadFloodHazardFactForServe(parcelNodeId),
-      loadZoningFactForServe(parcelNodeId),
-      loadSetbacksFactForServe(parcelNodeId),
-      needsCityLimits
-        ? loadCityLimitsFactForServe(parcelNodeId, snapshot.queryPoint ?? null)
-        : Promise.resolve(null),
-    ]);
+  const [
+    floodHazardFact,
+    parcelRecordZoningFact,
+    parcelRecordSetbacksFact,
+    cityLimitsFact,
+    landUseFact,
+  ] = await Promise.all([
+    loadFloodHazardFactForServe(parcelNodeId),
+    loadZoningFactForServe(parcelNodeId),
+    loadSetbacksFactForServe(parcelNodeId),
+    needsCityLimits
+      ? loadCityLimitsFactForServe(parcelNodeId, snapshot.queryPoint ?? null)
+      : Promise.resolve(null),
+    loadLandUseFactAtom(parcelNodeId),
+  ]);
+
+  const envelopeOutcome = atomPathPending(snapshot.envelopeBriefRefusal)
+    ? await tryComposeEnvelopeModelForDraw({
+        parcelNodeId,
+        jurisdictionCity: resolveSitusCity({
+          rollSitusCity: rollSitusCityFromFacets(snapshot.facets),
+          cityLimits: cityLimitsFact,
+        }).city,
+        jurisdictionState: null,
+        queryPoint: snapshot.queryPoint ?? null,
+      })
+    : null;
+
   return composeSmartSiteStub({
     parcelNodeId,
     facets: snapshot.facets,
@@ -54,5 +77,7 @@ export async function assembleSmartSiteStubBody(
     parcelRecordZoningFact,
     parcelRecordSetbacksFact,
     cityLimitsFact,
+    landUseFact,
+    envelopeOutcome,
   });
 }

@@ -23,6 +23,8 @@ import { composeSitusLabel, resolveSitusCity } from "./situsCompose";
 import type { CityLimitsFactServed } from "./cityLimitsFactServeCutover";
 import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
 import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
+import type { LandUseFactRead } from "./landUseFactRead";
+import type { EnvelopeDrawOutcome } from "./buildableEnvelope/envelopeDrawOutcome";
 
 export const SMART_SITE_RAIL_STATES = [
   "present",
@@ -156,6 +158,17 @@ function railStateFromSetbacksFact(fact: SetbacksFactRead): SmartSiteRailState {
   return "refused";
 }
 
+function railStateFromLandUseFact(fact: LandUseFactRead): SmartSiteRailState {
+  if (fact.state === "present") return "present";
+  if (fact.state === "absent") return "unknown";
+  return "refused";
+}
+
+/** Same envelope section the node brief uses (P-496 stub/node parity). */
+function railStateFromEnvelopeOutcome(outcome: EnvelopeDrawOutcome): SmartSiteRailState {
+  return outcome.state === "modelled" ? "present" : "refused";
+}
+
 export function composeSmartSiteStub(input: {
   parcelNodeId: string;
   facets: unknown;
@@ -166,6 +179,10 @@ export function composeSmartSiteStub(input: {
   parcelRecordZoningFact?: ZoningFactRead | null;
   /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing. */
   parcelRecordSetbacksFact?: SetbacksFactRead | null;
+  /** Unconditional atom read — same source as the node brief land-use section (P-496). */
+  landUseFact?: LandUseFactRead | null;
+  /** Live envelope derivation when atom path is pending — matches node brief (P-496). */
+  envelopeOutcome?: EnvelopeDrawOutcome | null;
   /**
    * P-270 CITY HALF (2026-09-19). The served city-limits determination, when the
    * caller made one. It exists here for ONE reason: the licence in
@@ -227,15 +244,25 @@ export function composeSmartSiteStub(input: {
     zoning: input.parcelRecordZoningFact
       ? railStateFromZoningFact(input.parcelRecordZoningFact)
       : railStateFromSectionDisposition(zoningDisposition(root.zoning)),
-    landUse: railStateFromSectionDisposition(
-      landUseDisposition(baseFacts.landUse),
-    ),
+    landUse: (() => {
+      const landUseAddressRecovered =
+        (asRecord(root.provenance)?.landUseAddressRecovered ?? false) === true;
+      if (landUseAddressRecovered) {
+        return railStateFromSectionDisposition(landUseDisposition(baseFacts.landUse));
+      }
+      if (input.landUseFact && input.landUseFact.state !== "refused") {
+        return railStateFromLandUseFact(input.landUseFact);
+      }
+      return railStateFromSectionDisposition(landUseDisposition(baseFacts.landUse));
+    })(),
     flood,
     drainage,
-    envelope: input.parcelRecordSetbacksFact
-      ? railStateFromSetbacksFact(input.parcelRecordSetbacksFact)
-      : railStateFromSectionDisposition(
-          envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
-        ),
+    envelope: input.envelopeOutcome
+      ? railStateFromEnvelopeOutcome(input.envelopeOutcome)
+      : input.parcelRecordSetbacksFact
+        ? railStateFromSetbacksFact(input.parcelRecordSetbacksFact)
+        : railStateFromSectionDisposition(
+            envelopeDisposition(root.envelope, input.envelopeBriefRefusal),
+          ),
   };
 }

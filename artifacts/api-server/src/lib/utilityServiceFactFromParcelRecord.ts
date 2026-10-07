@@ -133,11 +133,21 @@ export async function utilityServiceFactFromParcelRecord(
     };
   }
 
+  const waterAbsence =
+    water === null
+      ? {
+          kind: "absent-verified" as const,
+          reason:
+            "No PUCT water CCN or retail water service area polygon contains this parcel's centroid. Sewer or electric rows, when present, are separate utility types from the same sweep.",
+        }
+      : null;
+
   return {
     state: "present",
     source: UTILITY_SERVICE_FACT_SOURCE,
     entityId: placeKey,
     water,
+    waterAbsence,
     sewer,
     electric,
     sourceAdapter: "parcel_record",
