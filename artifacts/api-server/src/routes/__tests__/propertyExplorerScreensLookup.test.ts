@@ -326,7 +326,7 @@ describe("POST /property-explorer/v1/screens with two spellings of one parcel (B
       resolution: "resolved",
     });
     expect(res.body.screen.degraded).toEqual({
-      duplicates: [{ query: COVE, parcelNodeId: NODE, keptQuery: CV }],
+      duplicates: [{ ordinal: 1, query: COVE, parcelNodeId: NODE, keptQuery: CV }],
     });
     expect(JSON.stringify(res.body)).not.toContain("duplicate_resolved_node");
     expect(store.rows).toHaveLength(1);
