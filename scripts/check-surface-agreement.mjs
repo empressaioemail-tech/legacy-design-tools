@@ -61,17 +61,35 @@
  * is defense in depth, not the guarantee -- the guarantee is that every base URL is REQUIRED,
  * with no fallback value anywhere in this file.
  *
- * PDF TEXT EXTRACTION IS NOT IMPLEMENTED IN THIS FILE (stated, not silent). No
- * production-grade PDF-text-extraction library is wired into legacy-design-tools'
- * dependencies today (`pdf-lib`, the one PDF library present, is a creation/editing library,
- * not a text-extraction one; hauska-engine's own `decode-pdf-text.ts` is a test-only
- * verification helper, not a reusable parser). `extractPdfFields` therefore takes an
- * ALREADY-STRUCTURED field object -- a fixture for a local build, or a JSON file a future
- * decode step produces from the downloaded PDF -- never raw PDF bytes. `--pdf-base-url`
- * downloads the bytes (so the HTTP leg against a real deployment is exercised) and REFUSES
- * naming this gap (`GATE7_PDF_TEXT_EXTRACTION_NOT_IMPLEMENTED`) rather than fabricating
- * fields from bytes nothing here has read. `--pdf-fields-fixture <path.json>` is the
- * supported path end to end today, including the break test below.
+ * PDF TEXT DECODING (2026-10-07 revision). `decodeAllContentStreams` / `assertPdfTextReadable`
+ * below are VENDORED, byte-for-byte, from hauska-engine's own `decode-pdf-text.ts` (the
+ * decoder hauska-engine already uses to verify its own PDF output is really readable, read on
+ * hauska-engine origin/main). `extractPdfFields` now accepts either an already-structured
+ * field object (a fixture, still the supported path for the break test below) OR raw PDF
+ * bytes; `fetchPdfSurface`'s HTTP leg downloads bytes and decodes them for real.
+ *
+ * `assertPdfTextReadable` refuses `GATE7_PDF_UNREADABLE` when the PDF draws text (real `Tj`
+ * operators) but decodes to zero characters -- the signature of pdf-lib's StandardFonts
+ * (Helvetica etc.), which carry NO ToUnicode CMap at all (only a fully fontkit-embedded font
+ * does). Treating that empty text as "this surface has nothing to say" would let an unreadable
+ * PDF "agree" with every other surface's honest absence by coincidence, which is exactly the
+ * P2 "check that could not fail" pattern applied to gate 7 itself -- so it is a refusal, never
+ * a silent pass. Proven against two REAL PDFs built by two REAL composers (not two fixtures
+ * describing the same thing twice): a pdf-lib StandardFonts page (the broken shape) and
+ * hauska-engine's own `emitPdfFloodDrainage` pure-function output (a real, fontkit-embedded,
+ * decodable page) -- see this PR's body for both results.
+ *
+ * Field extraction from READABLE text (`extractPdfFieldsFromText`) is a small set of
+ * best-effort regexes against hauska-engine's feasibility-report narrative labels -- a
+ * feasibility PDF is prose, not JSON, so this is explicitly narrower and less certain than the
+ * other three extractors, and is stated as such rather than oversold.
+ *
+ * NOT DONE: generating hauska-engine's actual Feasibility Study PDF for a real parcel. That
+ * needs either hauska-engine-api's own service (DB, object storage, RETRIEVAL_API_KEY-class
+ * credentials this sandbox does not have) or hand-building a `ParcelReportModel` from
+ * low-level Atom Instance types (`SetbackRuleAtomInstance`, DEM grids, ...) that do not map
+ * from the JSON facts shape the other three surfaces share -- attempting that quickly risked
+ * fabricating atom data rather than reading it, so it was not attempted. Named, not silent.
  *
  * SELFTEST (`--selftest`), same convention as `check-cross-repo-literal-drift.mjs` and the
  * `ss-w16-tier2-flood-not-served` CI gate: every refusal code is driven on a fixture that
@@ -81,6 +99,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 
 export const EXIT = { PASS: 0, FAIL: 1, REFUSE: 2, USAGE: 3 };
 
@@ -90,7 +109,7 @@ export const CODES = Object.freeze({
   FIELD_DISAGREEMENT: "GATE7_SURFACE_FIELD_DISAGREEMENT",
   FIELD_HIDDEN: "GATE7_SURFACE_FIELD_HIDDEN",
   INTERNAL_WORD_LEAKED: "GATE7_INTERNAL_WORD_LEAKED",
-  PDF_TEXT_EXTRACTION_NOT_IMPLEMENTED: "GATE7_PDF_TEXT_EXTRACTION_NOT_IMPLEMENTED",
+  PDF_UNREADABLE: "GATE7_PDF_UNREADABLE",
 });
 
 export const SURFACES = Object.freeze(["card", "pdf", "map", "mcp"]);
@@ -341,8 +360,20 @@ function declaredAbsence(state, basis) {
  * rather than guessed, which the comparator above already treats as a real, named gap
  * (`FIELD_HIDDEN`) when another surface DOES carry them -- never a silent pass.
  */
-export function extractBriefLikeFields(obj) {
-  if (!obj || typeof obj !== "object") return {};
+export function extractBriefLikeFields(rawObj) {
+  if (!rawObj || typeof rawObj !== "object") return {};
+  // GET /api/brokerage/v1/place/node/:id/facets (brokerageNodeFacets.ts, confirmed live
+  // 2026-10-07 against a local build) wraps the tier-1 bake under its OWN `facets` key, with
+  // the live per-rail facts (floodHazardFact, cityLimitsFact, schoolDistrictFact, ownerFact,
+  // valueHistoryFact, setbackRulesFact, ...) at the OUTER top level beside it -- a SECOND,
+  // independently-shaped envelope for conceptually the same read `assembleNodeBriefBody`
+  // (propertyExplorer.ts) puts everything at one top level for. Flattened here (inner bake
+  // first, outer live facts win on any name collision) so one extractor reads either shape;
+  // this is itself a live instance of audit P7 inside ONE repo, not just across repos.
+  const obj =
+    rawObj.facets && typeof rawObj.facets === "object" && ("baseFacts" in rawObj.facets || "countyFips" in rawObj.facets)
+      ? { ...rawObj.facets, ...rawObj }
+      : rawObj;
   const baseFacts = obj.baseFacts ?? obj.facets?.base ?? {};
   const facetsBase = obj.facets?.base ?? {};
   const onRecord = obj.onRecord ?? {};
@@ -360,10 +391,15 @@ export function extractBriefLikeFields(obj) {
   // `situsCity` here would be exactly the P2-juris defect class the WDLL names.
   const cityLimits = obj.cityLimitsFact;
   if (cityLimits && typeof cityLimits === "object") {
-    if (cityLimits.state === "present") {
+    // Confirmed live 2026-10-07: cityLimitsFact carries `status`, not the `state` key every
+    // other FactRead in this response uses (floodHazardFact, schoolDistrictFact, ...) --
+    // itself a small instance of "one concept, two vocabularies" worth flagging on its own,
+    // not papered over by silently defaulting to one or the other.
+    const disposition = cityLimits.state ?? cityLimits.status;
+    if (disposition === "present") {
       fields.city = { state: "present", value: { jurisdiction: cityLimits.jurisdiction ?? null, vintage: cityLimits.vintage ?? null } };
-    } else if (cityLimits.state) {
-      fields.city = declaredAbsence(cityLimits.state, cityLimits.reason ?? null);
+    } else if (disposition) {
+      fields.city = declaredAbsence(disposition, cityLimits.reason ?? cityLimits.basis ?? null);
     }
   }
 
@@ -465,6 +501,18 @@ export function extractMcpFields(normalizedMcpJson) {
  */
 export function extractMapFields(mapJson) {
   if (!mapJson || typeof mapJson !== "object") return {};
+  // Confirmed live 2026-10-07 (handlePropertyAtomsFacets, pe-property-atoms.ts, invoked
+  // directly against a local cortex build, PROPERTY_ATOM_PATH unset): when the retrieval-api
+  // atom chain is disabled, hauska-map's OWN documented "instant rollback" path
+  // (atomEnabled=false) serves the cortex facets body nearly verbatim -- same shape
+  // `extractBriefLikeFields` already reads, stripped of envelope (`stripCortexEnvelopeProductTruth`,
+  // marked by the `cortexEnvelopeRetired` key this path adds). Reused here rather than a
+  // second parser for what is, on THIS path, the identical shape; the atom-chain-ENABLED
+  // shape below (`rails`) is a genuinely different composition this repo could not exercise
+  // without a RETRIEVAL_API_KEY this sandbox does not have (see this PR's body).
+  if (mapJson.rails === undefined && (mapJson.facets || mapJson.floodHazardFact || "cortexEnvelopeRetired" in mapJson)) {
+    return extractBriefLikeFields(mapJson);
+  }
   const rails = mapJson.rails && typeof mapJson.rails === "object" ? mapJson.rails : {};
   const fields = {};
 
@@ -530,18 +578,220 @@ export function extractMapFields(mapJson) {
   return fields;
 }
 
+/* ================================================================ PDF text decoding */
+
 /**
- * PDF: see the header. Takes an ALREADY-STRUCTURED field object -- never raw bytes. The
- * shape mirrors `extractBriefLikeFields`'s output keys 1:1 so a fixture author (or a future
- * real decode step) only has to answer "what does the PDF say for this WDLL check", not
- * learn a second schema.
+ * Vendored, byte-for-byte, from hauska-engine `packages/engine-core/src/site-plan/pdf/
+ * __tests__/decode-pdf-text.ts` (read on hauska-engine origin/main 2026-10-07) -- the SAME
+ * decoder hauska-engine already uses to verify its own PDF output carries real, readable
+ * text. Vendored rather than imported: this is a different repo (no workspace dependency),
+ * same convention this codebase already uses for cross-repo reference (see
+ * `check-cross-repo-literal-drift.mjs`'s own header on vendoring vs. importing). Kept
+ * unmodified so a future upstream fix (or a future upstream regression) is a diff against
+ * this exact block, not a silent drift.
+ *
+ * THE STANDARDFONTS FAILURE MODE THIS EXISTS TO CATCH. pdf-lib's built-in StandardFonts
+ * (Helvetica, etc.) draw text as single-byte WinAnsi codes with NO embedded font and NO
+ * ToUnicode CMap (`beginbfchar`/`endbfchar`) at all -- that CMap is what `buildGlyphToUnicode`
+ * below reads, and it is only ever written for a FULLY EMBEDDED font (fontkit, `subset:
+ * false`, matching this repo's own site-plan sheet). A StandardFonts PDF therefore has text
+ * ON THE PAGE (real `Tj`/`TJ` show operators) that this decoder cannot map to ANY character
+ * -- `remapOperand` returns `null` for every operand, `runs` stays empty, and the tight/
+ * spaced reconstructions are both the empty string. That is NOT "the PDF has no text"; it is
+ * "the PDF's font choice makes its text undecodable", and `assertPdfTextReadable` below is
+ * the one place that tells those two apart and refuses rather than silently treating empty
+ * decoded text as an absence this comparator could then "agree" with every other surface's
+ * absence by coincidence -- the exact P2 "check that could not fail" shape applied to gate 7
+ * itself.
+ */
+function buildGlyphToUnicode(inflatedStreams) {
+  const map = new Map();
+  const pairRe = /<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]+)>/g;
+  for (const s of inflatedStreams) {
+    if (!s.includes("beginbfchar")) continue;
+    const blockRe = /beginbfchar([\s\S]*?)endbfchar/g;
+    let block;
+    while ((block = blockRe.exec(s))) {
+      let pair;
+      pairRe.lastIndex = 0;
+      while ((pair = pairRe.exec(block[1]))) {
+        const code = pair[1].toUpperCase().padStart(4, "0");
+        const uhex = pair[2];
+        let chars = "";
+        let allNull = true;
+        for (let i = 0; i < uhex.length; i += 4) {
+          const cp = parseInt(uhex.slice(i, i + 4), 16);
+          if (cp !== 0) allNull = false;
+          chars += String.fromCodePoint(cp);
+        }
+        if (!allNull && !map.has(code)) map.set(code, chars);
+      }
+    }
+  }
+  return map;
+}
+
+/** Vendored unchanged from decode-pdf-text.ts (see the block comment above). */
+export function decodeAllContentStreams(pdfBytes) {
+  const raw = Buffer.from(pdfBytes);
+  const text = raw.toString("latin1");
+  const streamRe = /(?<!end)stream\r?\n/g;
+  let match;
+  const decoded = [];
+  let searchFloor = 0;
+  while ((match = streamRe.exec(text))) {
+    const startIndex = match.index + match[0].length;
+    const dict = text.slice(searchFloor, match.index);
+    const lengthMatches = [...dict.matchAll(/\/Length\s+(\d+)(?!\s+\d+\s+R)/g)];
+    const lengthMatch = lengthMatches.length > 0 ? lengthMatches[lengthMatches.length - 1] : null;
+    let endIndex;
+    if (lengthMatch) {
+      endIndex = startIndex + parseInt(lengthMatch[1], 10);
+    } else {
+      const naiveEnd = text.indexOf("endstream", startIndex);
+      if (naiveEnd === -1) continue;
+      let trimmed = naiveEnd;
+      if (text[trimmed - 1] === "\n") trimmed--;
+      if (text[trimmed - 1] === "\r") trimmed--;
+      endIndex = trimmed;
+    }
+    const streamBytes = raw.subarray(startIndex, endIndex);
+    try {
+      decoded.push(inflateSync(streamBytes).toString("latin1"));
+    } catch {
+      decoded.push(streamBytes.toString("latin1"));
+    }
+    searchFloor = endIndex;
+    streamRe.lastIndex = Math.max(streamRe.lastIndex, endIndex);
+  }
+  const glyphToUni = buildGlyphToUnicode(decoded);
+  const joined = decoded.join("\n");
+
+  const remapOperand = (hex) => {
+    if (hex.length % 4 !== 0) return null;
+    let out = "";
+    let mapped = false;
+    for (let i = 0; i < hex.length; i += 4) {
+      const code = hex.slice(i, i + 4).toUpperCase();
+      const ch = glyphToUni.get(code);
+      if (ch !== undefined) {
+        out += ch;
+        mapped = true;
+      } else {
+        out += Buffer.from(code, "hex").toString("latin1");
+      }
+    }
+    return mapped ? out : null;
+  };
+
+  const runs = [];
+  const showRe = /<([0-9A-Fa-f]+)>\s*Tj/g;
+  let showMatch;
+  while ((showMatch = showRe.exec(joined))) {
+    const remapped = remapOperand(showMatch[1]);
+    if (remapped !== null) runs.push(remapped);
+  }
+  const tightJoin = runs.join("");
+  const spacedJoin = runs.join(" ");
+  const inlineRemap = joined.replace(/<([0-9A-Fa-f]+)>/g, (all, hex) => remapOperand(hex) ?? all);
+  return { raw: joined, inlineRemap, tightJoin, spacedJoin, hasShowOperators: showRe.test(joined) || /<[0-9A-Fa-f]+>\s*Tj/.test(joined) };
+}
+
+/**
+ * The gate-7 refusal. Throws GATE7_PDF_UNREADABLE when the PDF draws text (real `Tj`
+ * operators exist) but not one of them decoded to a real character -- the StandardFonts/
+ * no-ToUnicode-CMap signature described above. A PDF with genuinely no text content at all
+ * (no `Tj` operators anywhere -- an image-only page, say) is a DIFFERENT, honestly-absent
+ * case and is returned as empty text rather than refused: this function's job is to tell
+ * "no text" and "undecodable text" apart, never to collapse them.
+ */
+export function assertPdfTextReadable(pdfBytes) {
+  const decoded = decodeAllContentStreams(pdfBytes);
+  const tight = decoded.tightJoin.trim();
+  const spaced = decoded.spacedJoin.trim();
+  if (decoded.hasShowOperators && tight === "" && spaced === "") {
+    throw refusal(
+      CODES.PDF_UNREADABLE,
+      "the PDF draws text (Tj operators present) but zero characters decoded -- consistent with pdf-lib StandardFonts carrying no ToUnicode CMap (fontkit embedding required); never treated as agreement or as an honest absence",
+      { byteCount: pdfBytes.length ?? pdfBytes.byteLength },
+    );
+  }
+  return decoded;
+}
+
+/**
+ * PDF: see the header. Takes either an ALREADY-STRUCTURED field object (a fixture, or a
+ * future richer decode step's JSON) OR raw PDF bytes (Uint8Array/Buffer) -- the real HTTP
+ * leg (`fetchPdfSurface`) downloads bytes and passes them straight through here. Bytes are
+ * run through `assertPdfTextReadable` FIRST (throws GATE7_PDF_UNREADABLE on the StandardFonts
+ * failure mode); readable text is then scanned with a small set of best-effort, clearly
+ * approximate field regexes -- a feasibility PDF is a narrative report, not structured JSON,
+ * so this is deliberately narrower and less certain than the other three extractors, and
+ * each regex is one field, not a claim to have solved PDF field extraction in general.
  */
 export function extractPdfFields(structured) {
+  if (structured instanceof Uint8Array || Buffer.isBuffer(structured)) {
+    const decoded = assertPdfTextReadable(structured);
+    const text = decoded.spacedJoin || decoded.tightJoin || decoded.inlineRemap;
+    return extractPdfFieldsFromText(text);
+  }
   if (!structured || typeof structured !== "object") return {};
   const fields = {};
   for (const check of WDLL_CHECKS) {
     if (check.id in structured) fields[check.id] = structured[check.id];
   }
+  return fields;
+}
+
+/**
+ * Best-effort, narrow, clearly-labeled regex extraction from DECODED, READABLE PDF text
+ * (never called on text `assertPdfTextReadable` already refused). Each regex targets one
+ * WDLL check's plain-English rendering in hauska-engine's feasibility report narrative
+ * (`feasibility.ts`'s section labels, read 2026-10-07); a regex that finds nothing leaves
+ * that check `undefined` (not represented) rather than guessing, which the comparator
+ * already treats as a real, named gap when another surface does carry the field.
+ */
+export function extractPdfFieldsFromText(text) {
+  const fields = {};
+  if (typeof text !== "string" || text.trim() === "") return fields;
+
+  const addr = /(?:Address|Site Address)\s*:?\s*([^\n]+)/i.exec(text);
+  if (addr) fields.address = { state: "present", value: addr[1].trim() };
+
+  const county = /County\s*:?\s*([A-Za-z .'-]+?)(?:,|\n|County\b)/i.exec(text);
+  if (county) fields.county = { state: "present", value: county[1].trim() };
+
+  const zoning = /Zoning District\s*:?\s*([A-Za-z0-9/.\- ]+)/i.exec(text);
+  if (zoning) fields.zoning = { state: "present", value: { district: zoning[1].trim() } };
+
+  const front = /Front(?: Setback)?\s*:?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet)?/i.exec(text);
+  const side = /Side(?: Setback)?\s*:?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet)?/i.exec(text);
+  const rear = /Rear(?: Setback)?\s*:?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet)?/i.exec(text);
+  const corner = /Corner(?: Setback)?\s*:?\s*(\d+(?:\.\d+)?)\s*(?:ft|feet)?/i.exec(text);
+  if (front || side || rear || corner) {
+    fields.setbacks = {
+      state: "present",
+      value: {
+        setbackFrontFt: front ? Number(front[1]) : null,
+        setbackSideFt: side ? Number(side[1]) : null,
+        setbackRearFt: rear ? Number(rear[1]) : null,
+        setbackCornerFt: corner ? Number(corner[1]) : null,
+      },
+    };
+  }
+
+  const floodZone = /Flood Zone\s*:?\s*([A-Za-z0-9]+)/i.exec(text);
+  const sfha = /\b(?:SFHA|Special Flood Hazard Area)\b\s*:?\s*(Yes|No|True|False)/i.exec(text);
+  if (floodZone || sfha) {
+    fields.flood = {
+      state: "present",
+      value: {
+        zone: floodZone ? floodZone[1].trim() : null,
+        sfha: sfha ? /^(yes|true)$/i.test(sfha[1]) : null,
+      },
+    };
+  }
+
   return fields;
 }
 
@@ -618,6 +868,39 @@ export function selftest() {
   check("the MCP's own declared vocabulary is NOT flagged", () =>
     assertOk(scanForInternalWords('{"status":"refused","reason":"upgrade_required","tier":"studio-gated"}').length === 0, "declared vocabulary excluded"),
   );
+
+  // PDF readability (GATE7_PDF_UNREADABLE) — minimal, dependency-free, hand-built PDF syntax
+  // fragments so this selftest needs no pdf-lib/fontkit dependency, driven in BOTH directions.
+  // Proven separately, against two REAL PDFs built by two real composers (a pdf-lib
+  // StandardFonts page and hauska-engine's own emitPdfFloodDrainage output) -- see this PR's
+  // body; not repeated here to keep --selftest fast and dependency-free.
+  check("GATE 7: a PDF with real Tj operators but no ToUnicode CMap is refused GATE7_PDF_UNREADABLE", () => {
+    const body = "<0041>Tj";
+    const pdf = `/Length ${body.length} >>\nstream\n${body}\nendstream`;
+    assertThrowsCode(() => assertPdfTextReadable(Buffer.from(pdf, "latin1")), CODES.PDF_UNREADABLE, "StandardFonts-shaped PDF");
+  });
+  check("a PDF whose font DOES carry a ToUnicode CMap decodes for real, not refused", () => {
+    const cmapBody = "beginbfchar\n<0041> <0058>\nendbfchar";
+    const cmapStream = `/Length ${cmapBody.length} >>\nstream\n${cmapBody}\nendstream`;
+    const showBody = "<0041>Tj";
+    const showStream = `/Length ${showBody.length} >>\nstream\n${showBody}\nendstream`;
+    const decoded = assertPdfTextReadable(Buffer.from(`${cmapStream}\n${showStream}`, "latin1"));
+    assertOk(decoded.tightJoin === "X", `expected the glyph to decode to X, got ${JSON.stringify(decoded.tightJoin)}`);
+  });
+  check("extractPdfFields on readable bytes runs the real text-field regexes", () => {
+    const body = "Setback Front: 25 ft";
+    // One operand, one glyph-per-char run via the WinAnsi-identity byte trick: map each byte
+    // to itself through a synthetic bfchar block so this stays dependency-free.
+    const hex = Buffer.from(body, "latin1").toString("hex").toUpperCase();
+    const pairs = [...body].map((ch, i) => `<${i.toString(16).padStart(4, "0").toUpperCase()}> <${ch.codePointAt(0).toString(16).padStart(4, "0").toUpperCase()}>`).join("\n");
+    const codes = [...body].map((_, i) => i.toString(16).padStart(4, "0").toUpperCase()).join("");
+    const cmapBody = `beginbfchar\n${pairs}\nendbfchar`;
+    const cmapStream = `/Length ${cmapBody.length} >>\nstream\n${cmapBody}\nendstream`;
+    const showBody = `<${codes}>Tj`;
+    const showStream = `/Length ${showBody.length} >>\nstream\n${showBody}\nendstream`;
+    const fields = extractPdfFields(Buffer.from(`${cmapStream}\n${showStream}`, "latin1"));
+    assertOk(fields.setbacks?.value?.setbackFrontFt === 25, `expected setbackFrontFt 25, got ${JSON.stringify(fields.setbacks)}`);
+  });
 
   // compareSurfaces: agreement, disagreement, hidden — the actual break test
   const fresh = freshBastropGoldFixture();
@@ -758,17 +1041,24 @@ export async function fetchMcpSurface(baseUrl, parcelNodeId) {
   }
 }
 
+/**
+ * `--pdf-fields-fixture` still wins when given (a fixture is a deliberate stand-in, e.g. for
+ * the break test). Otherwise the downloaded bytes are decoded for real:
+ * `assertPdfTextReadable` throws GATE7_PDF_UNREADABLE on the StandardFonts/no-CMap failure
+ * mode (see the decoder's own header) instead of this function silently reporting an empty
+ * PDF as agreement.
+ */
 export async function fetchPdfSurface(baseUrl, parcelNodeId, { fieldsFixturePath } = {}) {
   const base = assertNotProductionBaseUrl("pdf", baseUrl);
   const downloadRes = await fetch(`${base}/v1/property-nodes/${encodeURIComponent(parcelNodeId)}/feasibility-export/download`);
-  const bytes = await downloadRes.arrayBuffer();
-  if (!fieldsFixturePath) {
-    throw refusal(CODES.PDF_TEXT_EXTRACTION_NOT_IMPLEMENTED, "PDF bytes were downloaded, but no PDF-text-extraction library is wired into this file (see header); pass --pdf-fields-fixture", {
-      byteCount: bytes.byteLength,
-    });
+  const bytes = Buffer.from(await downloadRes.arrayBuffer());
+  if (fieldsFixturePath) {
+    const structured = JSON.parse(readFileSync(fieldsFixturePath, "utf8"));
+    return { rawText: JSON.stringify(structured), fields: extractPdfFields(structured) };
   }
-  const structured = JSON.parse(readFileSync(fieldsFixturePath, "utf8"));
-  return { rawText: JSON.stringify(structured), fields: extractPdfFields(structured) };
+  const decoded = assertPdfTextReadable(bytes);
+  const text = decoded.spacedJoin || decoded.tightJoin || decoded.inlineRemap;
+  return { rawText: text, fields: extractPdfFieldsFromText(text) };
 }
 
 /* ================================================================ CLI */
