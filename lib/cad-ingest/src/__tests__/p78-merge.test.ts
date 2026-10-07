@@ -247,11 +247,18 @@ describe("CTX-HAYS-REBIND: a geometry apply cannot blank a published crosswalk",
     const merged = applyPathAMerge(existing, stratmapIncoming);
     expect(merged.quickRefId).toBe("R26199");
     expect(merged.propertyNumber).toBe("11-2520-0000-03100-2");
-    // And the control that makes this test mean something: the SAME merge DOES
-    // overwrite the situs and the source file, which is the defect the
-    // crosswalk exists to route around. If this expectation ever flipped, the
-    // coalesce direction above would no longer be the thing being tested.
-    expect(merged.situsAddress).toBe("100 RIVERSIDE DR, SAN MARCOS, TX 78666");
+    // THE P-78 MERGE ROOT FIX (Phase 0 audit section 3/4, P3). Before this fix, the SAME merge
+    // ALSO overwrote situsAddress with the StratMap incoming value -- the exact defect audited
+    // as "p78Merge.ts letting geometry-source fields overwrite appraisal-source fields". Now
+    // situsAddress runs through the same authority-aware merge as quickRefId/propertyNumber's
+    // reasoning already implied it should: a non-cad-export incoming value can never overwrite
+    // an existing cad-export value. The real CAD export's situs survives a StratMap re-apply,
+    // exactly like its quickRefId/propertyNumber already did.
+    expect(merged.situsAddress).toBe("340 WINDMILL WAY, BUDA, TX 78610");
+    // source_file/source_vintage are NOT in AUTHORITY_COALESCE_FIELDS (they describe the row's
+    // own provenance, not an appraisal attribute) and are still overwritten unconditionally --
+    // this is the pre-existing, intentional "lineage could not be recovered from it" behavior
+    // the comment on applyPathAMerge's sourceFile/sourceVintage assignment already documents.
     expect(merged.sourceFile).toBe("stratmap25-landparcels_48209_lp.zip");
   });
 
@@ -299,5 +306,86 @@ describe("CTX-HAYS-REBIND: a geometry apply cannot blank a published crosswalk",
     );
     expect(rec?.quickRefId).toBeNull();
     expect(rec?.propertyNumber).toBeNull();
+  });
+});
+
+describe("THE P-78 MERGE ROOT (Phase 0 audit section 3/4, P3): authority-aware merge for every appraisal-sourced field, not only yearBuilt/livingAreaSqft", () => {
+  const camaRow = {
+    countyFips: "48053",
+    propId: "24560",
+    taxYear: 2025,
+    ownerName: "REAL CAD OWNER",
+    legalDescription: "REAL CAD LEGAL",
+    landValue: 50000,
+    improvementValue: 10000,
+    marketValue: 60000,
+    assessedValue: 55000,
+    landAcres: "1.5000",
+    propertyUseCode: "A1",
+    exemptionCodes: ["HS"],
+    sourceFile: "cad-export.zip",
+    sourceVintage: "tier:cad-export;2026",
+  };
+  const stratmapRow = {
+    countyFips: "48053",
+    propId: "24560",
+    taxYear: 2025,
+    ownerName: "STRATMAP OWNER",
+    legalDescription: "STRATMAP LEGAL",
+    landValue: 1,
+    improvementValue: 1,
+    marketValue: 2,
+    assessedValue: null,
+    landAcres: "9.9999",
+    propertyUseCode: "XX",
+    exemptionCodes: null,
+    sourceFile: "stratmap25.dbf",
+    sourceVintage: "tier:stratmap-roll;adapter:stratmap",
+  };
+
+  it("a StratMap (non-cad-export) incoming row can NEVER overwrite an existing cad-export row's appraisal fields, for every one of the 11 remaining AUTHORITY_COALESCE_FIELDS this fixture exercises", () => {
+    const merged = applyPathAMerge(camaRow, stratmapRow);
+    expect(merged.ownerName).toBe("REAL CAD OWNER");
+    expect(merged.legalDescription).toBe("REAL CAD LEGAL");
+    expect(merged.landValue).toBe(50000);
+    expect(merged.improvementValue).toBe(10000);
+    expect(merged.marketValue).toBe(60000);
+    expect(merged.assessedValue).toBe(55000);
+    expect(merged.landAcres).toBe("1.5000");
+    expect(merged.propertyUseCode).toBe("A1");
+    expect(merged.exemptionCodes).toEqual(["HS"]);
+  });
+
+  it("FALSIFIER: the OLD bare-coalesce merge (last-wins) regresses every one of those fields back to the StratMap value -- proving the fixture above is not vacuous", () => {
+    const naiveLastWins = { ...stratmapRow };
+    expect(naiveLastWins.ownerName).not.toBe(applyPathAMerge(camaRow, stratmapRow).ownerName);
+    expect(naiveLastWins.landValue).not.toBe(applyPathAMerge(camaRow, stratmapRow).landValue);
+    expect(naiveLastWins.legalDescription).not.toBe(applyPathAMerge(camaRow, stratmapRow).legalDescription);
+  });
+
+  it("a cad-export incoming row DOES win over an existing cad-export row (a re-published, corrected roll takes effect)", () => {
+    const correctedCamaIncoming = { ...camaRow, ownerName: "CORRECTED OWNER", landValue: 51000 };
+    const merged = applyPathAMerge(camaRow, correctedCamaIncoming);
+    expect(merged.ownerName).toBe("CORRECTED OWNER");
+    expect(merged.landValue).toBe(51000);
+  });
+
+  it("a non-null incoming value fills a null existing value regardless of tier (null never beats a value, on either side)", () => {
+    const existingWithGap = { ...camaRow, ownerName: null as unknown as string };
+    const merged = applyPathAMerge(existingWithGap, stratmapRow);
+    expect(merged.ownerName).toBe("STRATMAP OWNER");
+  });
+
+  it("a null incoming value never blanks an existing value, regardless of tier", () => {
+    const incomingWithGap = { ...stratmapRow, ownerName: null as unknown as string };
+    const merged = applyPathAMerge(camaRow, incomingWithGap);
+    expect(merged.ownerName).toBe("REAL CAD OWNER");
+  });
+
+  it("two StratMap loads in a row (neither side cad-export): incoming wins, identical to the pre-fix bare-coalesce outcome", () => {
+    const olderStratmap = { ...stratmapRow, ownerName: "OLDER STRATMAP OWNER" };
+    const newerStratmap = { ...stratmapRow, ownerName: "NEWER STRATMAP OWNER" };
+    const merged = applyPathAMerge(olderStratmap, newerStratmap);
+    expect(merged.ownerName).toBe("NEWER STRATMAP OWNER");
   });
 });
