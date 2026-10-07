@@ -38,6 +38,31 @@
  *    `pg` script outside this package's TS build; it computes the SAME
  *    lock key inline — see that script's own comment — so it contends on
  *    the identical advisory lock rather than a parallel one).
+ *
+ * POOLED CONNECTIONS ARE REFUSED, NOT JUST DISCOURAGED (2026-10-07).
+ * `pg_try_advisory_lock` is SESSION-scoped: it is held by whichever
+ * physical server connection issued it, until that exact connection calls
+ * `pg_advisory_unlock` or disconnects. A Neon `-pooler` host runs PgBouncer
+ * in transaction mode, which returns the underlying server connection to
+ * its pool the moment a statement (or transaction) completes -- the
+ * `pg.Client` object lives on, but the NEXT statement it sends may be
+ * handed a DIFFERENT server connection. So a lock taken through a pooler:
+ *  - may not even land on the connection the caller thinks it has, and
+ *  - once taken, is never reliably released, because the `UNLOCK` can be
+ *    issued on yet another borrowed connection and simply do nothing, or
+ *    worse, unlock on behalf of whichever OTHER client that connection now
+ *    belongs to.
+ * This is not a hypothetical: a session-level `SET` sent through the
+ * `hauska_mcp` pooler on 2026-10-07 leaked onto another client's connection
+ * and took metering down for every paid tool call until cleared (see
+ * memory `feedback_dsn_readonly_param_is_not_a_guard`). `takeCadProperty
+ * WriteLock` refuses `CAD_PROPERTY_LOCK_POOLED_CONNECTION` before issuing
+ * the lock query at all when the client's own recorded host contains
+ * `-pooler` -- mirroring hauska-factory's `refusePoolerHost`
+ * (`src/db/connect.mjs`), which refuses the same class of host for the
+ * same reason, one layer up (at connection-string time rather than at
+ * lock time, since this module never sees the connection string, only the
+ * already-constructed client).
  */
 
 export const CAD_PROPERTY_WRITE_LOCKED = "CAD_PROPERTY_WRITE_LOCKED";
@@ -65,18 +90,54 @@ export class CadPropertyWriteLockedError extends Error {
   }
 }
 
+export const CAD_PROPERTY_LOCK_POOLED_CONNECTION = "CAD_PROPERTY_LOCK_POOLED_CONNECTION";
+
+export class CadPropertyLockPooledConnectionError extends Error {
+  readonly code = CAD_PROPERTY_LOCK_POOLED_CONNECTION;
+  readonly host: string;
+  constructor(host: string) {
+    super(
+      `${CAD_PROPERTY_LOCK_POOLED_CONNECTION}: refusing to take a session advisory lock on a ` +
+        `pooled connection (host ${JSON.stringify(host)} contains "-pooler"). A Neon -pooler host ` +
+        "runs PgBouncer in transaction mode, which can return the underlying server connection to " +
+        "the pool between statements; a session-scoped pg_try_advisory_lock taken on it can land " +
+        "on, and later be released on behalf of, a DIFFERENT client, and is never reliably " +
+        "released by this one (2026-10-07 incident: a session-level SET through the hauska_mcp " +
+        "pooler leaked onto another client's connection and took metering down). Connect to the " +
+        "unpooled Neon host for any writer that takes this lock.",
+    );
+    this.name = "CadPropertyLockPooledConnectionError";
+    this.host = host;
+  }
+}
+
 /**
  * Minimal shape both `pg.Pool` and `pg.Client` satisfy. The caller passes
  * the ONE connection it intends to hold for the whole write run — a lock
  * taken via a `Pool`'s auto-checkout-per-query would attach to whichever
  * physical connection served that one query and could be silently returned
  * to the pool's idle set, not held.
+ *
+ * `connectionParameters.host` / `host` are OPTIONAL and read-only here —
+ * real `pg.Client`/`pg.PoolClient` instances carry one or both (`host` is
+ * the older, still-present alias), set at construction from the connection
+ * string/config, before any network connection succeeds. A minimal fake
+ * (e.g. this module's own tests, or any caller that constructs a plain
+ * `{ query }` object) simply omits them, and the pooler check below then
+ * has nothing to refuse — it refuses a KNOWN pooler host, not an unknown one.
  */
 export interface CadPropertyLockClient {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: T[] }>;
+  readonly connectionParameters?: { readonly host?: string };
+  readonly host?: string;
+}
+
+/** The host a real `pg.Client`/`pg.PoolClient` recorded at construction, or null if undeterminable. */
+export function cadPropertyLockClientHost(client: CadPropertyLockClient): string | null {
+  return client.connectionParameters?.host ?? client.host ?? null;
 }
 
 export interface HeldCadPropertyWriteLock {
@@ -102,6 +163,14 @@ export async function takeCadPropertyWriteLock(
 ): Promise<HeldCadPropertyWriteLock> {
   if (!/^\d{5}$/.test(countyFips)) {
     throw new Error(`takeCadPropertyWriteLock requires a 5-digit county_fips, got ${JSON.stringify(countyFips)}`);
+  }
+  // BEFORE issuing any lock query: a pooled host can never safely hold a
+  // session-scoped advisory lock (see the file header). Checked on the
+  // client's own recorded host, not re-parsed from a connection string —
+  // this module only ever receives an already-constructed client.
+  const host = cadPropertyLockClientHost(client);
+  if (host && host.includes("-pooler")) {
+    throw new CadPropertyLockPooledConnectionError(host);
   }
   const namespace = cadPropertyLockNamespace(countyFips);
   // hashtextextended($1 || '|' || current_schema(), 0): the same

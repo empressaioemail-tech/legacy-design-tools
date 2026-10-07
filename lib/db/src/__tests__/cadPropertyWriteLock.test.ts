@@ -12,11 +12,14 @@
  * than running the two claims one after another (WDLL 4.1).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
+  CadPropertyLockPooledConnectionError,
   CadPropertyWriteLockedError,
+  CAD_PROPERTY_LOCK_POOLED_CONNECTION,
   takeCadPropertyWriteLock,
   withCadPropertyWriteLock,
+  type CadPropertyLockClient,
 } from "../cadPropertyWriteLock";
 import { withTestSchema } from "../testing";
 
@@ -151,5 +154,93 @@ describe("withCadPropertyWriteLock", () => {
         peer.release();
       }
     });
+  });
+});
+
+/**
+ * Pooled-connection refusal (2026-10-07, coordinator-requested fix to this
+ * same PR). `pg_try_advisory_lock` is session-scoped, and a Neon `-pooler`
+ * host runs PgBouncer in transaction mode, which can return the underlying
+ * server connection to the pool between statements -- a lock taken through
+ * one is never reliably held or released by the client that took it. This
+ * is checked on the CLIENT's own recorded host (no real DB connection
+ * needed), so these tests use a minimal fake rather than `withTestSchema`.
+ */
+function fakeClient(
+  host: string | undefined,
+  opts: { viaConnectionParameters?: boolean; viaHost?: boolean; locked?: boolean } = {},
+): CadPropertyLockClient & { query: ReturnType<typeof vi.fn> } {
+  const { viaConnectionParameters = true, viaHost = true, locked = true } = opts;
+  const query = vi.fn(async () => ({ rows: [{ locked }] }));
+  const fake = {
+    query,
+    ...(viaConnectionParameters ? { connectionParameters: { host } } : {}),
+    ...(viaHost ? { host } : {}),
+  };
+  return fake as unknown as CadPropertyLockClient & { query: typeof query };
+}
+
+describe("takeCadPropertyWriteLock: pooled-connection refusal", () => {
+  it("REFUSES CAD_PROPERTY_LOCK_POOLED_CONNECTION for a -pooler host, WITHOUT ever issuing the lock query", async () => {
+    const client = fakeClient("ep-abc-pooler.us-east-2.aws.neon.tech");
+    await expect(takeCadPropertyWriteLock(client, BURNET_FIPS)).rejects.toBeInstanceOf(
+      CadPropertyLockPooledConnectionError,
+    );
+    await expect(takeCadPropertyWriteLock(client, BURNET_FIPS)).rejects.toMatchObject({
+      code: CAD_PROPERTY_LOCK_POOLED_CONNECTION,
+      host: "ep-abc-pooler.us-east-2.aws.neon.tech",
+    });
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it("PROCEEDS for an unpooled (direct) host — the lock query is issued and the lock is returned", async () => {
+    const client = fakeClient("ep-abc.us-east-2.aws.neon.tech");
+    const lock = await takeCadPropertyWriteLock(client, BURNET_FIPS);
+    expect(lock.countyFips).toBe(BURNET_FIPS);
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("pg_try_advisory_lock"), [
+      `cad_property_write|${BURNET_FIPS}`,
+    ]);
+  });
+
+  it("refuses via connectionParameters.host alone (no top-level .host)", async () => {
+    const client = fakeClient("ep-abc-pooler.us-east-2.aws.neon.tech", { viaHost: false });
+    await expect(takeCadPropertyWriteLock(client, BURNET_FIPS)).rejects.toBeInstanceOf(
+      CadPropertyLockPooledConnectionError,
+    );
+  });
+
+  it("refuses via the top-level .host alone (no connectionParameters)", async () => {
+    const client = fakeClient("ep-abc-pooler.us-east-2.aws.neon.tech", { viaConnectionParameters: false });
+    await expect(takeCadPropertyWriteLock(client, BURNET_FIPS)).rejects.toBeInstanceOf(
+      CadPropertyLockPooledConnectionError,
+    );
+  });
+
+  it("a client with neither host property proceeds (an unknown host is not a known pooler host)", async () => {
+    const client = fakeClient(undefined, { viaConnectionParameters: false, viaHost: false });
+    const lock = await takeCadPropertyWriteLock(client, BURNET_FIPS);
+    expect(lock.countyFips).toBe(BURNET_FIPS);
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("a REAL pg.Client built from a -pooler connection string is refused before this module ever calls .connect()", async () => {
+    // No network connection is made or needed: pg.Client parses the
+    // connection string at construction, and connectionParameters.host is
+    // set synchronously from it.
+    const pg = await import("pg");
+    const client = new pg.Client({
+      connectionString: "postgres://user:pass@ep-abc-pooler.us-east-2.aws.neon.tech:5432/db",
+    });
+    try {
+      await expect(takeCadPropertyWriteLock(client as never, BURNET_FIPS)).rejects.toBeInstanceOf(
+        CadPropertyLockPooledConnectionError,
+      );
+    } finally {
+      // Never connected, so nothing to close; end() on an unconnected
+      // client is a harmless no-op guard against a future refactor that
+      // connects it before this assertion.
+      await client.end().catch(() => {});
+    }
   });
 });
