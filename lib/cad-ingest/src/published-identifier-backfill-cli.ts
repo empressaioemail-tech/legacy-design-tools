@@ -54,6 +54,8 @@ import {
   type BackfillExecutor,
   type MemberDiscrimination,
 } from "./publishedIdentifierBackfill";
+import { CadPropertyWriteLockedError, takeCadPropertyWriteLock } from "@workspace/db/cadPropertyWriteLock";
+import { directNeonUrl } from "@workspace/db/directNeonUrl";
 
 
 function log(msg: string): void {
@@ -192,15 +194,19 @@ async function main(): Promise<void> {
         "count alone is not a record.",
     );
   }
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!dryRun && !databaseUrl) fail("DATABASE_URL must be set (or pass --dry-run)");
-  if (dryRun && !databaseUrl) {
-    fail(
-      "DATABASE_URL must be set even for --dry-run: the plan is computed " +
-        "against the real roll, so a dry run that guessed the roll would be " +
-        "measuring nothing.",
-    );
+  const databaseUrlEnv = process.env.DATABASE_URL;
+  if (!databaseUrlEnv) {
+    if (dryRun) {
+      fail(
+        "DATABASE_URL must be set even for --dry-run: the plan is computed " +
+          "against the real roll, so a dry run that guessed the roll would be " +
+          "measuring nothing.",
+      );
+    } else {
+      fail("DATABASE_URL must be set (or pass --dry-run)");
+    }
   }
+  const databaseUrl: string = databaseUrlEnv;
 
   const taxYearArg =
     values["tax-year"] !== undefined ? Number(values["tax-year"]) : undefined;
@@ -273,7 +279,16 @@ async function main(): Promise<void> {
   // 130 and leave a county two-thirds written; one transaction either lands or
   // does not. The operation is idempotent either way, so re-running after a
   // rollback costs nothing.
-  const client = new pg.Client({ connectionString: databaseUrl });
+  // Gate 4 / P4 (2026-10-07): DATABASE_URL (STAGING_NEONDB_URL /
+  // PRODUCTION_NEONDB_URL) is pooled (coordinator-verified: tested only
+  // for "-pooler" in the value, never printed). The cad_property write
+  // lock refuses a pooled connection outright, so a REAL (non-dry-run)
+  // run connects on the derived direct host instead -- the one
+  // connection it both reads through and writes/locks through. The
+  // dry-run read path is untouched, matching whatever host was configured.
+  const client = new pg.Client({
+    connectionString: dryRun ? databaseUrl : directNeonUrl(databaseUrl),
+  });
   await client.connect();
   // `pg` types its rows as QueryResultRow; the executor interface is generic
   // so tests can hand back typed fakes. The cast is at the seam, once.
@@ -284,8 +299,29 @@ async function main(): Promise<void> {
     },
   };
   let inTransaction = false;
+  let cadPropertyLock: Awaited<ReturnType<typeof takeCadPropertyWriteLock>> | undefined;
   try {
     if (!dryRun) {
+      // Gate 4 / P4 (audit 2026-10-07): the same cad_property write lock
+      // cli.ts takes, on THIS run's one pinned client, before BEGIN. A
+      // concurrent cad-ingest load (or another backfill run) on the same
+      // county refuses CAD_PROPERTY_WRITE_LOCKED rather than racing this
+      // transaction's UPDATEs.
+      try {
+        cadPropertyLock = await takeCadPropertyWriteLock(client, county.fips);
+      } catch (err) {
+        if (err instanceof CadPropertyWriteLockedError) {
+          console.error(
+            JSON.stringify({
+              event: "cad-backfill-ids.refused",
+              code: err.code,
+              message: err.message,
+            }),
+          );
+          process.exit(2);
+        }
+        throw err;
+      }
       await client.query("BEGIN");
       inTransaction = true;
       // Exit-bounded at the server too: a hung statement inside a transaction
@@ -381,6 +417,7 @@ async function main(): Promise<void> {
     }
     throw err;
   } finally {
+    await cadPropertyLock?.release();
     await client.end();
   }
 }
