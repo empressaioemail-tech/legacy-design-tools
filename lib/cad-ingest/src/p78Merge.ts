@@ -106,13 +106,52 @@ function coalesce<T>(incoming: T | null | undefined, existing: T | null | undefi
   return incoming == null ? existing : incoming;
 }
 
-function mergeAuthority(
-  incoming: number | null | undefined,
-  existing: number | null | undefined,
+/**
+ * THE P-78 MERGE ROOT (Phase 0 audit section 3/4, P3: "the root cause is
+ * p78Merge.ts letting geometry-source fields overwrite appraisal-source
+ * fields. That fix was built but never executed.").
+ *
+ * Authority-aware merge for every APPRAISAL-SOURCED field -- generalizes the
+ * CAMA-wins rule that `yearBuilt`/`livingAreaSqft` already used (see git
+ * history) to EVERY other field in COALESCE_FIELDS except `quickRefId` /
+ * `propertyNumber`, which stay under the bare `coalesce()` below because the
+ * StratMap/TxGIO geometry loader hardcodes them null (see that list's own
+ * comment) and so can never win them away from a real CAD export regardless
+ * of which merge function is used.
+ *
+ * Every OTHER field in COALESCE_FIELDS -- ownerName, situsAddress,
+ * situsCity, situsZip, legalDescription, landValue, improvementValue,
+ * marketValue, assessedValue, landAcres, propertyUseCode, exemptionCodes,
+ * ownerMailingAddress -- is NOT hardcoded null by the geometry loader
+ * (`normalizeStratMapLandUse` emits real, non-null values for all of them;
+ * see txgio/landuse.ts). Before this fix, `applyPathAMerge` ran these
+ * through the SAME bare `coalesce(incoming, existing)` as the two
+ * identifiers: incoming wins whenever non-null, with NO regard for which
+ * source produced it. A StratMap/TxGIO geometry re-ingest landing AFTER a
+ * real CAD appraisal export therefore silently overwrote the appraisal
+ * data with its own, lower-authority values -- measured live in Hays:
+ * joinNormalize.ts documents all 116,421 Hays `cad_property` tax_year 2025
+ * rows carrying TxGIO's situs byte-identically after the 2026-08-25 P-78
+ * StratMap merge upserted TxGIO-keyed rows with `situsAddress` under bare
+ * coalesce.
+ *
+ * Rule (identical shape to the pre-existing yearBuilt/livingAreaSqft case):
+ * null loses to a present value on either side; when BOTH sides are
+ * present, a cad-export-tier value always wins over a non-cad-export-tier
+ * value, from EITHER side (so a real CAD export can still correct its own
+ * prior value, and a geometry re-apply can never claw back a CAD value);
+ * when neither side is cad-export-tier (two geometry loads, or two
+ * non-authoritative sources), incoming wins -- the same outcome a bare
+ * coalesce already gave, so two StratMap re-ingests in a row behave exactly
+ * as before this change.
+ */
+function mergeAuthority<T>(
+  incoming: T | null | undefined,
+  existing: T | null | undefined,
   incomingVintage: string | undefined,
   existingVintage: string | undefined,
-  normalize?: (v: unknown) => number | null,
-): number | null | undefined {
+  normalize?: (v: unknown) => T | null,
+): T | null | undefined {
   const inc = normalize ? normalize(incoming) : incoming;
   const ex = normalize ? normalize(existing) : existing;
   if (inc == null) return ex ?? null;
@@ -147,7 +186,14 @@ export type CadPropertyMergeRow = {
   sourceVintage?: string;
 };
 
-const COALESCE_FIELDS = [
+/**
+ * APPRAISAL-SOURCED fields: the StratMap/TxGIO geometry loader emits REAL,
+ * non-null values for every one of these (`normalizeStratMapLandUse`), so a
+ * bare bidirectional coalesce would let a lower-authority geometry re-apply
+ * overwrite a real CAD export's value. Merged through `mergeAuthority` --
+ * see that function's header for the full fix writeup (THE P-78 MERGE ROOT).
+ */
+const AUTHORITY_COALESCE_FIELDS = [
   "ownerName",
   "ownerMailingAddress",
   "situsAddress",
@@ -161,17 +207,25 @@ const COALESCE_FIELDS = [
   "assessedValue",
   "landAcres",
   "propertyUseCode",
-  // CTX-HAYS-REBIND (P-124, 2026-09-10). The two OTHER identifiers the CAD
-  // publishes for the same account. They belong under coalesce for the same
-  // reason `assessedValue` survives a StratMap re-apply: the geometry loader
-  // emits null for both (it has no appraisal columns at all), so
-  // `coalesce(incoming, existing)` returns the EXISTING value and a
-  // geometry-only apply cannot blank a crosswalk a real CAD export
-  // established. Omitting them from this list would drop them from the merge
-  // output entirely, which is the failure mode this comment exists to prevent.
-  "quickRefId",
-  "propertyNumber",
 ] as const;
+
+/**
+ * IDENTIFIER fields: stay under a bare, direction-blind coalesce.
+ *
+ * CTX-HAYS-REBIND (P-124, 2026-09-10). The two OTHER identifiers the CAD
+ * publishes for the same account. They belong under coalesce for the same
+ * reason `assessedValue` survives a StratMap re-apply used to rely on: the
+ * geometry loader emits null for both (it has no appraisal columns at all),
+ * so `coalesce(incoming, existing)` returns the EXISTING value and a
+ * geometry-only apply cannot blank a crosswalk a real CAD export
+ * established. Unlike the fields above, the geometry loader can NEVER win
+ * these away from a CAD export regardless of merge function, so there is no
+ * authority question to resolve for them -- a bare coalesce is already
+ * correct and `mergeAuthority` would compute the identical result. Omitting
+ * them from either list would drop them from the merge output entirely,
+ * which is the failure mode this comment exists to prevent.
+ */
+const IDENTIFIER_COALESCE_FIELDS = ["quickRefId", "propertyNumber"] as const;
 
 /** JS reference for Path A ON CONFLICT merge (matches spec SET clause). */
 export function applyPathAMerge(
@@ -186,7 +240,16 @@ export function applyPathAMerge(
     propId: inc.propId,
     taxYear: inc.taxYear,
   };
-  for (const k of COALESCE_FIELDS) {
+  for (const k of AUTHORITY_COALESCE_FIELDS) {
+    (out as Record<string, unknown>)[k] =
+      mergeAuthority(
+        (inc as Record<string, unknown>)[k],
+        (existing as Record<string, unknown>)[k],
+        inc.sourceVintage,
+        existing.sourceVintage,
+      ) ?? null;
+  }
+  for (const k of IDENTIFIER_COALESCE_FIELDS) {
     (out as Record<string, unknown>)[k] = coalesce(
       (inc as Record<string, unknown>)[k],
       (existing as Record<string, unknown>)[k],

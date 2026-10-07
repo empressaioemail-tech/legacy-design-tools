@@ -83,7 +83,39 @@ async function countiesForCity(city: string): Promise<string[]> {
     const res = (await defaultDb.execute(
       sql`select county_fips from city_county_counts where city_normalised = ${city} order by parcel_count desc limit 3`,
     )) as unknown as { rows?: { county_fips: string }[] };
-    return (res.rows ?? []).map((row) => row.county_fips).filter((f) => /^d{5}$/.test(f));
+    // Was `/^d{5}$/` (a literal "ddddd" match -- never true for any real FIPS), which silently
+    // emptied this function's result on EVERY call, re-opening the exact C2 unbounded-scan
+    // timeout ("Water St, Bastrop") the city-counties narrowing was built to close, because the
+    // caller's fallback to `texasCountyFipsList()` (all 254 counties) fired every time. Fixed to
+    // the digit class; see test/txgioStreetSearch.test.ts's falsifier.
+    return (res.rows ?? []).map((row) => row.county_fips).filter((f) => /^\d{5}$/.test(f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * GATE 3 / ZIP-to-county ruling (operator, 2026-10-07): "The Census ZCTA-to-county
+ * relationship file is the authority ... A split ZIP is never decided from the ZIP alone: the
+ * address resolves to its parcel, and the parcel's county wins. The ZIP only narrows the
+ * search; a split ZIP such as 78654 searches every county it touches."
+ *
+ * Every county the ZCTA overlaps AT ALL, from the Census relationship file
+ * (`census_zcta_county_rel`, loaded by hauska-factory's `acquire-zcta-county.mjs`,
+ * `source_vintage='2020'`) -- not truncated to a top-N like `countiesForCity`'s
+ * parcel-count vote, because narrowing by an authoritative federal boundary file
+ * is not the same risk as narrowing by our own sparse served rows (Phase 0 audit
+ * section 3, P3: "ZIP-to-county is voted from our own sparse parcel rows: 53.6%
+ * of 2,864 ZIPs were over-confident"). This function only NARROWS the candidate
+ * counties scanned; each hit's actual county still comes from the parcel's own
+ * `txgio_parcel.county_fips` row (below), never from this list.
+ */
+async function countiesForZip(zip: string): Promise<string[]> {
+  try {
+    const res = (await defaultDb.execute(
+      sql`select county_fips from census_zcta_county_rel where zcta5 = ${zip}`,
+    )) as unknown as { rows?: { county_fips: string }[] };
+    return (res.rows ?? []).map((row) => row.county_fips).filter((f) => /^\d{5}$/.test(f));
   } catch {
     return [];
   }
@@ -140,6 +172,8 @@ export async function searchParcelsByBareStreet(input: {
   database?: StreetSearchDb;
   /** Test seam; defaults to city_county_counts. */
   resolveCityCounties?: (city: string) => Promise<string[]>;
+  /** Test seam; defaults to census_zcta_county_rel. */
+  resolveZipCounties?: (zip: string) => Promise<string[]>;
 }): Promise<StreetSearchResult> {
   const variants = situsSearchBareStreetVariants(input.query);
   if (variants.length === 0) {
@@ -173,6 +207,11 @@ export async function searchParcelsByBareStreet(input: {
   // the city to its counties first; keep the city filter when a county is given.
   const cityCounties =
     !hasCounty && locality.city ? await (input.resolveCityCounties ?? countiesForCity)(locality.city) : [];
+  // ZIP-to-county ruling (2026-10-07): narrow by the Census ZCTA relationship file, never decide
+  // from the ZIP alone. A split ZIP (78654: Burnet + Travis) searches every county it names here
+  // -- the actual county served for each hit still comes from that parcel's own row below.
+  const zipCounties =
+    !hasCounty && locality.zip ? await (input.resolveZipCounties ?? countiesForZip)(locality.zip) : [];
   const localityFilters = [];
   if (hasCounty) {
     localityFilters.push(eq(txgioParcel.countyFips, countyFips));
@@ -180,8 +219,15 @@ export async function searchParcelsByBareStreet(input: {
       localityFilters.push(sql`strpos(upper(${txgioParcel.situsAddress}), ${locality.city}) > 0`);
     }
   } else {
+    // Combine city and ZIP narrowing (either source that resolved counties bounds the scan;
+    // when both resolve, search every county either one names -- a narrower intersection could
+    // wrongly exclude a real county if the two sources disagree at the margin, and the ruling's
+    // own words are "the ZIP only narrows the search", not "the ZIP and the city must agree on
+    // the search"). Only when NEITHER resolves anything does this fall back to all 254 Texas
+    // counties, same as before this change.
+    const candidateCounties = Array.from(new Set([...cityCounties, ...zipCounties]));
     localityFilters.push(
-      inArray(txgioParcel.countyFips, cityCounties.length > 0 ? cityCounties : texasCountyFipsList()),
+      inArray(txgioParcel.countyFips, candidateCounties.length > 0 ? candidateCounties : texasCountyFipsList()),
     );
     if (locality.zip) {
       localityFilters.push(
