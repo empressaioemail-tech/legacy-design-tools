@@ -1,0 +1,235 @@
+/**
+ * GATE 2 (audit section 5.2, WDLL section 4.1) -- SOURCE REGISTER AND EDITION CURRENCY.
+ *
+ * THE DEFECT THIS CLOSES (P5, "stale or superseded sources served as current"). Bastrop setbacks
+ * were served from a repealed ordinance (B3 / 2019-51, repealed 2026-04-14) twice -- once through
+ * the card, once through a freshness gate on the PDFs. The fix that landed
+ * (`bastrop-setback-currency.ts`, `isStaleBastropCitySetbackRule`) is real, but it is a BASTROP
+ * BLOCKLIST: a hard-coded jurisdiction-key set and a hard-coded repealed-DID-marker list. The
+ * 2026-10-07 pipeline audit (section 3, pattern P5) re-confirmed today: "the general edition-currency
+ * gate (R16), 'owed before national', is still a Bastrop-specific blocklist," and Burnet is outside
+ * every scope list that mechanism touches -- so nothing today stops Burnet's six provisional/
+ * unverified ordinance rows (see the register) from being served as if they were current law.
+ *
+ * WHAT THIS MODULE IS. A GENERALIZED check: given a city and a district code, look up a
+ * machine-readable ORDINANCE REGISTER (one row per city/district, carrying the edition, its
+ * effective date, its citation and its verification state) and refuse with a named code when the
+ * edition is unverified, unregistered, or superseded. It does not replace Bastrop's R13 mechanism
+ * (`bastrop-setback-currency.ts`), which stays as the city's own established control; it is the
+ * GENERAL FORM the audit asked for, applied today to the register that exists (Burnet's eight
+ * cities, seeded from W1-H's 2026-10-07 research) and written so that a second county's register can
+ * be added the same way without a second copy of this logic (DEV_PROCESS 2.4).
+ *
+ * THE REGISTER: `./burnet-tx-ordinance-register.json`, 117 rows converted verbatim from
+ * `doc_repo/_inbox/2026-10-07_burnet_W1H_setbacks.csv` (W1-H's own research artifact; this file adds
+ * no new facts and transcribes no numbers by hand -- it is a machine conversion of that CSV, one row
+ * in, one row out). Its `verification` column is W1-H's own three-tier-plus vocabulary:
+ *   "transcribed" / "source: city GIS layer ..." -- USABLE (cleared, though not ordinance-verified
+ *       for the GIS-sourced Horseshoe Bay numbers specifically -- see the CSV's own notes column).
+ *   "provisional-*" (ua-spoofed / proxy-bypassed) -- NOT USABLE. Reached through a bot-block
+ *       workaround the honest-access rule forbids relying on; "needs honest re-source" in every row.
+ *   "unverified" -- NOT USABLE. No access method reached a number at all for that district.
+ * Per the WDLL dispatch: this is correct behaviour TODAY for 6 of Burnet's 8 cities (Burnet,
+ * Granite Shoals, Cottonwood Shores, Meadowlakes, Bertram, Highland Haven). Marble Falls and
+ * Horseshoe Bay are the two cities with usable rows.
+ *
+ * NAMED REFUSALS:
+ *   SETBACK_EDITION_CURRENT     -- the only pass.
+ *   SETBACK_SOURCE_NOT_REGISTERED -- the city, or the city's district, has no register row at all.
+ *   SETBACK_EDITION_UNVERIFIED  -- the row exists but its verification state is not cleared
+ *                                  (provisional-* or unverified).
+ *   SETBACK_EDITION_SUPERSEDED  -- the row's edition predates a KNOWN supersession cutoff (the
+ *                                  Bastrop B3/2026-04-14 shape, generalized: see
+ *                                  SUPERSEDED_ORDINANCE_EDITIONS).
+ *
+ * Executes: wired into `getSetbackTableForZoning` (./index.ts) for Burnet's eight city jurisdiction
+ * keys, ahead of the generic SETBACK_TABLES lookup -- see that file's own comment at the call site.
+ */
+import register from "./burnet-tx-ordinance-register.json" with { type: "json" };
+
+export const SETBACK_EDITION_CURRENT = "SETBACK_EDITION_CURRENT";
+export const SETBACK_SOURCE_NOT_REGISTERED = "SETBACK_SOURCE_NOT_REGISTERED";
+export const SETBACK_EDITION_UNVERIFIED = "SETBACK_EDITION_UNVERIFIED";
+export const SETBACK_EDITION_SUPERSEDED = "SETBACK_EDITION_SUPERSEDED";
+
+export interface OrdinanceRegisterRow {
+  city: string;
+  district_code: string;
+  district_name: string;
+  front_ft: string;
+  side_ft: string;
+  rear_ft: string;
+  corner_ft: string;
+  citation: string;
+  ordinance: string;
+  effective_date: string;
+  verification: string;
+  notes: string;
+}
+
+export type EditionCurrencyCode =
+  | typeof SETBACK_EDITION_CURRENT
+  | typeof SETBACK_SOURCE_NOT_REGISTERED
+  | typeof SETBACK_EDITION_UNVERIFIED
+  | typeof SETBACK_EDITION_SUPERSEDED;
+
+export interface EditionCurrencyVerdict {
+  verdict: "pass" | "fail";
+  code: EditionCurrencyCode;
+  city: string;
+  districtCode: string | null;
+  detail: string;
+  ordinance: string | null;
+  effectiveDate: string | null;
+  citation: string | null;
+  verification: string | null;
+}
+
+/**
+ * Edition cutoffs KNOWN to be superseded -- the generalized form of Bastrop's own
+ * `REPEALED_ATOM_DID_MARKERS` (bastrop-setback-currency.ts), keyed by city rather than hard-coded
+ * into one jurisdiction's module. Each entry names the cutoff date and its source, so a register row
+ * whose `effective_date` is BEFORE the cutoff refuses even if its `verification` state would
+ * otherwise clear -- an accurately-transcribed repealed ordinance is still the wrong law (the exact
+ * Bastrop B3/2019-51 shape).
+ */
+export const SUPERSEDED_ORDINANCE_EDITIONS: Readonly<Record<string, { supersededBefore: string; reason: string }>> = Object.freeze({
+  "granite shoals": {
+    supersededBefore: "2025-12-09",
+    reason:
+      'Chapter 40 (zoning) "was amended and replaced with similar provisions by Ordinance 885 adopted 12/9/2025" (W1-H research, 2026-10-07, section 4). Any edition dated or effective before 2025-12-09 is the repealed former Chapter 40, the WDLL 4.1 break-test case for this gate.',
+  },
+});
+
+function normalizeCity(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function normalizeDistrict(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Whether a register row's `verification` value clears the gate. "n/a" (MOR, LA, UNK -- documented
+ * non-dimensional GIS labels, not adopted districts) and "unverified" are NOT usable; neither is any
+ * "provisional-*" state (a bot-block or UA-spoof workaround, per the honest-access rule). Everything
+ * else -- "transcribed", or the GIS-layer-sourced note for Horseshoe Bay -- clears.
+ */
+export function isUsableVerification(verification: string | null | undefined): boolean {
+  const v = (verification ?? "").trim().toLowerCase();
+  if (!v || v === "unverified" || v === "n/a") return false;
+  if (v.startsWith("provisional")) return false;
+  return true;
+}
+
+function findRow(rows: OrdinanceRegisterRow[], city: string, districtCode?: string | null): OrdinanceRegisterRow | undefined {
+  const cityRows = rows.filter((r) => normalizeCity(r.city) === normalizeCity(city));
+  if (cityRows.length === 0) return undefined;
+  if (!districtCode) return cityRows[0];
+  const wanted = normalizeDistrict(districtCode);
+  return (
+    cityRows.find((r) => normalizeDistrict(r.district_code) === wanted) ??
+    cityRows.find((r) => normalizeDistrict(r.district_name) === wanted)
+  );
+}
+
+/**
+ * THE CHECK. Looks up `city`/`districtCode` in `opts.register` (defaults to the Burnet register),
+ * and returns a verdict naming exactly which of the four states applies. Pure: takes the register as
+ * data, so a second county's register can be checked with the same function and a test can supply a
+ * synthetic register without touching the real file.
+ */
+export function checkSetbackEditionCurrency(opts: {
+  city: string;
+  districtCode?: string | null;
+  register?: OrdinanceRegisterRow[];
+}): EditionCurrencyVerdict {
+  const rows = opts.register ?? (register as unknown as OrdinanceRegisterRow[]);
+  const cityHasAnyRow = rows.some((r) => normalizeCity(r.city) === normalizeCity(opts.city));
+  if (!cityHasAnyRow) {
+    return {
+      verdict: "fail",
+      code: SETBACK_SOURCE_NOT_REGISTERED,
+      city: opts.city,
+      districtCode: opts.districtCode ?? null,
+      detail: `no ordinance register row exists for "${opts.city}": a setback cannot be served for a city this register has never recorded (gate 2, audit section 5.2).`,
+      ordinance: null,
+      effectiveDate: null,
+      citation: null,
+      verification: null,
+    };
+  }
+
+  const row = findRow(rows, opts.city, opts.districtCode);
+  if (!row) {
+    return {
+      verdict: "fail",
+      code: SETBACK_SOURCE_NOT_REGISTERED,
+      city: opts.city,
+      districtCode: opts.districtCode ?? null,
+      detail: `"${opts.city}" is registered, but has no row for district "${opts.districtCode}".`,
+      ordinance: null,
+      effectiveDate: null,
+      citation: null,
+      verification: null,
+    };
+  }
+
+  const supersede = SUPERSEDED_ORDINANCE_EDITIONS[normalizeCity(opts.city)];
+  if (supersede && row.effective_date && row.effective_date < supersede.supersededBefore) {
+    return {
+      verdict: "fail",
+      code: SETBACK_EDITION_SUPERSEDED,
+      city: opts.city,
+      districtCode: row.district_code,
+      detail: `${opts.city}'s cited edition (${row.ordinance || "unnamed"}, effective ${row.effective_date}) predates the ${supersede.supersededBefore} supersession cutoff: ${supersede.reason}`,
+      ordinance: row.ordinance || null,
+      effectiveDate: row.effective_date || null,
+      citation: row.citation || null,
+      verification: row.verification || null,
+    };
+  }
+
+  if (!isUsableVerification(row.verification)) {
+    return {
+      verdict: "fail",
+      code: SETBACK_EDITION_UNVERIFIED,
+      city: opts.city,
+      districtCode: row.district_code,
+      detail: `${opts.city} ${row.district_code}'s register row carries verification "${row.verification}" -- not a cleared state, so this gate refuses to serve it rather than treat an unread or bot-block-bypassed source as current law (WDLL section 4.1, gate 2).`,
+      ordinance: row.ordinance || null,
+      effectiveDate: row.effective_date || null,
+      citation: row.citation || null,
+      verification: row.verification || null,
+    };
+  }
+
+  return {
+    verdict: "pass",
+    code: SETBACK_EDITION_CURRENT,
+    city: opts.city,
+    districtCode: row.district_code,
+    detail: `${opts.city} ${row.district_code} cites ${row.ordinance || "an unnamed edition"}${row.effective_date ? ` (effective ${row.effective_date})` : ""}, verification "${row.verification}".`,
+    ordinance: row.ordinance || null,
+    effectiveDate: row.effective_date || null,
+    citation: row.citation || null,
+    verification: row.verification || null,
+  };
+}
+
+/** The register, as loaded. Exported for the gate 1 register-reading tooling and for tests. */
+export function burnetOrdinanceRegister(): OrdinanceRegisterRow[] {
+  return register as unknown as OrdinanceRegisterRow[];
+}
+
+/** The eight Burnet city jurisdiction keys this gate is wired for (see index.ts). */
+export const BURNET_CITY_JURISDICTION_KEYS: Readonly<Record<string, string>> = Object.freeze({
+  "bertram-tx": "Bertram",
+  "burnet-tx": "Burnet",
+  "cottonwood-shores-tx": "Cottonwood Shores",
+  "granite-shoals-tx": "Granite Shoals",
+  "highland-haven-tx": "Highland Haven",
+  "horseshoe-bay-tx": "Horseshoe Bay",
+  "marble-falls-tx": "Marble Falls",
+  "meadowlakes-tx": "Meadowlakes",
+});
