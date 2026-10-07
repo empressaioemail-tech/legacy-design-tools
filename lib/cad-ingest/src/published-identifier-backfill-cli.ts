@@ -54,6 +54,7 @@ import {
   type BackfillExecutor,
   type MemberDiscrimination,
 } from "./publishedIdentifierBackfill";
+import { CadPropertyWriteLockedError, takeCadPropertyWriteLock } from "@workspace/db/cadPropertyWriteLock";
 
 
 function log(msg: string): void {
@@ -284,8 +285,29 @@ async function main(): Promise<void> {
     },
   };
   let inTransaction = false;
+  let cadPropertyLock: Awaited<ReturnType<typeof takeCadPropertyWriteLock>> | undefined;
   try {
     if (!dryRun) {
+      // Gate 4 / P4 (audit 2026-10-07): the same cad_property write lock
+      // cli.ts takes, on THIS run's one pinned client, before BEGIN. A
+      // concurrent cad-ingest load (or another backfill run) on the same
+      // county refuses CAD_PROPERTY_WRITE_LOCKED rather than racing this
+      // transaction's UPDATEs.
+      try {
+        cadPropertyLock = await takeCadPropertyWriteLock(client, county.fips);
+      } catch (err) {
+        if (err instanceof CadPropertyWriteLockedError) {
+          console.error(
+            JSON.stringify({
+              event: "cad-backfill-ids.refused",
+              code: err.code,
+              message: err.message,
+            }),
+          );
+          process.exit(2);
+        }
+        throw err;
+      }
       await client.query("BEGIN");
       inTransaction = true;
       // Exit-bounded at the server too: a hung statement inside a transaction
@@ -381,6 +403,7 @@ async function main(): Promise<void> {
     }
     throw err;
   } finally {
+    await cadPropertyLock?.release();
     await client.end();
   }
 }

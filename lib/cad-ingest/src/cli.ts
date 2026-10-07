@@ -74,6 +74,7 @@ import {
 import { resolveTargetDatabaseUrl } from "./targetEnv";
 import { finishCadIngestRun, hashInputFile, startCadIngestRun, type InputFileRecord } from "./runRecord";
 import { createFileRecordWriter, markAbsentFromDeclaredDrop } from "./rollMembership";
+import { CadPropertyWriteLockedError, takeCadPropertyWriteLock } from "@workspace/db/cadPropertyWriteLock";
 
 const { Pool } = pg;
 
@@ -505,6 +506,33 @@ async function main(): Promise<void> {
     }
   } else {
     const pool = new Pool({ connectionString: databaseUrl });
+
+    // Gate 4 / P4 (audit 2026-10-07): cad_property write lock. One pinned
+    // connection, checked out BEFORE any write and held for the whole run,
+    // so a second cad-ingest (or the identifier-backfill or p124 repair
+    // writer) on the SAME county refuses CAD_PROPERTY_WRITE_LOCKED instead
+    // of racing this one the way two writers raced on Tarrant's
+    // cad_property (91,931 unexplained rows, audit P4).
+    const lockClient = await pool.connect();
+    let cadPropertyLock: Awaited<ReturnType<typeof takeCadPropertyWriteLock>> | undefined;
+    try {
+      cadPropertyLock = await takeCadPropertyWriteLock(lockClient, county.fips);
+    } catch (err) {
+      lockClient.release();
+      await pool.end();
+      if (err instanceof CadPropertyWriteLockedError) {
+        console.error(
+          JSON.stringify({
+            event: "cad-ingest.refused",
+            code: err.code,
+            message: err.message,
+          }),
+        );
+        process.exit(2);
+      }
+      throw err;
+    }
+
     // P-169 load manifest: every input file this run reads, named with its
     // sha256 and byte size, in a queryable row (see runRecord.ts header —
     // P-171 is exactly the class of investigation this closes off).
@@ -586,6 +614,8 @@ async function main(): Promise<void> {
       });
       throw err;
     } finally {
+      await cadPropertyLock?.release();
+      lockClient.release();
       await pool.end();
     }
   }
