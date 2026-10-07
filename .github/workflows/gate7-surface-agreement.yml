@@ -1,0 +1,30 @@
+name: Gate 7 surface agreement selftest
+
+# Gate 7 (Phase-0 audit section 5): "completion means the customer surface". This workflow
+# runs ONLY the selftest -- a pure, fixture-driven run with no network calls and no base
+# URLs -- so it is safe to run on every PR and never risks reaching any deployment, staging
+# or production. A live run against real surfaces is an operator/integration-seat action
+# (`node scripts/check-surface-agreement.mjs --parcel <id> --card-base-url ... --map-base-url
+# ... --mcp-base-url ... --pdf-base-url ...`), deliberately NOT wired into CI, because every
+# base URL is required with no default (see the script's own header) and CI secrets for a
+# deployed non-production surface do not exist yet.
+#
+# THREE OUTCOMES: the selftest itself prints `ok -` / `FAIL -` per check and is READ, not
+# just exit-coded, so a reader can see exactly which of the 20 checks (every refusal code,
+# in both the triggering and the non-triggering direction, plus the gate-7 break test) ran.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest:
+    name: gate7 surface-agreement selftest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/check-surface-agreement.mjs --selftest
