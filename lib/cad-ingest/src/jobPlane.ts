@@ -12,7 +12,11 @@
  * Until 2026-10-07 the marker was CLOUD_RUN_JOB. Google Cloud closed on 2026-09-22, so that gate
  * made cad-ingest unable to write anywhere; it no longer counts.
  *
- * Executes: cli.ts before any file is downloaded for a write run.
+ * Executes: cli.ts before any file is downloaded for a write run (#793). As of the 2026-10-07
+ * stage-3 ruling (these three loaders are becoming dispatchable DOKS Jobs:
+ * factory-address-ingest, factory-txgio-ingest, factory-zoning-stamp), also reused -- not
+ * copied -- by address/cli.ts, txgio/cli.ts, and txgio/zoning-cli.ts, each before its own
+ * write path (the real UPDATE/INSERT/DELETE, whatever its flag is called) runs.
  * Fails:    LAPTOP_WRITE_FROZEN (exit 2).
  */
 

@@ -32,6 +32,7 @@
  */
 
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { resolveAddressCounty } from "./counties";
@@ -49,6 +50,7 @@ import {
 } from "./ingest";
 import { newCounters, type ParseCounters } from "../types";
 import type { TxgioAddressRecord } from "./parse";
+import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 
 const { Pool } = pg;
 
@@ -59,6 +61,29 @@ function log(msg: string): void {
 function fail(msg: string): never {
   console.error(`[address-ingest] ERROR: ${msg}`);
   process.exit(1);
+}
+
+export interface WriteGateRefusal {
+  code: typeof LAPTOP_WRITE_FROZEN;
+  message: string;
+}
+
+/**
+ * Cluster-job write gate (2026-10-07 stage-3 ruling; jobPlane.ts, reused —
+ * not copied — from cad-ingest's cli.ts gate in #793). `isWriteRun` is the
+ * caller's own determination of whether this invocation will write (here:
+ * neither --dry-run nor --count-only). Returns a refusal descriptor for a
+ * write run outside a cluster Job; null when the run may proceed. Exported
+ * so the gate is testable directly, independent of argv parsing / network /
+ * DB.
+ */
+export function addressIngestWriteGate(
+  isWriteRun: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): WriteGateRefusal | null {
+  if (!isWriteRun) return null;
+  if (isClusterJobExecution(env)) return null;
+  return { code: LAPTOP_WRITE_FROZEN, message: LAPTOP_WRITE_FROZEN_MESSAGE };
 }
 
 async function main(): Promise<void> {
@@ -114,6 +139,19 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!countOnly && !dryRun && !databaseUrl) {
     fail("DATABASE_URL must be set (or pass --dry-run / --count-only)");
+  }
+
+  // 2026-10-07 stage-3 ruling (jobPlane.ts): a write (not --dry-run /
+  // --count-only) runs only inside a cluster Job on the DigitalOcean job
+  // plane -- no break-glass laptop run (carries the 2026-09-12
+  // no-break-glass ruling to this loader, which previously checked
+  // nothing). Refuses before any network call.
+  const addressGateRefusal = addressIngestWriteGate(!countOnly && !dryRun);
+  if (addressGateRefusal) {
+    console.error(
+      JSON.stringify({ event: "address-ingest.refused", ...addressGateRefusal }),
+    );
+    process.exit(2);
   }
 
   const rateMs =
@@ -209,7 +247,17 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("[address-ingest] FATAL:", err);
-  process.exit(1);
-});
+// Direct-execution guard: only run when this file is the entrypoint (`tsx
+// src/address/cli.ts`), not when it is imported for its exported
+// `addressIngestWriteGate` by a test. Mirrors ../txgio/zoning-cli.ts's own
+// guard. `pathToFileURL` normalizes Windows drive-letter/slash-style
+// differences between `import.meta.url` and `process.argv[1]`.
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error("[address-ingest] FATAL:", err);
+    process.exit(1);
+  });
+}

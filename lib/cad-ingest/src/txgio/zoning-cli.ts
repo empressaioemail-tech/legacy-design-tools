@@ -71,6 +71,7 @@ import {
 } from "./zoning-service";
 import { buildZoningIndex } from "./zoning-stamp";
 import { stampCountyZoning } from "./zoning-stamp-db";
+import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 
 /**
  * Layer-level audit of the base-code parse (P-259). Pure, over the fetched
@@ -230,6 +231,30 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+export interface WriteGateRefusal {
+  code: typeof LAPTOP_WRITE_FROZEN;
+  message: string;
+}
+
+/**
+ * Cluster-job write gate (2026-10-07 stage-3 ruling; jobPlane.ts, reused —
+ * not copied — from cad-ingest's cli.ts gate in #793). `isWriteRun` is the
+ * caller's own determination of whether this invocation will write (here:
+ * not --dry-run — stampCountyZoning itself never issues an UPDATE when
+ * dryRun is true, see zoning-stamp-db.ts). Returns a refusal descriptor for
+ * a write run outside a cluster Job; null when the run may proceed.
+ * Exported so the gate is testable directly, independent of argv parsing /
+ * network / DB.
+ */
+export function zoningStampWriteGate(
+  isWriteRun: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): WriteGateRefusal | null {
+  if (!isWriteRun) return null;
+  if (isClusterJobExecution(env)) return null;
+  return { code: LAPTOP_WRITE_FROZEN, message: LAPTOP_WRITE_FROZEN_MESSAGE };
+}
+
 /**
  * Print what the layer says about itself. The projection is READ AT SOURCE
  * (never assumed): if the host did not answer `?f=json`, say so explicitly
@@ -349,6 +374,20 @@ async function main(): Promise<void> {
   if (!dryRun && !databaseUrl) {
     fail("DATABASE_URL must be set (or pass --dry-run to fetch + PIP only)");
   }
+
+  // 2026-10-07 stage-3 ruling (jobPlane.ts): a write (not --dry-run) runs
+  // only inside a cluster Job on the DigitalOcean job plane -- no
+  // break-glass laptop run (carries the 2026-09-12 no-break-glass ruling to
+  // this loader, which previously checked nothing). Refuses before the
+  // zoning layer is even fetched.
+  const zoningGateRefusal = zoningStampWriteGate(!dryRun);
+  if (zoningGateRefusal) {
+    console.error(
+      JSON.stringify({ event: "zoning-stamp.refused", ...zoningGateRefusal }),
+    );
+    process.exit(2);
+  }
+
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
   if (limit !== undefined && !Number.isInteger(limit)) {
     fail(`--limit must be an integer, got "${values.limit}"`);
