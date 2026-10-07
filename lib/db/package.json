@@ -8,7 +8,8 @@
     "./schema": "./src/schema/index.ts",
     "./manifest": "./src/manifest.ts",
     "./testing": "./src/testing/index.ts",
-    "./cadPropertyWriteLock": "./src/cadPropertyWriteLock.ts"
+    "./cadPropertyWriteLock": "./src/cadPropertyWriteLock.ts",
+    "./directNeonUrl": "./src/directNeonUrl.ts"
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",

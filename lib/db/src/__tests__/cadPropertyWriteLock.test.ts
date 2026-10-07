@@ -22,6 +22,7 @@ import {
   type CadPropertyLockClient,
 } from "../cadPropertyWriteLock";
 import { withTestSchema } from "../testing";
+import { directNeonUrl } from "../directNeonUrl";
 
 const BURNET_FIPS = "48053";
 const WILLIAMSON_FIPS = "48491";
@@ -240,6 +241,51 @@ describe("takeCadPropertyWriteLock: pooled-connection refusal", () => {
       // Never connected, so nothing to close; end() on an unconnected
       // client is a harmless no-op guard against a future refactor that
       // connects it before this assertion.
+      await client.end().catch(() => {});
+    }
+  });
+});
+
+/**
+ * The actual fix for the coordinator's finding: STAGING_NEONDB_URL /
+ * PRODUCTION_NEONDB_URL are both pooled, so a writer that connects on the
+ * CONFIGURED url is refused unconditionally. Each writer instead connects
+ * on `directNeonUrl(configuredUrl)`. These two tests chain that
+ * derivation into a real (unconnected) `pg.Client`'s own host parsing --
+ * not the `fakeClient` helper above -- to prove the derived URL is what a
+ * real writer's connection would actually carry.
+ */
+describe("directNeonUrl(...) feeding takeCadPropertyWriteLock: the derived URL is accepted, the original is not", () => {
+  const POOLED_DSN = "postgres://cad_writer:s3cr3t@ep-fancy-river-pooler.us-east-2.aws.neon.tech:5432/cortex";
+
+  it("a pg.Client built from the ORIGINAL pooled DSN is refused (the bug the writers had before this fix)", async () => {
+    const pg = await import("pg");
+    const client = new pg.Client({ connectionString: POOLED_DSN });
+    try {
+      await expect(takeCadPropertyWriteLock(client as never, BURNET_FIPS)).rejects.toBeInstanceOf(
+        CadPropertyLockPooledConnectionError,
+      );
+    } finally {
+      await client.end().catch(() => {});
+    }
+  });
+
+  it("a pg.Client built from directNeonUrl(POOLED_DSN) is NOT refused by the pooled-connection check — the lock proceeds to the query", async () => {
+    const pg = await import("pg");
+    const client = new pg.Client({ connectionString: directNeonUrl(POOLED_DSN) });
+    expect((client as unknown as { connectionParameters: { host: string } }).connectionParameters.host).toBe(
+      "ep-fancy-river.us-east-2.aws.neon.tech",
+    );
+    // Stub only the query (never a real network call) so this stays a
+    // fast, offline unit test; pg.Client's own host derivation above is
+    // real and untouched.
+    const query = vi.fn(async () => ({ rows: [{ locked: true }] }));
+    (client as unknown as { query: typeof query }).query = query;
+    try {
+      const lock = await takeCadPropertyWriteLock(client as never, BURNET_FIPS);
+      expect(lock.countyFips).toBe(BURNET_FIPS);
+      expect(query).toHaveBeenCalledTimes(1);
+    } finally {
       await client.end().catch(() => {});
     }
   });

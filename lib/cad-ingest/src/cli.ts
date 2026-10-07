@@ -75,6 +75,7 @@ import { resolveTargetDatabaseUrl } from "./targetEnv";
 import { finishCadIngestRun, hashInputFile, startCadIngestRun, type InputFileRecord } from "./runRecord";
 import { createFileRecordWriter, markAbsentFromDeclaredDrop } from "./rollMembership";
 import { CadPropertyWriteLockedError, takeCadPropertyWriteLock } from "@workspace/db/cadPropertyWriteLock";
+import { directNeonUrl } from "@workspace/db/directNeonUrl";
 
 const { Pool } = pg;
 
@@ -310,7 +311,15 @@ async function main(): Promise<void> {
       );
       process.exit(2);
     }
-    databaseUrl = resolveTargetDatabaseUrl(process.env, values.target);
+    // Gate 4 / P4 (2026-10-07): STAGING_NEONDB_URL / PRODUCTION_NEONDB_URL are
+    // BOTH pooled (coordinator-verified: tested only for "-pooler" in the
+    // value, never printed). cad_property's write lock refuses a pooled
+    // connection outright (pg_try_advisory_lock is session-scoped; a Neon
+    // -pooler host can hand the next statement a different server
+    // connection). So this writer's own connection -- the one it writes
+    // cad_property through AND takes the lock on -- is the DIRECT host,
+    // derived from whichever URL was configured, never the pooled one.
+    databaseUrl = directNeonUrl(resolveTargetDatabaseUrl(process.env, values.target));
   }
 
   const startedAt = Date.now();
