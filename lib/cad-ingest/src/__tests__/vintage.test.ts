@@ -36,6 +36,19 @@ describe("resolveDeclaredCadVintage", () => {
     expect(DECLARED_CAD_VINTAGES["48113"]?.taxYear).toBe(2026);
   });
 
+  it("returns Burnet (48053) declared stratmap-roll/2025 (OPS-24 Phase 1, store-truth read 2026-10-07) — throws FAIL CLOSED without this entry", () => {
+    const v = resolveDeclaredCadVintage("48053");
+    expect(v).toEqual({
+      countyFips: "48053",
+      taxYear: 2025,
+      tier: "stratmap-roll",
+    });
+    expect(DECLARED_CAD_VINTAGES["48053"]).toEqual({
+      taxYear: 2025,
+      tier: "stratmap-roll",
+    });
+  });
+
   it("fails closed on unknown county", () => {
     expect(() => resolveDeclaredCadVintage("48999")).toThrow(/FAIL CLOSED/);
   });

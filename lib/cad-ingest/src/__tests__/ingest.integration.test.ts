@@ -132,4 +132,111 @@ describe.skipIf(!hasDb)("cad_property upsert", () => {
       expect(new Set(rows.map((r) => r.taxYear))).toEqual(new Set([2025, 2026]));
     });
   });
+
+  /**
+   * THE P-78 MERGE ROOT, against the REAL UPSERT SQL (not the JS reference).
+   *
+   * The audit's own failure shape (P7, "one fact derived in several places"):
+   * a fix lands in the pure JS mirror (p78-merge.test.ts, 25/25 passing) but
+   * the live SQL CASE expressions in ingest.ts's `upsertCadProperties` --
+   * the ACTUAL production write path -- are never exercised. This test
+   * closes that gap: it runs the real ON CONFLICT ... DO UPDATE against a
+   * real table and asserts the cad-export row's appraisal fields survive a
+   * later StratMap re-apply.
+   */
+  it("THE P-78 MERGE ROOT (real SQL): a cad-export row's appraisal fields survive a later StratMap re-apply, for every AUTHORITY_COALESCE_FIELDS column", async () => {
+    await withTestSchema(async ({ db }) => {
+      const camaRow = {
+        countyFips: "48053",
+        propId: "23321",
+        taxYear: 2025,
+        ownerName: "SHARP REX ARTHUR & LORI RENEE",
+        ownerMailingAddress: "502 LUCY LN HORSESHOE BAY TX 78657",
+        situsAddress: "502 LUCY LN",
+        situsCity: "HORSESHOE BAY",
+        situsZip: "78657",
+        legalDescription: "S5222 HORSESHOE BAY NORTH LOT PT OF N13001",
+        exemptionCodes: ["HS"],
+        landValue: 400000,
+        improvementValue: 832910,
+        marketValue: 1232910,
+        assessedValue: 1100000,
+        yearBuilt: 2004,
+        livingAreaSqft: 3100,
+        landAcres: "0.4600",
+        propertyUseCode: "A1",
+        quickRefId: "R23321",
+        propertyNumber: "11-2520-0000-23321-0",
+      };
+
+      await upsertCadProperties(db, [camaRow], {
+        sourceFile: "burnet_cad_export.zip",
+        sourceVintage: "tier:cad-export;adapter:bis-consultants",
+      });
+
+      const stratmapIncoming = {
+        countyFips: "48053",
+        propId: "23321",
+        taxYear: 2025,
+        ownerName: "STRATMAP OWNER WRONG",
+        ownerMailingAddress: "WRONG ADDRESS",
+        situsAddress: "WRONG SITUS",
+        situsCity: "WRONG CITY",
+        situsZip: "00000",
+        legalDescription: "WRONG LEGAL",
+        exemptionCodes: ["WRONG"],
+        landValue: 1,
+        improvementValue: 1,
+        marketValue: 2,
+        assessedValue: 3,
+        yearBuilt: null,
+        livingAreaSqft: null,
+        landAcres: "9.9999",
+        propertyUseCode: "XX",
+        quickRefId: null,
+        propertyNumber: null,
+      };
+
+      await upsertCadProperties(db, [stratmapIncoming], {
+        sourceFile: "stratmap25-landparcels_48053_lp.zip",
+        sourceVintage: "tier:stratmap-roll;adapter:stratmap",
+      });
+
+      const [row] = await db
+        .select()
+        .from(cadProperty)
+        .where(eq(cadProperty.propId, "23321"));
+
+      // Every AUTHORITY_COALESCE_FIELDS column keeps the cad-export value --
+      // the StratMap re-apply's wrong values must not appear anywhere here.
+      expect(row.ownerName).toBe(camaRow.ownerName);
+      expect(row.ownerMailingAddress).toBe(camaRow.ownerMailingAddress);
+      expect(row.situsAddress).toBe(camaRow.situsAddress);
+      expect(row.situsCity).toBe(camaRow.situsCity);
+      expect(row.situsZip).toBe(camaRow.situsZip);
+      expect(row.legalDescription).toBe(camaRow.legalDescription);
+      expect(row.exemptionCodes).toEqual(camaRow.exemptionCodes);
+      expect(row.landValue).toBe(camaRow.landValue);
+      expect(row.improvementValue).toBe(camaRow.improvementValue);
+      expect(row.marketValue).toBe(camaRow.marketValue);
+      expect(row.assessedValue).toBe(camaRow.assessedValue);
+      expect(row.landAcres).toBe(camaRow.landAcres);
+      expect(row.propertyUseCode).toBe(camaRow.propertyUseCode);
+      // yearBuilt/livingAreaSqft were already fixed before this PR -- pinned
+      // here too, on the real SQL, as the control that this fixture is not
+      // accidentally testing nothing.
+      expect(row.yearBuilt).toBe(camaRow.yearBuilt);
+      expect(row.livingAreaSqft).toBe(camaRow.livingAreaSqft);
+      // quickRefId/propertyNumber: bare coalesce, unchanged by this PR --
+      // the StratMap loader's null must not blank the real CAD identifiers.
+      expect(row.quickRefId).toBe(camaRow.quickRefId);
+      expect(row.propertyNumber).toBe(camaRow.propertyNumber);
+      // sourceFile/sourceVintage are NOT authority-merged (provenance, not an
+      // appraisal attribute) -- the incoming StratMap row's own file/vintage
+      // DOES overwrite, same as before this PR. The control that proves the
+      // assertions above are not just "nothing changed at all".
+      expect(row.sourceFile).toBe("stratmap25-landparcels_48053_lp.zip");
+      expect(row.sourceVintage).toBe("tier:stratmap-roll;adapter:stratmap");
+    });
+  });
 });

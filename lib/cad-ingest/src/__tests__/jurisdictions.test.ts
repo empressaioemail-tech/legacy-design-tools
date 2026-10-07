@@ -196,6 +196,27 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.setbackTables).toEqual([getSetbackTable("new-braunfels-tx")]);
   });
 
+  it("Burnet (48053, OPS-24 Phase 1): geometry-only county (no CAD parser, no bulk source, no zoning layer wired yet)", () => {
+    const j = getJurisdictionConfig("48053");
+    expect(j).toBeDefined();
+    if (!j) throw new Error("expected Burnet");
+
+    expect(j.fips).toBe("48053");
+    expect(j.name).toBe("Burnet");
+    expect(j.state).toBe("TX");
+    expect(j.geometry).toBe(TXGIO_COUNTIES["48053"]);
+    // No bulk certified CAD export exists (counties.ts's BURNET writeup) —
+    // Burnet is correctly absent from CAD_COUNTIES and CAD_BULK_SOURCES,
+    // same shape as Comal above, not a gap to silently fill.
+    expect(j.cad).toBeUndefined();
+    expect(j.bulkSource).toBeUndefined();
+    // Marble Falls / Horseshoe Bay zoning lives only in the engine's
+    // jurisdiction-registry.ts (tx_zoning_district_staging) in this pass,
+    // not in this repo's ZONING_LAYERS — so no layer/setback facet here yet.
+    expect(j.zoningLayers).toBeUndefined();
+    expect(j.setbackTables).toBeUndefined();
+  });
+
   it("trims surrounding whitespace on the fips key", () => {
     expect(getJurisdictionConfig(" 48209 ")?.fips).toBe("48209");
   });

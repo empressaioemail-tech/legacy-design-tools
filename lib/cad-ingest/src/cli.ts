@@ -23,11 +23,12 @@
  *     [--batch-size=1000] [--limit=N] [--dry-run]
  *     [--target=staging|production] # REQUIRED for any non-dry-run
  *
- * A non-dry-run (a real write) is Cloud Run Job only (job `ldt-cad-ingest`,
- * us-east4) — no break-glass laptop run, per the 2026-09-12 ruling
- * (`_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md`, P-169).
+ * A non-dry-run (a real write) runs only inside a cluster Job on the
+ * DigitalOcean job plane — no break-glass laptop run, per the 2026-09-12 ruling
+ * (`_decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md`, P-169),
+ * carried to DigitalOcean by the 2026-10-07 stage-3 ruling (jobPlane.ts).
  * --target selects STAGING_NEONDB_URL or PRODUCTION_NEONDB_URL; running
- * outside the job (CLOUD_RUN_JOB unset) refuses LAPTOP_WRITE_FROZEN before
+ * outside the job refuses LAPTOP_WRITE_FROZEN before
  * any file is even downloaded. --dry-run always works anywhere (parse-only,
  * no store write, no target needed). Every write leaves a `cad_ingest_run`
  * row naming every input file with its sha256 and byte size.
@@ -72,6 +73,7 @@ import {
   DCAD_ENTRY_FILTER,
 } from "./zip";
 import { resolveTargetDatabaseUrl } from "./targetEnv";
+import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "./jobPlane";
 import { finishCadIngestRun, hashInputFile, startCadIngestRun, type InputFileRecord } from "./runRecord";
 import { createFileRecordWriter, markAbsentFromDeclaredDrop } from "./rollMembership";
 
@@ -280,13 +282,10 @@ async function main(): Promise<void> {
 
   const dryRun = values["dry-run"] ?? false;
 
-  // P-169 / A-132 (no break-glass, 2026-09-12): a write (anything that is
-  // not --dry-run) is Cloud Run Job only. CLOUD_RUN_JOB is GCP's own Cloud
-  // Run Jobs environment marker, set automatically on the job's execution
-  // environment and never something a caller's flag can supply — the same
-  // class of detection hauska-factory's own FACTORY_CLOUD gate uses. This
-  // refuses BEFORE any file is downloaded, extracted, or parsed for a
-  // write run.
+  // P-169 / A-132 (no break-glass, 2026-09-12), on the DigitalOcean job plane
+  // since Phase 1 B0-3 (2026-10-07): a write (anything that is not --dry-run)
+  // runs only inside a cluster Job (jobPlane.ts). This refuses BEFORE any file
+  // is downloaded, extracted, or parsed for a write run.
   let databaseUrl: string | undefined;
   if (!dryRun) {
     if (!values.target) {
@@ -295,16 +294,12 @@ async function main(): Promise<void> {
           "(pass --dry-run to parse locally without one).",
       );
     }
-    if (!process.env.CLOUD_RUN_JOB) {
+    if (!isClusterJobExecution(process.env)) {
       console.error(
         JSON.stringify({
           event: "cad-ingest.refused",
-          code: "LAPTOP_WRITE_FROZEN",
-          message:
-            "cad-ingest writes are Cloud Run (us-east4, job ldt-cad-ingest) only — " +
-            "no break-glass (2026-09-12 ruling, _decisions/2026-09-12_loaders_get_cloud_jobs_no_break_glass.md). " +
-            "CLOUD_RUN_JOB is unset: this process is not running inside the job. " +
-            "Pass --dry-run to parse locally, or run this from the Cloud Run job.",
+          code: LAPTOP_WRITE_FROZEN,
+          message: LAPTOP_WRITE_FROZEN_MESSAGE,
         }),
       );
       process.exit(2);

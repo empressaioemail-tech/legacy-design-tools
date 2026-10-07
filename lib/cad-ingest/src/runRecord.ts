@@ -17,6 +17,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
+import { runIdentity } from "./jobPlane";
 
 export interface InputFileRecord {
   role: string;
@@ -103,8 +104,9 @@ export async function startCadIngestRun(
       id,
       fields.countyFips,
       fields.target,
-      env.CLOUD_RUN_JOB ?? null,
-      env.CLOUD_RUN_EXECUTION ?? null,
+      // Columns keep their cloud_run_* names; they now hold the cluster Job name and uid (B0-3).
+      runIdentity(env).job,
+      runIdentity(env).execution,
       fields.taxYear ?? null,
       fields.sourceVintage ?? null,
       JSON.stringify(fields.files),

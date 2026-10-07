@@ -64,6 +64,11 @@ import martindaleTx from "./martindale-tx.json" with { type: "json" };
 import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 import jonestownTx from "./jonestown-tx.json" with { type: "json" };
 import lakewayTx from "./lakeway-tx.json" with { type: "json" };
+import {
+  BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_EDITION_CURRENT,
+  checkSetbackEditionCurrency,
+} from "./county-edition-currency.js";
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
 export interface SetbackDistrict {
@@ -404,6 +409,32 @@ export function getSetbackTableForZoning(
   const normalized = normalizeJurisdictionKey(jurisdictionKey);
   const code = (zoningCode ?? "").trim().toUpperCase();
 
+  // GATE 2 (audit section 5.2, WDLL 4.1) -- the generalized edition-currency check, wired here
+  // because this function is the one chokepoint every caller (propertyExplorer.ts,
+  // envelopeJurisdiction.ts, authoritativeSetbackSource.ts, and any future Burnet serve path) goes
+  // through to get a jurisdiction's table. Scoped to Burnet's eight city keys ONLY
+  // (BURNET_CITY_JURISDICTION_KEYS): no other jurisdiction's behavior changes, and no jurisdiction
+  // outside Burnet is affected by this file at all. Today every Burnet key already returns null from
+  // the plain `SETBACK_TABLES[normalized] ?? null` fall-through below (no table has been authored
+  // yet), so this throw replaces a SILENT, unnamed null -- indistinguishable from any mistyped or
+  // unknown jurisdiction -- with a LOUD, named refusal that states exactly which of the four gate-2
+  // codes applies (SETBACK_SOURCE_NOT_REGISTERED / SETBACK_EDITION_UNVERIFIED /
+  // SETBACK_EDITION_SUPERSEDED), so a caller cannot mistake "Burnet is unregistered" for "this
+  // district genuinely has no setbacks." It throws rather than returning null because null here
+  // already has an established meaning this function's own doc comment states ("no codified
+  // dimensional rules available") that is NOT what a provisional/unverified Burnet source means.
+  const burnetCity = BURNET_CITY_JURISDICTION_KEYS[normalized];
+  if (burnetCity) {
+    const verdict = checkSetbackEditionCurrency({ city: burnetCity, districtCode: code || null });
+    if (verdict.code !== SETBACK_EDITION_CURRENT) {
+      throw Object.assign(new Error(verdict.detail), { code: verdict.code, gate: "gate-2-edition-currency", verdict });
+    }
+    // A cleared verdict for Burnet still has no SETBACK_TABLES entry to serve (no jurisdiction JSON
+    // has been authored for any of the eight cities yet -- that is a separate, not-yet-done data
+    // task, not this gate's job). Fall through to the ordinary lookup, which returns null exactly as
+    // it does for any other jurisdiction with a currency-clean source but no vendored table.
+  }
+
   if (isBastropCityJurisdiction(normalized)) {
     if (code && isRepealedB3PlaceType(code)) {
       return null;
@@ -450,3 +481,18 @@ export function getSetbackDistrict(
 export function listSetbackTables(): SetbackTable[] {
   return Object.values(SETBACK_TABLES);
 }
+
+export {
+  BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_EDITION_CURRENT,
+  SETBACK_EDITION_SUPERSEDED,
+  SETBACK_EDITION_UNVERIFIED,
+  SETBACK_SOURCE_NOT_REGISTERED,
+  SUPERSEDED_ORDINANCE_EDITIONS,
+  burnetOrdinanceRegister,
+  checkSetbackEditionCurrency,
+  isUsableVerification,
+  type EditionCurrencyCode,
+  type EditionCurrencyVerdict,
+  type OrdinanceRegisterRow,
+} from "./county-edition-currency.js";

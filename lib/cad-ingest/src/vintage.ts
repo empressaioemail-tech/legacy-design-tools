@@ -49,6 +49,17 @@ export const DECLARED_CAD_VINTAGES: Readonly<
   "48021": { taxYear: 2025, tier: "cad-export" },
   "48027": { taxYear: 2025, tier: "stratmap-roll" },
   "48029": { taxYear: 2025, tier: "stratmap-roll" },
+  // 48053 Burnet (OPS-24 Phase 1) — store-truth read 2026-10-07
+  // (read-only query against cad_property): 49,243 rows, 100% tax_year
+  // 2025, all stamped source_vintage "tier:stratmap-roll;adapter:
+  // stratmap;drop:stratmap25-landparcels_48053_lp" — i.e. already loaded
+  // via the generic StratMap-DBF land-use adapter (txgio/landuse-cli.ts
+  // `stratmap-landuse`), not a county-specific parser. No bulk certified
+  // CAD export exists for Burnet (see counties.ts's BURNET note for the
+  // research and what a direct-CAD parser would need). Mirrors the
+  // engine's src/cad-vintage/resolve-declared-cad-vintage.ts verbatim per
+  // that file's own lockstep requirement.
+  "48053": { taxYear: 2025, tier: "stratmap-roll" },
   "48055": { taxYear: 2026, tier: "cad-export" },
   "48085": { taxYear: 2025, tier: "stratmap-roll" },
   "48091": { taxYear: 2025, tier: "stratmap-roll" },
