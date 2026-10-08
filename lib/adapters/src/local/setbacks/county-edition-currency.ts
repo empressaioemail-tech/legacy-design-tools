@@ -20,18 +20,28 @@
  * cities, seeded from W1-H's 2026-10-07 research) and written so that a second county's register can
  * be added the same way without a second copy of this logic (DEV_PROCESS 2.4).
  *
- * THE REGISTER: `./burnet-tx-ordinance-register.json`, 117 rows converted verbatim from
- * `doc_repo/_inbox/2026-10-07_burnet_W1H_setbacks.csv` (W1-H's own research artifact; this file adds
- * no new facts and transcribes no numbers by hand -- it is a machine conversion of that CSV, one row
- * in, one row out). Its `verification` column is W1-H's own three-tier-plus vocabulary:
- *   "transcribed" / "source: city GIS layer ..." -- USABLE (cleared, though not ordinance-verified
- *       for the GIS-sourced Horseshoe Bay numbers specifically -- see the CSV's own notes column).
+ * THE REGISTER: `./burnet-tx-ordinance-register.json`. Originally 117 rows converted verbatim from
+ * `doc_repo/_inbox/2026-10-07_burnet_W1H_setbacks.csv` (W1-H's own research artifact). As of
+ * 2026-10-07 (pack C, P5 continuation), the Burnet, Granite Shoals, Cottonwood Shores, Bertram and
+ * Highland Haven rows were REPLACED (and, for Burnet, which W1-H left entirely blank, newly added --
+ * all 27 Chart 1 districts) with rows converted from
+ * `doc_repo/_inbox/2026-10-07_burnet_B3_groundtruth_browser_packC.csv`, a person-paced honest browser
+ * read that copied each code's own edition line verbatim; see
+ * `../scripts/convert-ordinance-register-csv.mjs` and `../scripts/apply-packC-to-burnet-register.mjs`
+ * for the (reusable) conversion. Meadowlakes was also refreshed from pack C, confirming its chapter
+ * has no dimensional numbers at all. Marble Falls and Horseshoe Bay are untouched by pack C. The
+ * `verification` column's vocabulary, as of pack C:
+ *   "transcribed" / "verified-browser-read" / "source: city GIS layer ..." -- USABLE (cleared, though
+ *       not ordinance-verified for the GIS-sourced Horseshoe Bay numbers specifically -- see the CSV's
+ *       own notes column).
  *   "provisional-*" (ua-spoofed / proxy-bypassed) -- NOT USABLE. Reached through a bot-block
  *       workaround the honest-access rule forbids relying on; "needs honest re-source" in every row.
  *   "unverified" -- NOT USABLE. No access method reached a number at all for that district.
- * Per the WDLL dispatch: this is correct behaviour TODAY for 6 of Burnet's 8 cities (Burnet,
- * Granite Shoals, Cottonwood Shores, Meadowlakes, Bertram, Highland Haven). Marble Falls and
- * Horseshoe Bay are the two cities with usable rows.
+ *   "edition-ambiguous" -- NOT USABLE. The row's own source is internally inconsistent about which
+ *       edition is current (Burnet R-3 only -- see SETBACK_EDITION_AMBIGUOUS).
+ *   "no-dimensional-standards" -- NOT USABLE. The row's zoning text was read and confirmed to have no
+ *       dimensional numbers for this district (Meadowlakes' eight districts; Granite Shoals AG;
+ *       Highland Haven A and B -- see SETBACK_NO_DIMENSIONAL_STANDARDS).
  *
  * NAMED REFUSALS:
  *   SETBACK_EDITION_CURRENT     -- the only pass.
@@ -41,6 +51,8 @@
  *   SETBACK_EDITION_SUPERSEDED  -- the row's edition predates a KNOWN supersession cutoff (the
  *                                  Bastrop B3/2026-04-14 shape, generalized: see
  *                                  SUPERSEDED_ORDINANCE_EDITIONS).
+ *   SETBACK_EDITION_AMBIGUOUS   -- the row's own source cannot say which edition is current.
+ *   SETBACK_NO_DIMENSIONAL_STANDARDS -- the row's zoning text has no numbers for this district.
  *
  * Executes: wired into `getSetbackTableForZoning` (./index.ts) for Burnet's eight city jurisdiction
  * keys, ahead of the generic SETBACK_TABLES lookup -- see that file's own comment at the call site.
@@ -51,6 +63,24 @@ export const SETBACK_EDITION_CURRENT = "SETBACK_EDITION_CURRENT";
 export const SETBACK_SOURCE_NOT_REGISTERED = "SETBACK_SOURCE_NOT_REGISTERED";
 export const SETBACK_EDITION_UNVERIFIED = "SETBACK_EDITION_UNVERIFIED";
 export const SETBACK_EDITION_SUPERSEDED = "SETBACK_EDITION_SUPERSEDED";
+/**
+ * The row's own edition is internally inconsistent about whether a later ordinance is already
+ * reflected in it (the Burnet R-3 shape: Ord. 2026-12 amended R-3's Chart 1, and the history note
+ * says that amendment IS in the codified text, but Municode's own front page ALSO lists 2026-12 under
+ * "Adopted Ordinances Not Yet Codified" -- so a verified-browser-read of the SAME page cannot say
+ * which Chart 1 numbers are actually current). Distinct from UNVERIFIED (nobody read it) and from
+ * SUPERSEDED (a known cutoff date proves the edition read is simply the wrong, older one): here the
+ * edition WAS read, and the ambiguity is about currency, not about access.
+ */
+export const SETBACK_EDITION_AMBIGUOUS = "SETBACK_EDITION_AMBIGUOUS";
+/**
+ * The row's own zoning text was read and confirmed to carry no dimensional numbers for this district
+ * at all (the Meadowlakes Ch. 32 shape: only use statements and nonconforming-structure rules).
+ * Distinct from UNVERIFIED (which means "unread" or "read via a disallowed access method"): refusing
+ * here is not a provenance problem, it is that inventing a number where the ordinance states none
+ * would itself be the P5 defect this gate exists to prevent.
+ */
+export const SETBACK_NO_DIMENSIONAL_STANDARDS = "SETBACK_NO_DIMENSIONAL_STANDARDS";
 
 export interface OrdinanceRegisterRow {
   city: string;
@@ -65,13 +95,21 @@ export interface OrdinanceRegisterRow {
   effective_date: string;
   verification: string;
   notes: string;
+  /** The edition's own citation line, copied verbatim from the source (e.g. Municode/eCode360's "Codified through Ordinance No. ..." banner). Optional: older rows (W1-H) predate this field. */
+  edition_line_verbatim?: string;
+  /** The page this row was read from. Optional for the same reason. */
+  source_url?: string;
+  /** The date (YYYY-MM-DD) the page was read. Optional for the same reason. */
+  access_date?: string;
 }
 
 export type EditionCurrencyCode =
   | typeof SETBACK_EDITION_CURRENT
   | typeof SETBACK_SOURCE_NOT_REGISTERED
   | typeof SETBACK_EDITION_UNVERIFIED
-  | typeof SETBACK_EDITION_SUPERSEDED;
+  | typeof SETBACK_EDITION_SUPERSEDED
+  | typeof SETBACK_EDITION_AMBIGUOUS
+  | typeof SETBACK_NO_DIMENSIONAL_STANDARDS;
 
 export interface EditionCurrencyVerdict {
   verdict: "pass" | "fail";
@@ -112,13 +150,17 @@ function normalizeDistrict(s: string): string {
 /**
  * Whether a register row's `verification` value clears the gate. "n/a" (MOR, LA, UNK -- documented
  * non-dimensional GIS labels, not adopted districts) and "unverified" are NOT usable; neither is any
- * "provisional-*" state (a bot-block or UA-spoof workaround, per the honest-access rule). Everything
- * else -- "transcribed", or the GIS-layer-sourced note for Horseshoe Bay -- clears.
+ * "provisional-*" state (a bot-block or UA-spoof workaround, per the honest-access rule), nor
+ * "edition-ambiguous" (the edition was read, but it is unclear which numbers are current -- see
+ * SETBACK_EDITION_AMBIGUOUS) nor "no-dimensional-standards" (the edition was read and confirmed to
+ * have no numbers for this district -- see SETBACK_NO_DIMENSIONAL_STANDARDS). Everything else --
+ * "transcribed", "verified-browser-read", or the GIS-layer-sourced note for Horseshoe Bay -- clears.
  */
 export function isUsableVerification(verification: string | null | undefined): boolean {
   const v = (verification ?? "").trim().toLowerCase();
   if (!v || v === "unverified" || v === "n/a") return false;
   if (v.startsWith("provisional")) return false;
+  if (v === "edition-ambiguous" || v === "no-dimensional-standards") return false;
   return true;
 }
 
@@ -191,6 +233,33 @@ export function checkSetbackEditionCurrency(opts: {
   }
 
   if (!isUsableVerification(row.verification)) {
+    const v = (row.verification ?? "").trim().toLowerCase();
+    if (v === "edition-ambiguous") {
+      return {
+        verdict: "fail",
+        code: SETBACK_EDITION_AMBIGUOUS,
+        city: opts.city,
+        districtCode: row.district_code,
+        detail: `${opts.city} ${row.district_code} is edition-ambiguous: its own source is internally inconsistent about which edition is current -- ${row.notes || "see register notes"}. The gate refuses rather than guess which numbers are the law today.`,
+        ordinance: row.ordinance || null,
+        effectiveDate: row.effective_date || null,
+        citation: row.citation || null,
+        verification: row.verification || null,
+      };
+    }
+    if (v === "no-dimensional-standards") {
+      return {
+        verdict: "fail",
+        code: SETBACK_NO_DIMENSIONAL_STANDARDS,
+        city: opts.city,
+        districtCode: row.district_code,
+        detail: `${opts.city} ${row.district_code}'s zoning text was read and carries no dimensional (front/side/rear/corner) numbers at all -- serving a number here would invent one the ordinance does not state.`,
+        ordinance: row.ordinance || null,
+        effectiveDate: row.effective_date || null,
+        citation: row.citation || null,
+        verification: row.verification || null,
+      };
+    }
     return {
       verdict: "fail",
       code: SETBACK_EDITION_UNVERIFIED,
