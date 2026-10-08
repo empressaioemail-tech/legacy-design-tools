@@ -748,6 +748,108 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "Zoning_Abbr",
     descriptionField: "Zoning",
   },
+
+  // ---------------------------------------------------------------------------
+  // Burnet (48053, OPS-24 Phase 1). LDT's loader carried NO Burnet city before
+  // this pass -- 0 of 59,785 Burnet txgio_parcel rows were zoning-stamped
+  // (verified live, 2026-10-08). Of Burnet's 8 incorporated cities, only two
+  // publish a machine-readable zoning layer; the other six (Burnet, Bertram,
+  // Cottonwood Shores, Granite Shoals, Highland Haven, Meadowlakes) have
+  // PDF-only zoning maps and are NOT wired here (no layer exists to register).
+  // Burnet's setback numbers themselves are NOT in SETBACK_TABLES yet for
+  // either city below -- `getSetbackTableForZoning` throws its own named Gate
+  // 2 refusal for every `BURNET_CITY_JURISDICTION_KEYS` entry
+  // (county-edition-currency.ts) ahead of the ordinary table lookup, so a
+  // Burnet parcel declines honestly rather than serving an unverified or
+  // superseded setback. This registry only attaches the REAL district code to
+  // the parcel (`zoning_district` / `zoning_jurisdiction`), which is this
+  // city's own prerequisite to that gate ever being asked a real question.
+  // ---------------------------------------------------------------------------
+
+  // Marble Falls (Burnet, 48053). Public ArcGIS MapServer, layer 16
+  // ("Zoning"), live-verified 2026-10-08: HTTP 200, 261 zoning polygons across
+  // 17 distinct `Zone_ID` codes (FR/RE/NR/TR/DR/MR/ENZ.1-5/NC/GC/DN/DT/BP/IN --
+  // every one of them a district_code the W1-H ordinance register
+  // (burnet-tx-ordinance-register.json) already carries for Marble Falls; the
+  // register's 18th row, PD, is not currently zoned on the live layer).
+  // `robots.txt` on this host returns 404 (no path is disallowed). Source
+  // spatial reference wkid 102739 (latestWkid 2277, Texas Central State
+  // Plane feet); every page is requested outSR=4326 per zoning-service.ts.
+  // The layer publishes no service-level `editingInfo.lastEditDate`; its own
+  // `last_edited_date` field's live max is 2026-07-02 (max `Year_Zoned` 2026),
+  // read via an `outStatistics` query, not assumed. `Zone_Name` is the
+  // human description (e.g. "Existing Neighborhood Zone 4") and `Ordinance`/
+  // `Year_Zoned` are additional per-polygon provenance the stamp does not
+  // consume but which the PR's dry-run table cites for currency. No
+  // `codeExtractRegex`/`codeDomainMap`/`baseCodeParse` is needed -- `Zone_ID`
+  // already publishes the clean short code the register's district_code
+  // matches exactly (Georgetown's pattern, the simplest case). Dry run
+  // against all 30 Marble Falls sample parcels + the 2 no-polygon special
+  // cases (road ROW parcel 112953 / riverbank parcel 103196, WDLL
+  // Appendix A #41/#42) reproduced the frozen sample's expected district on
+  // every parcel with a zoning polygon under it; see the PR body for the
+  // full per-parcel table.
+  "marble-falls-tx": {
+    cityKey: "marble-falls-tx",
+    cityName: "Marble Falls",
+    countyFips: "48053",
+    layerUrl:
+      "https://mfgis.marblefallstx.gov/arcgis/rest/services/Planning/PDS/MapServer/16",
+    codeField: "Zone_ID",
+    descriptionField: "Zone_Name",
+  },
+
+  // Horseshoe Bay (Burnet, 48053). `maps.horseshoe-bay-tx.gov` (the city's own
+  // GIS host) is network-unreachable (connection timeout, verified again
+  // 2026-10-08) -- not a block, a dead host, so it is recorded as unreachable
+  // rather than worked around. The city's zoning is instead served from its
+  // GIS vendor, newedgeservices.com, behind an ArcGIS Enterprise Portal web
+  // map (item `1eefefa6e1ac460ea5aff761f21bdf52`, "Zoning, Water Availability,
+  // Landuse, NE_RD", access "public"). `robots.txt` on
+  // `horseshoebaygis.newedgeservices.com` returns 404 (nothing disallowed).
+  // The web map's own item-data JSON (Portal `content/items/<id>/data`, read
+  // plainly, no auth) names the REST FeatureServer layer behind its "Zoning
+  // Parcels" operational layer:
+  //   https://horseshoebaygis.newedgeservices.com/arcgis/rest/services/Public/Zoning/FeatureServer/2
+  // (layer 1 on the same service, "Zoning Labels", is label geometry only --
+  // not used). The `services2.arcgis.com` host named in earlier research was
+  // not this layer's host; it was not reached and is not relied on here.
+  // Live-verified 2026-10-08: HTTP 200, 11,434 zoning-parcel features, `ZONING`
+  // (the register's district_code field, e.g. "R-1", "A-1", "C-2") plus
+  // `SUB_ZONING` (a refinement -- R-1-SF/R-2-2F/R-4-MF -- not consumed by the
+  // stamp) and `PROP_ID`/`prop_id_1` (both present on the schema; a county-line
+  // parcel, 48053:23321, carries its Burnet CAD id in `prop_id_1` while
+  // `PROP_ID` holds an unrelated legacy value for that one row -- irrelevant to
+  // the stamp, which PIPs by geometry, never by this attribute join). Source
+  // spatial reference wkid 102739 (latestWkid 2277); every page requested
+  // outSR=4326. No service-level `editingInfo.lastEditDate`; the layer's own
+  // `last_edited_date` field's live max is 2024-06-24, read via
+  // `outStatistics`. No `codeExtractRegex`/`codeDomainMap`/`baseCodeParse`
+  // needed -- `ZONING` already publishes the register's own codes verbatim.
+  //
+  // TWO DECLARED NO-DISTRICT CASES (WDLL known special cases), BOTH confirmed
+  // live at the exact parcel, not inferred: 48053:69366 ("CA" in the frozen
+  // staging snapshot -- COMMON AREA land use, not an adopted district per the
+  // register's own CA note) carries a BLANK `ZONING` field on this live
+  // layer, and 48053:106280 ("UNK" in staging) is likewise BLANK. Both already
+  // fall through `buildZoningIndex`'s generic empty-code drop with NO
+  // registry-level filter needed (a 6-feature ` ` whitespace-only value
+  // elsewhere in the layer trims the same way). Two live, currently-unmatched
+  // codes were also measured on this layer that the W1-H register does not
+  // carry a row for -- "DR" (6 features) and bare "PD" (20 features, distinct
+  // from the register's "PDC-2") -- these will correctly decline with the
+  // named `SETBACK_SOURCE_NOT_REGISTERED` Gate 2 code rather than serving a
+  // guessed setback; recorded here as a disclosed gap, not fixed by this
+  // registration (authoring the register's content is W1-H's task).
+  "horseshoe-bay-tx": {
+    cityKey: "horseshoe-bay-tx",
+    cityName: "Horseshoe Bay",
+    countyFips: "48053",
+    layerUrl:
+      "https://horseshoebaygis.newedgeservices.com/arcgis/rest/services/Public/Zoning/FeatureServer/2",
+    codeField: "ZONING",
+    descriptionField: "SUB_ZONING",
+  },
 };
 
 export function resolveZoningLayer(input: string): ZoningLayerConfig | undefined {

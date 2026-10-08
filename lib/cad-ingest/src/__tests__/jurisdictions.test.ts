@@ -196,7 +196,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.setbackTables).toEqual([getSetbackTable("new-braunfels-tx")]);
   });
 
-  it("Burnet (48053, OPS-24 Phase 1): geometry-only county (no CAD parser, no bulk source, no zoning layer wired yet)", () => {
+  it("Burnet (48053, OPS-24 Phase 1): geometry-only county (no CAD parser, no bulk source) now carries two city zoning layers, no setback tables yet", () => {
     const j = getJurisdictionConfig("48053");
     expect(j).toBeDefined();
     if (!j) throw new Error("expected Burnet");
@@ -210,10 +210,24 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     // same shape as Comal above, not a gap to silently fill.
     expect(j.cad).toBeUndefined();
     expect(j.bulkSource).toBeUndefined();
-    // Marble Falls / Horseshoe Bay zoning lives only in the engine's
-    // jurisdiction-registry.ts (tx_zoning_district_staging) in this pass,
-    // not in this repo's ZONING_LAYERS — so no layer/setback facet here yet.
-    expect(j.zoningLayers).toBeUndefined();
+    // Marble Falls and Horseshoe Bay are the two Burnet cities that publish a
+    // machine-readable zoning layer (the other six have PDF-only maps and are
+    // not wired). REMOVAL PROOF: before this registration this field was
+    // `undefined` — delete either ZONING_LAYERS entry below and this
+    // assertion fails again.
+    expect(j.zoningLayers).toEqual([
+      ZONING_LAYERS["marble-falls-tx"],
+      ZONING_LAYERS["horseshoe-bay-tx"],
+    ]);
+    expect(j.zoningLayers?.map((z) => z.cityKey)).toEqual([
+      "marble-falls-tx",
+      "horseshoe-bay-tx",
+    ]);
+    // No SETBACK_TABLES entry exists for either Burnet city yet — the
+    // Gate 2 edition-currency check (county-edition-currency.ts) throws its
+    // own named refusal ahead of this lookup for every Burnet jurisdiction
+    // key, so the empty setback facet here is a separate, already-handled
+    // fact, not a silent gap this registration leaves open.
     expect(j.setbackTables).toBeUndefined();
   });
 
