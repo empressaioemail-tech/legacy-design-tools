@@ -42,6 +42,14 @@
  *   "no-dimensional-standards" -- NOT USABLE. The row's zoning text was read and confirmed to have no
  *       dimensional numbers for this district (Meadowlakes' eight districts; Granite Shoals AG;
  *       Highland Haven A and B -- see SETBACK_NO_DIMENSIONAL_STANDARDS).
+ *   "conditional-not-evaluated" -- NOT USABLE. At least one dimensional field's value genuinely
+ *       depends on a condition this pipeline cannot evaluate today -- road pavement width, unit or
+ *       tenant count, abutting-zone, which physical side of the lot, lot position relative to a lake
+ *       (21 cells across Burnet, Granite Shoals, Bertram and Highland Haven -- see
+ *       SETBACK_CONDITIONAL_NOT_EVALUATED). The ordinance's own text for every branch is carried
+ *       verbatim in the row's `conditional` map; no branch's number is ever recorded as THE value
+ *       (WDLL check 8, "zero wrong values": the most-restrictive branch would be wrong for every
+ *       parcel on the other branch).
  *
  * NAMED REFUSALS:
  *   SETBACK_EDITION_CURRENT     -- the only pass.
@@ -53,6 +61,8 @@
  *                                  SUPERSEDED_ORDINANCE_EDITIONS).
  *   SETBACK_EDITION_AMBIGUOUS   -- the row's own source cannot say which edition is current.
  *   SETBACK_NO_DIMENSIONAL_STANDARDS -- the row's zoning text has no numbers for this district.
+ *   SETBACK_CONDITIONAL_NOT_EVALUATED -- at least one of the row's dimensional values has more than
+ *                                  one real number and this pipeline cannot pick between them.
  *
  * Executes: wired into `getSetbackTableForZoning` (./index.ts) for Burnet's eight city jurisdiction
  * keys, ahead of the generic SETBACK_TABLES lookup -- see that file's own comment at the call site.
@@ -81,6 +91,20 @@ export const SETBACK_EDITION_AMBIGUOUS = "SETBACK_EDITION_AMBIGUOUS";
  * would itself be the P5 defect this gate exists to prevent.
  */
 export const SETBACK_NO_DIMENSIONAL_STANDARDS = "SETBACK_NO_DIMENSIONAL_STANDARDS";
+/**
+ * At least one of the row's dimensional fields (front_ft/side_ft/rear_ft/corner_ft) has no single
+ * value: the ordinance states two or more branches (road pavement width, unit or tenant count,
+ * abutting-zone, which physical side of the lot, lot position relative to a lake...) and this pipeline
+ * has no data today to evaluate which branch applies to a given parcel. WDLL check 8 ("zero wrong
+ * values") forbids recording the most-restrictive branch as THE setback: that number would be wrong
+ * for every parcel where the OTHER branch applies. Distinct from NO_DIMENSIONAL_STANDARDS (the
+ * ordinance states no number at all, for ANY parcel) and from UNVERIFIED (nobody read it): here the
+ * ordinance was read, and it states MULTIPLE real numbers, not zero. The gate is per DISTRICT, not per
+ * field -- see the row's own `conditional` map and the comment at this code's only throw site
+ * (`checkSetbackEditionCurrency`) for why a district with 3 clean fields and 1 conditional field still
+ * refuses as a whole.
+ */
+export const SETBACK_CONDITIONAL_NOT_EVALUATED = "SETBACK_CONDITIONAL_NOT_EVALUATED";
 
 export interface OrdinanceRegisterRow {
   city: string;
@@ -101,6 +125,16 @@ export interface OrdinanceRegisterRow {
   source_url?: string;
   /** The date (YYYY-MM-DD) the page was read. Optional for the same reason. */
   access_date?: string;
+  /**
+   * Present only when `verification` is "conditional-not-evaluated". Maps each AFFECTED dimensional
+   * field name (front_ft/side_ft/rear_ft/corner_ft) to the ordinance's own raw text for that cell,
+   * verbatim and including every branch (e.g. "20 ft. for any road over 31 feet of pavement. 25 ft.
+   * for roads shorter than 31 ft."). That field's own string value (e.g. `front_ft`) is always "" when
+   * it has an entry here -- the raw text is the record of what the ordinance says, never a collapsed
+   * single number. A row can have this on only SOME of its four fields; the other, clean fields keep
+   * their resolved numbers here for provenance even though the district as a whole still refuses today.
+   */
+  conditional?: Record<string, string>;
 }
 
 export type EditionCurrencyCode =
@@ -109,7 +143,8 @@ export type EditionCurrencyCode =
   | typeof SETBACK_EDITION_UNVERIFIED
   | typeof SETBACK_EDITION_SUPERSEDED
   | typeof SETBACK_EDITION_AMBIGUOUS
-  | typeof SETBACK_NO_DIMENSIONAL_STANDARDS;
+  | typeof SETBACK_NO_DIMENSIONAL_STANDARDS
+  | typeof SETBACK_CONDITIONAL_NOT_EVALUATED;
 
 export interface EditionCurrencyVerdict {
   verdict: "pass" | "fail";
@@ -153,14 +188,16 @@ function normalizeDistrict(s: string): string {
  * "provisional-*" state (a bot-block or UA-spoof workaround, per the honest-access rule), nor
  * "edition-ambiguous" (the edition was read, but it is unclear which numbers are current -- see
  * SETBACK_EDITION_AMBIGUOUS) nor "no-dimensional-standards" (the edition was read and confirmed to
- * have no numbers for this district -- see SETBACK_NO_DIMENSIONAL_STANDARDS). Everything else --
+ * have no numbers for this district -- see SETBACK_NO_DIMENSIONAL_STANDARDS) nor
+ * "conditional-not-evaluated" (the edition was read and states MULTIPLE numbers this pipeline cannot
+ * choose between -- see SETBACK_CONDITIONAL_NOT_EVALUATED). Everything else --
  * "transcribed", "verified-browser-read", or the GIS-layer-sourced note for Horseshoe Bay -- clears.
  */
 export function isUsableVerification(verification: string | null | undefined): boolean {
   const v = (verification ?? "").trim().toLowerCase();
   if (!v || v === "unverified" || v === "n/a") return false;
   if (v.startsWith("provisional")) return false;
-  if (v === "edition-ambiguous" || v === "no-dimensional-standards") return false;
+  if (v === "edition-ambiguous" || v === "no-dimensional-standards" || v === "conditional-not-evaluated") return false;
   return true;
 }
 
@@ -254,6 +291,27 @@ export function checkSetbackEditionCurrency(opts: {
         city: opts.city,
         districtCode: row.district_code,
         detail: `${opts.city} ${row.district_code}'s zoning text was read and carries no dimensional (front/side/rear/corner) numbers at all -- serving a number here would invent one the ordinance does not state.`,
+        ordinance: row.ordinance || null,
+        effectiveDate: row.effective_date || null,
+        citation: row.citation || null,
+        verification: row.verification || null,
+      };
+    }
+    if (v === "conditional-not-evaluated") {
+      // GATE IS PER DISTRICT, NOT PER FIELD. index.ts's SetbackDistrict requires front_ft/side_ft/
+      // rear_ft/side_corner_ft to ALL be real numbers -- there is no partial table to serve even when
+      // only one of this row's four dimensional fields is conditional, so the whole district refuses.
+      // The detail below names EVERY affected field and carries its raw ordinance text (every branch),
+      // so a caller can render "20 ft or 25 ft depending on road width" instead of a bare refusal.
+      const branches = Object.entries(row.conditional ?? {})
+        .map(([field, text]) => `${field}: "${text}"`)
+        .join("; ");
+      return {
+        verdict: "fail",
+        code: SETBACK_CONDITIONAL_NOT_EVALUATED,
+        city: opts.city,
+        districtCode: row.district_code,
+        detail: `${opts.city} ${row.district_code} has at least one dimensional value this pipeline cannot evaluate today, because the ordinance states more than one number and nothing resolves which applies to a given parcel -- ${branches || "see register notes"}. Recording the most-restrictive branch as THE setback would be wrong for every parcel where the other branch applies (WDLL check 8, zero wrong values), so no number is served.`,
         ordinance: row.ordinance || null,
         effectiveDate: row.effective_date || null,
         citation: row.citation || null,

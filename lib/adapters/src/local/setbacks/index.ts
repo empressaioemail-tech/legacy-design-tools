@@ -419,11 +419,12 @@ export function getSetbackTableForZoning(
   // yet), so this throw replaces a SILENT, unnamed null -- indistinguishable from any mistyped or
   // unknown jurisdiction -- with a LOUD, named refusal that states exactly which gate-2 code applies
   // (SETBACK_SOURCE_NOT_REGISTERED / SETBACK_EDITION_UNVERIFIED / SETBACK_EDITION_SUPERSEDED /
-  // SETBACK_EDITION_AMBIGUOUS / SETBACK_NO_DIMENSIONAL_STANDARDS), so a caller cannot mistake "Burnet
-  // is unregistered" for "this district genuinely has no setbacks." It throws rather than returning
-  // null because null here already has an established meaning this function's own doc comment states
-  // ("no codified dimensional rules available") that is NOT what a provisional/unverified/ambiguous/
-  // no-dimensional-standards Burnet source means.
+  // SETBACK_EDITION_AMBIGUOUS / SETBACK_NO_DIMENSIONAL_STANDARDS / SETBACK_CONDITIONAL_NOT_EVALUATED),
+  // so a caller cannot mistake "Burnet is unregistered" for "this district genuinely has no setbacks."
+  // It throws rather than returning null because null here already has an established meaning this
+  // function's own doc comment states ("no codified dimensional rules available") that is NOT what a
+  // provisional/unverified/ambiguous/no-dimensional-standards/conditional-not-evaluated Burnet source
+  // means.
   const burnetCity = BURNET_CITY_JURISDICTION_KEYS[normalized];
   if (burnetCity) {
     const verdict = checkSetbackEditionCurrency({ city: burnetCity, districtCode: code || null });

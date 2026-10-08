@@ -255,18 +255,21 @@
     "city": "Burnet",
     "district_code": "R-1",
     "district_name": "Single Family Residential (Sec. 118-25)",
-    "front_ft": "25",
+    "front_ft": "",
     "side_ft": "7.5",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 25 (reviewed override) -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\". | Min. lot width 75 ft. Min living area 1,350 sq ft (Sec. 118-25). | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft."
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [road pavement width (over vs under 31 ft)] -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\" | Min. lot width 75 ft. Min living area 1,350 sq ft (Sec. 118-25). | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
@@ -425,35 +428,43 @@
     "city": "Burnet",
     "district_code": "R-2",
     "district_name": "Duplex (Sec. 118-27)",
-    "front_ft": "30",
+    "front_ft": "",
     "side_ft": "10",
-    "rear_ft": "15",
+    "rear_ft": "",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 30 (reviewed override) -- raw ordinance text: \"25 ft. for two unit 30 ft. for three and four unit\". rear_ft recorded as 15 (reviewed override) -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\". | Min. lot width 75 ft. Rear: \"10 ft. 15 ft. when abutting R-1\". | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "25 ft. for two unit 30 ft. for three and four unit",
+      "rear_ft": "10 ft. 15 ft. when abutting R-1"
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [unit count (two-unit vs three/four-unit building)] -- raw ordinance text: \"25 ft. for two unit 30 ft. for three and four unit\" rear_ft [abutting residential (R-1) zoning] -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\" | Min. lot width 75 ft. Rear: \"10 ft. 15 ft. when abutting R-1\". | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
     "district_code": "R-2 A",
     "district_name": "Townhomes (Sec. 118-28)",
-    "front_ft": "30",
+    "front_ft": "",
     "side_ft": "10",
-    "rear_ft": "15",
+    "rear_ft": "",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 30 (reviewed override) -- raw ordinance text: \"25 ft. for two connected units 30 ft. for three or four connected units\". rear_ft recorded as 15 (reviewed override) -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\". | Min. lot width 75 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "25 ft. for two connected units 30 ft. for three or four connected units",
+      "rear_ft": "10 ft. 15 ft. when abutting R-1"
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [unit count (two vs three/four connected units)] -- raw ordinance text: \"25 ft. for two connected units 30 ft. for three or four connected units\" rear_ft [abutting residential (R-1) zoning] -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\" | Min. lot width 75 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
@@ -476,69 +487,82 @@
     "city": "Burnet",
     "district_code": "R-6",
     "district_name": "Single-Family Residential District R-6 (Sec. 118-25)",
-    "front_ft": "25",
+    "front_ft": "",
     "side_ft": "7.5",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 25 (reviewed override) -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\". | Min. lot width 60 ft. Min living area 1,100 sq ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft."
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [road pavement width (over vs under 31 ft)] -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\" | Min. lot width 60 ft. Min living area 1,100 sq ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
     "district_code": "R-6-13",
     "district_name": "Single-Family Residential District R-6-13",
-    "front_ft": "25",
+    "front_ft": "",
     "side_ft": "7.5",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 25 (reviewed override) -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\". | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft."
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [road pavement width (over vs under 31 ft)] -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.\" | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
     "district_code": "M-1",
     "district_name": "Manufactured Single Family Housing (Sec. 118-38)",
-    "front_ft": "25",
+    "front_ft": "",
     "side_ft": "7.5",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 25 (reviewed override) -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement 25 ft. for roads shorter than 31 ft.\". | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "20 ft. for any road over 31 feet of pavement 25 ft. for roads shorter than 31 ft."
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [road pavement width (over vs under 31 ft)] -- raw ordinance text: \"20 ft. for any road over 31 feet of pavement 25 ft. for roads shorter than 31 ft.\" | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
     "district_code": "M-2",
     "district_name": "Manufactured Housing Subdivision / Manufactured home park (Sec. 118-40)",
     "front_ft": "50",
-    "side_ft": "10",
-    "rear_ft": "15",
+    "side_ft": "",
+    "rear_ft": "",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: side_ft recorded as 10 (reviewed override) -- raw ordinance text: \"10 ft. and one foot per unit\". rear_ft recorded as 15 (reviewed override) -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\". | Min. lot width 150 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "side_ft": "10 ft. and one foot per unit",
+      "rear_ft": "10 ft. 15 ft. when abutting R-1"
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): side_ft [unit count, open-ended (base 10 ft plus 1 ft per unit, no stated maximum)] -- raw ordinance text: \"10 ft. and one foot per unit\" rear_ft [abutting residential (R-1) zoning] -- raw ordinance text: \"10 ft. 15 ft. when abutting R-1\" | Min. lot width 150 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
@@ -595,18 +619,21 @@
     "city": "Burnet",
     "district_code": "NC",
     "district_name": "Neighborhood Commercial (Sec. 118-44)",
-    "front_ft": "25",
+    "front_ft": "",
     "side_ft": "7.5",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: front_ft recorded as 25 (reviewed override) -- raw ordinance text: \"20 ft. on roads with 31 ft. of pavement 25 ft. on roads of less than 31 feet.\". | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "front_ft": "20 ft. on roads with 31 ft. of pavement 25 ft. on roads of less than 31 feet."
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [road pavement width (over vs under 31 ft)] -- raw ordinance text: \"20 ft. on roads with 31 ft. of pavement 25 ft. on roads of less than 31 feet.\" | Min. lot width 60 ft. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
@@ -647,17 +674,20 @@
     "district_code": "C-3",
     "district_name": "Heavy Commercial (Sec. 118-47)",
     "front_ft": "50",
-    "side_ft": "25",
+    "side_ft": "",
     "rear_ft": "15",
     "corner_ft": "20",
     "citation": "Ch. 118 § 118-20(j) Chart 1; § 118-20(l) Chart 2; district section as named",
     "ordinance": "Ord. No. 2026-23 (Supp. No. 57)",
     "effective_date": "2026-06-23",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "CODE OF ORDINANCES City of BURNET, TEXAS Codified through Ordinance No. 2026-23, enacted June 23, 2026. (Supp. No. 57) | Online content updated on September 25, 2026",
     "source_url": "https://library.municode.com/tx/burnet/codes/code_of_ordinances?nodeId=COOR_CH118ZO_ARTIIZODIRE",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | REVIEWED OVERRIDE: side_ft recorded as 25 (reviewed override) -- raw ordinance text: \"15 ft. for single tenant 25 ft. for multi-tenant\". | Min. lot width 60 ft. for single tenant 100 ft. for multi-tenant. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
+    "conditional": {
+      "side_ft": "15 ft. for single tenant 25 ft. for multi-tenant"
+    },
+    "notes": "Footnotes: Footnote 1: For corner lots, there will be a front yard, a street side yard, and two side yards for setback purposes. Corner lots will have no rear yard setback. This will provide equity for all property owners within like zoning districts. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): side_ft [tenant count (single- vs multi-tenant)] -- raw ordinance text: \"15 ft. for single tenant 25 ft. for multi-tenant\" | Min. lot width 60 ft. for single tenant 100 ft. for multi-tenant. | Ordinance history: Sec. 118-20 history: Ord. No. 2012-06, 2-28-12; 2019-16; 2019-17; 2020-13; 2022-15; 2023-17; 2024-51; 2025-12; Ord. No. 2026-12, §§ 2, 3, 4-20-26"
   },
   {
     "city": "Burnet",
@@ -766,17 +796,20 @@
     "district_code": "M-2",
     "district_name": "Manufactured Home Park District, M-2",
     "front_ft": "20",
-    "side_ft": "20",
+    "side_ft": "",
     "rear_ft": "",
     "corner_ft": "",
     "citation": "§ 40-15(b),(c),(d)",
     "ordinance": "Ord. No. 898",
     "effective_date": "2026-09-22",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 898 adopted September 22, 2026.",
     "source_url": "https://ecode360.com/40172259",
     "access_date": "2026-10-07",
-    "notes": "REVIEWED OVERRIDE: side_ft recorded as 20 (reviewed override) -- raw ordinance text: \"no side yard requirement on one sideline and a 12-foot side yard on the other\". | Side: \"except when zone M-2 borders a residential zone, then a 20-foot side yard shall be required on the side abutting the residentially zoned property.\" Shoreline: no main or accessory building closer than 20 feet to the shoreline; boat dock/storage max 16 ft height measured from 825-foot lake level, 200 sq ft, 5 ft from side line. Amended by Ord. 894. § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
+    "conditional": {
+      "side_ft": "no side yard requirement on one sideline and a 12-foot side yard on the other"
+    },
+    "notes": "CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): side_ft [side position (0 ft one side / 12 ft other) and abutting residential zoning (20 ft)] -- raw ordinance text: \"no side yard requirement on one sideline and a 12-foot side yard on the other\" | Side: \"except when zone M-2 borders a residential zone, then a 20-foot side yard shall be required on the side abutting the residentially zoned property.\" Shoreline: no main or accessory building closer than 20 feet to the shoreline; boat dock/storage max 16 ft height measured from 825-foot lake level, 200 sq ft, 5 ft from side line. Amended by Ord. 894. § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
   },
   {
     "city": "Granite Shoals",
@@ -784,16 +817,19 @@
     "district_name": "General Business District One, GB-1",
     "front_ft": "10",
     "side_ft": "",
-    "rear_ft": "10",
+    "rear_ft": "",
     "corner_ft": "",
     "citation": "§ 40-16(c),(d)",
     "ordinance": "Ord. No. 898",
     "effective_date": "2026-09-22",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 898 adopted September 22, 2026.",
     "source_url": "https://ecode360.com/40172259",
     "access_date": "2026-10-07",
-    "notes": "REVIEWED OVERRIDE: rear_ft recorded as 10 (reviewed override) -- raw ordinance text: \"none, except not less than 10 feet when rear lot line abuts property zoned residential\". | Rear: \"No rear yard shall be required, except when the property abuts, along its rear lot line, property zoned residential. Then a rear yard of not less than 10 feet must be provided\" plus privacy fence. § 40-9 general compliance applies to GB districts (not read in full). § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
+    "conditional": {
+      "rear_ft": "none, except not less than 10 feet when rear lot line abuts property zoned residential"
+    },
+    "notes": "CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): rear_ft [abutting residential zoning (none vs 10 ft)] -- raw ordinance text: \"none, except not less than 10 feet when rear lot line abuts property zoned residential\" | Rear: \"No rear yard shall be required, except when the property abuts, along its rear lot line, property zoned residential. Then a rear yard of not less than 10 feet must be provided\" plus privacy fence. § 40-9 general compliance applies to GB districts (not read in full). § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
   },
   {
     "city": "Granite Shoals",
@@ -801,33 +837,41 @@
     "district_name": "General Business District Two, GB-2",
     "front_ft": "25",
     "side_ft": "",
-    "rear_ft": "10",
+    "rear_ft": "",
     "corner_ft": "",
     "citation": "§ 40-17(c),(d)",
     "ordinance": "Ord. No. 898",
     "effective_date": "2026-09-22",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 898 adopted September 22, 2026.",
     "source_url": "https://ecode360.com/40172259",
     "access_date": "2026-10-07",
-    "notes": "REVIEWED OVERRIDE: rear_ft recorded as 10 (reviewed override) -- raw ordinance text: \"none, except not less than 10 feet when rear lot line abuts property zoned residential\". | Same rear-yard condition and fence language as GB-1. § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
+    "conditional": {
+      "rear_ft": "none, except not less than 10 feet when rear lot line abuts property zoned residential"
+    },
+    "notes": "CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): rear_ft [abutting residential zoning (none vs 10 ft)] -- raw ordinance text: \"none, except not less than 10 feet when rear lot line abuts property zoned residential\" | Same rear-yard condition and fence language as GB-1. § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
   },
   {
     "city": "Granite Shoals",
     "district_code": "I",
     "district_name": "Industrial District, I",
-    "front_ft": "20",
-    "side_ft": "20",
-    "rear_ft": "20",
+    "front_ft": "",
+    "side_ft": "",
+    "rear_ft": "",
     "corner_ft": "",
     "citation": "§ 40-18(e)",
     "ordinance": "Ord. No. 898",
     "effective_date": "2026-09-22",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 898 adopted September 22, 2026.",
     "source_url": "https://ecode360.com/40172259",
     "access_date": "2026-10-07",
-    "notes": "REVIEWED OVERRIDE: front_ft recorded as 20 (reviewed override) -- raw ordinance text: \"15 feet; 20 feet when adjacent to a residential district or residential use\". side_ft recorded as 20 (reviewed override) -- raw ordinance text: \"none on one side and minimum 12 feet on the other; 20 feet when abutting residential districts\". rear_ft recorded as 20 (reviewed override) -- raw ordinance text: \"15 feet; 20 feet when abutting residential districts\". | \"The term 'adjacent' means the nearest or closest to, even when separated by an intervening street.\" § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
+    "conditional": {
+      "front_ft": "15 feet; 20 feet when adjacent to a residential district or residential use",
+      "side_ft": "none on one side and minimum 12 feet on the other; 20 feet when abutting residential districts",
+      "rear_ft": "15 feet; 20 feet when abutting residential districts"
+    },
+    "notes": "CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): front_ft [adjacent residential district or use] -- raw ordinance text: \"15 feet; 20 feet when adjacent to a residential district or residential use\" side_ft [side position (none one side / 12 ft other) and abutting residential zoning (20 ft)] -- raw ordinance text: \"none on one side and minimum 12 feet on the other; 20 feet when abutting residential districts\" rear_ft [abutting residential districts] -- raw ordinance text: \"15 feet; 20 feet when abutting residential districts\" | \"The term 'adjacent' means the nearest or closest to, even when separated by an intervening street.\" § 40-21: public or semi-public buildings up to 45 ft and churches up to 75 ft when each required yard is increased one foot per two feet above district height. | Ordinance history: Ch. 40 replaced by Ordinance 885 adopted 12/9/2025; Ord. 894 (8/25/2026) amends §§ 40-7, 40-12, 40-14, 40-15 to establish driveway and culvert requirements, regulate dumpsters in multifamily districts and set manufactured housing requirements (per ordinance title page). Current eCode text already carries the 894 history note on §§ 40-12, 40-14, 40-15; dimensional numbers below are as currently codified. Not compared against pre-894 text."
   },
   {
     "city": "Granite Shoals",
@@ -1767,17 +1811,20 @@
     "district_code": "R-1-A",
     "district_name": "Single-Family Attached (Garden Home)",
     "front_ft": "20",
-    "side_ft": "10",
+    "side_ft": "",
     "rear_ft": "15",
     "corner_ft": "15",
     "citation": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
     "ordinance": "Ord. No. 215-081126",
     "effective_date": "2026-08-11",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 215-081126 adopted August 11, 2026.",
     "source_url": "https://ecode360.com/39872099",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: (2) Side Yard setback for the R-1-A District is ten (10) feet on one (1) side, and a zero lot line is permitted on the other side. | REVIEWED OVERRIDE: side_ft recorded as 10 (reviewed override) -- raw ordinance text: \"5 ft. (2)\". | Min. lot width 35 ft.. Chart 2 applies to multiple-family dwellings and listed districts only. | Ordinance history: § 20 history: Ordinance 26-2001, sec. 20, adopted 10/9/01; Ordinance 26-032415, pt. 1(B), adopted 3/24/15; Ordinance 26-032426 adopted 3/24/2026"
+    "conditional": {
+      "side_ft": "5 ft. (2)"
+    },
+    "notes": "Footnotes: (2) Side Yard setback for the R-1-A District is ten (10) feet on one (1) side, and a zero lot line is permitted on the other side. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): side_ft [side position (10 ft one side, zero-lot-line other side)] -- raw ordinance text: \"5 ft. (2)\" | Min. lot width 35 ft.. Chart 2 applies to multiple-family dwellings and listed districts only. | Ordinance history: § 20 history: Ordinance 26-2001, sec. 20, adopted 10/9/01; Ordinance 26-032415, pt. 1(B), adopted 3/24/15; Ordinance 26-032426 adopted 3/24/2026"
   },
   {
     "city": "Bertram",
@@ -2057,16 +2104,19 @@
     "district_name": "Single Family Residential 1 (SFR1)",
     "front_ft": "20",
     "side_ft": "5",
-    "rear_ft": "25",
+    "rear_ft": "",
     "corner_ft": "10",
     "citation": "Ch. 9, Art. 9.02 § 9.02.003(b); § 9.02.004(b),(d)(3),(d)(7)",
     "ordinance": "Ord. No. 056 Rev. 18",
     "effective_date": "2026-07-07",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 056 Rev. 18 adopted July 7, 2026.",
     "source_url": "https://ecode360.com/45254763",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Note (1): See appendix 2, Zoning Map. Multi-family residences are not permitted within the corporate city limits. | REVIEWED OVERRIDE: side_ft recorded as 5 (reviewed override) -- raw ordinance text: \"within five (5) feet of the adjacent lot line\". rear_ft recorded as 25 (reviewed override) -- raw ordinance text: \"twenty-five (25) feet to the navigable channel of Lake LBJ at normal water level 825 ft; 20 ft to rear lot line on lots with front and back street; 25 ft to rear lot line on back-to-back lots\". corner_ft recorded as 10 (reviewed override) -- raw ordinance text: \"ten (10) feet of the side lot line adjacent to the street (corner lots)\". | Measurements from property line to drip line of building and/or closest edge of outside appliance. Rear (C): on back-to-back lots outbuildings, garages, outside appliances not nearer than five feet to common lot line. Min living area 1,600 square feet contiguous. Waterfront structure max 16 ft above 825 ft lake level; waterfront facilities 5 ft setback from property line extension over water. | Ordinance history: NOT SHOWN"
+    "conditional": {
+      "rear_ft": "twenty-five (25) feet to the navigable channel of Lake LBJ at normal water level 825 ft; 20 ft to rear lot line on lots with front and back street; 25 ft to rear lot line on back-to-back lots"
+    },
+    "notes": "Footnotes: Note (1): See appendix 2, Zoning Map. Multi-family residences are not permitted within the corporate city limits. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): rear_ft [lot configuration (waterfront channel depth vs through-lot vs back-to-back)] -- raw ordinance text: \"twenty-five (25) feet to the navigable channel of Lake LBJ at normal water level 825 ft; 20 ft to rear lot line on lots with front and back street; 25 ft to rear lot line on back-to-back lots\" | REVIEWED OVERRIDE: side_ft recorded as 5 (reviewed override, confirmed single value) -- raw ordinance text: \"within five (5) feet of the adjacent lot line\". corner_ft recorded as 10 (reviewed override, confirmed single value) -- raw ordinance text: \"ten (10) feet of the side lot line adjacent to the street (corner lots)\". | Measurements from property line to drip line of building and/or closest edge of outside appliance. Rear (C): on back-to-back lots outbuildings, garages, outside appliances not nearer than five feet to common lot line. Min living area 1,600 square feet contiguous. Waterfront structure max 16 ft above 825 ft lake level; waterfront facilities 5 ft setback from property line extension over water. | Ordinance history: NOT SHOWN"
   },
   {
     "city": "Highland Haven",
@@ -2074,16 +2124,19 @@
     "district_name": "Single Family Residential 2 (SFR2)",
     "front_ft": "20",
     "side_ft": "5",
-    "rear_ft": "25",
+    "rear_ft": "",
     "corner_ft": "10",
     "citation": "Ch. 9, Art. 9.02 § 9.02.003(e); § 9.02.004",
     "ordinance": "Ord. No. 056 Rev. 18",
     "effective_date": "2026-07-07",
-    "verification": "verified-browser-read",
+    "verification": "conditional-not-evaluated",
     "edition_line_verbatim": "Includes legislation through Ord. No. 056 Rev. 18 adopted July 7, 2026.",
     "source_url": "https://ecode360.com/45254763",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: Note (1): See appendix 2, Zoning Map. Multi-family residences are not permitted within the corporate city limits. | REVIEWED OVERRIDE: side_ft recorded as 5 (reviewed override) -- raw ordinance text: \"within five (5) feet of the adjacent lot line\". rear_ft recorded as 25 (reviewed override) -- raw ordinance text: \"same as R1\". | \"Use regulations and restrictions are the same as prescribed for District R1, SFR1, except: (i) Minimum lot/acreage size is increased to 1 acre. (ii) Minimum street/road frontage is increased to 100 feet. (iii) Tracts of 2 acres or more may construct an additional outbuilding and may stable up to 2 horses.\" | Ordinance history: NOT SHOWN"
+    "conditional": {
+      "rear_ft": "same as R1"
+    },
+    "notes": "Footnotes: Note (1): See appendix 2, Zoning Map. Multi-family residences are not permitted within the corporate city limits. | CONDITIONAL (not evaluated; see SETBACK_CONDITIONAL_NOT_EVALUATED): rear_ft [lot configuration (same as R1: waterfront/through-lot/back-to-back)] -- raw ordinance text: \"same as R1\" | REVIEWED OVERRIDE: side_ft recorded as 5 (reviewed override, confirmed single value) -- raw ordinance text: \"within five (5) feet of the adjacent lot line\". | \"Use regulations and restrictions are the same as prescribed for District R1, SFR1, except: (i) Minimum lot/acreage size is increased to 1 acre. (ii) Minimum street/road frontage is increased to 100 feet. (iii) Tracts of 2 acres or more may construct an additional outbuilding and may stable up to 2 horses.\" | Ordinance history: NOT SHOWN"
   },
   {
     "city": "Highland Haven",

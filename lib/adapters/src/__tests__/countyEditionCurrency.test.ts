@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
   SETBACK_EDITION_AMBIGUOUS,
   SETBACK_EDITION_CURRENT,
   SETBACK_EDITION_SUPERSEDED,
@@ -67,14 +68,17 @@ describe("the real Burnet register", () => {
     }
   });
 
-  it("before/after count: Burnet served 0 of 17 districts before pack C and now serves 25 of 27 (all but R-3 ambiguous and PUD no-dimensional-standards)", () => {
+  it("before/after count: Burnet served 0 of 17 districts before pack C and now serves 16 of 27 (9 conditional-not-evaluated, 1 ambiguous R-3, 1 no-dimensional-standards PUD)", () => {
     const burnetRows = register.filter((r) => r.city === "Burnet");
     expect(burnetRows.length).toBe(27);
-    const passing = burnetRows.filter((r) => checkSetbackEditionCurrency({ city: "Burnet", districtCode: r.district_code }).code === SETBACK_EDITION_CURRENT);
-    expect(passing.length).toBe(25);
+    const verdicts = burnetRows.map((r) => checkSetbackEditionCurrency({ city: "Burnet", districtCode: r.district_code }).code);
+    expect(verdicts.filter((c) => c === SETBACK_EDITION_CURRENT).length).toBe(16);
+    expect(verdicts.filter((c) => c === SETBACK_CONDITIONAL_NOT_EVALUATED).length).toBe(9);
+    expect(verdicts.filter((c) => c === SETBACK_EDITION_AMBIGUOUS).length).toBe(1);
+    expect(verdicts.filter((c) => c === SETBACK_NO_DIMENSIONAL_STANDARDS).length).toBe(1);
   });
 
-  it("every Cottonwood Shores district serves (no edge cases found in pack C for this city)", () => {
+  it("every Cottonwood Shores district serves (no edge cases -- conditional or otherwise -- found in pack C for this city)", () => {
     const rows = register.filter((r) => r.city === "Cottonwood Shores");
     expect(rows.length).toBe(18);
     for (const r of rows) {
@@ -83,33 +87,85 @@ describe("the real Burnet register", () => {
     }
   });
 
-  it("Granite Shoals AG serves no numbers (confirmed no dimensional standards), but its other seven districts serve", () => {
+  it("Granite Shoals: AG has no dimensional standards, 4 of its other 7 districts are conditional-not-evaluated (abutting-residential / side-position conditions), and 3 serve clean", () => {
     const ag = checkSetbackEditionCurrency({ city: "Granite Shoals", districtCode: "AG" });
     expect(ag.code).toBe(SETBACK_NO_DIMENSIONAL_STANDARDS);
     const others = register.filter((r) => r.city === "Granite Shoals" && r.district_code !== "AG");
     expect(others.length).toBe(7);
+    const verdicts = others.map((r) => checkSetbackEditionCurrency({ city: "Granite Shoals", districtCode: r.district_code }).code);
+    expect(verdicts.filter((c) => c === SETBACK_EDITION_CURRENT).length).toBe(3);
+    expect(verdicts.filter((c) => c === SETBACK_CONDITIONAL_NOT_EVALUATED).length).toBe(4);
+  });
+
+  it("Bertram R-1-A's side setback is NOT collapsed to a number: the chart cell's misleading 5 ft and the footnote's real 10-ft/zero-lot-line rule are both wrong to serve as ONE value, so the district refuses conditional-not-evaluated with the raw text preserved", () => {
+    const row = register.find((r) => r.city === "Bertram" && r.district_code === "R-1-A")!;
+    expect(row.side_ft).toBe("");
+    expect(row.conditional?.side_ft).toMatch(/5 ft\. \(2\)/);
+    expect(row.notes).toMatch(/CONDITIONAL \(not evaluated/);
+    const v = checkSetbackEditionCurrency({ city: "Bertram", districtCode: "R-1-A" });
+    expect(v.code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    // The rest of Bertram is untouched by this one conditional cell.
+    const others = register.filter((r) => r.city === "Bertram" && r.district_code !== "R-1-A");
+    expect(others.length).toBe(20);
     for (const r of others) {
-      expect(checkSetbackEditionCurrency({ city: "Granite Shoals", districtCode: r.district_code }).code).toBe(SETBACK_EDITION_CURRENT);
+      expect(checkSetbackEditionCurrency({ city: "Bertram", districtCode: r.district_code }).code, r.district_code).toBe(SETBACK_EDITION_CURRENT);
     }
   });
 
-  it("Bertram R-1-A's side setback is the footnote-corrected 10 ft, not the misleading chart cell's 5 ft", () => {
-    const row = register.find((r) => r.city === "Bertram" && r.district_code === "R-1-A")!;
-    expect(row.side_ft).toBe("10");
-    expect(row.notes).toMatch(/REVIEWED OVERRIDE/);
-    const v = checkSetbackEditionCurrency({ city: "Bertram", districtCode: "R-1-A" });
-    expect(v.code).toBe(SETBACK_EDITION_CURRENT);
-  });
-
-  it("Highland Haven A and B serve no numbers (confirmed no dimensional standards); the other six districts serve", () => {
+  it("Highland Haven: A and B have no dimensional standards, R1 and R2 are conditional-not-evaluated (lot configuration relative to Lake LBJ), and the remaining 4 (O, GB, LI, GUI) serve clean", () => {
     for (const code of ["A", "B"]) {
       expect(checkSetbackEditionCurrency({ city: "Highland Haven", districtCode: code }).code).toBe(SETBACK_NO_DIMENSIONAL_STANDARDS);
     }
-    const others = register.filter((r) => r.city === "Highland Haven" && !["A", "B"].includes(r.district_code));
-    expect(others.length).toBe(6);
+    for (const code of ["R1", "R2"]) {
+      expect(checkSetbackEditionCurrency({ city: "Highland Haven", districtCode: code }).code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    }
+    const others = register.filter((r) => r.city === "Highland Haven" && !["A", "B", "R1", "R2"].includes(r.district_code));
+    expect(others.length).toBe(4);
     for (const r of others) {
       expect(checkSetbackEditionCurrency({ city: "Highland Haven", districtCode: r.district_code }).code).toBe(SETBACK_EDITION_CURRENT);
     }
+  });
+
+  /* ------------------------- conditional-not-evaluated: WDLL check 8 ------------------------------ */
+
+  it("Burnet R-1 refuses SETBACK_CONDITIONAL_NOT_EVALUATED, with BOTH branches of the road-width condition in the detail -- never a single collapsed number", () => {
+    const row = register.find((r) => r.city === "Burnet" && r.district_code === "R-1")!;
+    expect(row.front_ft).toBe(""); // never a collapsed "25" -- WDLL check 8, zero wrong values
+    expect(row.conditional?.front_ft).toBe("20 ft. for any road over 31 feet of pavement. 25 ft. for roads shorter than 31 ft.");
+    // The other three fields on this SAME row are clean and keep their resolved numbers for
+    // provenance, even though the district as a whole still refuses today (gate is per district).
+    expect(row.side_ft).toBe("7.5");
+    expect(row.rear_ft).toBe("15");
+    expect(row.corner_ft).toBe("15");
+
+    const v = checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1" });
+    expect(v.verdict).toBe("fail");
+    expect(v.code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    expect(v.detail).toMatch(/20 ft/);
+    expect(v.detail).toMatch(/25 ft/);
+    expect(v.detail).toMatch(/pavement/i);
+  });
+
+  it("a district with no conditional cell at all still serves (Burnet R-1 E: all four fields are plain single numbers)", () => {
+    const row = register.find((r) => r.city === "Burnet" && r.district_code === "R-1 E")!;
+    expect(row.conditional).toBeUndefined();
+    const v = checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1 E" });
+    expect(v.verdict).toBe("pass");
+    expect(v.code).toBe(SETBACK_EDITION_CURRENT);
+  });
+
+  it("REMOVAL-STYLE PROOF: collapsing Burnet R-1's conditional front_ft back to a single number (25, the shape this PR's review replaced) makes the district pass again -- confirming this test would catch that regression", () => {
+    const real = register.find((r) => r.city === "Burnet" && r.district_code === "R-1")!;
+    expect(checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1" }).code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+
+    const collapsed: OrdinanceRegisterRow[] = register.map((r) =>
+      r.city === "Burnet" && r.district_code === "R-1"
+        ? { ...real, front_ft: "25", verification: "verified-browser-read", conditional: undefined }
+        : r,
+    );
+    const v = checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1", register: collapsed });
+    expect(v.verdict).toBe("pass");
+    expect(v.code).toBe(SETBACK_EDITION_CURRENT);
   });
 
   /* ------------------------------------- Burnet R-3: ambiguous ------------------------------------ */
@@ -148,14 +204,14 @@ describe("the real Burnet register", () => {
   /* --------------------- removal-style proof: a row edited back to provisional refuses again ------ */
 
   it("REMOVAL-STYLE PROOF: a cleared row, with its verification edited back to provisional, refuses SETBACK_EDITION_UNVERIFIED again -- demonstrating this suite would actually catch a regression", () => {
-    const real = register.find((r) => r.city === "Burnet" && r.district_code === "R-1")!;
-    // Sanity: the real row passes today.
-    expect(checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1" }).code).toBe(SETBACK_EDITION_CURRENT);
+    const real = register.find((r) => r.city === "Burnet" && r.district_code === "R-1 E")!;
+    // Sanity: the real row passes today (R-1 E has no conditional cell, unlike R-1 -- see above).
+    expect(checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1 E" }).code).toBe(SETBACK_EDITION_CURRENT);
 
     const regressed: OrdinanceRegisterRow[] = register.map((r) =>
-      r.city === "Burnet" && r.district_code === "R-1" ? { ...real, verification: "provisional-ua-spoofed (needs honest re-source)" } : r,
+      r.city === "Burnet" && r.district_code === "R-1 E" ? { ...real, verification: "provisional-ua-spoofed (needs honest re-source)" } : r,
     );
-    const v = checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1", register: regressed });
+    const v = checkSetbackEditionCurrency({ city: "Burnet", districtCode: "R-1 E", register: regressed });
     expect(v.verdict).toBe("fail");
     expect(v.code).toBe(SETBACK_EDITION_UNVERIFIED);
   });
@@ -185,13 +241,14 @@ describe("isUsableVerification", () => {
     expect(isUsableVerification("verified-browser-read")).toBe(true);
     expect(isUsableVerification("source: city GIS layer - not yet cross-checked against ordinance text")).toBe(true);
   });
-  it("refuses unverified, n/a, every provisional-* variant, edition-ambiguous, and no-dimensional-standards", () => {
+  it("refuses unverified, n/a, every provisional-* variant, edition-ambiguous, no-dimensional-standards, and conditional-not-evaluated", () => {
     expect(isUsableVerification("unverified")).toBe(false);
     expect(isUsableVerification("n/a")).toBe(false);
     expect(isUsableVerification("provisional-proxy-bypassed (needs honest re-source)")).toBe(false);
     expect(isUsableVerification("provisional-ua-spoofed (needs honest re-source)")).toBe(false);
     expect(isUsableVerification("edition-ambiguous")).toBe(false);
     expect(isUsableVerification("no-dimensional-standards")).toBe(false);
+    expect(isUsableVerification("conditional-not-evaluated")).toBe(false);
     expect(isUsableVerification(null)).toBe(false);
     expect(isUsableVerification("")).toBe(false);
   });
@@ -281,14 +338,24 @@ describe("getSetbackTableForZoning refuses Burnet by name instead of a silent nu
     }
   });
 
+  it("throws SETBACK_CONDITIONAL_NOT_EVALUATED for Burnet R-1 (road-width condition) rather than returning null or a collapsed number", () => {
+    expect(() => getSetbackTableForZoning("burnet-tx", "R-1")).toThrow(/SETBACK_CONDITIONAL_NOT_EVALUATED|pavement/i);
+    try {
+      getSetbackTableForZoning("burnet-tx", "R-1");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    }
+  });
+
   it("a cleared Burnet city (Marble Falls) does NOT throw -- it falls through to the ordinary lookup, which returns null because no table JSON has been authored for it yet (a separate, not-yet-done task)", () => {
     expect(() => getSetbackTableForZoning("marble-falls-tx", "FR")).not.toThrow();
     expect(getSetbackTableForZoning("marble-falls-tx", "FR")).toBeNull();
   });
 
-  it("BREAK-TEST PROOF (fails on origin/main, passes here): Burnet proper, now pack-C-verified for district R-1, does NOT throw -- before pack C this threw SETBACK_EDITION_UNVERIFIED for every Burnet district", () => {
-    expect(() => getSetbackTableForZoning("burnet-tx", "R-1")).not.toThrow();
-    expect(getSetbackTableForZoning("burnet-tx", "R-1")).toBeNull(); // still no numeric table authored -- a separate task
+  it("BREAK-TEST PROOF (fails on origin/main, passes here): Burnet proper, now pack-C-verified for district R-1 E (no conditional cell), does NOT throw -- before pack C this threw SETBACK_EDITION_UNVERIFIED for every Burnet district", () => {
+    expect(() => getSetbackTableForZoning("burnet-tx", "R-1 E")).not.toThrow();
+    expect(getSetbackTableForZoning("burnet-tx", "R-1 E")).toBeNull(); // still no numeric table authored -- a separate task
   });
 
   it("every non-Burnet jurisdiction is completely unaffected: Bastrop's existing behavior is unchanged", () => {
