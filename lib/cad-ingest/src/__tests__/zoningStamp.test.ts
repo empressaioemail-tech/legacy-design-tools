@@ -36,7 +36,7 @@ import {
   esriRingsToGeoJson,
   reduceZoningFeature,
 } from "../txgio/zoning-service";
-import { resolveZoningLayer } from "../txgio/zoning-layers";
+import { resolveZoningLayer, wiredZoningCityKeys } from "../txgio/zoning-layers";
 import { normalizePropId, parsePropIdsFile } from "../txgio/zoning-cli";
 
 /** A unit square [lo,hi]^2 as a GeoJSON Polygon carrying a district code. */
@@ -513,6 +513,155 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
         cfg,
       ).code,
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Burnet (48053, OPS-24 Phase 1). Before this registration LDT's loader
+// carried no Burnet city at all — 0 of 59,785 Burnet txgio_parcel rows were
+// zoning-stamped (verified live on CORTEX_DATABASE_URL, 2026-10-08).
+// REMOVAL PROOF for this whole describe block: delete either entry from
+// ZONING_LAYERS (zoning-layers.ts) and `resolveZoningLayer` below returns
+// `undefined`, failing every `cfg!.x` assertion immediately.
+// ---------------------------------------------------------------------------
+describe("resolveZoningLayer (Burnet: Marble Falls + Horseshoe Bay)", () => {
+  it.each([
+    ["marble-falls-tx", "Marble Falls", "Zone_ID", "Zone_Name"],
+    ["horseshoe-bay-tx", "Horseshoe Bay", "ZONING", "SUB_ZONING"],
+  ])("resolves %s to %s (county 48053, codeField %s, descriptionField %s)", (key, name, codeField, descriptionField) => {
+    const cfg = resolveZoningLayer(key);
+    expect(cfg).toBeDefined();
+    expect(cfg!.cityKey).toBe(key);
+    expect(cfg!.cityName).toBe(name);
+    expect(cfg!.countyFips).toBe("48053");
+    expect(cfg!.codeField).toBe(codeField);
+    expect(cfg!.descriptionField).toBe(descriptionField);
+  });
+
+  it("Marble Falls targets the public MapServer/16 zoning layer, no transform configured", () => {
+    const cfg = resolveZoningLayer("marble-falls-tx")!;
+    expect(cfg.layerUrl).toBe(
+      "https://mfgis.marblefallstx.gov/arcgis/rest/services/Planning/PDS/MapServer/16",
+    );
+    // Zone_ID already publishes the register's own short code (NR/GC/DT/
+    // ENZ.4/...) verbatim — the Georgetown-pattern simplest case.
+    expect(cfg.codeExtractRegex).toBeUndefined();
+    expect(cfg.codeDomainMap).toBeUndefined();
+    expect(cfg.baseCodeParse).toBeUndefined();
+    expect(cfg.nullDistrictCodes).toBeUndefined();
+  });
+
+  it("Horseshoe Bay targets the Public/Zoning FeatureServer/2 layer resolved off the city's own web map, no transform configured", () => {
+    const cfg = resolveZoningLayer("horseshoe-bay-tx")!;
+    expect(cfg.layerUrl).toBe(
+      "https://horseshoebaygis.newedgeservices.com/arcgis/rest/services/Public/Zoning/FeatureServer/2",
+    );
+    // ZONING already publishes the register's own code (R-1/A-1/C-2/...)
+    // verbatim.
+    expect(cfg.codeExtractRegex).toBeUndefined();
+    expect(cfg.codeDomainMap).toBeUndefined();
+    expect(cfg.baseCodeParse).toBeUndefined();
+    expect(cfg.nullDistrictCodes).toBeUndefined();
+  });
+
+  it("Marble Falls live-shaped attributes reduce to the raw Zone_ID (sample #56, 48053:112952)", () => {
+    const cfg = resolveZoningLayer("marble-falls-tx")!;
+    const reduced = reduceZoningFeature(
+      {
+        attributes: {
+          Zone_ID: "ENZ.4",
+          Zone_Name: "Existing Neighborhood Zone 4",
+          Ordinance: "2018-O-10B",
+          Year_Zoned: 2019,
+        },
+        geometry: null,
+      },
+      cfg,
+    );
+    expect(reduced.code).toBe("ENZ.4");
+    expect(reduced.description).toBe("Existing Neighborhood Zone 4");
+  });
+
+  it("Horseshoe Bay live-shaped attributes reduce to the raw ZONING code (sample #38, 48053:23169, R-4/R-4-MF)", () => {
+    const cfg = resolveZoningLayer("horseshoe-bay-tx")!;
+    const reduced = reduceZoningFeature(
+      {
+        attributes: {
+          PROP_ID: 23169,
+          ZONING: "R-4",
+          SUB_ZONING: "R-4-MF",
+          LANDUSE: "MULTI-FAMILY RESIDENTIAL",
+        },
+        geometry: null,
+      },
+      cfg,
+    );
+    expect(reduced.code).toBe("R-4");
+    expect(reduced.description).toBe("R-4-MF");
+  });
+
+  it("Horseshoe Bay KNOWN SPECIAL CASES: a blank ZONING field (CA / UNK in staging) reduces to NULL, never a guessed district", () => {
+    const cfg = resolveZoningLayer("horseshoe-bay-tx")!;
+    // 48053:69366 — COMMON AREA land use; the live layer's own ZONING field
+    // is blank (the register's CA row documents it is not an adopted
+    // district, but no registry-level filter is needed: the field is
+    // already empty on the city's own layer).
+    expect(
+      reduceZoningFeature(
+        {
+          attributes: { PROP_ID: 69366, ZONING: null, SUB_ZONING: null, LANDUSE: "COMMON AREA" },
+          geometry: null,
+        },
+        cfg,
+      ).code,
+    ).toBeNull();
+    // 48053:106280 — "UNK" in the old staging snapshot; also blank live.
+    expect(
+      reduceZoningFeature(
+        {
+          attributes: { PROP_ID: 106280, ZONING: "", SUB_ZONING: "", LANDUSE: "VACANT LAND" },
+          geometry: null,
+        },
+        cfg,
+      ).code,
+    ).toBeNull();
+    // A whitespace-only value (measured live: 6 features on this layer)
+    // trims the same way.
+    expect(
+      reduceZoningFeature(
+        { attributes: { PROP_ID: 1, ZONING: "  ", SUB_ZONING: null }, geometry: null },
+        cfg,
+      ).code,
+    ).toBeNull();
+  });
+
+  it("FIXTURE: a parcel with no zoning polygon under it yields the declared no-district outcome (null), never a guess", () => {
+    // Models WDLL Appendix A #42 (48053:103196, Marble Falls riverbank — no
+    // zoning polygon on the live layer at this parcel's representative
+    // point, confirmed live 2026-10-08). A synthetic index carrying ONLY an
+    // NR polygon far from this parcel proves the miss is a true "outside
+    // every polygon" case, not an artifact of an empty index.
+    const index = buildZoningIndex([
+      squareFeature("NR", -98.30, 30.49, 0.01), // nowhere near the parcel below
+    ]);
+    const noPolygonParcel = parcelSquare(-98.2742, 30.5654, 0.0005); // 103196-shaped
+    const hit = stampParcelZoning(index, noPolygonParcel);
+    expect(hit).toBeNull();
+  });
+
+  it("FIXTURE: a parcel centered inside a registered Marble Falls polygon stamps that polygon's raw Zone_ID", () => {
+    const index = buildZoningIndex([
+      squareFeature("NR", -98.3025, 30.4932, 0.002),
+    ]);
+    const parcel = parcelSquare(-98.302056, 30.493671, 0.0003); // sample #7 shaped
+    const hit = stampParcelZoning(index, parcel);
+    expect(hit?.code).toBe("NR");
+  });
+
+  it("wiredZoningCityKeys(48053) composes the SET {marble-falls-tx, horseshoe-bay-tx} — never a sole-city assumption", () => {
+    expect(wiredZoningCityKeys("48053")).toEqual(
+      new Set(["marble-falls-tx", "horseshoe-bay-tx"]),
+    );
   });
 });
 
