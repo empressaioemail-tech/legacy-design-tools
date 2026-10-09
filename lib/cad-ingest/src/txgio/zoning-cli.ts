@@ -63,13 +63,14 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { normalizeDigitId } from "./geo";
 import { ZONING_LAYERS, resolveZoningLayer } from "./zoning-layers";
 import {
   fetchZoningFeatures,
   type RawZoningFeature,
   type ZoningLayerMeta,
 } from "./zoning-service";
-import { buildZoningIndex } from "./zoning-stamp";
+import { buildParcelIdIndex, buildZoningIndex } from "./zoning-stamp";
 import { stampCountyZoning } from "./zoning-stamp-db";
 import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 
@@ -176,14 +177,15 @@ function sortedHist(hist: Record<string, number>): [string, number][] {
 
 /**
  * Normalize a raw prop id (leading zeros stripped from an all-digit id,
- * left untouched otherwise). Mirrors `normalizeCadPropId` in
- * `artifacts/api-server/src/lib/parcelNodeId.ts` — duplicated here (not
- * imported) so `cad-ingest` stays dependency-free of `api-server`.
+ * left untouched otherwise). Delegates to `geo.ts`'s `normalizeDigitId` —
+ * the SAME rule the zoning-stamp parcel-id join now applies (Bug 2) — so
+ * the two never drift into two copies of one rule. `geo.ts`'s own doc
+ * comment carries the cross-package note: this mirrors `normalizeCadPropId`
+ * in `artifacts/api-server/src/lib/parcelNodeId.ts`, not imported from it so
+ * `cad-ingest` stays dependency-free of `api-server`.
  */
 export function normalizePropId(propId: string): string {
-  const t = propId.trim();
-  if (!/^\d+$/.test(t)) return t;
-  return t.replace(/^0+(?=\d)/, "");
+  return normalizeDigitId(propId);
 }
 
 /**
@@ -440,6 +442,33 @@ async function main(): Promise<void> {
   log(`codes in the index: ${codesInLayer.join(", ")}`);
   if (cfg.baseCodeParse) logParseAudit(audit);
 
+  // Bug 2 (parcel-id-first join): built from the SAME fetched `raw`
+  // features `index` came from, but NOT filtered by `buildZoningIndex`'s
+  // blank-code drop — a blank code on the parcel's own feature is exactly
+  // the fact this index exists to answer. Only built when the layer config
+  // carries `parcelIdField`; every other city's run is untouched.
+  // `parcelIdDiscriminatorValues` (cross-county fix) restricts the id join
+  // to features on this layer that are actually on THIS city's county side
+  // (Horseshoe Bay's layer also carries Llano CAD parcels under an
+  // overlapping PROP_ID space) — see zoning-stamp.ts's buildParcelIdIndex.
+  const parcelIdIndex = cfg.parcelIdField
+    ? buildParcelIdIndex(raw, {
+        discriminatorAcceptValues: cfg.parcelIdDiscriminatorValues,
+      })
+    : undefined;
+  if (parcelIdIndex) {
+    const blankOwnFeatures = [...parcelIdIndex.values()].filter(
+      (e) => e.code === null,
+    ).length;
+    log(
+      `parcel-id index (field ${cfg.parcelIdField}` +
+        (cfg.parcelIdDiscriminatorField
+          ? `, discriminator ${cfg.parcelIdDiscriminatorField}=${(cfg.parcelIdDiscriminatorValues ?? []).join("/")}`
+          : "") +
+        `): ${parcelIdIndex.size} ids indexed (${blankOwnFeatures} carry a blank/no-district code)`,
+    );
+  }
+
   // 2. Stamp the county's parcels.
   if (dryRun && !databaseUrl) {
     log(
@@ -461,6 +490,7 @@ async function main(): Promise<void> {
       dryRun,
       limit,
       propIds,
+      parcelIdIndex,
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
@@ -511,15 +541,29 @@ async function main(): Promise<void> {
       "(representative point in no zoning polygon carrying a published code: " +
       "outside the city, an un-zoned pocket, or one of the layer's empty-code polygons)",
   );
+  if (parcelIdIndex) {
+    log(
+      `no district (layer): ${summary.parcelsNoDistrictOnLayer} (Bug 2: the ` +
+        "parcel's OWN feature was found by id and its code there is blank — " +
+        "declared, never stamped from a neighbour)",
+    );
+    log(
+      `id-geometry mismatch: ${summary.parcelsIdGeometryMismatch} (an id match ` +
+        "was found but its feature's geometry does not contain this parcel's " +
+        "interior point -- rejected as a cross-county/numeric id coincidence, " +
+        "the point lookup decided instead; NOT a 7th bucket, see note below)",
+    );
+  }
   log(
     `buckets sum:      ${
       summary.parcelsMatched +
       summary.parcelsPlannedDevelopment +
       summary.parcelsUnrecognised +
       summary.parcelsUnmatched +
+      summary.parcelsNoDistrictOnLayer +
       summary.parcelsSkippedNoAccount
     } (must equal features read; a feature is in exactly one of matched / planned dev / ` +
-      "unrecognised / null / skipped-no-account)",
+      "unrecognised / null / no-district-on-layer / skipped-no-account)",
   );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
   const interimVals = sortedHist(summary.interimValueHistogram);
@@ -585,15 +629,27 @@ async function main(): Promise<void> {
     if (summary.unrecognisedPropIds && summary.unrecognisedPropIds.length > 0) {
       log(`  ids: ${summary.unrecognisedPropIds.join(", ")}`);
     }
+    if (parcelIdIndex) {
+      log(
+        `noDistrictOnLayer:     ${summary.noDistrictOnLayerPropIds?.length ?? 0} (Bug 2: own feature found by id, code blank — declared, never from a neighbour)`,
+      );
+      if (
+        summary.noDistrictOnLayerPropIds &&
+        summary.noDistrictOnLayerPropIds.length > 0
+      ) {
+        log(`  ids: ${summary.noDistrictOnLayerPropIds.join(", ")}`);
+      }
+    }
     if (summary.perParcel && summary.perParcel.length > 0) {
       log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
       log(
-        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} district`,
+        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} ${"method".padEnd(29)} district`,
       );
       for (const row of summary.perParcel) {
         log(
           `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ` +
-            `${row.kind.padEnd(20)} ${(row.interim === undefined ? "-" : String(row.interim)).padEnd(8)} ${row.district ?? "(none)"}` +
+            `${row.kind.padEnd(20)} ${(row.interim === undefined ? "-" : String(row.interim)).padEnd(8)} ` +
+            `${(row.matchMethod ?? "-").padEnd(29)} ${row.district ?? "(none)"}` +
             (row.publishedCode && row.publishedCode !== row.district
               ? `   [published: ${row.publishedCode}]`
               : ""),
