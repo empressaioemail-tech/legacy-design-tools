@@ -20,3 +20,13 @@ export {
   type ClusterLockTxHandle,
   type WithClusterSweepLockResult,
 } from "./clusterLock";
+export {
+  swapStagedCounty,
+  SourceFeatureSwapEmptyStageError,
+  SourceFeatureSwapCountMismatchError,
+  SOURCE_FEATURE_SWAP_EMPTY_STAGE,
+  SOURCE_FEATURE_SWAP_COUNT_MISMATCH,
+  type SourceFeatureSwapDbHandle,
+  type SwapStagedCountyParams,
+  type SwapStagedCountyResult,
+} from "./sourceFeatureSwap";

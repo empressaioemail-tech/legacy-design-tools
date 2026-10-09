@@ -36,6 +36,19 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: check-no-hauska-atom-contract
         run: node scripts/check-no-hauska-atom-contract.mjs
+      # P-499 (OPS-16 A-382/A-383): one national source-table shape, keyed on
+      # the provider's own id (lib/source-registry, lib/db/drizzle/0111_
+      # source_feature.sql). Refuses a registry entry keyed positionally/on a
+      # bigserial, and any migration after 0111 that creates a new per-state
+      # tx_*/txgio_* table.
+      - name: check-source-shape (P-499)
+        run: node scripts/check-source-shape.mjs
+      # P-499 (OPS-16 A-382/A-383): serving-read ratchet. Fails on any
+      # artifacts/api-server or artifacts/smartsite-mcp reader of a source
+      # table that is not on the checked-in allow-list, and on any allow-list
+      # entry that no longer reads (the list only shrinks).
+      - name: check-serving-source-reads (P-499)
+        run: node scripts/check-serving-source-reads.mjs
       # P-492 (OPS-16 A-368): GoHighLevel is retired from Smart Site with a hard
       # cut. Nothing under cortex-api's source may call it or read its
       # credentials again. rg exit 0 = a hit (fail), 1 = clean (pass), anything
