@@ -3601,10 +3601,6 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_wcad_ag_valuation
 
 
 -- Name: txgio_address txgio_address_county_fips_object_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
--- Migration 0110: was (county_fips, full_addr, unit); full_addr/unit
--- collapsed distinct points sharing a label (measured Burnet 2026-10-09:
--- 35,857 service points -> 35,690 stored). object_id is NOT NULL and
--- unique per county (verified live: never null, zero duplicate groups).
 
 ALTER TABLE ONLY @@SCHEMA@@.txgio_address
     ADD CONSTRAINT txgio_address_county_fips_object_id_pk PRIMARY KEY (county_fips, object_id);
