@@ -80,6 +80,9 @@
     },
     {
       "path": "./lib/instrument-registry"
+    },
+    {
+      "path": "./lib/source-registry"
     }
   ]
 }

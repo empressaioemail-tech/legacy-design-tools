@@ -130,4 +130,6 @@ export * from "./clerkPortalTerms";
 export * from "./recordsRequestJobs";
 export * from "./recordsRequestArtifacts";
 export * from "./zoningStampRun";
+export * from "./sourceFeature";
+export * from "./sourceFeatureStage";
 // smartFiles.ts stays on disk until G-58b drops the tables. Do not re-export.
