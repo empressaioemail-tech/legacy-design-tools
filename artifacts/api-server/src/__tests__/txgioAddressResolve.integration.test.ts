@@ -201,6 +201,7 @@ const ADDRESS_SEED: (typeof txgioAddress.$inferInsert)[] = [
     countyFips: "48209",
     fullAddr: "6026 MARSH LN",
     unit: "",
+    objectId: 1,
     addNumber: "6026",
     stName: "Marsh",
     postComm: "Buda",

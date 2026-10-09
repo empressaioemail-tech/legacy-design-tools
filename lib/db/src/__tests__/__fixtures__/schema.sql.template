@@ -2584,7 +2584,7 @@ CREATE TABLE @@SCHEMA@@.txgio_address (
     county_fips text NOT NULL,
     full_addr text NOT NULL,
     unit text DEFAULT ''::text NOT NULL,
-    object_id integer,
+    object_id integer NOT NULL,
     add_number text,
     st_name text,
     post_comm text,
@@ -3600,10 +3600,14 @@ ALTER TABLE ONLY @@SCHEMA@@.tx_wcad_ag_valuation
     ADD CONSTRAINT tx_wcad_ag_valuation_pkey PRIMARY KEY (id);
 
 
--- Name: txgio_address txgio_address_county_fips_full_addr_unit_pk; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: txgio_address txgio_address_county_fips_object_id_pk; Type: CONSTRAINT; Schema: public; Owner: -
+-- Migration 0110: was (county_fips, full_addr, unit); full_addr/unit
+-- collapsed distinct points sharing a label (measured Burnet 2026-10-09:
+-- 35,857 service points -> 35,690 stored). object_id is NOT NULL and
+-- unique per county (verified live: never null, zero duplicate groups).
 
 ALTER TABLE ONLY @@SCHEMA@@.txgio_address
-    ADD CONSTRAINT txgio_address_county_fips_full_addr_unit_pk PRIMARY KEY (county_fips, full_addr, unit);
+    ADD CONSTRAINT txgio_address_county_fips_object_id_pk PRIMARY KEY (county_fips, object_id);
 
 
 -- Name: txgio_parcel txgio_parcel_county_fips_tile_key_feature_index_pk; Type: CONSTRAINT; Schema: public; Owner: -

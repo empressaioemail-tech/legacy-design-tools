@@ -428,7 +428,9 @@ describe("lib/db schema integration", () => {
         "tx_wcad_ag_valuation",
         // feat/txgio-address-points (0056) — self-hosted TxGIO/StratMap
         // address-POINT store (open paginated ArcGIS REST); point sibling
-        // of txgio_parcel, keyed (county_fips, full_addr, unit).
+        // of txgio_parcel. Keyed (county_fips, object_id) as of migration
+        // 0110 — was (county_fips, full_addr, unit), which collapsed
+        // distinct points sharing a label (measured Burnet 2026-10-09).
         "txgio_address",
         // feat/txgio-parcel-geometry (0053) — self-hosted TxGIO/StratMap
         // parcel geometry store for counties without a live county GIS

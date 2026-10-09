@@ -198,6 +198,7 @@ async function main(): Promise<void> {
 
   // 3. Load (or drain when --dry-run).
   let rowsInserted = 0;
+  let duplicateObjectIds = 0;
   if (dryRun) {
     for await (const _rec of records()) {
       // parse-only
@@ -222,6 +223,7 @@ async function main(): Promise<void> {
         },
       });
       rowsInserted = summary.rowsInserted;
+      duplicateObjectIds = summary.duplicateObjectIds;
     } finally {
       await pool.end();
     }
@@ -236,7 +238,11 @@ async function main(): Promise<void> {
   log(`features read:     ${counters.rowsRead}`);
   log(`features parsed:   ${counters.rowsParsed}`);
   log(`rows inserted:     ${dryRun ? "0 (dry-run)" : rowsInserted}`);
-  log(`features skipped:  ${counters.rowsSkipped} (no addr / no geometry)`);
+  log(`features skipped:  ${counters.rowsSkipped} (no addr / no objectid / no geometry)`);
+  log(
+    `duplicate objectids dropped: ${dryRun ? "0 (dry-run)" : duplicateObjectIds}` +
+      " (same objectid seen twice in this load -- should be 0; a reconciliation gap means it was not)",
+  );
   if (limit !== undefined) log(`limit:             ${limit} (bounded sample)`);
   log(`duration:          ${seconds}s`);
   if (counters.skipSamples.length > 0) {

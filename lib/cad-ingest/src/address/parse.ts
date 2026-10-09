@@ -27,7 +27,10 @@ export interface TxgioAddressRecord {
   countyFips: string;
   fullAddr: string;
   unit: string;
-  objectId: number | null;
+  /** Source OBJECTID — half of the table's primary key (migration 0110),
+   *  never null here: a feature with no usable objectid is skipped by
+   *  {@link normalizeAddressFeature} before this type is ever built. */
+  objectId: number;
   addNumber: string | null;
   stName: string | null;
   postComm: string | null;
@@ -83,8 +86,10 @@ function pointOf(
 
 /**
  * Normalize one address-point feature. Returns null (and counts a skip)
- * when the feature carries no usable point geometry or no `full_addr`
- * (the store's join surface and half its primary key).
+ * when the feature carries no usable point geometry, no `full_addr`, or
+ * no usable `objectid` (the store's primary key, together with
+ * county_fips, as of migration 0110 — a feature we cannot key is
+ * declined, never inserted with a null/placeholder objectid).
  */
 export function normalizeAddressFeature(
   countyFips: string,
@@ -97,6 +102,11 @@ export function normalizeAddressFeature(
     recordSkip(counters, `objectid ${p.objectid ?? "?"}: no full_addr`);
     return null;
   }
+  const objectId = intOrNull(p.objectid);
+  if (objectId === null) {
+    recordSkip(counters, `${fullAddr}: no usable objectid`);
+    return null;
+  }
   const point = pointOf(feature.geometry);
   if (point === null) {
     recordSkip(counters, `${fullAddr}: no point geometry`);
@@ -106,11 +116,10 @@ export function normalizeAddressFeature(
   return {
     countyFips,
     fullAddr,
-    // Unit is the primary-key tiebreaker; normalize null -> "" so the
-    // common (no-unit) case is a stable key and multi-unit points at
-    // one label do not collide.
+    // Unit is kept as a (non-key) column; normalize null -> "" so a
+    // missing unit is a stable "" rather than null.
     unit: str(p.unit) ?? "",
-    objectId: intOrNull(p.objectid),
+    objectId,
     addNumber: str(p.add_number),
     stName: str(p.st_name),
     postComm: str(p.post_comm),

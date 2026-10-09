@@ -82,7 +82,10 @@ describe("address feature normalization", () => {
     expect(c.rowsSkipped).toBe(0);
   });
 
-  it("keeps a real unit as the PK tiebreaker", () => {
+  it("keeps a real unit as a stored (non-key) column", () => {
+    // unit was the PK tiebreaker pre-migration-0110; it is now a plain
+    // column (the key is county_fips + objectid), but it must still
+    // round-trip -- it remains the join surface to CAD situs.
     const c = newCounters();
     const rec = normalizeAddressFeature(
       "48453",
@@ -97,6 +100,29 @@ describe("address feature normalization", () => {
     const rec = normalizeAddressFeature(
       "48453",
       feature({ ...TRAVIS_PROPS, full_addr: "  " }, TRAVIS_COORDS),
+      c,
+    );
+    expect(rec).toBeNull();
+    expect(c.rowsSkipped).toBe(1);
+  });
+
+  it("skips a feature with no usable objectid, with a recorded reason (never inserts a null key)", () => {
+    const c = newCounters();
+    const rec = normalizeAddressFeature(
+      "48453",
+      feature({ ...TRAVIS_PROPS, objectid: null }, TRAVIS_COORDS),
+      c,
+    );
+    expect(rec).toBeNull();
+    expect(c.rowsSkipped).toBe(1);
+    expect(c.skipSamples[0]).toContain("no usable objectid");
+  });
+
+  it("skips a feature with a non-numeric objectid", () => {
+    const c = newCounters();
+    const rec = normalizeAddressFeature(
+      "48453",
+      feature({ ...TRAVIS_PROPS, objectid: "not-a-number" }, TRAVIS_COORDS),
       c,
     );
     expect(rec).toBeNull();
@@ -195,6 +221,23 @@ describe("address service pagination (exit-bounded)", () => {
       rows.push(f);
     }
     expect(rows).toHaveLength(50);
+  });
+
+  it("sorts every page by objectid ASC, so resultOffset paging is stable", async () => {
+    const { fetchJson, calls } = fakeService(4500);
+    const rows: unknown[] = [];
+    for await (const f of fetchAddressFeatures({
+      countyName: "Travis",
+      fetchJson,
+      rateMs: 0,
+    })) {
+      rows.push(f);
+    }
+    const pageCalls = calls.filter((u) => u.includes("resultOffset="));
+    expect(pageCalls.length).toBeGreaterThan(0);
+    for (const url of pageCalls) {
+      expect(url).toContain("orderByFields=objectid");
+    }
   });
 
   it("targets the verified StratMap address-points layer", () => {
