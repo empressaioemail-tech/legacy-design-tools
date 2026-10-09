@@ -73,7 +73,10 @@
 -- `SET statement_timeout = 0` guards against a future non-zero default
 -- killing the migration mid-way, same reasoning as 0058/0108.
 
-SET statement_timeout = 0;
+-- SET LOCAL, not SET (W3 review): migrate-prod.mjs runs this file inside BEGIN/COMMIT, so LOCAL
+-- covers every statement here and ends with the transaction. A plain SET would outlive the COMMIT
+-- and, through a Neon -pooler host, leak onto a shared server connection (2026-10-07 incident).
+SET LOCAL statement_timeout = 0;
 
 ALTER TABLE "txgio_address" ALTER COLUMN "object_id" SET NOT NULL;
 
