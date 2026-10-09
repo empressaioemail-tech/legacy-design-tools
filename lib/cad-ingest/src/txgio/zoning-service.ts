@@ -103,6 +103,16 @@ export interface RawZoningFeature {
    * ruling may need are never discarded at the layer boundary.
    */
   parse?: BaseCodeParse;
+  /**
+   * OPTIONAL (Burnet stage 3 §3 Bug 2). Set only when the layer config
+   * carries `parcelIdField` — the RAW value of that field on this feature,
+   * coerced to a string (the field is an ArcGIS integer on Horseshoe Bay's
+   * layer, same coercion as `codeField`). NOT yet normalized (leading
+   * zeros etc.) — `buildParcelIdIndex` (zoning-stamp.ts) owns that, the same
+   * place `--prop-ids-file` normalization already lives, so the two stay
+   * one rule instead of two copies that can drift apart.
+   */
+  parcelId?: string | null;
 }
 
 function str(v: unknown): string | null {
@@ -178,6 +188,7 @@ export function reduceZoningFeature(
     | "codeDomainMap"
     | "nullDistrictCodes"
     | "baseCodeParse"
+    | "parcelIdField"
   >,
 ): RawZoningFeature {
   const { properties: props, geometry } = normalizeZoningPageFeature(feature);
@@ -189,11 +200,16 @@ export function reduceZoningFeature(
   const description = cfg.descriptionField
     ? str(props[cfg.descriptionField])
     : null;
+  // Read BEFORE the null-district-code early return: a blank-coded feature's
+  // own parcel id is exactly what Bug 2's fix needs to find it by (the id
+  // join must see this feature, blank code and all — see
+  // `buildParcelIdIndex`, zoning-stamp.ts).
+  const parcelId = cfg.parcelIdField ? codeFieldRaw(props[cfg.parcelIdField]) : null;
   if (isNullDistrictCode(code, cfg.nullDistrictCodes)) {
-    return { code: null, description, geometry };
+    return { code: null, description, geometry, parcelId };
   }
   if (!cfg.baseCodeParse || code === null) {
-    return { code, description, geometry };
+    return { code, description, geometry, parcelId };
   }
   // Base-code layers (Austin): resolve the compound published value to its
   // base district. `unrecognised` keeps the RAW value in `code` — the published
@@ -210,6 +226,7 @@ export function reduceZoningFeature(
     description,
     geometry,
     parse,
+    parcelId,
   };
 }
 
@@ -374,7 +391,11 @@ export async function fetchZoningFeatures(
       opts.limit !== undefined ? opts.limit - out.length : pageSize;
     if (remaining <= 0) return out;
     const want = Math.min(pageSize, remaining);
-    const outFields = [opts.cfg.codeField, opts.cfg.descriptionField]
+    const outFields = [
+      opts.cfg.codeField,
+      opts.cfg.descriptionField,
+      opts.cfg.parcelIdField,
+    ]
       .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(",");
     const where = opts.cfg.layerWhere?.trim() || "1=1";

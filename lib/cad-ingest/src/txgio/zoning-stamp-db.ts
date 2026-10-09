@@ -58,9 +58,26 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txgioParcel } from "@workspace/db/schema";
-import type { GeoJsonGeometry } from "./geo";
+import { normalizeDigitId, type GeoJsonGeometry } from "./geo";
 import type { BaseCodeKind } from "./zoning-base-code";
-import { stampParcelZoning, type ZoningPolygon } from "./zoning-stamp";
+import {
+  stampParcelZoning,
+  type ParcelIdZoningEntry,
+  type ZoningPolygon,
+} from "./zoning-stamp";
+
+/**
+ * How a stamped (or declared-blank) parcel's district was decided
+ * (Burnet stage 3 §3 Bug 2). `"parcel-id"`: the layer's own feature for
+ * this exact parcel id published a code, used directly. `"parcel-id-blank"`:
+ * the layer's own feature for this parcel id exists but its code field is
+ * blank/null — a declared "no district on the city's own layer" outcome,
+ * never filled in from a neighbour. `"point"`: no parcel-id index was
+ * configured for this layer, or this parcel's id was not found on it, so
+ * the point-in-polygon lookup decided (the ONLY method before Bug 2, and
+ * still the only method for a district-polygon layer like Marble Falls).
+ */
+export type ZoningMatchMethod = "parcel-id" | "parcel-id-blank" | "point";
 
 /** Why a feature was skipped for carrying no CAD account. */
 export type NoAccountReason = "zero" | "empty" | "null";
@@ -128,6 +145,18 @@ export interface ZoningStampSummary {
   parcelsMatched: number;
   /** Parcels left NULL (representative point in no zoning polygon). */
   parcelsUnmatched: number;
+  /**
+   * Burnet stage 3 §3 Bug 2. Parcels whose layer config carries
+   * `parcelIdField` AND whose OWN feature was found by that id on the
+   * layer AND whose code field on that own feature is blank/null — a
+   * DECLARED "no district on the city's own layer" outcome. Disjoint from
+   * `parcelsUnmatched` (that bucket means no feature at all covered the
+   * point; this one means the parcel's OWN feature was found and said
+   * nothing) and disjoint from `parcelsMatched`/`parcelsPlannedDevelopment`/
+   * `parcelsUnrecognised` (this parcel is never stamped from a neighbour).
+   * Always 0 when the layer carries no `parcelIdField` (Marble Falls).
+   */
+  parcelsNoDistrictOnLayer: number;
   /**
    * Features read whose `prop_id` is `'0'`, empty or NULL, so they were NOT
    * PIPed and wrote NO ROW (P-259b, operator ruling 2026-09-17). Listed by
@@ -250,24 +279,39 @@ export interface ZoningStampSummary {
    */
   unrecognisedPropIds?: string[];
   /**
+   * Scoped runs only (Burnet stage 3 §3 Bug 2): requested prop ids whose
+   * OWN feature was found by id on a `parcelIdField` layer but whose code
+   * there is blank/null — the declared "no district on the city's own
+   * layer" outcome. Always empty when the layer carries no `parcelIdField`.
+   */
+  noDistrictOnLayerPropIds?: string[];
+  /**
    * Scoped runs only: one row per RESOLVED parcel plus one per skipped
    * no-account feature, with its outcome — the per-parcel would-stamp table
    * (dry-run) or applied table (live). `district` is null when nothing is
    * stamped, and `kind` says why: `none` (no zoning polygon), `unrecognised`
    * (published value has no base in this city's vocabulary), `base`, or
-   * `planned-development` (stamped raw), or `skipped-no-account` (no CAD
-   * account, no row written). `publishedCode` is the value the layer published
-   * for that polygon. `interim` (P-259b) is set on stamped rows whose published
-   * value carried a declared interim qualifier, and is `undefined` when nothing
-   * was stamped (so it is never read as "stamped, not interim").
+   * `planned-development` (stamped raw), `skipped-no-account` (no CAD
+   * account, no row written), or `no-district-on-layer` (Bug 2: the
+   * parcel's OWN feature was found by id and its code is blank — never
+   * stamped from a neighbour). `publishedCode` is the value the layer
+   * published for that polygon. `interim` (P-259b) is set on stamped rows
+   * whose published value carried a declared interim qualifier, and is
+   * `undefined` when nothing was stamped (so it is never read as "stamped,
+   * not interim"). `matchMethod` (Bug 2) says HOW a row's outcome was
+   * decided — `parcel-id` / `parcel-id-blank` / `point` — and is
+   * `undefined` for a `skipped-no-account` row (never reached a match
+   * decision) and for every run on a layer with no `parcelIdField`
+   * configured (method is always the point lookup there, same as always).
    */
   perParcel?: {
     propId: string;
     featureIndex: number;
     district: string | null;
-    kind: BaseCodeKind | "none" | "skipped-no-account";
+    kind: BaseCodeKind | "none" | "skipped-no-account" | "no-district-on-layer";
     publishedCode?: string | null;
     interim?: boolean;
+    matchMethod?: ZoningMatchMethod;
   }[];
 }
 
@@ -380,10 +424,25 @@ export async function stampCountyZoning(opts: {
    * filtered set, in read order).
    */
   propIds?: Set<string>;
+  /**
+   * Burnet stage 3 §3 Bug 2. Set ONLY for a layer whose config carries
+   * `parcelIdField` (built by the CLI via `buildParcelIdIndex` off the SAME
+   * fetched features `index` came from). When present, each parcel's OWN
+   * `prop_id` (normalized the same way, `normalizeDigitId`) is looked up
+   * here FIRST, before any point-in-polygon: a real code stamps directly
+   * (`matchMethod: "parcel-id"`), a blank code is the declared
+   * "no district on the city's own layer" outcome
+   * (`matchMethod: "parcel-id-blank"`, counted in
+   * `parcelsNoDistrictOnLayer`, never PIPed), and an id absent from this
+   * index falls back to the ordinary point lookup (`matchMethod: "point"`).
+   * Undefined (the default) preserves the pre-Bug-2 point-only path
+   * exactly — every existing caller that does not pass this is unaffected.
+   */
+  parcelIdIndex?: Map<string, ParcelIdZoningEntry>;
   onProgress?: (done: number, matched: number) => void;
   progressEvery?: number;
 }): Promise<ZoningStampSummary> {
-  const { db, countyFips, cityKey, index, dryRun, limit, propIds } = opts;
+  const { db, countyFips, cityKey, index, dryRun, limit, propIds, parcelIdIndex } = opts;
   const progressEvery = opts.progressEvery ?? 5000;
   if (!cityKey.trim()) {
     throw new Error("stampCountyZoning requires cityKey (ZONING_LAYERS key)");
@@ -418,6 +477,7 @@ export async function stampCountyZoning(opts: {
     accountsRead: 0,
     parcelsMatched: 0,
     parcelsUnmatched: 0,
+    parcelsNoDistrictOnLayer: 0,
     parcelsSkippedNoAccount: 0,
     skippedNoAccountByReason: { zero: 0, empty: 0, null: 0 },
     parcelsUnrecognised: 0,
@@ -434,6 +494,7 @@ export async function stampCountyZoning(opts: {
 
   const noZoningPolygonHit: string[] = [];
   const unrecognisedPropIds: string[] = [];
+  const noDistrictOnLayerPropIds: string[] = [];
   const skippedNoAccountPropIds: string[] = [];
   const foundPropIds = new Set<string>();
   const accounts = new Set<string>();
@@ -484,7 +545,44 @@ export async function stampCountyZoning(opts: {
     summary.accountBearingFeatures += 1;
     if (p.propId) accounts.add(p.propId);
 
-    const hit = stampParcelZoning(index, p.geometry as GeoJsonGeometry);
+    // BUG 2 (Burnet stage 3 §3, parcel-id-first join). Checked BEFORE the
+    // point lookup, for a layer whose config carries `parcelIdField`
+    // (Horseshoe Bay): the parcel's OWN feature, found by id, decides.
+    // A blank code there is a DECLARED fact — never PIPed, never
+    // overwritten by whichever neighbour's polygon a point lookup would
+    // have landed in. An id absent from this index (every parcel, on a
+    // layer with no `parcelIdField` configured) falls through to the
+    // ordinary point lookup exactly as before Bug 2.
+    const idEntry =
+      parcelIdIndex && p.propId
+        ? parcelIdIndex.get(normalizeDigitId(p.propId))
+        : undefined;
+    if (idEntry && idEntry.code === null) {
+      summary.parcelsNoDistrictOnLayer += 1;
+      if (scoped && p.propId) {
+        noDistrictOnLayerPropIds.push(p.propId);
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: null,
+          kind: "no-district-on-layer",
+          matchMethod: "parcel-id-blank",
+        });
+      }
+      continue;
+    }
+    // `matchMethod` is only meaningful (non-undefined) when this layer
+    // carries a `parcelIdField` at all — a layer with none (Marble Falls)
+    // always used the point lookup, before and after Bug 2, and reports no
+    // method rather than a redundant constant "point" on every row.
+    const matchMethod: ZoningMatchMethod | undefined = parcelIdIndex
+      ? idEntry
+        ? "parcel-id"
+        : "point"
+      : undefined;
+    const hit = idEntry
+      ? { code: idEntry.code!, description: idEntry.description, parse: idEntry.parse }
+      : stampParcelZoning(index, p.geometry as GeoJsonGeometry);
     if (!hit) {
       // No zoning polygon holds the parcel's representative point: outside the
       // city, or an un-zoned pocket. Honest null, never a guessed district.
@@ -496,6 +594,7 @@ export async function stampCountyZoning(opts: {
           featureIndex: p.featureIndex,
           district: null,
           kind: "none",
+          matchMethod,
         });
       }
     } else if (hit.parse?.kind === "unrecognised") {
@@ -526,6 +625,7 @@ export async function stampCountyZoning(opts: {
           kind: "unrecognised",
           publishedCode: hit.code,
           interim: hit.parse.interim,
+          matchMethod,
         });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
@@ -575,6 +675,7 @@ export async function stampCountyZoning(opts: {
           kind,
           publishedCode: hit.parse?.raw ?? hit.code,
           interim,
+          matchMethod,
         });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
@@ -602,6 +703,7 @@ export async function stampCountyZoning(opts: {
     summary.noZoningPolygonHit = noZoningPolygonHit;
     summary.skippedNoAccountPropIds = skippedNoAccountPropIds;
     summary.unrecognisedPropIds = unrecognisedPropIds;
+    summary.noDistrictOnLayerPropIds = noDistrictOnLayerPropIds;
     summary.perParcel = perParcel;
   }
 

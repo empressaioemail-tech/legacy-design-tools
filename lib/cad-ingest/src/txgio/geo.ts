@@ -310,3 +310,238 @@ export function pointInGeometry(
   }
   return false;
 }
+
+// --------------------------------------------------------------- IDs
+
+/**
+ * Strip leading zeros from an all-digit id ("0031131" -> "31131"); any
+ * other value is returned trimmed, unchanged. Shared normalization for
+ * every place `cad-ingest` compares a CAD/GIS id as a loose string
+ * (`--prop-ids-file` ids, a zoning layer's own parcel-id attribute). Kept
+ * here, not re-derived per call site, because `zoning-cli.ts`'s
+ * `normalizePropId` and the zoning-stamp parcel-id join (`zoning-stamp.ts`)
+ * both need EXACTLY this rule and a silent divergence between two copies
+ * would reintroduce the class of bug OPS-16 already named (a fix landing
+ * in one copy of the logic but not its sibling). `api-server`'s own
+ * `normalizeCadPropId` (`parcelNodeId.ts`) mirrors this rule too, but is
+ * deliberately NOT imported here — `cad-ingest` stays dependency-free of
+ * `api-server` (see `zoning-cli.ts`'s header) — so that is a documented,
+ * separate copy across the package boundary, not an oversight.
+ */
+export function normalizeDigitId(raw: string): string {
+  const t = raw.trim();
+  if (!/^\d+$/.test(t)) return t;
+  return t.replace(/^0+(?=\d)/, "");
+}
+
+// -------------------------------------------------------- Interior point
+
+/** A WGS84 (or whatever CRS the geometry is in) point, longitude first. */
+export interface InteriorPoint {
+  longitude: number;
+  latitude: number;
+}
+
+function isPosition2(v: unknown): v is [number, number] {
+  return (
+    Array.isArray(v) &&
+    v.length >= 2 &&
+    typeof v[0] === "number" &&
+    typeof v[1] === "number" &&
+    Number.isFinite(v[0]) &&
+    Number.isFinite(v[1])
+  );
+}
+
+/** One polygon PART: outer ring first, any holes after (GeoJSON Polygon.coordinates shape). */
+type RingSet = [number, number][][];
+
+/** Filter a raw coordinate ring to finite positions; null when fewer than 3 survive. */
+function cleanRing(ring: unknown): [number, number][] | null {
+  if (!Array.isArray(ring)) return null;
+  const out = ring.filter(isPosition2) as [number, number][];
+  return out.length >= 3 ? out : null;
+}
+
+/** Every Polygon/MultiPolygon PART (outer + holes) with usable rings, geometry order preserved. */
+function partsOf(geometry: GeoJsonGeometry): RingSet[] {
+  const raw: unknown[] =
+    geometry.type === "Polygon"
+      ? [geometry.coordinates]
+      : geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)
+        ? geometry.coordinates
+        : [];
+  const parts: RingSet[] = [];
+  for (const part of raw) {
+    if (!Array.isArray(part)) continue;
+    const rings: RingSet = [];
+    for (const ring of part) {
+      const cleaned = cleanRing(ring);
+      if (cleaned) rings.push(cleaned);
+    }
+    if (rings.length > 0) parts.push(rings);
+  }
+  return parts;
+}
+
+/** Numerically-stable shoelace |area| (same origin-shift as `zoning-stamp.ts`'s centroid fix). */
+function absRingArea(ring: [number, number][]): number {
+  const [ox, oy] = ring[0]!;
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [rx0, ry0] = ring[i]!;
+    const [rx1, ry1] = ring[(i + 1) % ring.length]!;
+    a += (rx0 - ox) * (ry1 - oy) - (rx1 - ox) * (ry0 - oy);
+  }
+  return Math.abs(a) * 0.5;
+}
+
+/** The PART (outer ring + its holes) whose OUTER ring has the largest |area|. */
+function largestPart(parts: RingSet[]): RingSet | null {
+  let best: RingSet | null = null;
+  let bestArea = -1;
+  for (const part of parts) {
+    const area = absRingArea(part[0]!);
+    if (area > bestArea) {
+      bestArea = area;
+      best = part;
+    }
+  }
+  return best;
+}
+
+/**
+ * Every x where a horizontal ray at `fixed` crosses an edge of `ring`,
+ * sorted ascending. Half-open on the fixed coordinate (`a > fixed !== b >
+ * fixed`) so a vertex lying exactly on the scanline is counted once, same
+ * convention as `ringCrossings` above. Passing (lat-major) coordinates
+ * swapped lets the SAME function serve a vertical scanline (see
+ * `trueInteriorPoint`): callers that want crossings-by-latitude pass rings
+ * with [lat, lng] pairs and read the result as latitudes.
+ */
+function scanlineCrossings(rings: RingSet, fixed: number): number[] {
+  const xs: number[] = [];
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ax, ay] = ring[i]!;
+      const [bx, by] = ring[j]!;
+      if (ay > fixed !== by > fixed) {
+        const t = (fixed - ay) / (by - ay);
+        xs.push(ax + t * (bx - ax));
+      }
+    }
+  }
+  xs.sort((a, b) => a - b);
+  return xs;
+}
+
+/** Candidate scanline positions: midpoints between (possibly subsampled) distinct vertex coordinates. */
+function candidateScanlines(sortedDistinct: number[], maxLines: number): number[] {
+  const n = sortedDistinct.length;
+  if (n < 2) return [];
+  let picked: number[];
+  if (n - 1 <= maxLines) {
+    picked = sortedDistinct;
+  } else {
+    picked = [];
+    for (let k = 0; k <= maxLines; k++) {
+      const idx = Math.round((k * (n - 1)) / maxLines);
+      picked.push(sortedDistinct[idx]!);
+    }
+  }
+  const lines: number[] = [];
+  for (let i = 0; i + 1 < picked.length; i++) {
+    const a = picked[i]!;
+    const b = picked[i + 1]!;
+    const mid = (a + b) / 2;
+    if (mid > a && mid < b) lines.push(mid);
+  }
+  return lines;
+}
+
+/** Best (widest) inside segment found along one scanline direction. */
+interface BestSegment {
+  /** The point: [varying coordinate midpoint, fixed scanline coordinate]. */
+  point: [number, number];
+  width: number;
+}
+
+/**
+ * Scan a fixed set of lines perpendicular to `axis`. `axis==="y"` means
+ * HORIZONTAL scanlines at fixed latitudes, varying longitude (the normal
+ * orientation); `axis==="x"` means VERTICAL scanlines at fixed longitudes,
+ * varying latitude, done by swapping each ring's [lng,lat] to [lat,lng] so
+ * the same crossing math applies, then swapping the result back.
+ */
+function bestSegmentAlong(rings: RingSet, axis: "x" | "y"): BestSegment | null {
+  const swapped: RingSet =
+    axis === "x" ? rings.map((ring) => ring.map(([x, y]) => [y, x] as [number, number])) : rings;
+  const fixedValues = new Set<number>();
+  for (const ring of swapped) for (const [, y] of ring) fixedValues.add(y);
+  const sorted = [...fixedValues].sort((a, b) => a - b);
+  const lines = candidateScanlines(sorted, 192);
+  let best: BestSegment | null = null;
+  for (const fixed of lines) {
+    const xs = scanlineCrossings(swapped, fixed);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const width = xs[i + 1]! - xs[i]!;
+      if (width <= 0) continue;
+      if (best === null || width > best.width) {
+        const mid = (xs[i]! + xs[i + 1]!) / 2;
+        best = {
+          width,
+          point: axis === "x" ? [fixed, mid] : [mid, fixed],
+        };
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * A point GUARANTEED strictly inside a Polygon/MultiPolygon — never a
+ * vertex, never outside the ring, never inside a hole, never on a shared
+ * boundary with a neighbouring feature. Unlike a bare centroid, this never
+ * needs an "is it actually inside?" afterthought: every candidate this
+ * function considers is derived from an inside scanline segment, and the
+ * final choice is verified against the geometry before it is returned.
+ *
+ * Method (dependency-free — no PostGIS, no turf, matching this module's own
+ * design note): for a MultiPolygon, the LARGEST-area part by its outer
+ * ring (never a hole, never a smaller part) is used — the brief's own
+ * instruction, and the only sane choice when a caller wants ONE point.
+ * Within that part, horizontal AND vertical scanlines are placed at the
+ * midpoints between the part's own vertex coordinates (subsampled when a
+ * ring is very dense, so cost stays bounded regardless of vertex count),
+ * each scanline's crossings against EVERY ring of the part (outer + holes)
+ * are combined with the even-odd rule — exactly `pointInPolygonRings`'s own
+ * rule, so a hole is excluded for free — and the WIDEST inside segment
+ * across both orientations wins. Scanning both axes means a thin strip
+ * oriented either way still gets a reasonable interior point (a long
+ * horizontal road is wide along horizontal scanlines; a long vertical one
+ * along vertical scanlines).
+ *
+ * Returns null only for a geometry with no usable ring, or one so
+ * degenerate (zero area, a line) that no scanline ever finds a strictly
+ * inside segment — there is no interior point to report, which is the
+ * honest answer for a sliver with no interior.
+ */
+export function trueInteriorPoint(geometry: GeoJsonGeometry): InteriorPoint | null {
+  const parts = partsOf(geometry);
+  const part = largestPart(parts);
+  if (!part) return null;
+
+  const horizontal = bestSegmentAlong(part, "y");
+  const vertical = bestSegmentAlong(part, "x");
+  const candidates = [horizontal, vertical]
+    .filter((c): c is BestSegment => c !== null)
+    .sort((a, b) => b.width - a.width);
+
+  for (const c of candidates) {
+    const [longitude, latitude] = c.point;
+    if (pointInGeometry(longitude, latitude, geometry)) {
+      return { longitude, latitude };
+    }
+  }
+  return null;
+}

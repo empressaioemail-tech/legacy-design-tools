@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import type { GeoJsonGeometry } from "../txgio/geo";
 import { pointInGeometry } from "../txgio/geo";
 import {
+  buildParcelIdIndex,
   buildZoningIndex,
   representativePoint,
   stampParcelZoning,
@@ -524,6 +525,223 @@ describe("resolveZoningLayer (the 5 newly registered cities)", () => {
 // ZONING_LAYERS (zoning-layers.ts) and `resolveZoningLayer` below returns
 // `undefined`, failing every `cfg!.x` assertion immediately.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Bug 1 regression (2026-10-09, Burnet stage 3 §3): stampParcelZoning must
+// never stamp a parcel from a NEIGHBOUR's polygon when its own centroid
+// falls outside its own ring. REAL production geometry (48053:112953,
+// Marble Falls sample #41, a 3.63-ac road parcel) — proven live (see PR
+// body) that the bare shoelace centroid lands OUTSIDE this exact ring, at
+// (-98.27717726145636, 30.55312105716379).
+// ---------------------------------------------------------------------------
+describe("stampParcelZoning (Bug 1 regression — centroid outside own ring)", () => {
+  const prop112953Ring: [number, number][] = [
+          [-98.27576145899997, 30.552891126000077],
+          [-98.27575755499998, 30.552875657000072],
+          [-98.27592559399994, 30.552860709000072],
+          [-98.27592881799995, 30.55286908200003],
+          [-98.27593351599995, 30.552876914000024],
+          [-98.27593957399995, 30.55288401400003],
+          [-98.27594684199994, 30.55289020400005],
+          [-98.27595513899996, 30.552895334000027],
+          [-98.27596426399998, 30.552899276000062],
+          [-98.27597398799998, 30.552901932000054],
+          [-98.27598407299996, 30.552903238000056],
+          [-98.27599426999996, 30.552903160000028],
+          [-98.27607408299997, 30.55289638200003],
+          [-98.27616124799994, 30.552890276000028],
+          [-98.27630202799998, 30.55287760500005],
+          [-98.27636419699996, 30.552870201000076],
+          [-98.27647424099996, 30.552854339000078],
+          [-98.27658354999994, 30.552835040000048],
+          [-98.27669197999995, 30.55281233100004],
+          [-98.27774763899998, 30.552573651000046],
+          [-98.27928097099999, 30.552235245000077],
+          [-98.27935901699999, 30.552214768000056],
+          [-98.27943480299996, 30.552188692000072],
+          [-98.27950779199995, 30.552157203000036],
+          [-98.27957746899995, 30.552120523000042],
+          [-98.27964334199999, 30.552078910000034],
+          [-98.27970494599998, 30.55203265800003],
+          [-98.27976184799996, 30.55198209300005],
+          [-98.27978993299996, 30.55195524800007],
+          [-98.27985806599997, 30.551885071000072],
+          [-98.27992096299994, 30.551811324000028],
+          [-98.27997837499998, 30.551734298000042],
+          [-98.28001905999997, 30.551672367000037],
+          [-98.28005619799995, 30.551608789000056],
+          [-98.28009131199997, 30.55154047800005],
+          [-98.28012225099997, 30.55147067200005],
+          [-98.28014893299996, 30.55139956200003],
+          [-98.28019324799999, 30.551268312000047],
+          [-98.28038474399995, 30.551290203000065],
+          [-98.28033070299995, 30.551444359000072],
+          [-98.28032109399999, 30.55147170300006],
+          [-98.28031091899999, 30.551498895000066],
+          [-98.28030562099997, 30.55151243000006],
+          [-98.28029460599998, 30.55153937500006],
+          [-98.28028888899996, 30.551552783000034],
+          [-98.28024163299995, 30.55165183300005],
+          [-98.28018679599995, 30.551747913000042],
+          [-98.28012462599997, 30.55184058900005],
+          [-98.28005540599997, 30.551929441000027],
+          [-98.28004566099997, 30.55194097800006],
+          [-98.27998471399997, 30.552008568000076],
+          [-98.27993629999997, 30.552057346000026],
+          [-98.27990884599996, 30.552083793000065],
+          [-98.27989145299995, 30.552100369000073],
+          [-98.27982248199999, 30.552159394000057],
+          [-98.27974797799999, 30.55221314700003],
+          [-98.27966847999994, 30.552261241000053],
+          [-98.27958455699996, 30.552303332000065],
+          [-98.27949681499996, 30.552339115000052],
+          [-98.27940588299998, 30.55236833400005],
+          [-98.27939355399997, 30.552371721000043],
+          [-98.27936876399997, 30.552378133000047],
+          [-98.27934381499995, 30.552384059000076],
+          [-98.27847900999996, 30.552579579000053],
+          [-98.27784406799998, 30.552723126000046],
+          [-98.27678867999998, 30.552961735000054],
+          [-98.27678460699997, 30.55296264900005],
+          [-98.27664640699999, 30.552990978000025],
+          [-98.27650691799994, 30.55301409100008],
+          [-98.27636640199995, 30.553031944000054],
+          [-98.27622512299996, 30.553044502000034],
+          [-98.27621843599997, 30.55304497000003],
+          [-98.27604015699995, 30.55305745800007],
+          [-98.27602783199995, 30.553059133000033],
+          [-98.27601596099998, 30.553062458000056],
+          [-98.27600483999998, 30.55306735000005],
+          [-98.27599473999999, 30.553073690000076],
+          [-98.27598591099996, 30.553081320000047],
+          [-98.27597857299997, 30.553090052000073],
+          [-98.27597290499995, 30.55309967100004],
+          [-98.27596904699999, 30.553109939000024],
+          [-98.27596709599999, 30.55312060400007],
+          [-98.27596060199994, 30.553172792000055],
+          [-98.27595063299998, 30.553224568000076],
+          [-98.27593269999994, 30.553290445000073],
+          [-98.27590914399997, 30.55335498200003],
+          [-98.27579943099994, 30.55362415700006],
+          [-98.27574464899999, 30.55375813300003],
+          [-98.27561124299996, 30.554085435000047],
+          [-98.27560643599998, 30.554097227000057],
+          [-98.27552857099994, 30.554288261000067],
+          [-98.27550078899998, 30.554349321000075],
+          [-98.27546839199994, 30.554408654000042],
+          [-98.27543152399994, 30.554466000000048],
+          [-98.27539034699998, 30.55452110400006],
+          [-98.27534195699997, 30.55457718200006],
+          [-98.27528916799997, 30.554630202000055],
+          [-98.27523223399999, 30.554679907000036],
+          [-98.27517143499995, 30.55472605600005],
+          [-98.27510706499999, 30.55476842300004],
+          [-98.27506139799999, 30.55480018600008],
+          [-98.27502087599999, 30.554836806000026],
+          [-98.27498618499999, 30.55487766600004],
+          [-98.27495790999996, 30.554922075000036],
+          [-98.27493652999999, 30.55496928200006],
+          [-98.27492240399994, 30.555018491000055],
+          [-98.27491577299998, 30.555068869000024],
+          [-98.27491454099999, 30.555132832000027],
+          [-98.27491833399995, 30.555196720000026],
+          [-98.27492989099994, 30.55527500900007],
+          [-98.27494898399999, 30.55535218400007],
+          [-98.27497547999997, 30.555427703000078],
+          [-98.27487626599998, 30.55545621400006],
+          [-98.27484000299995, 30.55546663100006],
+          [-98.27479202999996, 30.555480413000055],
+          [-98.27478345199995, 30.555458246000057],
+          [-98.27476103299995, 30.55539086300007],
+          [-98.27474364499994, 30.55532237700004],
+          [-98.27473898099998, 30.555299352000077],
+          [-98.27472755499997, 30.555222074000028],
+          [-98.27472251199998, 30.555144289000054],
+          [-98.27472387699999, 30.555066389000046],
+          [-98.27472392399994, 30.555065654000032],
+          [-98.27472972499999, 30.555014241000038],
+          [-98.27474107599994, 30.55496352600005],
+          [-98.27475787599997, 30.554913956000064],
+          [-98.27477997499994, 30.554865970000037],
+          [-98.27479258599999, 30.55484332800006],
+          [-98.27481621399994, 30.554806779000046],
+          [-98.27482655499995, 30.554792613000075],
+          [-98.27483738599994, 30.554778725000062],
+          [-98.27487274999999, 30.554738867000026],
+          [-98.27487904799995, 30.554732503000025],
+          [-98.27491216999994, 30.554701969000064],
+          [-98.27494787999996, 30.554673704000038],
+          [-98.27495531599999, 30.554668338000056],
+          [-98.27498597499994, 30.554647874000068],
+          [-98.27499385899995, 30.554643011000053],
+          [-98.27506316399996, 30.554596392000064],
+          [-98.27512721999994, 30.554544453000062],
+          [-98.27514334299997, 30.554529758000058],
+          [-98.27518436199995, 30.55448883100007],
+          [-98.27518914699999, 30.554483685000037],
+          [-98.27520353099999, 30.55446769400004],
+          [-98.27523745999997, 30.554426418000048],
+          [-98.27526839699999, 30.554383419000033],
+          [-98.27527990799996, 30.55436577200004],
+          [-98.27531380399995, 30.554306824000037],
+          [-98.27534215799994, 30.554245725000044],
+          [-98.27538867299995, 30.554131605000066],
+          [-98.27552091299998, 30.55380716600007],
+          [-98.27560023899997, 30.553612543000042],
+          [-98.27572774499998, 30.553299714000048],
+          [-98.27575036099995, 30.55323591000007],
+          [-98.27576027899994, 30.55319874500003],
+          [-98.27576441199994, 30.553180009000073],
+          [-98.27577228799998, 30.553132821000077],
+          [-98.27577532999999, 30.553104332000032],
+          [-98.27577709999997, 30.553075764000027],
+          [-98.27577636499996, 30.55301033300003],
+          [-98.27577614899997, 30.553001082000037],
+          [-98.27577345799995, 30.55296157500004],
+          [-98.27576792199994, 30.552922290000026],
+          [-98.27576145899997, 30.552891126000077],
+  ];
+  const prop112953Geometry: GeoJsonGeometry = {
+    type: "Polygon",
+    coordinates: [prop112953Ring],
+  };
+
+  it("never stamps the neighbour's district when the bare centroid lands outside the parcel's own ring", () => {
+    // A small neighbour "MR" polygon placed exactly where the UNCHECKED
+    // centroid (-98.27717726145636, 30.55312105716379) falls — reproducing
+    // the live Marble Falls MR polygon's position relative to this parcel
+    // — and deliberately SMALL enough to exclude the true interior point
+    // (-98.27638561467619, 30.55291276400004) the fix uses instead, so a
+    // pass here proves the fix path, not an oversized box that would catch
+    // both. On the PRE-FIX code (bare centroid, no inside-check) this
+    // stamps "MR"; the fix must leave it unmatched instead of crossing
+    // into the neighbour.
+    const index = buildZoningIndex([
+      squareFeature("MR", -98.2773, 30.553, 0.0004),
+    ]);
+    const hit = stampParcelZoning(index, prop112953Geometry);
+    expect(hit).toBeNull();
+  });
+
+  it("the plain centroid really is outside this parcel's own ring (confirms the premise)", () => {
+    const centroid = representativePoint(prop112953Geometry)!;
+    expect(pointInGeometry(centroid.longitude, centroid.latitude, prop112953Geometry)).toBe(
+      false,
+    );
+  });
+
+  it("still finds the REAL district when one actually covers the parcel's true interior", () => {
+    // A small "GC" polygon placed over the parcel's own true interior
+    // area (near its widest stretch, around -98.2764/30.5529) must still
+    // be found — the fix does not make every Bug-1-class parcel unmatched,
+    // only stops it from crossing into an unrelated neighbour.
+    const index = buildZoningIndex([
+      squareFeature("GC", -98.277, 30.5525, 0.002),
+    ]);
+    const hit = stampParcelZoning(index, prop112953Geometry);
+    expect(hit?.code).toBe("GC");
+  });
+});
+
 describe("resolveZoningLayer (Burnet: Marble Falls + Horseshoe Bay)", () => {
   it.each([
     ["marble-falls-tx", "Marble Falls", "Zone_ID", "Zone_Name"],
@@ -1551,5 +1769,166 @@ describe("stampCountyZoning (interim disclosure through the write, P-259b)", () 
       kind: "base",
       interim: false,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 2 (2026-10-09, Burnet stage 3 §3): parcel-id-first join for a layer
+// whose features ARE the parcel fabric (Horseshoe Bay). The parcel's OWN
+// feature decides — a real code stamps, a blank code is a declared
+// "no district on the city's own layer" outcome — and the point lookup is
+// used ONLY when the id is absent from the layer's own index.
+// ---------------------------------------------------------------------------
+describe("buildParcelIdIndex", () => {
+  it("indexes a feature's own code by its normalized parcel id", () => {
+    const idx = buildParcelIdIndex([
+      { parcelId: "0069366", code: null, description: null },
+      { parcelId: "23169", code: "R-4", description: "R-4-MF" },
+    ]);
+    expect(idx.get("69366")).toEqual({ code: null, description: null, parse: undefined });
+    expect(idx.get("23169")).toEqual({ code: "R-4", description: "R-4-MF", parse: undefined });
+  });
+
+  it("keeps a blank-coded feature instead of DROPPING it (unlike buildZoningIndex)", () => {
+    const idx = buildParcelIdIndex([{ parcelId: "1", code: "   ", description: null }]);
+    expect(idx.has("1")).toBe(true);
+    expect(idx.get("1")?.code).toBeNull();
+    // buildZoningIndex, by contrast, drops this feature entirely (Bug 2's
+    // root cause for the PIP-only path) — the two indexes exist precisely
+    // because they disagree about what to do with a blank code.
+    expect(buildZoningIndex([{ code: "   ", description: null, geometry: null }])).toHaveLength(
+      0,
+    );
+  });
+
+  it("skips features with no parcel id, and keeps the FIRST on a repeated id", () => {
+    const idx = buildParcelIdIndex([
+      { parcelId: null, code: "R-1" },
+      { parcelId: "5", code: "A-1" },
+      { parcelId: "5", code: "C-2" }, // repeat id -- first wins, never overwritten
+    ]);
+    expect(idx.size).toBe(1);
+    expect(idx.get("5")?.code).toBe("A-1");
+  });
+});
+
+describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
+  const CITY = "horseshoe-bay-tx";
+  const COUNTY = "48053";
+  // A point-lookup index carrying only a "neighbour" polygon. Every
+  // synthetic parcel's geometry below sits INSIDE this square, so any test
+  // that still reports this neighbour's code proves the point lookup ran;
+  // any test that must NOT report it proves the id join pre-empted it.
+  const neighbourIndex = buildZoningIndex([squareFeature("C-2", -97.72, 30.715, 0.01)]);
+
+  function seedHsbRows(propId: string, featureIndex: number): FakeParcelRow[] {
+    return [
+      {
+        countyFips: COUNTY,
+        featureIndex,
+        tileKey: "c1",
+        propId,
+        geometry: parcelSquare(-97.715, 30.72), // inside the neighbour's C-2 square
+        zoningDistrict: null,
+        zoningJurisdiction: null,
+      },
+    ];
+  }
+
+  // "100" -> real code; "200" -> own feature found, code BLANK; "300" ->
+  // deliberately absent from the index (id not on the layer at all).
+  const parcelIdIndex = buildParcelIdIndex([
+    { parcelId: "100", code: "R-1", description: "R-1-SF" },
+    { parcelId: "200", code: null, description: null },
+  ]);
+
+  it("own feature with a real code stamps directly (matchMethod parcel-id), bypassing the point lookup", async () => {
+    const fake = makeFakeDb(seedHsbRows("100", 200));
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: neighbourIndex,
+      parcelIdIndex,
+      propIds: new Set(["100"]),
+      dryRun: true,
+    });
+    expect(summary.parcelsMatched).toBe(1);
+    expect(summary.perParcel).toHaveLength(1);
+    expect(summary.perParcel![0]).toMatchObject({
+      propId: "100",
+      district: "R-1", // the OWN feature's code, not the neighbour's "C-2"
+      kind: "base",
+      matchMethod: "parcel-id",
+    });
+  });
+
+  it("own feature blank: declared no-district, NEVER the neighbour's code, counted in parcelsNoDistrictOnLayer", async () => {
+    const fake = makeFakeDb(seedHsbRows("200", 201));
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: neighbourIndex,
+      parcelIdIndex,
+      propIds: new Set(["200"]),
+      dryRun: true,
+    });
+    expect(summary.parcelsNoDistrictOnLayer).toBe(1);
+    expect(summary.parcelsMatched).toBe(0); // never the neighbour's C-2
+    expect(summary.parcelsUnmatched).toBe(0); // not the generic "no polygon" bucket either
+    expect(summary.noDistrictOnLayerPropIds).toEqual(["200"]);
+    expect(summary.perParcel).toHaveLength(1);
+    expect(summary.perParcel![0]).toEqual({
+      propId: "200",
+      featureIndex: 201,
+      district: null,
+      kind: "no-district-on-layer",
+      matchMethod: "parcel-id-blank",
+    });
+  });
+
+  it("no own feature for this id: falls back to the point lookup, counted as matchMethod point", async () => {
+    const fake = makeFakeDb(seedHsbRows("300", 202));
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: neighbourIndex,
+      parcelIdIndex,
+      propIds: new Set(["300"]),
+      dryRun: true,
+    });
+    expect(summary.parcelsMatched).toBe(1);
+    expect(summary.perParcel).toHaveLength(1);
+    expect(summary.perParcel![0]).toMatchObject({
+      propId: "300",
+      district: "C-2", // genuinely falls back to the point lookup
+      kind: "base",
+      matchMethod: "point",
+    });
+  });
+
+  it("no parcelIdIndex supplied at all: byte-identical to pre-Bug-2 behaviour (every row point-matched, matchMethod undefined)", async () => {
+    const fake = makeFakeDb([
+      ...seedHsbRows("100", 200),
+      ...seedHsbRows("200", 201),
+      ...seedHsbRows("300", 202),
+    ]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: neighbourIndex,
+      // parcelIdIndex intentionally omitted.
+      propIds: new Set(["100", "200", "300"]),
+      dryRun: true,
+    });
+    expect(summary.parcelsNoDistrictOnLayer).toBe(0);
+    expect(summary.parcelsMatched).toBe(3);
+    for (const row of summary.perParcel!) {
+      expect(row.matchMethod).toBeUndefined();
+      expect(row.district).toBe("C-2"); // every one hits the point lookup -> neighbour
+    }
   });
 });

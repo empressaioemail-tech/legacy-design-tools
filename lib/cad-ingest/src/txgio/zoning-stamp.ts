@@ -32,7 +32,9 @@
 import {
   bboxOfGeometry,
   bboxesIntersect,
+  normalizeDigitId,
   pointInGeometry,
+  trueInteriorPoint,
   type GeoBbox,
   type GeoJsonGeometry,
 } from "./geo";
@@ -271,32 +273,121 @@ export function isInterimDistrict(
 
 /**
  * Stamp one parcel: compute its representative point, PIP the zoning index.
- * On a centroid miss (centroid outside its own ring), retry with the ring's
- * first vertex before giving up. Returns the matched code (+ description) or
- * null (leave the parcel unstamped).
+ *
+ * BUG FIX (2026-10-09, Burnet stage 3 §3 Bug 1 — Marble Falls sample #41,
+ * prop_id 112953): `representativePoint` above is a bare centroid — it does
+ * NOT check that the centroid actually lands inside the parcel's own ring
+ * before returning it (only a zero-area/collinear ring gets a fallback).
+ * For a deeply non-convex parcel (a thin, winding road right-of-way is the
+ * measured case: 1,065 of Burnet's 59,785 parcel features have their
+ * centroid outside their own polygon) that unchecked centroid can land
+ * anywhere, including well outside the parcel — and when it happens to fall
+ * inside a NEIGHBOURING zoning polygon, the parcel was stamped with the
+ * neighbour's district. The PRE-FIX fallback for a centroid that hit no
+ * zoning polygon at all made this worse: it swept the ring's own vertices
+ * and stamped whichever one FIRST happened to PIP into any polygon — a
+ * ring vertex sits ON a boundary that can be shared with a neighbour, and
+ * the even-odd ray cast has no reason to prefer "this parcel's own
+ * district" when a shared-boundary point is numerically inside the
+ * neighbour's ring.
+ *
+ * Verified live against prop_id 112953's real production geometry
+ * (48053:112953): the bare centroid is OUTSIDE the parcel's own ring and
+ * lands DIRECTLY inside the neighbouring Marble Falls "MR" polygon on the
+ * very first try — the old vertex-sweep fallback was never even reached for
+ * this sample; the bug is the missing inside-check on the fast path, not
+ * the vertex sweep alone. (If the vertex sweep HAD run, its first hit for
+ * this geometry is a different wrong answer, "ENZ.4" — i.e. the sweep is
+ * its own, separate instance of the same class of bug, which is why it is
+ * removed rather than kept as a second-stage fallback.)
+ *
+ * Fix: the FAST path is unchanged byte-for-byte when it already works — the
+ * centroid is tried first, and used exactly as before whenever it is both
+ * inside the parcel's own ring AND lands in a zoning polygon (this is true
+ * for the overwhelming majority of parcels, so this function's cost is
+ * unchanged for them). Only when the centroid is missing, outside the
+ * parcel's own ring, or inside the ring but in no zoning polygon does this
+ * function reach for `trueInteriorPoint` (geo.ts) — a point PROVEN strictly
+ * inside the parcel (scanline search, holes/MultiPolygon-aware, never a
+ * vertex, never outside) — and try THAT point against the zoning index
+ * instead of sweeping boundary vertices. If neither point lands in a
+ * zoning polygon, the parcel is honestly left unmatched (null), exactly the
+ * conservative-fallback contract this module has always had.
  */
 export function stampParcelZoning(
   index: ZoningPolygon[],
   parcelGeometry: GeoJsonGeometry,
 ): { code: string; description?: string | null; parse?: BaseCodeParse } | null {
   const centroid = representativePoint(parcelGeometry);
-  if (centroid) {
+  if (centroid && pointInGeometry(centroid.longitude, centroid.latitude, parcelGeometry)) {
     const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);
     if (hit) return hit;
   }
-  // Centroid missed — sweep ring vertices (partial-geometry / flag-lot class:
-  // centroid on null fragment but zoned sub-ring has district on record).
-  const ring = largestRing(parcelGeometry);
-  if (ring && ring.length > 0) {
-    const seen = new Set<string>();
-    for (const coord of ring) {
-      if (!coord || coord.length < 2) continue;
-      const key = `${coord[0]!.toFixed(8)},${coord[1]!.toFixed(8)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const hit = zoningCodeAtPoint(index, coord[0]!, coord[1]!);
-      if (hit) return hit;
-    }
+  // Centroid missing, outside the parcel's own ring, or inside but no
+  // zoning polygon underneath it — try a point GUARANTEED inside the
+  // parcel (never a shared boundary vertex) before giving up.
+  const interior = trueInteriorPoint(parcelGeometry);
+  if (interior) {
+    const hit = zoningCodeAtPoint(index, interior.longitude, interior.latitude);
+    if (hit) return hit;
   }
   return null;
+}
+
+/**
+ * One parcel-shaped zoning layer's own feature for a given CAD parcel id
+ * (P-???, Burnet stage 3 §3 Bug 2 — Horseshoe Bay sample #30/#40).
+ *
+ * `code: null` means the layer's OWN feature for this exact parcel carries
+ * a blank/no district on its code field — a DECLARED fact (the register's
+ * own CA/vacant-land rows), never to be filled in from a point lookup that
+ * might land in a neighbour's polygon on a misaligned shared boundary.
+ */
+export interface ParcelIdZoningEntry {
+  code: string | null;
+  description?: string | null;
+  parse?: BaseCodeParse;
+}
+
+/**
+ * Build a parcel-id -> own-feature index for a layer whose features ARE
+ * the city's parcel fabric (Horseshoe Bay's `Zoning Parcels` layer: one
+ * feature per CAD parcel, carrying both the parcel's own `PROP_ID` and its
+ * zoning code). Keyed by the SAME normalized id `--prop-ids-file` uses
+ * (`normalizeDigitId`, geo.ts) so a lookup by `txgio_parcel.prop_id` and a
+ * lookup by this layer's own id field agree on leading zeros.
+ *
+ * Deliberately NOT built from `buildZoningIndex`'s output: that function
+ * drops every feature with a blank `code` (so a parcel's own blank-coded
+ * feature would simply not exist in the PIP index), which is exactly the
+ * loss bug 2 is about. This index keeps every feature that carries a
+ * parcel id, blank code included — the blank IS the fact a caller needs to
+ * read before ever falling back to a point lookup.
+ *
+ * A parcel id repeated across more than one feature keeps the FIRST and
+ * drops the rest — a parcel-shaped layer is expected to carry one feature
+ * per parcel; a repeat is a layer-data surprise, not something to resolve
+ * by silently overwriting in either direction.
+ */
+export function buildParcelIdIndex(
+  features: Array<{
+    parcelId?: string | null;
+    code: string | null | undefined;
+    description?: string | null;
+    parse?: BaseCodeParse;
+  }>,
+): Map<string, ParcelIdZoningEntry> {
+  const out = new Map<string, ParcelIdZoningEntry>();
+  for (const f of features) {
+    if (!f.parcelId) continue;
+    const id = normalizeDigitId(f.parcelId);
+    if (!id || out.has(id)) continue;
+    const code = typeof f.code === "string" ? f.code.trim() : "";
+    out.set(id, {
+      code: code.length > 0 ? code : null,
+      description: f.description ?? null,
+      parse: f.parse,
+    });
+  }
+  return out;
 }
