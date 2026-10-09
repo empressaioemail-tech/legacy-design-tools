@@ -1,15 +1,5 @@
 [
   {
-    "file": "artifacts/api-server/src/countyLedgerCompute.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/countyLedgerCompute.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
     "file": "artifacts/api-server/src/lib/boundaryEdgeFactRead.ts",
     "token": "cad_property",
     "row": "P-499-followup"
@@ -17,11 +7,6 @@
   {
     "file": "artifacts/api-server/src/lib/boundaryEdgeFactRead.ts",
     "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageGisCache.ts",
-    "token": "tx_parcel_tile_cache",
     "row": "P-499-followup"
   },
   {
@@ -35,11 +20,6 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/brokerageGisLayers.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
     "file": "artifacts/api-server/src/lib/brokerageMotivatedSellerSignals.ts",
     "token": "cad_property",
     "row": "P-499-followup"
@@ -50,58 +30,8 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/brokerageSiteContext.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageSiteContext.ts",
-    "token": "permit_record",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTierGate.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTierGate.ts",
-    "token": "permit_record",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTxParcels.ts",
-    "token": "cad_property",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTxParcels.ts",
-    "token": "tx_parcel_tile_cache",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTxParcels.ts",
-    "token": "txgio_address",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/brokerageTxParcels.ts",
-    "token": "txgio_parcel",
-    "row": "P-499"
-  },
-  {
     "file": "artifacts/api-server/src/lib/buildingFootprintFactRead.ts",
     "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cadPropertyLookup.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cadPropertyLookup.ts",
-    "token": "cad_property_vintage_crosswalk",
     "row": "P-499-followup"
   },
   {
@@ -121,27 +51,12 @@
   },
   {
     "file": "artifacts/api-server/src/lib/cadPropertyLookup.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cadPropertyLookup.ts",
     "token": "txgioParcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cadRollFactFromParcelRecord.ts",
-    "token": "cad_property",
     "row": "P-499-followup"
   },
   {
     "file": "artifacts/api-server/src/lib/cadRollValue.ts",
     "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cityLimitsFactFromParcelRecord.ts",
-    "token": "tx_etj_boundary",
     "row": "P-499-followup"
   },
   {
@@ -151,22 +66,7 @@
   },
   {
     "file": "artifacts/api-server/src/lib/cityLimitsFactRead.ts",
-    "token": "tx_etj_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cityLimitsFactRead.ts",
     "token": "txCityBoundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cityLimitsFactServeCutover.ts",
-    "token": "tx_etj_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/cityLimitsFactServeCutover.ts",
-    "token": "tx_etj_source",
     "row": "P-499-followup"
   },
   {
@@ -205,16 +105,6 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/joinNormalize.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/joinNormalize.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
     "file": "artifacts/api-server/src/lib/jurisdictionBoundariesNearBbox.ts",
     "token": "tx_city_boundary",
     "row": "P-499-followup"
@@ -240,38 +130,8 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/nodeFacetTier1Assemble.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
     "file": "artifacts/api-server/src/lib/ownerFactRead.ts",
     "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelAreaSqFtFactRead.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelConstraintProjection.ts",
-    "token": "tx_city_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelConstraintProjection.ts",
-    "token": "tx_county_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelConstraintProjection.ts",
-    "token": "tx_etj_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelConstraintProjection.ts",
-    "token": "tx_etj_source",
     "row": "P-499-followup"
   },
   {
@@ -285,57 +145,12 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/parcelNodeId.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelNodeId.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/parcelRecordAllowlist.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/permitHistoryLookup.ts",
-    "token": "permit_record",
-    "row": "P-499-followup"
-  },
-  {
     "file": "artifacts/api-server/src/lib/permitHistoryLookup.ts",
     "token": "permitRecord",
     "row": "P-499-followup"
   },
   {
     "file": "artifacts/api-server/src/lib/pipelineFactRead.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/placeCoverageSource.ts",
-    "token": "txgio_address",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/placeCoverageSource.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/providerCatalog.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/providerCatalog.ts",
-    "token": "permit_record",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/ptadLandUse.ts",
     "token": "cad_property",
     "row": "P-499-followup"
   },
@@ -366,11 +181,6 @@
   },
   {
     "file": "artifacts/api-server/src/lib/railScoring/registry.ts",
-    "token": "tx_city_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/railScoring/registry.ts",
     "token": "txgio_parcel",
     "row": "P-499-followup"
   },
@@ -390,21 +200,6 @@
     "row": "P-499-followup"
   },
   {
-    "file": "artifacts/api-server/src/lib/txgioAddressNormalize.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioAddressResolve.ts",
-    "token": "txgio_address",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioAddressResolve.ts",
-    "token": "txgio_parcel",
-    "row": "P-499"
-  },
-  {
     "file": "artifacts/api-server/src/lib/txgioAddressResolve.ts",
     "token": "txgioAddress",
     "row": "P-499"
@@ -421,28 +216,13 @@
   },
   {
     "file": "artifacts/api-server/src/lib/txgioParcelStore.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioParcelStore.ts",
     "token": "cadProperty",
     "row": "P-499-followup"
   },
   {
     "file": "artifacts/api-server/src/lib/txgioParcelStore.ts",
-    "token": "txgio_parcel",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioParcelStore.ts",
     "token": "txgioParcel",
     "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioRadiusSearch.ts",
-    "token": "tx_county_boundary",
-    "row": "P-499-followup"
   },
   {
     "file": "artifacts/api-server/src/lib/txgioRadiusSearch.ts",
@@ -451,32 +231,12 @@
   },
   {
     "file": "artifacts/api-server/src/lib/txgioRadiusSearch.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioRadiusSearch.ts",
     "token": "txgioParcel",
     "row": "P-499-followup"
   },
   {
     "file": "artifacts/api-server/src/lib/txgioStreetSearch.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/txgioStreetSearch.ts",
     "token": "txgioParcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/valueHistoryFactFromParcelRecord.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/valueHistoryFactRead.ts",
-    "token": "cad_property",
     "row": "P-499-followup"
   },
   {
@@ -502,61 +262,6 @@
   {
     "file": "artifacts/api-server/src/lib/whoServesRead.ts",
     "token": "txUtilityTerritoryStaging",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/lib/zoningProvenance.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokerageNodeFacets.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokerageNodeFacets.ts",
-    "token": "tx_city_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokerageNodeFacets.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokeragePlaceBuildableEnvelope.ts",
-    "token": "txgio_address",
-    "row": "P-499"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokeragePlaceJurisdictionBoundaries.ts",
-    "token": "tx_city_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/brokeragePlaceJurisdictionBoundaries.ts",
-    "token": "tx_etj_boundary",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/countyLedger.ts",
-    "token": "cad_property",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/countyLedger.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/countyRailScore.ts",
-    "token": "txgio_parcel",
-    "row": "P-499-followup"
-  },
-  {
-    "file": "artifacts/api-server/src/routes/propertyExplorer.ts",
-    "token": "txgio_parcel",
     "row": "P-499-followup"
   },
   {

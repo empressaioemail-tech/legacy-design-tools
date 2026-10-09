@@ -28,6 +28,22 @@
  * helpers (`clusterLock.ts`, `cadPropertyWriteLock.ts`) are TS modules
  * over a drizzle transaction, not stored procedures, and this follows the
  * same shape so the same test harness (`withTestSchema`) exercises it.
+ *
+ * CONCURRENCY (W3 review, 2026-10-09). Two swaps of the SAME (provider,
+ * countyFips) must never interleave -- without serialization, two
+ * concurrent transactions could each pass their own count-check, each
+ * DELETE the other's just-inserted rows, and each INSERT their own run's
+ * rows, landing the live table on the UNION of both runs (stale rows from
+ * one run surviving alongside the other's) rather than exactly one run.
+ * The first statement in the transaction is a BLOCKING
+ * `pg_advisory_xact_lock` keyed on (provider, countyFips) -- a second
+ * swap for the same county simply WAITS for the first transaction to
+ * commit or roll back (the lock is transaction-scoped, so it releases
+ * automatically either way), rather than refusing immediately like
+ * `cadPropertyWriteLock.ts`'s session-scoped try-lock. "Serialize", not
+ * "refuse", is the explicit requirement here -- two legitimate swaps of
+ * the same county queuing behind each other is normal; racing them is
+ * not.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -114,6 +130,45 @@ export class SourceFeatureSwapCountMismatchError extends Error {
   }
 }
 
+export const SOURCE_FEATURE_SWAP_INSERT_MISMATCH = "SOURCE_FEATURE_SWAP_INSERT_MISMATCH";
+
+/**
+ * Refusal: the `INSERT ... SELECT` moved a different number of rows than
+ * the stage held at count-check time, moments earlier in the SAME
+ * transaction. Under this function's own flow that can only happen if
+ * something else modified `source_feature_stage` for this exact
+ * `(provider, countyFips, loadRunId)` between the count-check and the
+ * insert WITHOUT holding the advisory lock this function takes first
+ * (e.g. a stage-cleanup job with a bug, or a future caller that bypasses
+ * this function) -- the stage table itself has no internal duplicates
+ * (its own primary key already includes `provider_object_id`), and the
+ * live DELETE already ran before this INSERT, so a same-process,
+ * same-transaction mismatch is not reachable through this function's own
+ * logic alone. Thrown rather than silently accepted: throwing inside the
+ * transaction callback rolls back the WHOLE transaction, including the
+ * live DELETE, so a bad insert never leaves the county half-swapped.
+ */
+export class SourceFeatureSwapInsertMismatchError extends Error {
+  readonly code = SOURCE_FEATURE_SWAP_INSERT_MISMATCH;
+  constructor(
+    readonly provider: string,
+    readonly countyFips: string,
+    readonly loadRunId: string,
+    readonly stagedCount: number,
+    readonly insertedCount: number,
+  ) {
+    super(
+      `${SOURCE_FEATURE_SWAP_INSERT_MISMATCH}: INSERT ... SELECT moved ${insertedCount} row(s) into ` +
+        `source_feature for provider=${JSON.stringify(provider)} county_fips=${JSON.stringify(countyFips)} ` +
+        `load_run_id=${JSON.stringify(loadRunId)}, but source_feature_stage held ${stagedCount} row(s) ` +
+        "at this function's own count-check moments earlier in the same transaction. Rolling back -- " +
+        "the live rows for this county are left untouched (this error aborts the transaction, undoing " +
+        "the DELETE too).",
+    );
+    this.name = "SourceFeatureSwapInsertMismatchError";
+  }
+}
+
 /**
  * Validates the plain-shape arguments BEFORE any query runs, same style as
  * `takeCadPropertyWriteLock`'s county_fips guard.
@@ -138,20 +193,37 @@ function assertValidParams(params: SwapStagedCountyParams): void {
 }
 
 /**
+ * The namespace hashed into the advisory lock key, scoped to (provider,
+ * countyFips) and to `current_schema()` -- the latter purely so concurrent
+ * `withTestSchema` suites (each its own Postgres schema on one shared test
+ * database) never contend with each other's locks; every production
+ * connection is on `public`, so it costs nothing there.
+ */
+function swapLockNamespace(provider: string, countyFips: string): string {
+  return `source_feature_swap|${provider}|${countyFips}`;
+}
+
+/**
  * Swap the live `source_feature` rows for (provider, countyFips) with this
  * run's staged rows from `source_feature_stage`, in ONE transaction:
  *
+ *   0. Take a BLOCKING transaction-scoped advisory lock keyed on
+ *      (provider, countyFips) -- the FIRST statement, before anything
+ *      else runs. A concurrent swap of the SAME county waits here rather
+ *      than racing (see the module header's "CONCURRENCY" note).
  *   1. Count the staged rows for (provider, countyFips, loadRunId).
  *   2. Refuse (throw, no-op) if that count is zero, or does not equal
  *      `expectedCount`. Nothing is deleted or inserted on a refusal --
  *      the live county is untouched and the stage is kept for diagnosis.
  *   3. Delete the live (provider, countyFips) rows.
- *   4. Insert this run's staged rows into `source_feature`.
+ *   4. Insert this run's staged rows into `source_feature`. Refuse (throw,
+ *      rolling back the delete too) if the number of rows actually moved
+ *      does not equal the count from step 1.
  *   5. Delete this run's rows from `source_feature_stage` (the stage is
  *      only ever a holding area for one load's own rows en route to
  *      going live, or to being thrown away on a refusal).
  *
- * All five steps run inside one drizzle transaction, so a crash or error
+ * All steps run inside one drizzle transaction, so a crash or error
  * between steps 3 and 5 rolls the whole swap back -- the live table is
  * never observed half-replaced.
  *
@@ -161,6 +233,12 @@ function assertValidParams(params: SwapStagedCountyParams): void {
  * partitioned parent with no matching partition refuses the INSERT at the
  * database level ("no partition of relation ... found for row"), which
  * surfaces as a thrown error from this function, not a silent no-op.
+ *
+ * Steps 3 and 4 use raw `DELETE`/`INSERT` and read the statement's own
+ * `rowCount` rather than Drizzle's `.returning()` -- `.returning()` would
+ * pull every affected row's data into memory (Harris county alone is
+ * about 1.5M `source_feature` rows for one provider), which this function
+ * never needs: only the COUNT of affected rows is ever used.
  */
 export async function swapStagedCounty(
   dbHandle: SourceFeatureSwapDbHandle,
@@ -170,6 +248,17 @@ export async function swapStagedCounty(
   const { provider, countyFips, loadRunId, expectedCount } = params;
 
   return await dbHandle.transaction(async (tx) => {
+    // Step 0: serialize against any other swap of this exact county.
+    // BLOCKING (pg_advisory_xact_lock, not the _try_ variant) -- this
+    // function waits for a peer's transaction to end rather than
+    // refusing; see the module header. Transaction-scoped, so it releases
+    // automatically on COMMIT or ROLLBACK (including every throw below).
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(
+            hashtextextended(${swapLockNamespace(provider, countyFips)} || '|' || current_schema(), 0)
+          )`,
+    );
+
     const countResult = (await tx.execute(
       sql`SELECT count(*)::int AS n
           FROM ${sourceFeatureStage}
@@ -192,15 +281,12 @@ export async function swapStagedCounty(
       );
     }
 
-    const deletedLive = await tx
-      .delete(sourceFeature)
-      .where(
-        and(
-          eq(sourceFeature.provider, provider),
-          eq(sourceFeature.countyFips, countyFips),
-        ),
-      )
-      .returning({ providerObjectId: sourceFeature.providerObjectId });
+    const deleteLiveResult = (await tx.execute(
+      sql`DELETE FROM ${sourceFeature}
+          WHERE ${sourceFeature.provider} = ${provider}
+            AND ${sourceFeature.countyFips} = ${countyFips}`,
+    )) as unknown as { rowCount?: number | null };
+    const deletedLiveCount = deleteLiveResult.rowCount ?? 0;
 
     const insertResult = (await tx.execute(
       sql`INSERT INTO ${sourceFeature}
@@ -214,6 +300,16 @@ export async function swapStagedCounty(
             AND ${sourceFeatureStage.loadRunId} = ${loadRunId}`,
     )) as unknown as { rowCount?: number | null };
     const insertedCount = insertResult.rowCount ?? 0;
+
+    if (insertedCount !== stagedCount) {
+      throw new SourceFeatureSwapInsertMismatchError(
+        provider,
+        countyFips,
+        loadRunId,
+        stagedCount,
+        insertedCount,
+      );
+    }
 
     await tx
       .delete(sourceFeatureStage)
@@ -229,7 +325,7 @@ export async function swapStagedCounty(
       provider,
       countyFips,
       loadRunId,
-      deletedLiveCount: deletedLive.length,
+      deletedLiveCount,
       insertedCount,
     };
   });

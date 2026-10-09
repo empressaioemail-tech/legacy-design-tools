@@ -227,20 +227,145 @@ function buildSmartsiteMcpScope(repoRoot) {
 }
 
 // -------------------------------------------------------------------------
-// Token scan over the built scope.
-// -------------------------------------------------------------------------
+// Comment stripping (W3 review, 2026-10-09): a `//` or `/* */` (including
+// JSDoc `/** */`) mention of a table name is not a read. String literals
+// and template-literal contents ARE kept -- raw SQL in this repo lives in
+// `sql\`...\`` template strings (and sometimes a plain string), and both
+// must still count as a hit.
+//
+// This is a hand-rolled character scanner, not a real TS parser -- it is
+// scoped to this repo's own files, not general JS/TS. It tracks:
+//   - "code": normal code (the permanent base state; never popped).
+//   - "template": inside a template literal's raw text (between
+//     backticks, outside any `${...}`) -- copied verbatim, comments inside
+//     here are literal text (e.g. a `-- ` SQL comment), not JS comments.
+//   - "interp": inside a `${...}` interpolation, or inside a nested
+//     `{...}` block/object within one -- this IS code, so comments/strings/
+//     nested templates are stripped/kept the same as "code". A `{` pushes
+//     another "interp" frame (to find the matching close); a `}` pops one.
+//     Outside any interpolation (the base "code" frame), bare `{`/`}` need
+//     no tracking since nothing ever pops the base frame.
+//
+// Known limitation: regex literals are not specially recognized, so a
+// regex containing two UNESCAPED adjacent `/` characters (e.g. inside a
+// character class, `/[//]/`) could be misread as a line comment. This
+// does not occur in this repo's current files (verified: the self-test's
+// clean-vs-planted fixtures below exercise the real token set against
+// the real scope with this stripper and the counts are stable); a general
+// JS/TS parser would be the real fix if it ever does.
+function stripCommentsKeepStrings(source) {
+  let out = "";
+  const stack = ["code"];
+  const n = source.length;
+  let i = 0;
+
+  function copyQuoted(quote) {
+    out += source[i];
+    i++;
+    while (i < n) {
+      const c = source[i];
+      out += c;
+      if (c === "\\") {
+        i++;
+        if (i < n) {
+          out += source[i];
+          i++;
+        }
+        continue;
+      }
+      i++;
+      if (c === quote) break;
+    }
+  }
+
+  while (i < n) {
+    const top = stack[stack.length - 1];
+    const c = source[i];
+    const c2 = i + 1 < n ? source[i + 1] : "";
+
+    if (top === "template") {
+      if (c === "\\") {
+        out += c;
+        i++;
+        if (i < n) {
+          out += source[i];
+          i++;
+        }
+        continue;
+      }
+      if (c === "`") {
+        out += c;
+        stack.pop();
+        i++;
+        continue;
+      }
+      if (c === "$" && c2 === "{") {
+        out += "${";
+        stack.push("interp");
+        i += 2;
+        continue;
+      }
+      out += c; // raw template text -- kept verbatim, this is where SQL lives
+      i++;
+      continue;
+    }
+
+    // top === "code" || top === "interp": both are executable code.
+    if (c === "/" && c2 === "/") {
+      let j = i + 2;
+      while (j < n && source[j] !== "\n") j++;
+      out += " ";
+      i = j;
+      continue;
+    }
+    if (c === "/" && c2 === "*") {
+      let j = i + 2;
+      while (j < n && !(source[j] === "*" && source[j + 1] === "/")) j++;
+      j = Math.min(j + 2, n);
+      out += " ";
+      i = j;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      copyQuoted(c);
+      continue;
+    }
+    if (c === "`") {
+      out += c;
+      stack.push("template");
+      i++;
+      continue;
+    }
+    if (top === "interp" && c === "{") {
+      out += c;
+      stack.push("interp");
+      i++;
+      continue;
+    }
+    if (top === "interp" && c === "}") {
+      out += c;
+      stack.pop();
+      i++;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
 
 function wordBoundaryRegex(token) {
   const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`\\b${escaped}\\b`);
 }
 
-/** Returns a sorted array of `{ file, token }` (file relative-posix to repoRoot) for every token hit in the given file set. */
+/** Returns a sorted array of `{ file, token }` (file relative-posix to repoRoot) for every token hit in the given file set. Comments are stripped before matching (see `stripCommentsKeepStrings`); string and template-literal contents are kept. */
 function scanForTokenHits(repoRoot, files, tokens) {
   const tokenRes = tokens.map((t) => ({ token: t, re: wordBoundaryRegex(t) }));
   const hits = [];
   for (const absFile of files) {
-    const content = fs.readFileSync(absFile, "utf8");
+    const raw = fs.readFileSync(absFile, "utf8");
+    const content = stripCommentsKeepStrings(raw);
     const rel = relFromRoot(repoRoot, absFile);
     for (const { token, re } of tokenRes) {
       if (re.test(content)) {
@@ -429,6 +554,53 @@ function runSelfTest() {
     if (unauthorized.length !== 0 || stale.length !== 0) {
       console.error(
         `FAIL ${GATE_ID}: self-test — a clean fixture was flagged: unauthorized=${JSON.stringify(unauthorized)} stale=${JSON.stringify(stale)}`,
+      );
+      process.exit(EXIT_VIOLATION);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // --- (5) a table name ONLY in a // comment and a /** */ block in a route-reachable lib -> must NOT be a hit ---
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "serving-reads-"));
+  try {
+    writeFixtureRepo(tmp, {
+      routeContent: `import { readIt } from "../lib/fixtureLib";\nexport const route = readIt;\n`,
+      libContent:
+        `// txgio_address lives over there, not here\n` +
+        `/**\n * See txgio_address for the real store.\n */\n` +
+        `export function readIt() { return 1; }\n`,
+    });
+    const { hits } = runFixtureScan(tmp);
+    const found = hits.some(
+      (h) => h.file === "artifacts/api-server/src/lib/fixtureLib.ts" && h.token === "txgio_address",
+    );
+    if (found) {
+      console.error(
+        `FAIL ${GATE_ID}: self-test — a "txgio_address" mention inside // and /** */ comments only was counted as a read; comments must be stripped before matching`,
+      );
+      process.exit(EXIT_VIOLATION);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // --- (6) the SAME name inside a sql`` template literal -> MUST be a hit (template contents are kept, not stripped) ---
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "serving-reads-"));
+  try {
+    writeFixtureRepo(tmp, {
+      routeContent: `import { readIt } from "../lib/fixtureLib";\nexport const route = readIt;\n`,
+      libContent:
+        `// not a comment hit: this is inside the template below\n` +
+        "export function readIt() { return sql`SELECT 1 FROM txgio_address`; }\n",
+    });
+    const { hits } = runFixtureScan(tmp);
+    const found = hits.some(
+      (h) => h.file === "artifacts/api-server/src/lib/fixtureLib.ts" && h.token === "txgio_address",
+    );
+    if (!found) {
+      console.error(
+        `FAIL ${GATE_ID}: self-test — a "txgio_address" read inside a sql\`\` template literal was not detected; template-literal contents must be kept, not stripped`,
       );
       process.exit(EXIT_VIOLATION);
     }
