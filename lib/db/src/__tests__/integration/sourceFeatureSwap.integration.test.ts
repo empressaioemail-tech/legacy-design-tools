@@ -32,7 +32,7 @@ import {
 } from "../../sourceFeatureSwap";
 import { sourceFeature } from "../../schema/sourceFeature";
 import { sourceFeatureStage } from "../../schema/sourceFeatureStage";
-import { withTestSchema } from "../../testing";
+import { withTestSchema, openSecondHandle } from "../../testing";
 import type { TestSchemaContext } from "../../testing";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -304,4 +304,110 @@ describe("swapStagedCounty", () => {
       ).rejects.toThrow(/non-negative integer expectedCount/);
     });
   });
+
+  /**
+   * Concurrency (W3 review, 2026-10-09). Fires two swaps of the SAME
+   * county through TWO SEPARATE connections (`openSecondHandle` -- a
+   * genuinely independent pool, not a second checkout from the same
+   * pool), via `Promise.all` so both are truly in flight at the database
+   * at once -- a sequential `await` would never exercise the advisory
+   * lock ("concurrency falsifier must overlap": a locking test can pass
+   * on broken code unless the two claims actually overlap in time).
+   *
+   * Without the lock, this is exactly the race the module header
+   * describes: both transactions could pass their own count-check
+   * independently, each DELETE the live county, each INSERT their own
+   * run, and leave the live table on the UNION of both runs. With the
+   * lock, the second swap waits for the first's transaction to end, so
+   * whichever runs second sees (and deletes) the first's already-
+   * committed rows before inserting its own -- the final state is
+   * exactly one run's rows, never both and never neither.
+   */
+  it("serializes two concurrent swaps of the SAME county: both complete, and the final live rows belong to exactly one run (never a mix of both)", async () => {
+    await withTestSchema(async (ctx) => {
+      await setUpSourceFeatureTables(ctx);
+
+      await ctx.db.insert(sourceFeatureStage).values([
+        stageRow({ providerObjectId: "run-a-1", loadRunId: "run-a" }),
+        stageRow({ providerObjectId: "run-a-2", loadRunId: "run-a" }),
+        stageRow({ providerObjectId: "run-a-3", loadRunId: "run-a" }),
+      ]);
+      await ctx.db.insert(sourceFeatureStage).values([
+        stageRow({ providerObjectId: "run-b-1", loadRunId: "run-b" }),
+        stageRow({ providerObjectId: "run-b-2", loadRunId: "run-b" }),
+      ]);
+
+      const second = openSecondHandle(ctx.schemaName);
+      try {
+        const [resultA, resultB] = await Promise.all([
+          swapStagedCounty(ctx.db, {
+            provider: PROVIDER,
+            countyFips: COUNTY,
+            loadRunId: "run-a",
+            expectedCount: 3,
+          }),
+          swapStagedCounty(second.db, {
+            provider: PROVIDER,
+            countyFips: COUNTY,
+            loadRunId: "run-b",
+            expectedCount: 2,
+          }),
+        ]);
+
+        // Both complete without throwing -- the lock serializes rather
+        // than refusing (unlike cadPropertyWriteLock's try-lock).
+        expect(resultA.loadRunId).toBe("run-a");
+        expect(resultB.loadRunId).toBe("run-b");
+
+        const live = await ctx.db
+          .select()
+          .from(sourceFeature)
+          .where(
+            and(eq(sourceFeature.provider, PROVIDER), eq(sourceFeature.countyFips, COUNTY)),
+          );
+        const liveRunIds = new Set(live.map((r) => r.loadRunId));
+        expect(liveRunIds.size).toBe(1); // never a mix of run-a and run-b
+        if (liveRunIds.has("run-a")) {
+          expect(live.map((r) => r.providerObjectId).sort()).toEqual([
+            "run-a-1",
+            "run-a-2",
+            "run-a-3",
+          ]);
+        } else {
+          expect(live.map((r) => r.providerObjectId).sort()).toEqual(["run-b-1", "run-b-2"]);
+        }
+      } finally {
+        await second.pool.end();
+      }
+    });
+  });
+
+  /**
+   * SOURCE_FEATURE_SWAP_INSERT_MISMATCH is NOT tested here with a forced
+   * trigger. Tracing why one is hard to construct deterministically in a
+   * single test, without adding a test-only seam to the function itself
+   * (not asked for, and it would be production code shaped around a
+   * test):
+   *
+   *  - The live DELETE (step 3) always runs before the INSERT (step 4)
+   *    and is scoped to the whole county, so no pre-existing live row can
+   *    survive to collide with the insert on the (provider, county_fips,
+   *    provider_object_id) primary key.
+   *  - `source_feature_stage` cannot hold two rows with the same
+   *    provider_object_id for one (provider, county_fips, load_run_id) --
+   *    that tuple IS its own primary key -- so the `SELECT` the `INSERT
+   *    ... SELECT` runs can never itself return a duplicate key.
+   *  - A genuine mismatch therefore requires a SECOND transaction to
+   *    modify this exact run's staged rows AND commit in the narrow
+   *    window between this function's own count-check and its insert --
+   *    a real race needing precise cross-connection timing this test
+   *    harness has no hook to control (unlike the lock test above, which
+   *    only needs both calls to be in flight, not precisely interleaved
+   *    mid-transaction).
+   *
+   * The refusal is still implemented (see `SourceFeatureSwapInsertMismatchError`
+   * and the check right after the insert in `sourceFeatureSwap.ts`) as
+   * defense-in-depth against exactly that race -- a future stage-cleanup
+   * job or a caller that bypasses the advisory lock.
+   */
 });
