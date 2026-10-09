@@ -113,6 +113,16 @@ export interface RawZoningFeature {
    * one rule instead of two copies that can drift apart.
    */
   parcelId?: string | null;
+  /**
+   * OPTIONAL (Burnet stage 3 §3 Bug 2 cross-county fix). Set only when the
+   * layer config carries `parcelIdDiscriminatorField` — the RAW value of
+   * that field on this feature (Horseshoe Bay: `county`, "GBU" or "GLL").
+   * `buildParcelIdIndex` uses it to EXCLUDE a feature from the id join
+   * entirely when its value is not in `parcelIdDiscriminatorValues`, so a
+   * layer mixing more than one CAD's parcels under one numeric id space
+   * does not match a parcel to the wrong CAD's feature.
+   */
+  parcelIdDiscriminator?: string | null;
 }
 
 function str(v: unknown): string | null {
@@ -189,6 +199,7 @@ export function reduceZoningFeature(
     | "nullDistrictCodes"
     | "baseCodeParse"
     | "parcelIdField"
+    | "parcelIdDiscriminatorField"
   >,
 ): RawZoningFeature {
   const { properties: props, geometry } = normalizeZoningPageFeature(feature);
@@ -205,11 +216,14 @@ export function reduceZoningFeature(
   // join must see this feature, blank code and all — see
   // `buildParcelIdIndex`, zoning-stamp.ts).
   const parcelId = cfg.parcelIdField ? codeFieldRaw(props[cfg.parcelIdField]) : null;
+  const parcelIdDiscriminator = cfg.parcelIdDiscriminatorField
+    ? codeFieldRaw(props[cfg.parcelIdDiscriminatorField])
+    : null;
   if (isNullDistrictCode(code, cfg.nullDistrictCodes)) {
-    return { code: null, description, geometry, parcelId };
+    return { code: null, description, geometry, parcelId, parcelIdDiscriminator };
   }
   if (!cfg.baseCodeParse || code === null) {
-    return { code, description, geometry, parcelId };
+    return { code, description, geometry, parcelId, parcelIdDiscriminator };
   }
   // Base-code layers (Austin): resolve the compound published value to its
   // base district. `unrecognised` keeps the RAW value in `code` — the published
@@ -227,6 +241,7 @@ export function reduceZoningFeature(
     geometry,
     parse,
     parcelId,
+    parcelIdDiscriminator,
   };
 }
 
@@ -395,6 +410,7 @@ export async function fetchZoningFeatures(
       opts.cfg.codeField,
       opts.cfg.descriptionField,
       opts.cfg.parcelIdField,
+      opts.cfg.parcelIdDiscriminatorField,
     ]
       .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(",");

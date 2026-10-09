@@ -40,6 +40,17 @@
  * second is work owed. "This feature has no account to attribute a district to"
  * is a third fact again.
  *
+ * BUG 2 (P-259-adjacent, 2026-10-09/10) adds a SIXTH bucket for a layer
+ * configured with `parcelIdField` (Horseshoe Bay): `parcelsNoDistrictOnLayer`
+ * — the parcel's OWN feature was found by id (on the correct county's side,
+ * and geometrically confirmed, see below) and its code there is blank. The
+ * six buckets still sum to `parcelsRead`. `parcelsIdGeometryMismatch` is NOT
+ * a seventh bucket in that sum — it is a sub-count of however many parcels
+ * landed in `parcelsMatched`/`parcelsUnmatched`/etc. via the ordinary point
+ * lookup specifically BECAUSE an id match was found but rejected on
+ * geometry (a cross-county numeric id collision), so it is reported
+ * alongside the six-way sum rather than inside it.
+ *
  * FEATURES vs ACCOUNTS (P-259b). `parcelsRead` counts FEATURES (`DISTINCT ON
  * feature_index`), which is the denominator the predecessor lane's bands were
  * written in and is kept. It is not an account count: in Travis 423,540 of
@@ -58,7 +69,12 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { txgioParcel } from "@workspace/db/schema";
-import { normalizeDigitId, type GeoJsonGeometry } from "./geo";
+import {
+  normalizeDigitId,
+  pointInGeometry,
+  trueInteriorPoint,
+  type GeoJsonGeometry,
+} from "./geo";
 import type { BaseCodeKind } from "./zoning-base-code";
 import {
   stampParcelZoning,
@@ -69,15 +85,28 @@ import {
 /**
  * How a stamped (or declared-blank) parcel's district was decided
  * (Burnet stage 3 §3 Bug 2). `"parcel-id"`: the layer's own feature for
- * this exact parcel id published a code, used directly. `"parcel-id-blank"`:
- * the layer's own feature for this parcel id exists but its code field is
- * blank/null — a declared "no district on the city's own layer" outcome,
- * never filled in from a neighbour. `"point"`: no parcel-id index was
- * configured for this layer, or this parcel's id was not found on it, so
- * the point-in-polygon lookup decided (the ONLY method before Bug 2, and
- * still the only method for a district-polygon layer like Marble Falls).
+ * this exact parcel id published a code, AND its geometry was confirmed to
+ * contain the parcel's interior point, so it was used directly.
+ * `"parcel-id-blank"`: same geometry confirmation, but the feature's code
+ * field is blank/null — a declared "no district on the city's own layer"
+ * outcome, never filled in from a neighbour. `"parcel-id-geometry-mismatch"`
+ * (cross-county fix, 2026-10-10): a feature WAS found for this id, but its
+ * geometry does NOT contain the parcel's interior point — e.g. Horseshoe
+ * Bay's layer also carries Llano CAD parcels under a PROP_ID space that
+ * overlaps Burnet's, so an id match alone is not proof of the same physical
+ * parcel. The id is treated as not found and the point lookup decides
+ * instead, same as `"point"`, but the mismatch is still counted separately
+ * so it is visible rather than indistinguishable from "no id existed at
+ * all". `"point"`: no parcel-id index was configured for this layer, or
+ * this parcel's id was not found on it at all, so the point-in-polygon
+ * lookup decided (the ONLY method before Bug 2, and still the only method
+ * for a district-polygon layer like Marble Falls).
  */
-export type ZoningMatchMethod = "parcel-id" | "parcel-id-blank" | "point";
+export type ZoningMatchMethod =
+  | "parcel-id"
+  | "parcel-id-blank"
+  | "parcel-id-geometry-mismatch"
+  | "point";
 
 /** Why a feature was skipped for carrying no CAD account. */
 export type NoAccountReason = "zero" | "empty" | "null";
@@ -157,6 +186,20 @@ export interface ZoningStampSummary {
    * Always 0 when the layer carries no `parcelIdField` (Marble Falls).
    */
   parcelsNoDistrictOnLayer: number;
+  /**
+   * Cross-county fix (2026-10-10). Parcels whose `prop_id` WAS found on the
+   * layer's parcel-id index, but the joined feature's geometry does NOT
+   * contain the parcel's interior point — a numeric id coincidence, not the
+   * same physical parcel (Horseshoe Bay's layer also carries Llano CAD
+   * parcels under a `PROP_ID` space that overlaps Burnet's). NOT its own
+   * bucket in the five/six-way sum: these parcels fall through to the
+   * ordinary point lookup and land in `parcelsMatched` /
+   * `parcelsUnmatched` / etc. exactly as an id-absent parcel would — this
+   * count exists only so the mismatch is visible rather than
+   * indistinguishable from "no id existed on the layer at all". Always 0
+   * when the layer carries no `parcelIdField`.
+   */
+  parcelsIdGeometryMismatch: number;
   /**
    * Features read whose `prop_id` is `'0'`, empty or NULL, so they were NOT
    * PIPed and wrote NO ROW (P-259b, operator ruling 2026-09-17). Listed by
@@ -478,6 +521,7 @@ export async function stampCountyZoning(opts: {
     parcelsMatched: 0,
     parcelsUnmatched: 0,
     parcelsNoDistrictOnLayer: 0,
+    parcelsIdGeometryMismatch: 0,
     parcelsSkippedNoAccount: 0,
     skippedNoAccountByReason: { zero: 0, empty: 0, null: 0 },
     parcelsUnrecognised: 0,
@@ -553,10 +597,37 @@ export async function stampCountyZoning(opts: {
     // have landed in. An id absent from this index (every parcel, on a
     // layer with no `parcelIdField` configured) falls through to the
     // ordinary point lookup exactly as before Bug 2.
-    const idEntry =
+    let idEntry =
       parcelIdIndex && p.propId
         ? parcelIdIndex.get(normalizeDigitId(p.propId))
         : undefined;
+    // CROSS-COUNTY GEOMETRY GATE (2026-10-10). An id match alone is not
+    // proof of the same physical parcel: Horseshoe Bay's layer also
+    // carries Llano CAD parcels under a PROP_ID space that overlaps
+    // Burnet's. Before trusting ANY id match (real code or blank), the
+    // joined feature's geometry must actually contain the parcel's
+    // interior point. `parcelIdDiscriminatorField`/`Values` (zoning-
+    // layers.ts) already narrows the id index to the right county's
+    // features at build time; this is the second, independent check —
+    // belt and suspenders against a wrong or stale discriminator value on
+    // some row. A mismatch is NOT trusted as an id match at all: it falls
+    // through to the ordinary point lookup, same as an absent id, but is
+    // counted separately so the mismatch stays visible.
+    let idGeometryMismatch = false;
+    if (idEntry) {
+      const interior = trueInteriorPoint(p.geometry as GeoJsonGeometry);
+      const agrees =
+        interior !== null &&
+        idEntry.geometry !== null &&
+        pointInGeometry(interior.longitude, interior.latitude, idEntry.geometry);
+      if (!agrees) {
+        idGeometryMismatch = true;
+        idEntry = undefined;
+      }
+    }
+    if (idGeometryMismatch) {
+      summary.parcelsIdGeometryMismatch += 1;
+    }
     if (idEntry && idEntry.code === null) {
       summary.parcelsNoDistrictOnLayer += 1;
       if (scoped && p.propId) {
@@ -578,7 +649,9 @@ export async function stampCountyZoning(opts: {
     const matchMethod: ZoningMatchMethod | undefined = parcelIdIndex
       ? idEntry
         ? "parcel-id"
-        : "point"
+        : idGeometryMismatch
+          ? "parcel-id-geometry-mismatch"
+          : "point"
       : undefined;
     const hit = idEntry
       ? { code: idEntry.code!, description: idEntry.description, parse: idEntry.parse }

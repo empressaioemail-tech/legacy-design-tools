@@ -155,6 +155,33 @@ export interface ZoningLayerConfig {
    * byte-identical to pre-Bug-2 behavior.
    */
   parcelIdField?: string;
+  /**
+   * OPTIONAL, together with `parcelIdField`. Found live 2026-10-10 reviewing
+   * this very fix: Horseshoe Bay's "Zoning Parcels" layer is NOT single-CAD.
+   * It carries BOTH Burnet (`county="GBU"`, 2,532 features) and Llano
+   * (`county="GLL"`, 8,597 features — most of the layer) CAD parcels, and
+   * the two CADs' `PROP_ID` numbering spaces OVERLAP. Measured countywide
+   * on the unfiltered join: of 6,729 parcels matched by id, only 2,053
+   * (30%) geometrically agreed with the joined feature — the other 4,676
+   * were Burnet parcels whose id happened to also be some unrelated Llano
+   * parcel's id (examples up to 60 km away), and 2,242 of those were
+   * UNINCORPORATED Burnet parcels that would have been wrongly given an
+   * HSB zoning code. `parcelIdDiscriminatorField` names the attribute that
+   * separates the two CADs; `parcelIdDiscriminatorValues` lists the values
+   * that mean "this feature is on MY county's side" (Horseshoe Bay:
+   * field `county`, value `GBU`). A feature whose discriminator value is
+   * NOT in this list is treated as ABSENT for the id join — never matched
+   * by id, never counted toward "this id is ambiguous" (so a Burnet/Llano
+   * numeric collision resolves cleanly to the Burnet side rather than
+   * being excluded as a false ambiguity). `stampCountyZoning` additionally
+   * requires the joined feature's geometry to actually contain the
+   * parcel's interior point before trusting an id match at all — the
+   * discriminator narrows which CAD's features are even candidates, the
+   * geometry check is what actually proves the SAME physical parcel.
+   */
+  parcelIdDiscriminatorField?: string;
+  /** See `parcelIdDiscriminatorField`. */
+  parcelIdDiscriminatorValues?: string[];
 }
 
 /**
@@ -851,13 +878,33 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
   // The one documented exception, 48053:23321 (a county-line parcel), has
   // its real CAD id in `prop_id_1` while `PROP_ID` on that same feature
   // holds an unrelated legacy value (16298) -- live-confirmed again
-  // 2026-10-09. `parcelIdField` below names ONLY `PROP_ID`, not both: for
-  // 23321 the id join finds no feature and the stamp correctly falls back
-  // to the point lookup (counted as `matchMethod: "point"`), which lands in
-  // 23321's own feature anyway (ZONING "R-1", matching what `prop_id_1`
-  // would have given directly) because 23321's own footprint is not
-  // blank-coded -- a documented, harmless fallback, not a second join key
-  // added speculatively.
+  // 2026-10-09, and (see below) 16298 is a LLANO id (`county="GLL"`), not
+  // a mere "legacy" artifact. `parcelIdField` below names ONLY `PROP_ID`,
+  // not both: for 23321 the id join finds no feature and the stamp
+  // correctly falls back to the point lookup (counted as
+  // `matchMethod: "point"`), which lands in 23321's own feature anyway
+  // (ZONING "R-1", matching what `prop_id_1` would have given directly)
+  // because 23321's own footprint is not blank-coded -- a documented,
+  // harmless fallback, not a second join key added speculatively.
+  //
+  // CROSS-COUNTY PROP_ID COLLISION (found 2026-10-10 reviewing this fix):
+  // Horseshoe Bay straddles Burnet (48053) AND Llano (48299), and this
+  // single layer carries BOTH counties' CAD parcels -- `county="GBU"`
+  // (2,532 features, Burnet) and `county="GLL"` (8,597 features, Llano --
+  // the MAJORITY of the layer). The two CADs' `PROP_ID` spaces overlap
+  // numerically (confirmed: `PROP_ID=20598` is TWO different features at
+  // opposite ends of the city, one GBU/"C-2", one GLL/"R-1"), so an
+  // unfiltered id join matches a Burnet parcel to an unrelated Llano
+  // parcel whenever their ids coincide. Measured countywide: of 6,729
+  // parcels matched by id with no discriminator, only 2,053 (30%)
+  // geometrically agreed with the joined feature; the other 4,676 were
+  // cross-county collisions (up to ~60 km away), 2,242 of them
+  // UNINCORPORATED Burnet parcels that would have been wrongly given an
+  // HSB code. `parcelIdDiscriminatorField`/`Values` below restrict the id
+  // join to `county="GBU"` features only, and `stampCountyZoning` still
+  // requires the joined feature to geometrically contain the parcel's
+  // interior point before trusting the match at all (belt and suspenders:
+  // the discriminator could itself be wrong or stale on some row).
   //
   // TWO DECLARED NO-DISTRICT CASES (WDLL known special cases), BOTH confirmed
   // live at the exact parcel, not inferred: 48053:69366 ("CA" in the frozen
@@ -886,6 +933,8 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     codeField: "ZONING",
     descriptionField: "SUB_ZONING",
     parcelIdField: "PROP_ID",
+    parcelIdDiscriminatorField: "county",
+    parcelIdDiscriminatorValues: ["GBU"],
   },
 };
 

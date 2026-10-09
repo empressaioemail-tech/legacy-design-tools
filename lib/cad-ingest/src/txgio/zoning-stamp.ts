@@ -336,17 +336,24 @@ export function stampParcelZoning(
 
 /**
  * One parcel-shaped zoning layer's own feature for a given CAD parcel id
- * (P-???, Burnet stage 3 §3 Bug 2 — Horseshoe Bay sample #30/#40).
+ * (Burnet stage 3 §3 Bug 2 — Horseshoe Bay sample #30/#40).
  *
  * `code: null` means the layer's OWN feature for this exact parcel carries
  * a blank/no district on its code field — a DECLARED fact (the register's
  * own CA/vacant-land rows), never to be filled in from a point lookup that
  * might land in a neighbour's polygon on a misaligned shared boundary.
+ *
+ * `geometry` is the matched feature's OWN geometry, carried through so the
+ * caller (`stampCountyZoning`) can require it to actually contain the
+ * parcel's interior point before trusting the id match at all — see the
+ * cross-county finding below. `null` only for a feature whose geometry
+ * could not be converted at fetch time (never trusted as a match then).
  */
 export interface ParcelIdZoningEntry {
   code: string | null;
   description?: string | null;
   parse?: BaseCodeParse;
+  geometry: GeoJsonGeometry | null;
 }
 
 /**
@@ -364,24 +371,37 @@ export interface ParcelIdZoningEntry {
  * parcel id, blank code included — the blank IS the fact a caller needs to
  * read before ever falling back to a point lookup.
  *
- * AMBIGUOUS IDS ARE EXCLUDED, NEVER GUESSED (found live, 2026-10-09): a
- * parcel id repeated across MORE THAN ONE feature is EXCLUDED from this
- * index entirely — not "keep the first" — so a caller for that id gets back
- * `undefined` and falls through to the point lookup exactly as it would for
- * an id absent from the layer. "Keep the first" was tried and measured
- * wrong: Horseshoe Bay's own live layer carries 502 non-zero `PROP_ID`
- * values on 2+ features each (`PROP_ID=0` on 246 more, a sentinel, never
- * looked up — the no-CAD-account gate already filters it upstream). The
- * concrete case: `PROP_ID=20598` is on TWO features at opposite ends of the
- * city (OBJECTID 1947, geo_id 10650-002-4118-0, "R-1"; OBJECTID 16134,
- * geo_id 05220-3700-37060-A00, "C-2"). Burnet's own `txgio_parcel` geometry
- * for prop_id 20598 is byte-identical (to float precision) to OBJECTID
- * 16134's ring — "C-2" is the geometrically correct answer — but ArcGIS
- * returns OBJECTID 1947 FIRST, so "keep the first" would have silently
- * stamped the wrong district ("R-1") purely from fetch order. The point
- * lookup has no such failure mode: it tests the ACTUAL geometry, which is
- * exactly why it is kept as the fallback for an ambiguous id rather than
- * guessing between the id's candidates.
+ * CROSS-COUNTY DISCRIMINATOR (found 2026-10-10 reviewing this fix):
+ * Horseshoe Bay straddles Burnet and Llano, and this ONE layer carries
+ * BOTH counties' CAD parcels under a numeric `PROP_ID` space that overlaps
+ * between the two CADs. `discriminatorAcceptValues`, when supplied, means
+ * "a feature whose `parcelIdDiscriminator` value is NOT in this set is
+ * ABSENT for the id join" — it is skipped before anything else, including
+ * before ambiguity detection, so a Llano feature that happens to share a
+ * Burnet parcel's id does not make that id "ambiguous"; it simply never
+ * entered the Burnet-side index. Measured countywide on the UNFILTERED
+ * join: of 6,729 parcels matched by id, only 2,053 (30%) geometrically
+ * agreed with the joined feature; the rest were cross-county numeric
+ * collisions (examples up to ~60 km away), 2,242 of them UNINCORPORATED
+ * Burnet parcels that would have been wrongly given an HSB code.
+ *
+ * AMBIGUOUS IDS ARE EXCLUDED, NEVER GUESSED (found live, 2026-10-09,
+ * BEFORE the discriminator above was added — kept as a second, independent
+ * safety net for a true same-side duplicate the discriminator does not
+ * resolve): a parcel id repeated across MORE THAN ONE surviving (post-
+ * discriminator) feature is EXCLUDED from this index entirely — not "keep
+ * the first" — so a caller for that id gets back `undefined` and falls
+ * through to the point lookup exactly as it would for an id absent from
+ * the layer. "Keep the first" was tried and measured wrong before the
+ * discriminator existed: `PROP_ID=20598` is on two features at opposite
+ * ends of the city (OBJECTID 1947, `county="GLL"`, "R-1"; OBJECTID 16134,
+ * `county="GBU"`, "C-2"), and ArcGIS returns 1947 FIRST, so "keep the
+ * first" would have silently stamped the wrong, cross-county district.
+ * With the discriminator now filtering to `county="GBU"` first, 20598
+ * resolves cleanly to OBJECTID 16134 alone — the ambiguity-exclusion path
+ * below is for when 2+ features survive the discriminator filter (or when
+ * no discriminator is configured for a layer at all, e.g. Marble Falls,
+ * where this function is simply never called).
  */
 export function buildParcelIdIndex(
   features: Array<{
@@ -389,18 +409,38 @@ export function buildParcelIdIndex(
     code: string | null | undefined;
     description?: string | null;
     parse?: BaseCodeParse;
+    geometry?: GeoJsonGeometry | null;
+    parcelIdDiscriminator?: string | null;
   }>,
+  opts?: {
+    /**
+     * When supplied, a feature whose `parcelIdDiscriminator` is not in
+     * this list is treated as if it were not on the layer at all for the
+     * id join (see the cross-county note above). `undefined` (the
+     * default) applies no filter — every feature with a parcel id is a
+     * candidate, byte-identical to this function's pre-discriminator
+     * behavior.
+     */
+    discriminatorAcceptValues?: readonly string[];
+  },
 ): Map<string, ParcelIdZoningEntry> {
+  const accept = opts?.discriminatorAcceptValues;
   const out = new Map<string, ParcelIdZoningEntry>();
   const ambiguous = new Set<string>();
   for (const f of features) {
     if (!f.parcelId) continue;
+    if (accept && (f.parcelIdDiscriminator === null || f.parcelIdDiscriminator === undefined || !accept.includes(f.parcelIdDiscriminator))) {
+      // Not on the accepted side (e.g. a Llano feature on Horseshoe Bay's
+      // layer) -- absent for the id join, never counted toward ambiguity.
+      continue;
+    }
     const id = normalizeDigitId(f.parcelId);
     if (!id || ambiguous.has(id)) continue;
     if (out.has(id)) {
-      // Second sighting of this id: it no longer identifies ONE feature.
-      // Drop it from the resolvable map and remember it as ambiguous so a
-      // THIRD sighting does not re-add it.
+      // Second sighting of this id (AFTER the discriminator filter above):
+      // it no longer identifies ONE feature on the accepted side. Drop it
+      // from the resolvable map and remember it as ambiguous so a THIRD
+      // sighting does not re-add it.
       out.delete(id);
       ambiguous.add(id);
       continue;
@@ -410,6 +450,7 @@ export function buildParcelIdIndex(
       code: code.length > 0 ? code : null,
       description: f.description ?? null,
       parse: f.parse,
+      geometry: f.geometry ?? null,
     });
   }
   return out;

@@ -447,14 +447,25 @@ async function main(): Promise<void> {
   // blank-code drop — a blank code on the parcel's own feature is exactly
   // the fact this index exists to answer. Only built when the layer config
   // carries `parcelIdField`; every other city's run is untouched.
-  const parcelIdIndex = cfg.parcelIdField ? buildParcelIdIndex(raw) : undefined;
+  // `parcelIdDiscriminatorValues` (cross-county fix) restricts the id join
+  // to features on this layer that are actually on THIS city's county side
+  // (Horseshoe Bay's layer also carries Llano CAD parcels under an
+  // overlapping PROP_ID space) — see zoning-stamp.ts's buildParcelIdIndex.
+  const parcelIdIndex = cfg.parcelIdField
+    ? buildParcelIdIndex(raw, {
+        discriminatorAcceptValues: cfg.parcelIdDiscriminatorValues,
+      })
+    : undefined;
   if (parcelIdIndex) {
     const blankOwnFeatures = [...parcelIdIndex.values()].filter(
       (e) => e.code === null,
     ).length;
     log(
-      `parcel-id index (field ${cfg.parcelIdField}): ${parcelIdIndex.size} ` +
-        `ids indexed (${blankOwnFeatures} carry a blank/no-district code)`,
+      `parcel-id index (field ${cfg.parcelIdField}` +
+        (cfg.parcelIdDiscriminatorField
+          ? `, discriminator ${cfg.parcelIdDiscriminatorField}=${(cfg.parcelIdDiscriminatorValues ?? []).join("/")}`
+          : "") +
+        `): ${parcelIdIndex.size} ids indexed (${blankOwnFeatures} carry a blank/no-district code)`,
     );
   }
 
@@ -535,6 +546,12 @@ async function main(): Promise<void> {
       `no district (layer): ${summary.parcelsNoDistrictOnLayer} (Bug 2: the ` +
         "parcel's OWN feature was found by id and its code there is blank — " +
         "declared, never stamped from a neighbour)",
+    );
+    log(
+      `id-geometry mismatch: ${summary.parcelsIdGeometryMismatch} (an id match ` +
+        "was found but its feature's geometry does not contain this parcel's " +
+        "interior point -- rejected as a cross-county/numeric id coincidence, " +
+        "the point lookup decided instead; NOT a 7th bucket, see note below)",
     );
   }
   log(
@@ -626,13 +643,13 @@ async function main(): Promise<void> {
     if (summary.perParcel && summary.perParcel.length > 0) {
       log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
       log(
-        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} ${"method".padEnd(13)} district`,
+        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} ${"method".padEnd(29)} district`,
       );
       for (const row of summary.perParcel) {
         log(
           `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ` +
             `${row.kind.padEnd(20)} ${(row.interim === undefined ? "-" : String(row.interim)).padEnd(8)} ` +
-            `${(row.matchMethod ?? "-").padEnd(13)} ${row.district ?? "(none)"}` +
+            `${(row.matchMethod ?? "-").padEnd(29)} ${row.district ?? "(none)"}` +
             (row.publishedCode && row.publishedCode !== row.district
               ? `   [published: ${row.publishedCode}]`
               : ""),

@@ -1785,8 +1785,24 @@ describe("buildParcelIdIndex", () => {
       { parcelId: "0069366", code: null, description: null },
       { parcelId: "23169", code: "R-4", description: "R-4-MF" },
     ]);
-    expect(idx.get("69366")).toEqual({ code: null, description: null, parse: undefined });
-    expect(idx.get("23169")).toEqual({ code: "R-4", description: "R-4-MF", parse: undefined });
+    expect(idx.get("69366")).toEqual({
+      code: null,
+      description: null,
+      parse: undefined,
+      geometry: null,
+    });
+    expect(idx.get("23169")).toEqual({
+      code: "R-4",
+      description: "R-4-MF",
+      parse: undefined,
+      geometry: null,
+    });
+  });
+
+  it("carries the feature's own geometry through (for the caller's geometry-agreement gate)", () => {
+    const geom = squareFeature("X", -97.7, 30.7, 0.01).geometry;
+    const idx = buildParcelIdIndex([{ parcelId: "1", code: "R-1", geometry: geom }]);
+    expect(idx.get("1")?.geometry).toBe(geom);
   });
 
   it("keeps a blank-coded feature instead of DROPPING it (unlike buildZoningIndex)", () => {
@@ -1806,14 +1822,16 @@ describe("buildParcelIdIndex", () => {
     expect(idx.size).toBe(0);
   });
 
-  it("a repeated id is AMBIGUOUS and EXCLUDED, never guessed (live Horseshoe Bay finding: PROP_ID=20598)", () => {
+  it("a repeated id is AMBIGUOUS and EXCLUDED, never guessed (live Horseshoe Bay finding: PROP_ID=20598, no discriminator configured)", () => {
     // Reproduces the real live case: two features on the same layer share
     // one PROP_ID with two DIFFERENT codes. Neither can be trusted by id
     // alone -- "keep the first" was measured wrong on this exact id (the
     // first-fetched feature, OBJECTID 1947/"R-1", was NOT the one Burnet's
     // own txgio_parcel geometry for prop_id 20598 actually sits on; OBJECTID
     // 16134/"C-2" was). The id must come back unresolved so the caller
-    // falls through to the point lookup, which tests real geometry.
+    // falls through to the point lookup, which tests real geometry. (With
+    // NO discriminator passed here — the case below shows the discriminator
+    // resolving this exact id cleanly instead.)
     const idx = buildParcelIdIndex([
       { parcelId: "20598", code: "R-1" }, // OBJECTID 1947, fetched first
       { parcelId: "20598", code: "C-2" }, // OBJECTID 16134, the geometrically correct one
@@ -1838,6 +1856,54 @@ describe("buildParcelIdIndex", () => {
     ]);
     expect(idx.has("20598")).toBe(false);
     expect(idx.get("69366")?.code).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Cross-county discriminator (found 2026-10-10 reviewing this fix):
+  // Horseshoe Bay's layer carries BOTH Burnet ("GBU") and Llano ("GLL") CAD
+  // parcels under an overlapping PROP_ID space. `discriminatorAcceptValues`
+  // must exclude the wrong county's feature from the id join BEFORE
+  // ambiguity is even considered.
+  // -------------------------------------------------------------------------
+  describe("discriminatorAcceptValues (cross-county fix)", () => {
+    it("a Llano feature sharing a Burnet parcel's id is treated as ABSENT, not ambiguous -- PROP_ID=20598 resolves cleanly to the Burnet side", () => {
+      const idx = buildParcelIdIndex(
+        [
+          { parcelId: "20598", code: "R-1", parcelIdDiscriminator: "GLL" }, // Llano, OBJECTID 1947
+          { parcelId: "20598", code: "C-2", parcelIdDiscriminator: "GBU" }, // Burnet, OBJECTID 16134
+        ],
+        { discriminatorAcceptValues: ["GBU"] },
+      );
+      // NOT excluded as ambiguous -- the Llano sighting never counted.
+      expect(idx.has("20598")).toBe(true);
+      expect(idx.get("20598")?.code).toBe("C-2");
+    });
+
+    it("a feature with no discriminator value at all is excluded from the id join when a filter is configured", () => {
+      const idx = buildParcelIdIndex(
+        [{ parcelId: "5", code: "R-1", parcelIdDiscriminator: null }],
+        { discriminatorAcceptValues: ["GBU"] },
+      );
+      expect(idx.has("5")).toBe(false);
+    });
+
+    it("TWO features both on the accepted side sharing an id are still ambiguous (the discriminator narrows, it does not replace the dedupe)", () => {
+      const idx = buildParcelIdIndex(
+        [
+          { parcelId: "9", code: "R-1", parcelIdDiscriminator: "GBU" },
+          { parcelId: "9", code: "C-2", parcelIdDiscriminator: "GBU" },
+        ],
+        { discriminatorAcceptValues: ["GBU"] },
+      );
+      expect(idx.has("9")).toBe(false);
+    });
+
+    it("with no discriminatorAcceptValues passed, behavior is byte-identical to pre-cross-county-fix (every feature is a candidate)", () => {
+      const idx = buildParcelIdIndex([
+        { parcelId: "1", code: "R-1", parcelIdDiscriminator: "GLL" },
+      ]);
+      expect(idx.get("1")?.code).toBe("R-1");
+    });
   });
 });
 
@@ -1864,14 +1930,23 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
     ];
   }
 
-  // "100" -> real code; "200" -> own feature found, code BLANK; "300" ->
-  // deliberately absent from the index (id not on the layer at all).
+  // Every synthetic parcel's own geometry is `parcelSquare(-97.715, 30.72)`
+  // (seedHsbRows above) -- the SAME shape every real-id-match index entry
+  // below carries, so the geometry-agreement gate passes for a genuine
+  // match. "100" -> real code; "200" -> own feature found, code BLANK;
+  // "300" -> deliberately absent from the index (id not on the layer at
+  // all); "400" -> an id match exists but its feature is FAR AWAY (a
+  // cross-county numeric collision, e.g. a Llano parcel sharing a Burnet
+  // parcel's PROP_ID) and must be rejected.
+  const ownGeometry = parcelSquare(-97.715, 30.72);
+  const farAwayGeometry = parcelSquare(10, 10); // nowhere near Horseshoe Bay
   const parcelIdIndex = buildParcelIdIndex([
-    { parcelId: "100", code: "R-1", description: "R-1-SF" },
-    { parcelId: "200", code: null, description: null },
+    { parcelId: "100", code: "R-1", description: "R-1-SF", geometry: ownGeometry },
+    { parcelId: "200", code: null, description: null, geometry: ownGeometry },
+    { parcelId: "400", code: "A-1", description: null, geometry: farAwayGeometry },
   ]);
 
-  it("own feature with a real code stamps directly (matchMethod parcel-id), bypassing the point lookup", async () => {
+  it("own feature with a real code AND agreeing geometry stamps directly (matchMethod parcel-id), bypassing the point lookup", async () => {
     const fake = makeFakeDb(seedHsbRows("100", 200));
     const summary = await stampCountyZoning({
       db: fake.db,
@@ -1883,6 +1958,7 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
       dryRun: true,
     });
     expect(summary.parcelsMatched).toBe(1);
+    expect(summary.parcelsIdGeometryMismatch).toBe(0);
     expect(summary.perParcel).toHaveLength(1);
     expect(summary.perParcel![0]).toMatchObject({
       propId: "100",
@@ -1892,7 +1968,7 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
     });
   });
 
-  it("own feature blank: declared no-district, NEVER the neighbour's code, counted in parcelsNoDistrictOnLayer", async () => {
+  it("own feature blank AND agreeing geometry: declared no-district, NEVER the neighbour's code, counted in parcelsNoDistrictOnLayer", async () => {
     const fake = makeFakeDb(seedHsbRows("200", 201));
     const summary = await stampCountyZoning({
       db: fake.db,
@@ -1906,6 +1982,7 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
     expect(summary.parcelsNoDistrictOnLayer).toBe(1);
     expect(summary.parcelsMatched).toBe(0); // never the neighbour's C-2
     expect(summary.parcelsUnmatched).toBe(0); // not the generic "no polygon" bucket either
+    expect(summary.parcelsIdGeometryMismatch).toBe(0);
     expect(summary.noDistrictOnLayerPropIds).toEqual(["200"]);
     expect(summary.perParcel).toHaveLength(1);
     expect(summary.perParcel![0]).toEqual({
@@ -1929,12 +2006,40 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
       dryRun: true,
     });
     expect(summary.parcelsMatched).toBe(1);
+    expect(summary.parcelsIdGeometryMismatch).toBe(0);
     expect(summary.perParcel).toHaveLength(1);
     expect(summary.perParcel![0]).toMatchObject({
       propId: "300",
       district: "C-2", // genuinely falls back to the point lookup
       kind: "base",
       matchMethod: "point",
+    });
+  });
+
+  // THE CROSS-COUNTY REGRESSION (coordinator review, 2026-10-10): an id
+  // match whose feature sits far away must NOT be trusted -- it is exactly
+  // the live Horseshoe Bay/Llano shape (same PROP_ID, unrelated parcel).
+  it("an id match whose feature geometry is FAR AWAY is rejected (not an id match) and falls back to the point lookup, counted in parcelsIdGeometryMismatch", async () => {
+    const fake = makeFakeDb(seedHsbRows("400", 203));
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: neighbourIndex,
+      parcelIdIndex,
+      propIds: new Set(["400"]),
+      dryRun: true,
+    });
+    expect(summary.parcelsIdGeometryMismatch).toBe(1);
+    // Still matched overall -- just via the point lookup, not the id join.
+    expect(summary.parcelsMatched).toBe(1);
+    expect(summary.parcelsNoDistrictOnLayer).toBe(0);
+    expect(summary.perParcel).toHaveLength(1);
+    expect(summary.perParcel![0]).toMatchObject({
+      propId: "400",
+      district: "C-2", // the POINT LOOKUP's answer, never the far-away id match's "A-1"
+      kind: "base",
+      matchMethod: "parcel-id-geometry-mismatch",
     });
   });
 
@@ -1954,6 +2059,7 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
       dryRun: true,
     });
     expect(summary.parcelsNoDistrictOnLayer).toBe(0);
+    expect(summary.parcelsIdGeometryMismatch).toBe(0);
     expect(summary.parcelsMatched).toBe(3);
     for (const row of summary.perParcel!) {
       expect(row.matchMethod).toBeUndefined();
