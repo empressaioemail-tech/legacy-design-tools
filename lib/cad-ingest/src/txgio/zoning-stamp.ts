@@ -364,10 +364,24 @@ export interface ParcelIdZoningEntry {
  * parcel id, blank code included — the blank IS the fact a caller needs to
  * read before ever falling back to a point lookup.
  *
- * A parcel id repeated across more than one feature keeps the FIRST and
- * drops the rest — a parcel-shaped layer is expected to carry one feature
- * per parcel; a repeat is a layer-data surprise, not something to resolve
- * by silently overwriting in either direction.
+ * AMBIGUOUS IDS ARE EXCLUDED, NEVER GUESSED (found live, 2026-10-09): a
+ * parcel id repeated across MORE THAN ONE feature is EXCLUDED from this
+ * index entirely — not "keep the first" — so a caller for that id gets back
+ * `undefined` and falls through to the point lookup exactly as it would for
+ * an id absent from the layer. "Keep the first" was tried and measured
+ * wrong: Horseshoe Bay's own live layer carries 502 non-zero `PROP_ID`
+ * values on 2+ features each (`PROP_ID=0` on 246 more, a sentinel, never
+ * looked up — the no-CAD-account gate already filters it upstream). The
+ * concrete case: `PROP_ID=20598` is on TWO features at opposite ends of the
+ * city (OBJECTID 1947, geo_id 10650-002-4118-0, "R-1"; OBJECTID 16134,
+ * geo_id 05220-3700-37060-A00, "C-2"). Burnet's own `txgio_parcel` geometry
+ * for prop_id 20598 is byte-identical (to float precision) to OBJECTID
+ * 16134's ring — "C-2" is the geometrically correct answer — but ArcGIS
+ * returns OBJECTID 1947 FIRST, so "keep the first" would have silently
+ * stamped the wrong district ("R-1") purely from fetch order. The point
+ * lookup has no such failure mode: it tests the ACTUAL geometry, which is
+ * exactly why it is kept as the fallback for an ambiguous id rather than
+ * guessing between the id's candidates.
  */
 export function buildParcelIdIndex(
   features: Array<{
@@ -378,10 +392,19 @@ export function buildParcelIdIndex(
   }>,
 ): Map<string, ParcelIdZoningEntry> {
   const out = new Map<string, ParcelIdZoningEntry>();
+  const ambiguous = new Set<string>();
   for (const f of features) {
     if (!f.parcelId) continue;
     const id = normalizeDigitId(f.parcelId);
-    if (!id || out.has(id)) continue;
+    if (!id || ambiguous.has(id)) continue;
+    if (out.has(id)) {
+      // Second sighting of this id: it no longer identifies ONE feature.
+      // Drop it from the resolvable map and remember it as ambiguous so a
+      // THIRD sighting does not re-add it.
+      out.delete(id);
+      ambiguous.add(id);
+      continue;
+    }
     const code = typeof f.code === "string" ? f.code.trim() : "";
     out.set(id, {
       code: code.length > 0 ? code : null,

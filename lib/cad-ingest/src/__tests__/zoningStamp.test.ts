@@ -1801,14 +1801,43 @@ describe("buildParcelIdIndex", () => {
     );
   });
 
-  it("skips features with no parcel id, and keeps the FIRST on a repeated id", () => {
+  it("skips features with no parcel id", () => {
+    const idx = buildParcelIdIndex([{ parcelId: null, code: "R-1" }]);
+    expect(idx.size).toBe(0);
+  });
+
+  it("a repeated id is AMBIGUOUS and EXCLUDED, never guessed (live Horseshoe Bay finding: PROP_ID=20598)", () => {
+    // Reproduces the real live case: two features on the same layer share
+    // one PROP_ID with two DIFFERENT codes. Neither can be trusted by id
+    // alone -- "keep the first" was measured wrong on this exact id (the
+    // first-fetched feature, OBJECTID 1947/"R-1", was NOT the one Burnet's
+    // own txgio_parcel geometry for prop_id 20598 actually sits on; OBJECTID
+    // 16134/"C-2" was). The id must come back unresolved so the caller
+    // falls through to the point lookup, which tests real geometry.
     const idx = buildParcelIdIndex([
-      { parcelId: null, code: "R-1" },
-      { parcelId: "5", code: "A-1" },
-      { parcelId: "5", code: "C-2" }, // repeat id -- first wins, never overwritten
+      { parcelId: "20598", code: "R-1" }, // OBJECTID 1947, fetched first
+      { parcelId: "20598", code: "C-2" }, // OBJECTID 16134, the geometrically correct one
     ]);
-    expect(idx.size).toBe(1);
-    expect(idx.get("5")?.code).toBe("A-1");
+    expect(idx.has("20598")).toBe(false);
+  });
+
+  it("a THIRD sighting of an already-ambiguous id stays excluded (does not silently re-resolve)", () => {
+    const idx = buildParcelIdIndex([
+      { parcelId: "7", code: "A-1" },
+      { parcelId: "7", code: "B-1" },
+      { parcelId: "7", code: "C-1" },
+    ]);
+    expect(idx.has("7")).toBe(false);
+  });
+
+  it("an id seen once stays resolvable even when OTHER ids on the same call are ambiguous", () => {
+    const idx = buildParcelIdIndex([
+      { parcelId: "20598", code: "R-1" },
+      { parcelId: "20598", code: "C-2" },
+      { parcelId: "69366", code: null }, // unrelated, unique, blank -- must be unaffected
+    ]);
+    expect(idx.has("20598")).toBe(false);
+    expect(idx.get("69366")?.code).toBeNull();
   });
 });
 
