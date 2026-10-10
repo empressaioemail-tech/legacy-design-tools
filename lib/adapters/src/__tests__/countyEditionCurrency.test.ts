@@ -355,7 +355,11 @@ describe("getSetbackTableForZoning refuses Burnet by name instead of a silent nu
 
   it("BREAK-TEST PROOF (fails on origin/main, passes here): Burnet proper, now pack-C-verified for district R-1 E (no conditional cell), does NOT throw -- before pack C this threw SETBACK_EDITION_UNVERIFIED for every Burnet district", () => {
     expect(() => getSetbackTableForZoning("burnet-tx", "R-1 E")).not.toThrow();
-    expect(getSetbackTableForZoning("burnet-tx", "R-1 E")).toBeNull(); // still no numeric table authored -- a separate task
+    // OPS-24 stage 6, W3 (2026-10-09): burnet-tx.json now exists, so the cleared district resolves
+    // to a real table instead of the stale "no table authored yet" null.
+    const table = getSetbackTableForZoning("burnet-tx", "R-1 E");
+    expect(table).not.toBeNull();
+    expect(table!.districts.some((d) => d.district_name.includes("(R-1 E)"))).toBe(true);
   });
 
   it("every non-Burnet jurisdiction is completely unaffected: Bastrop's existing behavior is unchanged", () => {

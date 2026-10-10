@@ -1,0 +1,1153 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "bertram-tx",
+  "jurisdictionDisplayName": "City of Bertram, TX",
+  "effectiveDate": "2026-08-11",
+  "note": "City of Bertram, TX. INSTRUMENT: Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1 (yards/height/lot area), § 20(k) Chart 2 (lot coverage) and Chart 3 (F.A.R.); current through Ord. No. 215-081126 (2026-08-11). SOURCE: ecode360.com, pack C (2026-10-07), cross-matched against the register (LDT #800). SCOPE: 20 of Bertram's 21 districts. R-1-A stays UNROWED (SETBACK_CONDITIONAL_NOT_EVALUATED: its side-yard cell states a misleadingly simple 5 ft in Chart 1 but a footnote states the real zero-lot-line rule separately -- the register refuses rather than serve either number alone). READING RULES: (1) Chart 2's \"X% main building(s); Y% main and all accessory\" pattern (R-4-1/2/3, C, C-1, CBD, O, LI, HI) is a MAIN-vs-MAIN-PLUS-ACCESSORY split of the SAME building-coverage metric, not a buildings-vs-impervious split (no impervious figure is stated anywhere in this chapter) -- the base case coded is the lower, main-building-only figure, and the higher main-plus-accessory total is the quoted condition; max_impervious_pct is not_specified throughout this city for the same reason. (2) R-4-1/2/3's height footnotes (6)/(7)/(8) state a STORY cap (\"not to exceed one/two/three stories\") alongside the stated feet figure, not a competing number -- the feet figure is coded and the story cap is quoted. (3) CBD, PUD and H (Historic Overlay) carry Chart-1 cells that are bare footnote references -- (9) or (10) -- reading \"see the base-use district\" or \"see Section 40\", NOT numbers; a correct reader that dropped the parenthesis and read \"10\" or \"9\" as feet would silently invent a setback the ordinance never states for that cell. front_ft/side_ft/rear_ft (and, for CBD and H, side_corner_ft and max_height_ft too) are therefore not_specified for these three districts, with the deferral footnote quoted verbatim. PUD's own corner yard (15 ft) and height (45 ft) ARE stated directly in Chart 1 and are coded normally. H has NO independently stated dimension at all (every Chart-1 cell for H is the same base-use deferral) -- its row is included because the register marks it verified-browser-read/SETBACK_EDITION_CURRENT (not one of the three stay-refused codes), but every field in it is not_specified; see this PR's report for why that register classification is itself questionable for a district with zero independent standards. SENTINELS: not_specified = 100, except max_height_ft's canonical 999 (used for CBD and H only). No code-section atom corpus exists yet for bertram_tx; every value is primary-source-verified.",
+  "districts": [
+    {
+      "district_name": "A Agricultural - District A (A)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"A\", Agricultural - District A): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"A\", Agricultural - District A): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"A\", Agricultural - District A): \"25 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"A\", Agricultural - District A): \"25 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"A\", Agricultural - District A): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"A\", Agricultural - District A): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"A\", Agricultural - District A): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "UE Urban Estate - District UE (UE)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"UE\", Urban Estate - District UE): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"UE\", Urban Estate - District UE): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"UE\", Urban Estate - District UE): \"25 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"UE\", Urban Estate - District UE): \"25 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"UE\", Urban Estate - District UE): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"UE\", Urban Estate - District UE): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"UE\", Urban Estate - District UE): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-1-1 Single-Family Residential (R-1-1)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-1-1\", Single-Family Residential): \"20 ft.\". Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-1-1\", Single-Family Residential): \"15 ft.\". Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-1-1\", Single-Family Residential): \"5 ft.\". Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-1-1\", Single-Family Residential): \"15 ft.\". Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-1-1\", Single-Family Residential): \"35 ft.\". Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-1-1\", Single-Family Residential): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-1-1\", Single-Family Residential): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-1-2 Single-Family Residential (R-1-2)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-1-2\", Single-Family Residential): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-1-2\", Single-Family Residential): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-1-2\", Single-Family Residential): \"5 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-1-2\", Single-Family Residential): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-1-2\", Single-Family Residential): \"35 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-1-2\", Single-Family Residential): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-1-2\", Single-Family Residential): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-2 Residential Two-Family (Duplex) (R-2)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-2\", Residential Two-Family (Duplex)): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-2\", Residential Two-Family (Duplex)): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-2\", Residential Two-Family (Duplex)): \"7 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-2\", Residential Two-Family (Duplex)): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-2\", Residential Two-Family (Duplex)): \"35 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-2\", Residential Two-Family (Duplex)): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-2\", Residential Two-Family (Duplex)): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-3 Residential Multi-plex (R-3)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-3\", Residential Multi-plex): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-3\", Residential Multi-plex): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-3\", Residential Multi-plex): \"7 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-3\", Residential Multi-plex): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-3\", Residential Multi-plex): \"35 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-3\", Residential Multi-plex): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-3\", Residential Multi-plex): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-4-1 Multifamily Residential (R-4-1)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-4-1\", Multifamily Residential): \"20 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-4-1\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-4-1\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-4-1\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-4-1\", Multifamily Residential): \"35 ft. (6)\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-4-1\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". Base case coded: the MAIN-BUILDING-ONLY figure (40%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-4-1\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (6) Not to exceed one (1) stories."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-4-2 Multifamily Residential (R-4-2)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-4-2\", Multifamily Residential): \"20 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-4-2\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-4-2\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-4-2\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-4-2\", Multifamily Residential): \"35 ft. (7)\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-4-2\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". Base case coded: the MAIN-BUILDING-ONLY figure (40%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-4-2\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (7) Not to exceed two (2) stories."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-4-3 Multifamily Residential (R-4-3)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"R-4-3\", Multifamily Residential): \"20 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"R-4-3\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"R-4-3\", Multifamily Residential): \"20 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-4-3\", Multifamily Residential): \"15 ft.\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"R-4-3\", Multifamily Residential): \"45 ft. (8)\". Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-4-3\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". Base case coded: the MAIN-BUILDING-ONLY figure (40%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-4-3\", Multifamily Residential): \"40% main building(s); 50% main and all accessory (Chart 2, R-4)\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above. Footnotes on this row: (3) See Section 30(c). | (5) Minimum lot area for property in any R-4 District is 12,000 sf. plus an additional 1,500 sf for each dwelling unit in excess of four (4) units; provided that the density limitations set forth for each such district shall apply. | (8) Not to exceed three (3) stories."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 20,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-1 Manufactured Housing 1 (M-1)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"M-1\", Manufactured Housing 1): \"20 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"M-1\", Manufactured Housing 1): \"15 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"M-1\", Manufactured Housing 1): \"5 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"M-1\", Manufactured Housing 1): \"15 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"M-1\", Manufactured Housing 1): \"35 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"M-1\", Manufactured Housing 1): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"M-1\", Manufactured Housing 1): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-2 Manufactured Housing 2 (M-2)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"M-2\", Manufactured Housing 2): \"20 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"M-2\", Manufactured Housing 2): \"15 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"M-2\", Manufactured Housing 2): \"5 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"M-2\", Manufactured Housing 2): \"25 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"M-2\", Manufactured Housing 2): \"35 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"M-2\", Manufactured Housing 2): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"M-2\", Manufactured Housing 2): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 25,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-3 Manufactured Home Park (M-3)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"M-3\", Manufactured Home Park): \"20 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"M-3\", Manufactured Home Park): \"15 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"M-3\", Manufactured Home Park): \"5 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"M-3\", Manufactured Home Park): \"15 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"M-3\", Manufactured Home Park): \"35 ft.\". Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"M-3\", Manufactured Home Park): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"M-3\", Manufactured Home Park): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (4) See Section 31(c). | (1) On approval by the Commission, up to 25% of R-1 lots may be less than 7,200 sf in area but not less than 6,500 sf."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C Commercial (C)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"C\", Commercial): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"C\", Commercial): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"C\", Commercial): \"7 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"C\", Commercial): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"C\", Commercial): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"C\", Commercial): \"60% main; 70% main and all accessory (Chart 2, C and C-1); F.A.R. 1.8 to 1 (Chart 3)\". Base case coded: the MAIN-BUILDING-ONLY figure (60%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"C\", Commercial): \"60% main; 70% main and all accessory (Chart 2, C and C-1); F.A.R. 1.8 to 1 (Chart 3)\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "C-1 Restricted Commercial (C-1)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"C-1\", Restricted Commercial): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"C-1\", Restricted Commercial): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"C-1\", Restricted Commercial): \"10 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"C-1\", Restricted Commercial): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"C-1\", Restricted Commercial): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"C-1\", Restricted Commercial): \"60% main; 70% main and all accessory (Chart 2); F.A.R. 1.8 to 1\". Base case coded: the MAIN-BUILDING-ONLY figure (60%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"C-1\", Restricted Commercial): \"60% main; 70% main and all accessory (Chart 2); F.A.R. 1.8 to 1\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "CBD Central Business District (CBD)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"CBD\", Central Business District): \"(10)\". Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"CBD\", Central Business District): \"(10)\". Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"CBD\", Central Business District): \"(10)\". Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"CBD\", Central Business District): \"(10)\". Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"CBD\", Central Business District): \"(10)\". Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"CBD\", Central Business District): \"60%* main; 70% main and all accessory (Chart 2); F.A.R. 1.8 to 1\". Base case coded: the MAIN-BUILDING-ONLY figure (60%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field. Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"CBD\", Central Business District): \"60%* main; 70% main and all accessory (Chart 2); F.A.R. 1.8 to 1\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above. Footnotes on this row: The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | Chart 2 *: To preserve the history and small town ambiance ... the City Council may, on the recommendation of the Historic Preservation Commission ... waive the maximum lot coverage on a case-by-case basis"
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "O Office (O)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"O\", Office): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"O\", Office): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"O\", Office): \"5 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"O\", Office): \"15 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"O\", Office): \"35 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"O\", Office): \"50% main; 60% main and all accessory; F.A.R. .8 to 1\". Base case coded: the MAIN-BUILDING-ONLY figure (50%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"O\", Office): \"50% main; 60% main and all accessory; F.A.R. .8 to 1\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "LI Light Industrial (LI)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"LI\", Light Industrial): \"20 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"LI\", Light Industrial): \"15 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"LI\", Light Industrial): \"25 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"LI\", Light Industrial): \"25 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"LI\", Light Industrial): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"LI\", Light Industrial): \"50% main; 60% main and all accessory; F.A.R. 1.5 to 1\". Base case coded: the MAIN-BUILDING-ONLY figure (50%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"LI\", Light Industrial): \"50% main; 60% main and all accessory; F.A.R. 1.5 to 1\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above."
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 15,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "HI Heavy Industrial (HI)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"HI\", Heavy Industrial): \"50 ft.\"."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"HI\", Heavy Industrial): \"50 ft.\"."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"HI\", Heavy Industrial): \"50 ft.\"."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"HI\", Heavy Industrial): \"50 ft.\"."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"HI\", Heavy Industrial): \"45 ft.\"."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"HI\", Heavy Industrial): \"40% main; 45% main and all accessory; F.A.R. 1.2 to 1\". Base case coded: the MAIN-BUILDING-ONLY figure (40%). The ordinance's own higher figure (main building plus all accessory structures combined) is the quoted condition, not a second value for the same field."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"HI\", Heavy Industrial): \"40% main; 45% main and all accessory; F.A.R. 1.2 to 1\". No impervious-surface standard distinct from lot coverage is stated for this district; the ordinance's only site-coverage measure is the main/main-plus-accessory lot-coverage split quoted above."
+        }
+      },
+      "front_ft": 50,
+      "rear_ft": 50,
+      "side_ft": 50,
+      "side_corner_ft": 50,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "PUD Planned Development District (PUD)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"PUD\", Planned Development District): \"(9)\". Footnotes on this row: (9) See section 40."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"PUD\", Planned Development District): \"(9)\". Footnotes on this row: (9) See section 40."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"PUD\", Planned Development District): \"(9)\". Footnotes on this row: (9) See section 40."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"PUD\", Planned Development District): \"15 ft.\". Footnotes on this row: (9) See section 40."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"PUD\", Planned Development District): \"45 ft.\". Footnotes on this row: (9) See section 40."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"PUD\", Planned Development District): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (9) See section 40."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"PUD\", Planned Development District): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (9) See section 40."
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 15,
+      "max_height_ft": 45,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "H Historic Overlay District (H)",
+      "citation_url": "https://ecode360.com/39872099",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"H\", Historic Overlay District): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"H\", Historic Overlay District): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
+        }
+      },
+      "front_ft": 100,
+      "rear_ft": 100,
+      "side_ft": 100,
+      "side_corner_ft": 100,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    }
+  ]
+}

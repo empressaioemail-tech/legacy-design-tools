@@ -1,0 +1,181 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "granite-shoals-tx",
+  "jurisdictionDisplayName": "City of Granite Shoals, TX",
+  "effectiveDate": "2026-09-22",
+  "note": "City of Granite Shoals, TX. INSTRUMENT: Code of Ordinances Ch. 40 (Zoning), replaced in full by Ordinance 885 (adopted 2025-12-09) and amended by Ordinance 894 (2026-08-25); current through Ord. No. 898 (2026-09-22). SOURCE: ecode360.com, pack C (2026-10-07), cross-matched against the register (LDT #800). SCOPE: 3 of Granite Shoals' 8 districts -- R-1, R-2, M-1. The other 5 stay UNROWED: M-2, GB-1, GB-2 and I are SETBACK_CONDITIONAL_NOT_EVALUATED (each has at least one yard that depends on a condition -- which side of the lot, abutting a residential district, or distance from a shoreline -- this pipeline does not evaluate per-parcel); AG is SETBACK_NO_DIMENSIONAL_STANDARDS (§ 40-19 states permitted uses are decided \"on a case by case basis\" and carries no yard/height/coverage numbers at all). READING RULES: §§ 40-10/40-12/40-14 state front/side/rear as word-numbers (\"not less than five feet on each side\", \"not less than ten feet (street side on corner lot)\") rather than digits; those words are coded to their numeric value (5, 5, 10) and the ordinance's own wording is quoted verbatim rather than paraphrased. No lot-coverage or impervious-cover standard is stated anywhere in §§ 40-10/40-12/40-14 for these three districts (confirmed by the live text, not assumed from silence), so max_lot_coverage_pct and max_impervious_pct are not_specified for all three rows. M-1's height subsection states no number at all (confirmed: § 40-14 has no height cell), so max_height_ft is not_specified (999) for M-1 only; R-1 and R-2 both state a height in feet. SENTINELS: not_specified = 100, except max_height_ft's canonical 999. No code-section atom corpus exists yet for granite_shoals_tx; every value is primary-source-verified.",
+  "districts": [
+    {
+      "district_name": "R-1 Single-family residential district, R-1 (R-1)",
+      "citation_url": "https://ecode360.com/40172259",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-10(k),(l),(m) -- front yard setback (district \"R-1\", Single-family residential district, R-1): \"not less than 20 feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "rear_ft": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-10(k),(l),(m) -- rear yard setback (district \"R-1\", Single-family residential district, R-1): \"not less than five feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_ft": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-10(k),(l),(m) -- side yard setback (district \"R-1\", Single-family residential district, R-1): \"not less than five feet on each side\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-10(k),(l),(m) -- corner / street-side yard setback (district \"R-1\", Single-family residential district, R-1): \"not less than ten feet (street side on corner lot)\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_height_ft": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-10(k),(l),(m) -- maximum height (district \"R-1\", Single-family residential district, R-1): \"35 feet; two stories\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-10(k),(l),(m) -- maximum lot coverage (district \"R-1\", Single-family residential district, R-1): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 40-10(k),(l),(m)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-10(k),(l),(m) -- maximum impervious cover (district \"R-1\", Single-family residential district, R-1): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-2 Multifamily Residential District, R-2 (R-2)",
+      "citation_url": "https://ecode360.com/40172259",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-12(b),(c),(d) -- front yard setback (district \"R-2\", Multifamily Residential District, R-2): \"not less than 20 feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "rear_ft": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-12(b),(c),(d) -- rear yard setback (district \"R-2\", Multifamily Residential District, R-2): \"not less than five feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_ft": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-12(b),(c),(d) -- side yard setback (district \"R-2\", Multifamily Residential District, R-2): \"not less than five feet on each side\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-12(b),(c),(d) -- corner / street-side yard setback (district \"R-2\", Multifamily Residential District, R-2): \"not less than ten feet (street side on corner lot)\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_height_ft": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-12(b),(c),(d) -- maximum height (district \"R-2\", Multifamily Residential District, R-2): \"30 feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-12(b),(c),(d) -- maximum lot coverage (district \"R-2\", Multifamily Residential District, R-2): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 40-12(b),(c),(d)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-12(b),(c),(d) -- maximum impervious cover (district \"R-2\", Multifamily Residential District, R-2): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-1 Manufactured Home Residential District, M-1 (M-1)",
+      "citation_url": "https://ecode360.com/40172259",
+      "provenance": {
+        "front_ft": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-14(b),(c) -- front yard setback (district \"M-1\", Manufactured Home Residential District, M-1): \"not less than 20 feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "rear_ft": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-14(b),(c) -- rear yard setback (district \"M-1\", Manufactured Home Residential District, M-1): \"not less than five feet\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_ft": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-14(b),(c) -- side yard setback (district \"M-1\", Manufactured Home Residential District, M-1): \"not less than five feet on each side\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "side_corner_ft": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "§ 40-14(b),(c) -- corner / street-side yard setback (district \"M-1\", Manufactured Home Residential District, M-1): \"not less than ten feet (street side on corner lot)\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_height_ft": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-14(b),(c) -- maximum height (district \"M-1\", Manufactured Home Residential District, M-1): \"NOT SPECIFIED\". Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-14(b),(c) -- maximum lot coverage (district \"M-1\", Manufactured Home Residential District, M-1): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        },
+        "max_impervious_pct": {
+          "section_number": "§ 40-14(b),(c)",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "§ 40-14(b),(c) -- maximum impervious cover (district \"M-1\", Manufactured Home Residential District, M-1): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: NOT SPECIFIED (no footnotes; text sections)"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 10,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    }
+  ]
+}
