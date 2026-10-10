@@ -97,6 +97,12 @@ export {
   getSetbackDistrict,
   listSetbackTables,
   SETBACK_JURISDICTION_KEYS,
+  SETBACK_TABLE_ABSENT,
+  SETBACK_REFUSAL_CODES,
+  isSetbackRefusalError,
+  assertTableVendoredForClearedVerdict,
   type SetbackTable,
   type SetbackDistrict,
+  type SetbackRefusalCode,
+  type SetbackRefusalError,
 } from "./local/setbacks";

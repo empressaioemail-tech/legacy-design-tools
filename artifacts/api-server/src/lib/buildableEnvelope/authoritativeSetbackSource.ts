@@ -38,6 +38,7 @@
 
 import {
   getSetbackTableForZoning,
+  isSetbackRefusalError,
   type SetbackDistrict,
   type SetbackTable,
 } from "@workspace/adapters";
@@ -338,7 +339,20 @@ export function resolveAuthoritativeSetbacks(args: {
   const jurisdictionKey = args.jurisdictionKey?.trim() || null;
   if (!jurisdictionKey) return null;
 
-  const table = getSetbackTableForZoning(jurisdictionKey, districtCode);
+  let table;
+  try {
+    table = getSetbackTableForZoning(jurisdictionKey, districtCode);
+  } catch (err) {
+    // W3 PR #805 review: a named setback refusal (gate 2's six edition-currency codes, or gate 3's
+    // SETBACK_TABLE_ABSENT) joins this function's existing "no usable candidate on either side"
+    // null -- its own documented decline, never invent, never a 500. This function has no live
+    // route today (P-465/A-324 retired it from the serving derivation; see the module doc above)
+    // and no richer decline shape to carry the code onto, so it declines the same way a genuinely
+    // untabled jurisdiction already does, rather than inventing a new wire shape nothing consumes
+    // yet. Anything else is a real bug and still throws.
+    if (!isSetbackRefusalError(err)) throw err;
+    return null;
+  }
   if (!table?.districts.length) return null;
 
   /**

@@ -64,10 +64,34 @@ import martindaleTx from "./martindale-tx.json" with { type: "json" };
 import smithvilleTx from "./smithville-tx.json" with { type: "json" };
 import jonestownTx from "./jonestown-tx.json" with { type: "json" };
 import lakewayTx from "./lakeway-tx.json" with { type: "json" };
+// OPS-24 Burnet County (48053) stage 6 setback cells, W3 (2026-10-09): tables for the
+// districts the ordinance register (burnet-tx-ordinance-register.json, LDT #800) marks
+// verified-browser-read / SETBACK_EDITION_CURRENT, built from the pack-C browser read
+// (doc_repo/_inbox/2026-10-07_burnet_B3_groundtruth_browser_packC.csv). Before this, every
+// cleared Burnet city fell through the gate to a silent null (see countyEditionCurrency.test.ts's
+// prior "a separate, not-yet-done task" assertions) -- this is that task. Marble Falls and
+// Horseshoe Bay are deliberately NOT added here even though their own registers clear the same
+// gate (isUsableVerification treats "transcribed" and "source: city GIS layer..." as usable) --
+// pack C never covered those two cities (it is scoped to the six cities in its own task doc), so
+// no quote-complete, section-cited source exists yet to build their tables from; see this PR's
+// report for the gap. Meadowlakes has zero served districts (all eight are
+// SETBACK_NO_DIMENSIONAL_STANDARDS) and so gets no table at all.
+import burnetTx from "./burnet-tx.json" with { type: "json" };
+import graniteShoalsTx from "./granite-shoals-tx.json" with { type: "json" };
+import cottonwoodShoresTx from "./cottonwood-shores-tx.json" with { type: "json" };
+import bertramTx from "./bertram-tx.json" with { type: "json" };
+import highlandHavenTx from "./highland-haven-tx.json" with { type: "json" };
 import {
   BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_EDITION_AMBIGUOUS,
   SETBACK_EDITION_CURRENT,
+  SETBACK_EDITION_SUPERSEDED,
+  SETBACK_EDITION_UNVERIFIED,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
+  SETBACK_SOURCE_NOT_REGISTERED,
   checkSetbackEditionCurrency,
+  type EditionCurrencyVerdict,
 } from "./county-edition-currency.js";
 
 /** Per locked decision #9 — one row per zoning district per jurisdiction. */
@@ -314,6 +338,13 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   // setback table at all, so every one of those parcels was serving an
   // absence. Table is Ch. 30 Art. 30.03 (§ 30.03.001 – § 30.03.023).
   "lakeway-tx": lakewayTx as SetbackTable,
+  // OPS-24 Burnet County stage 6, W3 (2026-10-09). See the import-site comment above for scope,
+  // sourcing and the Marble Falls / Horseshoe Bay / Meadowlakes omissions.
+  "burnet-tx": burnetTx as SetbackTable,
+  "granite-shoals-tx": graniteShoalsTx as SetbackTable,
+  "cottonwood-shores-tx": cottonwoodShoresTx as SetbackTable,
+  "bertram-tx": bertramTx as SetbackTable,
+  "highland-haven-tx": highlandHavenTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
@@ -358,6 +389,103 @@ function isBdcEuclideanCode(code: string): boolean {
  */
 function isKnownBdcDistrictCode(code: string): boolean {
   return isBdcEuclideanCode(code) || isBdcPerParcelDistrictCode(code);
+}
+
+/**
+ * GATE 3 (W3 PR #805 review, 2026-10-09) -- TABLE REGISTRATION.
+ *
+ * THE DEFECT THIS CLOSES. A county's edition-currency register (today, Burnet's) can clear a
+ * jurisdiction/district as SETBACK_EDITION_CURRENT -- a real, current, codified ordinance exists
+ * and was read -- while this file's own SETBACK_TABLES registry still has nothing vendored for that
+ * jurisdiction key. Before this gate, that combination fell through to the SAME `null` this file's
+ * own doc comment defines as "no codified dimensional rules available" -- which is false for a
+ * cleared verdict. Marble Falls and Horseshoe Bay (6,000+ stamped parcels) hit exactly this: their
+ * registers cleared many districts as current (Marble Falls' "transcribed" / Horseshoe Bay's
+ * "source: city GIS layer..." states both passed {@link isUsableVerification} before the 2026-10-09
+ * downgrade below), but neither city has a `marble-falls-tx.json` / `horseshoe-bay-tx.json` table,
+ * so every one of those parcels silently served null -- indistinguishable from an honest "no
+ * register, no rules" absence, which is the P5 silent-wrong shape one level up from the defect
+ * GATE 2 (`checkSetbackEditionCurrency`) already closes.
+ *
+ * NOT BURNET-SPECIFIC. This function takes the already-computed verdict and the jurisdiction's own
+ * normalized key; it does not read `BURNET_CITY_JURISDICTION_KEYS` or anything else Burnet-named. A
+ * second county's edition-currency register, built the same way `county-edition-currency.ts`'s own
+ * header says a second one should be (DEV_PROCESS 2.4), reuses this exact function on its own
+ * cleared verdicts and gets the same protection against the same "cleared but untabled" gap, with no
+ * second copy of this check.
+ */
+export const SETBACK_TABLE_ABSENT = "SETBACK_TABLE_ABSENT";
+
+/**
+ * Throws {@link SETBACK_TABLE_ABSENT} when `verdict` is a cleared (SETBACK_EDITION_CURRENT) edition-
+ * currency verdict but `normalizedJurisdictionKey` has no entry in {@link SETBACK_TABLES}. A no-op
+ * for every other verdict code (those already throw their own named refusal before this function is
+ * ever called) and a no-op when the table IS vendored. `sourceLabel` names the register that cleared
+ * the verdict, for the thrown error's own message (e.g. "Marble Falls's ordinance register").
+ */
+export function assertTableVendoredForClearedVerdict(opts: {
+  normalizedJurisdictionKey: string;
+  verdict: EditionCurrencyVerdict;
+  sourceLabel: string;
+}): void {
+  if (opts.verdict.code !== SETBACK_EDITION_CURRENT) return;
+  if (opts.normalizedJurisdictionKey in SETBACK_TABLES) return;
+  throw Object.assign(
+    new Error(
+      `${opts.sourceLabel} clears ${opts.verdict.city}${
+        opts.verdict.districtCode ? ` district "${opts.verdict.districtCode}"` : ""
+      } as currently codified and servable (${opts.verdict.detail}), but no SETBACK_TABLES entry has ` +
+        `been vendored yet for jurisdiction key "${opts.normalizedJurisdictionKey}" -- the district's ` +
+        `numbers are not missing data, the TABLE is. Serving null here would be indistinguishable ` +
+        `from an honest "no codified rules exist" absence, which this verdict is not.`,
+    ),
+    { code: SETBACK_TABLE_ABSENT, gate: "gate-3-table-registration", verdict: opts.verdict },
+  );
+}
+
+/**
+ * GATE 4 (W3 PR #805 review, 2026-10-09) -- SHARED REFUSAL CLASSIFICATION.
+ *
+ * Every code {@link getSetbackTableForZoning} (or the edition-currency / table-registration gates
+ * it wires in) can throw INSTEAD of returning a value. A caller with a documented "decline, never
+ * invent" contract -- `resolveAuthoritativeSetbacks`, `jurisdictionKeyFromParcelNode`,
+ * `lookUpEnvelopeTableRow`, and any future one -- must turn exactly these into its own decline
+ * shape, carrying the code through so the app can say WHY, and must NOT turn anything else into a
+ * decline (a real bug -- a TypeError, a bad argument -- must still surface as an uncaught exception,
+ * never be silently swallowed as "no setback available"). Catching by `code`, never by message text
+ * (prose meant for a human reading a log, not a stable contract), is what makes that distinction
+ * possible. One shared list and one shared guard here, rather than three independent catch blocks
+ * each re-deriving which codes are "ours" -- the exact "fix the class, not the instance" shape this
+ * corpus's own conventions ask for.
+ */
+export const SETBACK_REFUSAL_CODES = [
+  SETBACK_SOURCE_NOT_REGISTERED,
+  SETBACK_EDITION_UNVERIFIED,
+  SETBACK_EDITION_SUPERSEDED,
+  SETBACK_EDITION_AMBIGUOUS,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_TABLE_ABSENT,
+] as const;
+
+export type SetbackRefusalCode = (typeof SETBACK_REFUSAL_CODES)[number];
+
+/** An error thrown by `getSetbackTableForZoning` for one of the named, documented refusals. */
+export type SetbackRefusalError = Error & { code: SetbackRefusalCode };
+
+const SETBACK_REFUSAL_CODE_SET: ReadonlySet<string> = new Set(SETBACK_REFUSAL_CODES);
+
+/**
+ * True iff `err` is one of the named setback refusals `getSetbackTableForZoning` throws (GATE 2's
+ * six edition-currency codes, or GATE 3's `SETBACK_TABLE_ABSENT`) -- checked by `err.code`, never by
+ * `err.message` (which is free-form prose, not a stable contract a catch block should pattern-match
+ * on). Anything else -- a real bug -- returns false, so a caller's `catch` block can `throw` it back
+ * out unchanged instead of mistaking it for a decline.
+ */
+export function isSetbackRefusalError(err: unknown): err is SetbackRefusalError {
+  if (!(err instanceof Error)) return false;
+  const code = (err as unknown as { code?: unknown }).code;
+  return typeof code === "string" && SETBACK_REFUSAL_CODE_SET.has(code);
 }
 
 function isBastropCityJurisdiction(normalizedKey: string): boolean {
@@ -414,11 +542,13 @@ export function getSetbackTableForZoning(
   // envelopeJurisdiction.ts, authoritativeSetbackSource.ts, and any future Burnet serve path) goes
   // through to get a jurisdiction's table. Scoped to Burnet's eight city keys ONLY
   // (BURNET_CITY_JURISDICTION_KEYS): no other jurisdiction's behavior changes, and no jurisdiction
-  // outside Burnet is affected by this file at all. Today every Burnet key already returns null from
-  // the plain `SETBACK_TABLES[normalized] ?? null` fall-through below (no table has been authored
-  // yet), so this throw replaces a SILENT, unnamed null -- indistinguishable from any mistyped or
-  // unknown jurisdiction -- with a LOUD, named refusal that states exactly which gate-2 code applies
-  // (SETBACK_SOURCE_NOT_REGISTERED / SETBACK_EDITION_UNVERIFIED / SETBACK_EDITION_SUPERSEDED /
+  // outside Burnet is affected by this file at all. As of OPS-24 stage 6 (W3, 2026-10-09), five of
+  // the eight Burnet city keys (burnet-tx, granite-shoals-tx, cottonwood-shores-tx, bertram-tx,
+  // highland-haven-tx) now carry a real table below for every district the register clears. For
+  // every Burnet district that is NOT cleared, this throw replaces a SILENT, unnamed null --
+  // indistinguishable from any mistyped or unknown jurisdiction -- with a LOUD, named refusal that
+  // states exactly which gate-2 code applies (SETBACK_SOURCE_NOT_REGISTERED /
+  // SETBACK_EDITION_UNVERIFIED / SETBACK_EDITION_SUPERSEDED /
   // SETBACK_EDITION_AMBIGUOUS / SETBACK_NO_DIMENSIONAL_STANDARDS / SETBACK_CONDITIONAL_NOT_EVALUATED),
   // so a caller cannot mistake "Burnet is unregistered" for "this district genuinely has no setbacks."
   // It throws rather than returning null because null here already has an established meaning this
@@ -431,10 +561,17 @@ export function getSetbackTableForZoning(
     if (verdict.code !== SETBACK_EDITION_CURRENT) {
       throw Object.assign(new Error(verdict.detail), { code: verdict.code, gate: "gate-2-edition-currency", verdict });
     }
-    // A cleared verdict for Burnet still has no SETBACK_TABLES entry to serve (no jurisdiction JSON
-    // has been authored for any of the eight cities yet -- that is a separate, not-yet-done data
-    // task, not this gate's job). Fall through to the ordinary lookup, which returns null exactly as
-    // it does for any other jurisdiction with a currency-clean source but no vendored table.
+    // GATE 3 (table registration, W3 PR #805 review): a cleared verdict is not a licence to fall
+    // through to a silent null when no table has been vendored for this jurisdiction key -- see
+    // assertTableVendoredForClearedVerdict's own doc comment. marble-falls-tx and horseshoe-bay-tx
+    // hit this today (their registers clear many districts; neither has a table file yet);
+    // burnet-tx/granite-shoals-tx/cottonwood-shores-tx/bertram-tx/highland-haven-tx all have one, so
+    // this is a no-op for them. meadowlakes-tx never reaches here (its register never clears).
+    assertTableVendoredForClearedVerdict({
+      normalizedJurisdictionKey: normalized,
+      verdict,
+      sourceLabel: `${burnetCity}'s ordinance register`,
+    });
   }
 
   if (isBastropCityJurisdiction(normalized)) {
@@ -486,9 +623,12 @@ export function listSetbackTables(): SetbackTable[] {
 
 export {
   BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_EDITION_AMBIGUOUS,
   SETBACK_EDITION_CURRENT,
   SETBACK_EDITION_SUPERSEDED,
   SETBACK_EDITION_UNVERIFIED,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
   SETBACK_SOURCE_NOT_REGISTERED,
   SUPERSEDED_ORDINANCE_EDITIONS,
   burnetOrdinanceRegister,
