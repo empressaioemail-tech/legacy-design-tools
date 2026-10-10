@@ -10,8 +10,8 @@
     "citation": "UDC Art.4 Sec.4.2.2 Table 4.2.2 (Farm and Ranch SFD row)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 10%; impervious cover not stated. Read via zoneomics.com mirror of Municode text (Municode itself unreachable - JS SPA; robots.txt checked and permits the zoneomics paths used). Min lot 5ac/275ft/200ft frontage. 5 other FR sub-options (Cluster/Conservation/MH subdivision/MH park/Tiny House) carry different numbers in the same table."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 10%; impervious cover not stated. Read via zoneomics.com mirror of Municode text (Municode itself unreachable - JS SPA; robots.txt checked and permits the zoneomics paths used). Min lot 5ac/275ft/200ft frontage. 5 other FR sub-options (Cluster/Conservation/MH subdivision/MH park/Tiny House) carry different numbers in the same table."
   },
   {
     "city": "Marble Falls",
@@ -24,8 +24,8 @@
     "citation": "UDC Art.4 Sec.4.2.2 Table 4.2.2 (Estate SFD row)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 30%; impervious cover not stated. Min lot 32670sf. Estate Cluster sub-option differs (90/45/50/20ft; 30%/35%)."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 30%; impervious cover not stated. Min lot 32670sf. Estate Cluster sub-option differs (90/45/50/20ft; 30%/35%)."
   },
   {
     "city": "Marble Falls",
@@ -38,8 +38,8 @@
     "citation": "UDC Art.4 Sec.4.2.2 Table 4.2.2 (Suburban SFD row)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 45%; impervious cover not stated. Min lot 12000sf; garage setback separately 30/7.5ft (alley access). See also the Section C note below: sample parcel 48053:120442 zoned NR sits outside the loaded Aug-2025 city boundary - a peer lane (W1-F) reports it is inside the citys live boundary per Annexation Ordinance 2023-O-04B (relayed - not independently verified here)."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 45%; impervious cover not stated. Min lot 12000sf; garage setback separately 30/7.5ft (alley access). See also the Section C note below: sample parcel 48053:120442 zoned NR sits outside the loaded Aug-2025 city boundary - a peer lane (W1-F) reports it is inside the citys live boundary per Annexation Ordinance 2023-O-04B (relayed - not independently verified here)."
   },
   {
     "city": "Marble Falls",
@@ -52,8 +52,8 @@
     "citation": "UDC Art.4 Sec.4.2.2 Table 4.2.2 (Neighborhood SFD row)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 50%; impervious cover not stated. Min lot 5000sf; attached/duplex/townhouse/triplex/quadplex/apartment sub-options up to 70% coverage."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 50%; impervious cover not stated. Min lot 5000sf; attached/duplex/townhouse/triplex/quadplex/apartment sub-options up to 70% coverage."
   },
   {
     "city": "Marble Falls",
@@ -66,8 +66,8 @@
     "citation": "UDC Art.4 Sec.4.2.6 Table 4.2.6.A (SFD 30ft-lot tier)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 60%; impervious cover not stated. Standards live in a SEPARATE table from the main district table; 3 lot-width tiers (30/40/50ft) per use type each carry different numbers."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 60%; impervious cover not stated. Standards live in a SEPARATE table from the main district table; 3 lot-width tiers (30/40/50ft) per use type each carry different numbers."
   },
   {
     "city": "Marble Falls",
@@ -80,8 +80,8 @@
     "citation": "UDC Art.4 Sec.4.2.2 Table 4.2.2 (Apartment 5-14 units/ac row)",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 40ft; lot coverage 70%; impervious cover not stated. No district-named base option; apartment row used as representative value."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 40ft; lot coverage 70%; impervious cover not stated. No district-named base option; apartment row used as representative value."
   },
   {
     "city": "Marble Falls",
@@ -94,8 +94,8 @@
     "citation": "UDC Art.4 Sec.4.2.7 Table 4.2.7.A",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 30%; impervious cover not stated. Min lot 1ac/100ft width; min dwelling 1500sf."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 30%; impervious cover not stated. Min lot 1ac/100ft width; min dwelling 1500sf."
   },
   {
     "city": "Marble Falls",
@@ -108,8 +108,8 @@
     "citation": "UDC Art.4 Sec.4.2.7 Table 4.2.7.A",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 50%; impervious cover not stated. Min lot 6000sf/50ft width."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 50%; impervious cover not stated. Min lot 6000sf/50ft width."
   },
   {
     "city": "Marble Falls",
@@ -122,8 +122,8 @@
     "citation": "UDC Art.4 Sec.4.2.7 Table 4.2.7.A",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft (capped within 100ft of ENZ.2/DR/NR per table note); lot coverage 75%; impervious cover not stated."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft (capped within 100ft of ENZ.2/DR/NR per table note); lot coverage 75%; impervious cover not stated."
   },
   {
     "city": "Marble Falls",
@@ -136,8 +136,8 @@
     "citation": "UDC Art.4 Sec.4.2.7 Table 4.2.7.A",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 75%; impervious cover not stated. Min lot 6000sf/50ft width; min dwelling 800sf."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 75%; impervious cover not stated. Min lot 6000sf/50ft width; min dwelling 800sf."
   },
   {
     "city": "Marble Falls",
@@ -150,8 +150,8 @@
     "citation": "UDC Art.4 Sec.4.2.7 Table 4.2.7.A",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 25ft; lot coverage 60%; impervious cover not stated. Manufactured-home sub-district; min lot 5000sf/50ft width."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 25ft; lot coverage 60%; impervious cover not stated. Manufactured-home sub-district; min lot 5000sf/50ft width."
   },
   {
     "city": "Marble Falls",
@@ -164,8 +164,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 35ft; lot coverage 70%; impervious cover not stated. Also governed by Sec.4.3.3 Special Design Standards."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 35ft; lot coverage 70%; impervious cover not stated. Also governed by Sec.4.3.3 Special Design Standards."
   },
   {
     "city": "Marble Falls",
@@ -178,8 +178,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 45ft; lot coverage 75%; impervious cover not stated."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 45ft; lot coverage 75%; impervious cover not stated."
   },
   {
     "city": "Marble Falls",
@@ -192,8 +192,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B cross-ref Sec.4.3.4",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 60ft (rooftop amenities excluded); lot coverage/impervious cover not stated. FORM-BASED district governed by a Build-to Line (Sec.4.3.4.B) not conventional setbacks."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 60ft (rooftop amenities excluded); lot coverage/impervious cover not stated. FORM-BASED district governed by a Build-to Line (Sec.4.3.4.B) not conventional setbacks."
   },
   {
     "city": "Marble Falls",
@@ -206,8 +206,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B cross-ref Sec.4.3.4",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 60ft (rooftop amenities excluded); lot coverage/impervious cover not stated. Same form-based build-to mechanism as DN less intense."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 60ft (rooftop amenities excluded); lot coverage/impervious cover not stated. Same form-based build-to mechanism as DN less intense."
   },
   {
     "city": "Marble Falls",
@@ -220,8 +220,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 60ft; lot coverage 80%; impervious cover not stated. Min area 2.5ac/21780sf/150ft width. Cross-validated against the citys own BP-district summary PDF (marblefallstx.gov - primary-source-verified channel) - exact match."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 60ft; lot coverage 80%; impervious cover not stated. Min area 2.5ac/21780sf/150ft width. Cross-validated against the citys own BP-district summary PDF (marblefallstx.gov - primary-source-verified channel) - exact match."
   },
   {
     "city": "Marble Falls",
@@ -234,8 +234,8 @@
     "citation": "UDC Art.4 Sec.4.3.1 Table 4.3.1.B",
     "ordinance": "2019-O-05A",
     "effective_date": "2019-05-21",
-    "verification": "transcribed",
-    "notes": "Height 60ft; lot coverage 85%; impervious cover not stated. Min area 5ac/1ac/250ft width."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this row was \"transcribed\" from a zoneomics.com MIRROR of the Marble Falls UDC text (Municode itself unreachable, a JS SPA), never cross-checked against the citys own primary instrument. A mirror read is not ordinance-quality regardless of how carefully it was transcribed, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on a mirror-sourced number. Previously recorded as transcribed; the transcribed values below are KEPT for audit/cross-check, not deleted. | Height 60ft; lot coverage 85%; impervious cover not stated. Min area 5ac/1ac/250ft width."
   },
   {
     "city": "Marble Falls",
@@ -901,8 +901,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1) as staged in Hauska tx_zoning_district_staging - source_vintage arcgis-live:horseshoe-bay-tx:2026-08-12",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value set - 4568 of 6920 R-1 parcels (66%) carry this exact combination. At least 40 other distinct combinations exist across the rest reflecting zone-specific R-1 sub-areas (e.g. a 35/10/25/15 pattern covers 296 parcels; several 50/25/50 rural-feeling patterns and dense 10/5/15/10 patterns cover small named developments). Height 32ft (35ft at shoreline) for the dominant set; coverage 50% most common and 60% for 420 parcels. An eCode360 fetch (UA-spoofed - not relied on for these numbers) pointed to Sec.14.02.406(b) as the likely ordinance citation - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value set - 4568 of 6920 R-1 parcels (66%) carry this exact combination. At least 40 other distinct combinations exist across the rest reflecting zone-specific R-1 sub-areas (e.g. a 35/10/25/15 pattern covers 296 parcels; several 50/25/50 rural-feeling patterns and dense 10/5/15/10 patterns cover small named developments). Height 32ft (35ft at shoreline) for the dominant set; coverage 50% most common and 60% for 420 parcels. An eCode360 fetch (UA-spoofed - not relied on for these numbers) pointed to Sec.14.02.406(b) as the likely ordinance citation - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -915,8 +915,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=GH)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - 363 of 405 GH parcels (90%). 19 parcels carry a shoreline-style variant (front25/side-total15/rear15/corner25/height32-35/coverage50%); 23 blank. Height 32ft; coverage field reads NO INFO for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(c) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - 363 of 405 GH parcels (90%). 19 parcels carry a shoreline-style variant (front25/side-total15/rear15/corner25/height32-35/coverage50%); 23 blank. Height 32ft; coverage field reads NO INFO for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(c) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -929,8 +929,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-2)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - 460 of 470 parcels (98%). Height 32ft; coverage 50%. Eco360 (UA-spoofed) pointed to Sec.14.02.406(d) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - 460 of 470 parcels (98%). Height 32ft; coverage 50%. Eco360 (UA-spoofed) pointed to Sec.14.02.406(d) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -943,8 +943,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-4)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - approximately 880 of 917 parcels (96%). A smaller cluster of about 26 parcels carries front20/side10/rear20/height36/coverage-60%-impervious instead. Height 32ft; coverage 50% for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(e) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - approximately 880 of 917 parcels (96%). A smaller cluster of about 26 parcels carries front20/side10/rear20/height36/coverage-60%-impervious instead. Height 32ft; coverage 50% for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(e) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -957,8 +957,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-6)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - 591 of 661 parcels (89%); height 32ft; coverage 60%. A second real cluster of 69 parcels (10%) carries front0/side0/rear0/corner0/height35/coverage-NO-INFO - likely a zero-lot-line attached product within this district - not a data error given its size. Eco360 (UA-spoofed) pointed to Sec.14.02.406(h) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - 591 of 661 parcels (89%); height 32ft; coverage 60%. A second real cluster of 69 parcels (10%) carries front0/side0/rear0/corner0/height35/coverage-NO-INFO - likely a zero-lot-line attached product within this district - not a data error given its size. Eco360 (UA-spoofed) pointed to Sec.14.02.406(h) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -971,8 +971,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=MH-1)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 789 MH-1 parcels (100%) including height=15ft and coverage=50%. An eCode360 fetch (UA-spoofed) reported the ordinance text itself calls this district M-1 (reserving MH-1/M-1 differently in GIS) and states height 20ft/32ft-modular - that conflicts with the GIS height of 15ft; per the coordinator ruling the GIS value (15ft) is reported here as the GIS-sourced fact; the ordinance figure is not used and is not independently confirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 789 MH-1 parcels (100%) including height=15ft and coverage=50%. An eCode360 fetch (UA-spoofed) reported the ordinance text itself calls this district M-1 (reserving MH-1/M-1 differently in GIS) and states height 20ft/32ft-modular - that conflicts with the GIS height of 15ft; per the coordinator ruling the GIS value (15ft) is reported here as the GIS-sourced fact; the ordinance figure is not used and is not independently confirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -985,8 +985,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=C-2)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Where populated height=35ft and coverage=60% consistently (121 of 153 parcels); one outlier row carries a fully different setback set matching the R-1 shoreline pattern. Eco360 (UA-spoofed) pointed to Sec.14.02.406(j) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Where populated height=35ft and coverage=60% consistently (121 of 153 parcels); one outlier row carries a fully different setback set matching the R-1 shoreline pattern. Eco360 (UA-spoofed) pointed to Sec.14.02.406(j) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -999,8 +999,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=A-1)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Almost entirely blank in the GIS layer. A small number of outlier rows (4 of 307) carry inconsistent figures not representative of the district as a whole. Eco360 (UA-spoofed) pointed to Sec.14.02.406(l) with height/coverage subject to case-by-case approval - unconfirmed and consistent with the GIS blankness."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Almost entirely blank in the GIS layer. A small number of outlier rows (4 of 307) carry inconsistent figures not representative of the district as a whole. Eco360 (UA-spoofed) pointed to Sec.14.02.406(l) with height/coverage subject to case-by-case approval - unconfirmed and consistent with the GIS blankness."
   },
   {
     "city": "Horseshoe Bay",
@@ -1013,8 +1013,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=GUI)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "This value set covers 18 of 25 parcels (72%); 5 blank; 2 carry height35/coverage60% only. Height and coverage read NO INFO / SUBJECT TO APPROVAL for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(n) - unconfirmed."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | This value set covers 18 of 25 parcels (72%); 5 blank; 2 carry height35/coverage60% only. Height and coverage read NO INFO / SUBJECT TO APPROVAL for the dominant set. Eco360 (UA-spoofed) pointed to Sec.14.02.406(n) - unconfirmed."
   },
   {
     "city": "Horseshoe Bay",
@@ -1027,8 +1027,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=MURC-1)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "The single MURC-1 parcel in the GIS layer has no setback fields populated. An eCode360 fetch (UA-spoofed) described front25/side-10-to-30-between-buildings/rear-to-825ft-lake-contour/height32-40/coverage60pct-of-footprint for a 'Marina Village' application of this code - not confirmed against this parcel's own GIS record. The one GIS-sampled parcel's subdivision field reads HSB CORRIDOR not Marina Village - an unresolved discrepancy."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | The single MURC-1 parcel in the GIS layer has no setback fields populated. An eCode360 fetch (UA-spoofed) described front25/side-10-to-30-between-buildings/rear-to-825ft-lake-contour/height32-40/coverage60pct-of-footprint for a 'Marina Village' application of this code - not confirmed against this parcel's own GIS record. The one GIS-sampled parcel's subdivision field reads HSB CORRIDOR not Marina Village - an unresolved discrepancy."
   },
   {
     "city": "Horseshoe Bay",
@@ -1041,8 +1041,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=RR)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - 89 of 123 parcels (72%); height 30ft; coverage NO INFO. A second real cluster of 34 parcels (28% - the Hills/Zone17 area per an eCode360 reading) carries rear 25ft with a 100ft exception for Lots 1-5 and 24; corner 30ft not 50ft; height 45ft not 30ft."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - 89 of 123 parcels (72%); height 30ft; coverage NO INFO. A second real cluster of 34 parcels (28% - the Hills/Zone17 area per an eCode360 reading) carries rear 25ft with a 100ft exception for Lots 1-5 and 24; corner 30ft not 50ft; height 45ft not 30ft."
   },
   {
     "city": "Horseshoe Bay",
@@ -1055,8 +1055,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-6.5)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 67 parcels (100%). Applies in the Pecan Creek area. Height 32ft; coverage 50%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 67 parcels (100%). Applies in the Pecan Creek area. Height 32ft; coverage 50%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1069,8 +1069,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-16)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 28 parcels (100%) including the blank rear field. Applies in the Pecan Creek area. Height 32ft; coverage 50%. An eCode360 fetch (UA-spoofed) claimed rear=15ft - the GIS field itself is blank; that ordinance claim is not used here."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 28 parcels (100%) including the blank rear field. Applies in the Pecan Creek area. Height 32ft; coverage 50%. An eCode360 fetch (UA-spoofed) claimed rear=15ft - the GIS field itself is blank; that ordinance claim is not used here."
   },
   {
     "city": "Horseshoe Bay",
@@ -1083,8 +1083,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=AM-1)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 66 parcels (100%). Height 32ft (SF) / 35ft (other); coverage 50%/60%. Applies in the Airport zone."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 66 parcels (100%). Height 32ft (SF) / 35ft (other); coverage 50%/60%. Applies in the Airport zone."
   },
   {
     "city": "Horseshoe Bay",
@@ -1097,8 +1097,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=C-3)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Only 1 parcel carries this code; fully populated. Height varies by use (hospital160/hotel-medical70/other45ft); coverage 65%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Only 1 parcel carries this code; fully populated. Height varies by use (hospital160/hotel-medical70/other45ft); coverage 65%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1111,8 +1111,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1-CAB)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 4 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 4 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1125,8 +1125,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1-COT)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 29 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 29 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1139,8 +1139,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1-GOLF)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 28 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 50%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 28 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 50%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1153,8 +1153,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-4-CAB)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 5 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 5 parcels. Zone 12 (Summit Rock) only. Height 35ft; coverage 60%."
   },
   {
     "city": "Horseshoe Bay",
@@ -1167,8 +1167,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1-EST)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Dominant value - 192 of 230 parcels (83%); height 35ft; coverage 50%. A second real cluster of 37 parcels (16% - Lago Escondido/Zone9 area) carries front35/side5/corner15/coverage-9500sf-minimum-lot instead of a coverage percent."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Dominant value - 192 of 230 parcels (83%); height 35ft; coverage 50%. A second real cluster of 37 parcels (16% - Lago Escondido/Zone9 area) carries front35/side5/corner15/coverage-9500sf-minimum-lot instead of a coverage percent."
   },
   {
     "city": "Horseshoe Bay",
@@ -1181,8 +1181,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=R-1-VIL)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform across all 49 parcels. Height 35ft; coverage reads NO INFO."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform across all 49 parcels. Height 35ft; coverage reads NO INFO."
   },
   {
     "city": "Horseshoe Bay",
@@ -1237,8 +1237,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=LAPD)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Only 2 features citywide; setback fields blank for both. One carries a coverage-field note of '121170 SF; 19 buildings total' describing the specific site rather than a standard. Governing exhibit text (Exhibit 14A - per an eCode360 title listing only) was not independently read by any method."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Only 2 features citywide; setback fields blank for both. One carries a coverage-field note of '121170 SF; 19 buildings total' describing the specific site rather than a standard. Governing exhibit text (Exhibit 14A - per an eCode360 title listing only) was not independently read by any method."
   },
   {
     "city": "Horseshoe Bay",
@@ -1251,8 +1251,8 @@
     "citation": "ArcGIS Zoning FeatureServer (DS_ZONE=MU-GH)",
     "ordinance": "not confirmed against ordinance text",
     "effective_date": "",
-    "verification": "source: city GIS layer - not yet cross-checked against ordinance text",
-    "notes": "Uniform setback/height across all 21 features (height 32ft); coverage populated on only 1 of 21 (20% impervious cover). Applies to the Hidden Cove PD. Governing exhibit (presumed 14K) not independently read."
+    "verification": "unverified",
+    "notes": "VERIFICATION DOWNGRADED (2026-10-09, W3 PR #805 review): this rows district_code/front_ft etc. came from the city GIS vendors ZONING/SUB_ZONING parcel ATTRIBUTES, not from a read of the Horseshoe Bay ordinance text itself (the rows own prior verification value said so: \"not yet cross-checked against ordinance text\"). A live GIS attribute is not ordinance-quality, so this row is downgraded to unverified until a real ordinance-text read lands (pack E, in progress) -- it refuses SETBACK_EDITION_UNVERIFIED rather than clearing the gate on an un-cross-checked GIS value. | Uniform setback/height across all 21 features (height 32ft); coverage populated on only 1 of 21 (20% impervious cover). Applies to the Hidden Cove PD. Governing exhibit (presumed 14K) not independently read."
   },
   {
     "city": "Horseshoe Bay",
@@ -2092,11 +2092,11 @@
     "citation": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
     "ordinance": "Ord. No. 215-081126",
     "effective_date": "2026-08-11",
-    "verification": "verified-browser-read",
+    "verification": "no-dimensional-standards",
     "edition_line_verbatim": "Includes legislation through Ord. No. 215-081126 adopted August 11, 2026.",
     "source_url": "https://ecode360.com/39872099",
     "access_date": "2026-10-07",
-    "notes": "Footnotes: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property. | DEFERRED TO BASE-USE DISTRICT: front_ft is a footnote reference (\"(10)\"), not a number -- see footnotes_verbatim. side_ft is a footnote reference (\"(10)\"), not a number -- see footnotes_verbatim. rear_ft is a footnote reference (\"(10)\"), not a number -- see footnotes_verbatim. corner_ft is a footnote reference (\"(10)\"), not a number -- see footnotes_verbatim. | Min. lot width (10). Chart 2 applies to multiple-family dwellings and listed districts only. | Ordinance history: § 20 history: Ordinance 26-2001, sec. 20, adopted 10/9/01; Ordinance 26-032415, pt. 1(B), adopted 3/24/15; Ordinance 26-032426 adopted 3/24/2026"
+    "notes": "NO DIMENSIONAL STANDARDS (reclassified 2026-10-09, W3 PR #805 review): this district states no front/side/rear/corner/height number of its OWN for any parcel -- every Chart-1 cell is the same base-use deferral, verbatim: \"(10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property.\" Unlike Bertram's CBD and PUD (which also carry this footnote on SOME cells but state real numbers on others -- CBD's own lot-coverage split, PUD's corner yard and height), H has NO cell this footnote does not cover, so there is no base case left to code; it was previously verified-browser-read in error (correctly reading the footnote's absence of a number, but not treating a wholly-deferred district the same as Meadowlakes' wholly-silent ones). Previously coded verbatim: front_ft/side_ft/rear_ft/corner_ft are footnote references (\"(10)\"), not numbers -- see the quote above. | Min. lot width (10). Chart 2 applies to multiple-family dwellings and listed districts only. | Ordinance history: § 20 history: Ordinance 26-2001, sec. 20, adopted 10/9/01; Ordinance 26-032415, pt. 1(B), adopted 3/24/15; Ordinance 26-032426 adopted 3/24/2026"
   },
   {
     "city": "Highland Haven",

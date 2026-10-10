@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   cityStateFromSitus,
@@ -7,6 +7,26 @@ import {
 } from "./envelopeJurisdiction";
 import { resolveAuthoritativeSetbacks } from "./authoritativeSetbackSource";
 import { POST_BODY } from "./envelopePostBody";
+
+// W3 PR #805 review: getSetbackTableForZoning now throws a named setback refusal (gate 2/3)
+// instead of silently returning null for some jurisdictions. Real call-through for every normal
+// code, PLUS one sentinel districtCode forced to throw a generic (non-refusal) error, so
+// jurisdictionKeyFromParcelNode's "decline the refusal family, rethrow anything else" behavior is
+// provable without touching production code. Keyed on districtCode (not jurisdictionKey) because
+// this function's own public signature never takes a bare jurisdictionKey -- it derives candidate
+// city keys itself from the parcel node's county FIPS.
+vi.mock("@workspace/adapters", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/adapters")>();
+  return {
+    ...actual,
+    getSetbackTableForZoning: (key: string, code: string | null | undefined) => {
+      if (code === "__NON_REFUSAL_BUG__") {
+        throw new TypeError("a real bug, not a named setback refusal");
+      }
+      return actual.getSetbackTableForZoning(key, code);
+    },
+  };
+});
 
 const DASHWOOD_SITUS = "17006 DASHWOOD CREEK DR , TX 78660";
 const DASHWOOD_NODE = "48453:280210";
@@ -75,6 +95,42 @@ describe("jurisdictionKeyFromParcelNode — Dashwood 48453:280210 (WDLL 2)", () 
         districtCode: "SF-S",
       }),
     ).toBeNull();
+  });
+});
+
+/**
+ * W3 PR #805 review: Marble Falls and Horseshoe Bay (the only two of Burnet's eight cities with a
+ * wired zoning layer, per zoning-layers.ts) now throw a named setback refusal for most district
+ * codes (the 2026-10-09 register downgrade) instead of clearing the gate and resolving. A Burnet
+ * parcel node reaching this loop must decline to null the same way an ordinary "no table for this
+ * candidate city" miss already does -- never crash the whole lookup. A non-refusal error (a real
+ * bug) must still throw.
+ */
+describe("jurisdictionKeyFromParcelNode declines the setback-refusal family, never throws it (W3 PR #805 review)", () => {
+  const BURNET_NODE = "48053:12487"; // sample #12, City of Burnet
+
+  it("a Burnet parcel node with a Marble-Falls/Horseshoe-Bay-shaped district code declines to null, no throw -- both wired candidate cities refuse (ENZ.2 is unverified for Marble Falls, unregistered for Horseshoe Bay)", () => {
+    expect(() =>
+      jurisdictionKeyFromParcelNode({
+        parcelNodeId: BURNET_NODE,
+        districtCode: "ENZ.2",
+      }),
+    ).not.toThrow();
+    expect(
+      jurisdictionKeyFromParcelNode({
+        parcelNodeId: BURNET_NODE,
+        districtCode: "ENZ.2",
+      }),
+    ).toBeNull();
+  });
+
+  it("a non-refusal error (a real bug) still throws, uncaught", () => {
+    expect(() =>
+      jurisdictionKeyFromParcelNode({
+        parcelNodeId: BURNET_NODE,
+        districtCode: "__NON_REFUSAL_BUG__",
+      }),
+    ).toThrow(/real bug/);
   });
 });
 

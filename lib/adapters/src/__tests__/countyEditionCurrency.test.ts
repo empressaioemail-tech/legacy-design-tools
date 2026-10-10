@@ -43,18 +43,18 @@ describe("the real Burnet register", () => {
     }
   });
 
-  it("Marble Falls (FR district) is usable: the gate passes and cites the real ordinance", () => {
+  it("Marble Falls (FR district) is UNVERIFIED (2026-10-09 W3 review downgrade): a zoneomics-mirror transcription is not ordinance-quality, so the gate now refuses rather than passes -- still cites the real ordinance for audit", () => {
     const v = checkSetbackEditionCurrency({ city: "Marble Falls", districtCode: "FR" });
-    expect(v.verdict).toBe("pass");
-    expect(v.code).toBe(SETBACK_EDITION_CURRENT);
+    expect(v.verdict).toBe("fail");
+    expect(v.code).toBe(SETBACK_EDITION_UNVERIFIED);
     expect(v.ordinance).toBe("2019-O-05A");
     expect(v.effectiveDate).toBe("2019-05-21");
   });
 
-  it("Horseshoe Bay (R-1, GIS-sourced) is usable: the gate passes", () => {
+  it("Horseshoe Bay (R-1, GIS-sourced) is UNVERIFIED (2026-10-09 W3 review downgrade): a live GIS attribute never cross-checked against ordinance text is not ordinance-quality, so the gate now refuses rather than passes", () => {
     const v = checkSetbackEditionCurrency({ city: "Horseshoe Bay", districtCode: "R-1" });
-    expect(v.verdict).toBe("pass");
-    expect(v.code).toBe(SETBACK_EDITION_CURRENT);
+    expect(v.verdict).toBe("fail");
+    expect(v.code).toBe(SETBACK_EDITION_UNVERIFIED);
   });
 
   /* ------------------- pack C: the five cities newly cleared by a browser read ------------------- */
@@ -104,12 +104,18 @@ describe("the real Burnet register", () => {
     expect(row.notes).toMatch(/CONDITIONAL \(not evaluated/);
     const v = checkSetbackEditionCurrency({ city: "Bertram", districtCode: "R-1-A" });
     expect(v.code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
-    // The rest of Bertram is untouched by this one conditional cell.
-    const others = register.filter((r) => r.city === "Bertram" && r.district_code !== "R-1-A");
-    expect(others.length).toBe(20);
+    // The rest of Bertram is untouched by this one conditional cell, EXCEPT H (Historic Overlay),
+    // reclassified SETBACK_NO_DIMENSIONAL_STANDARDS by the 2026-10-09 W3 review (see the register's
+    // own notes on that row): every Chart-1 cell for H, unlike CBD/PUD, is the same base-use
+    // deferral with no surviving base case, so it is excluded from the "all clear" set here too.
+    const others = register.filter(
+      (r) => r.city === "Bertram" && r.district_code !== "R-1-A" && r.district_code !== "H",
+    );
+    expect(others.length).toBe(19);
     for (const r of others) {
       expect(checkSetbackEditionCurrency({ city: "Bertram", districtCode: r.district_code }).code, r.district_code).toBe(SETBACK_EDITION_CURRENT);
     }
+    expect(checkSetbackEditionCurrency({ city: "Bertram", districtCode: "H" }).code).toBe(SETBACK_NO_DIMENSIONAL_STANDARDS);
   });
 
   it("Highland Haven: A and B have no dimensional standards, R1 and R2 are conditional-not-evaluated (lot configuration relative to Lake LBJ), and the remaining 4 (O, GB, LI, GUI) serve clean", () => {
@@ -348,14 +354,33 @@ describe("getSetbackTableForZoning refuses Burnet by name instead of a silent nu
     }
   });
 
-  it("a cleared Burnet city (Marble Falls) does NOT throw -- it falls through to the ordinary lookup, which returns null because no table JSON has been authored for it yet (a separate, not-yet-done task)", () => {
-    expect(() => getSetbackTableForZoning("marble-falls-tx", "FR")).not.toThrow();
-    expect(getSetbackTableForZoning("marble-falls-tx", "FR")).toBeNull();
+  it("Marble Falls now THROWS instead of silently falling through to null (2026-10-09 W3 review: BEFORE this review FR cleared the gate and returned null here -- indistinguishable from an honest 'no rules' absence, even though a current ordinance exists; AFTER, the register downgrade makes it refuse by its own correct code before the table lookup is ever reached)", () => {
+    expect(() => getSetbackTableForZoning("marble-falls-tx", "FR")).toThrow();
+    try {
+      getSetbackTableForZoning("marble-falls-tx", "FR");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+    }
+  });
+
+  it("Horseshoe Bay, same shape: R-1 now throws SETBACK_EDITION_UNVERIFIED instead of falling through to null", () => {
+    expect(() => getSetbackTableForZoning("horseshoe-bay-tx", "R-1")).toThrow();
+    try {
+      getSetbackTableForZoning("horseshoe-bay-tx", "R-1");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+    }
   });
 
   it("BREAK-TEST PROOF (fails on origin/main, passes here): Burnet proper, now pack-C-verified for district R-1 E (no conditional cell), does NOT throw -- before pack C this threw SETBACK_EDITION_UNVERIFIED for every Burnet district", () => {
     expect(() => getSetbackTableForZoning("burnet-tx", "R-1 E")).not.toThrow();
-    expect(getSetbackTableForZoning("burnet-tx", "R-1 E")).toBeNull(); // still no numeric table authored -- a separate task
+    // OPS-24 stage 6, W3 (2026-10-09): burnet-tx.json now exists, so the cleared district resolves
+    // to a real table instead of the stale "no table authored yet" null.
+    const table = getSetbackTableForZoning("burnet-tx", "R-1 E");
+    expect(table).not.toBeNull();
+    expect(table!.districts.some((d) => d.district_name.includes("(R-1 E)"))).toBe(true);
   });
 
   it("every non-Burnet jurisdiction is completely unaffected: Bastrop's existing behavior is unchanged", () => {

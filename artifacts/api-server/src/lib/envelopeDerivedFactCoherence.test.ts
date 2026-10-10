@@ -1,14 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ENVELOPE_ROUTER_CODE_SETS_NONE,
   ENVELOPE_ROUTER_FIELD_NOT_SPECIFIED,
   ENVELOPE_ROUTER_NOT_A_DISTRICT,
+  ENVELOPE_ROUTER_SETBACK_SOURCE_REFUSED,
   lookUpEnvelopeTableRow,
   reconcileMaxFootprintSqFtFact,
   reconcileMaxHeightFtFact,
   reconcileMaxLotCoveragePctFact,
 } from "./envelopeDerivedFactCoherence";
+
+// W3 PR #805 review: getSetbackTableForZoning now throws a named setback refusal (gate 2/3)
+// instead of silently returning null for some jurisdictions. Real call-through for every normal
+// code, PLUS one sentinel districtCode forced to throw a generic (non-refusal) error, so
+// lookUpEnvelopeTableRow's "decline the refusal family, rethrow anything else" behavior is
+// provable without touching production code.
+vi.mock("@workspace/adapters", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/adapters")>();
+  return {
+    ...actual,
+    getSetbackTableForZoning: (key: string, code: string | null | undefined) => {
+      if (code === "__NON_REFUSAL_BUG__") {
+        throw new TypeError("a real bug, not a named setback refusal");
+      }
+      return actual.getSetbackTableForZoning(key, code);
+    },
+  };
+});
 import type { MaxFootprintSqFtFactRead } from "./maxFootprintSqFtFactRead";
 import { MAX_FOOTPRINT_SQFT_FACT_SOURCE } from "./maxFootprintSqFtFactRead";
 import type { MaxHeightFtFactRead } from "./maxHeightFtFactRead";
@@ -107,5 +126,49 @@ describe("P-445 envelope-derived fact coherence", () => {
     if (out.state === "absent") {
       expect(out.absence?.reason).toBe(ENVELOPE_ROUTER_NOT_A_DISTRICT);
     }
+  });
+});
+
+/**
+ * W3 PR #805 review: getSetbackTableForZoning now throws a named setback refusal for a Burnet
+ * district whose source is unverified, superseded, ambiguous, conditional, has no dimensional
+ * standards, or clears the register with no vendored table -- instead of silently returning null.
+ * lookUpEnvelopeTableRow has a real route (propertyExplorer.ts) and a typed decline shape
+ * (EnvelopeTableRowLookup.sourceRefusal) to carry the code through, which it reuses rather than
+ * inventing a new one -- never a 500 for this read. A non-refusal error (a real bug) must still
+ * throw.
+ */
+describe("lookUpEnvelopeTableRow declines the setback-refusal family by code, never throws it (W3 PR #805 review)", () => {
+  it("a Marble Falls parcel (ENZ.2, SETBACK_EDITION_UNVERIFIED after the W3 register downgrade) declines, no throw, and carries the code onto the row", () => {
+    expect(() => lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2")).not.toThrow();
+    const row = lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2");
+    expect(row.tableHasDistrictRow).toBe(false);
+    expect(row.district).toBeNull();
+    expect(row.sourceRefusal?.code).toBe("SETBACK_EDITION_UNVERIFIED");
+  });
+
+  it("that refusal, reconciled onto an absent height fact, says WHY instead of the generic code-sets-none", () => {
+    const row = lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2");
+    const out = reconcileMaxHeightFtFact(PI_ABSENT_HEIGHT, true, row);
+    expect(out.state).toBe("absent");
+    if (out.state === "absent") {
+      expect(out.absence?.reason).toBe(
+        `${ENVELOPE_ROUTER_SETBACK_SOURCE_REFUSED}:SETBACK_EDITION_UNVERIFIED`,
+      );
+    }
+  });
+
+  it("a served Bertram district (R-1-2) still resolves to a real row, unaffected by the refusal handling", () => {
+    const row = lookUpEnvelopeTableRow("bertram-tx", "R-1-2");
+    expect(row.tableHasDistrictRow).toBe(true);
+    expect(row.sourceRefusal).toBeUndefined();
+    expect(row.district?.front_ft).toBe(20);
+    expect(row.district?.side_ft).toBe(5);
+    expect(row.district?.rear_ft).toBe(15);
+    expect(row.district?.side_corner_ft).toBe(15);
+  });
+
+  it("a non-refusal error (a real bug) still throws, uncaught", () => {
+    expect(() => lookUpEnvelopeTableRow("bastrop-tx", "__NON_REFUSAL_BUG__")).toThrow(/real bug/);
   });
 });

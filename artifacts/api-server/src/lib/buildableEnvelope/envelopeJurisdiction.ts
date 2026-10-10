@@ -10,7 +10,7 @@
  * many hits stay null (honest). Not a situs regex.
  */
 
-import { getSetbackTableForZoning } from "@workspace/adapters";
+import { getSetbackTableForZoning, isSetbackRefusalError } from "@workspace/adapters";
 import { wiredZoningCityKeys } from "@workspace/cad-ingest/zoning-layers";
 import { mapDistrict } from "./districtMapping";
 
@@ -65,7 +65,17 @@ export function jurisdictionKeyFromParcelNode(args: {
 
   const hits: string[] = [];
   for (const cityKey of wiredZoningCityKeys(fips)) {
-    const table = getSetbackTableForZoning(cityKey, district);
+    let table;
+    try {
+      table = getSetbackTableForZoning(cityKey, district);
+    } catch (err) {
+      // W3 PR #805 review: a named setback refusal (gate 2/3 -- e.g. this city's edition is
+      // unverified, or it clears the register but has no vendored table yet) means this candidate
+      // city does not hit, same as the ordinary "no table"/"no row" misses below -- decline, never
+      // invent, never let it crash the whole lookup. Anything else is a real bug and still throws.
+      if (!isSetbackRefusalError(err)) throw err;
+      continue;
+    }
     if (!table?.districts.length) continue;
     const mapped = mapDistrict(table, district);
     if (!mapped || mapped.kind === "fallback-conservative") continue;
