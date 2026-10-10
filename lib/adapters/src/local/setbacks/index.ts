@@ -83,7 +83,13 @@ import bertramTx from "./bertram-tx.json" with { type: "json" };
 import highlandHavenTx from "./highland-haven-tx.json" with { type: "json" };
 import {
   BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_EDITION_AMBIGUOUS,
   SETBACK_EDITION_CURRENT,
+  SETBACK_EDITION_SUPERSEDED,
+  SETBACK_EDITION_UNVERIFIED,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
+  SETBACK_SOURCE_NOT_REGISTERED,
   checkSetbackEditionCurrency,
   type EditionCurrencyVerdict,
 } from "./county-edition-currency.js";
@@ -437,6 +443,51 @@ export function assertTableVendoredForClearedVerdict(opts: {
   );
 }
 
+/**
+ * GATE 4 (W3 PR #805 review, 2026-10-09) -- SHARED REFUSAL CLASSIFICATION.
+ *
+ * Every code {@link getSetbackTableForZoning} (or the edition-currency / table-registration gates
+ * it wires in) can throw INSTEAD of returning a value. A caller with a documented "decline, never
+ * invent" contract -- `resolveAuthoritativeSetbacks`, `jurisdictionKeyFromParcelNode`,
+ * `lookUpEnvelopeTableRow`, and any future one -- must turn exactly these into its own decline
+ * shape, carrying the code through so the app can say WHY, and must NOT turn anything else into a
+ * decline (a real bug -- a TypeError, a bad argument -- must still surface as an uncaught exception,
+ * never be silently swallowed as "no setback available"). Catching by `code`, never by message text
+ * (prose meant for a human reading a log, not a stable contract), is what makes that distinction
+ * possible. One shared list and one shared guard here, rather than three independent catch blocks
+ * each re-deriving which codes are "ours" -- the exact "fix the class, not the instance" shape this
+ * corpus's own conventions ask for.
+ */
+export const SETBACK_REFUSAL_CODES = [
+  SETBACK_SOURCE_NOT_REGISTERED,
+  SETBACK_EDITION_UNVERIFIED,
+  SETBACK_EDITION_SUPERSEDED,
+  SETBACK_EDITION_AMBIGUOUS,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_TABLE_ABSENT,
+] as const;
+
+export type SetbackRefusalCode = (typeof SETBACK_REFUSAL_CODES)[number];
+
+/** An error thrown by `getSetbackTableForZoning` for one of the named, documented refusals. */
+export type SetbackRefusalError = Error & { code: SetbackRefusalCode };
+
+const SETBACK_REFUSAL_CODE_SET: ReadonlySet<string> = new Set(SETBACK_REFUSAL_CODES);
+
+/**
+ * True iff `err` is one of the named setback refusals `getSetbackTableForZoning` throws (GATE 2's
+ * six edition-currency codes, or GATE 3's `SETBACK_TABLE_ABSENT`) -- checked by `err.code`, never by
+ * `err.message` (which is free-form prose, not a stable contract a catch block should pattern-match
+ * on). Anything else -- a real bug -- returns false, so a caller's `catch` block can `throw` it back
+ * out unchanged instead of mistaking it for a decline.
+ */
+export function isSetbackRefusalError(err: unknown): err is SetbackRefusalError {
+  if (!(err instanceof Error)) return false;
+  const code = (err as unknown as { code?: unknown }).code;
+  return typeof code === "string" && SETBACK_REFUSAL_CODE_SET.has(code);
+}
+
 function isBastropCityJurisdiction(normalizedKey: string): boolean {
   return (
     normalizedKey === "bastrop-tx" ||
@@ -572,9 +623,12 @@ export function listSetbackTables(): SetbackTable[] {
 
 export {
   BURNET_CITY_JURISDICTION_KEYS,
+  SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_EDITION_AMBIGUOUS,
   SETBACK_EDITION_CURRENT,
   SETBACK_EDITION_SUPERSEDED,
   SETBACK_EDITION_UNVERIFIED,
+  SETBACK_NO_DIMENSIONAL_STANDARDS,
   SETBACK_SOURCE_NOT_REGISTERED,
   SUPERSEDED_ORDINANCE_EDITIONS,
   burnetOrdinanceRegister,

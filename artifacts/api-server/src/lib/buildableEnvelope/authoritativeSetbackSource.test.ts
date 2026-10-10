@@ -1,9 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   effectiveDateForTable,
   resolveAuthoritativeSetbacks,
 } from "./authoritativeSetbackSource";
+
+// W3 PR #805 review: getSetbackTableForZoning now throws a named setback refusal (gate 2/3)
+// instead of silently returning null for some jurisdictions. A real call-through for every normal
+// key, PLUS one sentinel key forced to throw a generic (non-refusal) error, so
+// resolveAuthoritativeSetbacks's "decline the refusal family, rethrow anything else" behavior is
+// provable without touching production code.
+vi.mock("@workspace/adapters", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@workspace/adapters")>();
+  return {
+    ...actual,
+    getSetbackTableForZoning: (key: string, code: string | null | undefined) => {
+      if (key === "__non_refusal_bug__") {
+        throw new TypeError("a real bug, not a named setback refusal");
+      }
+      return actual.getSetbackTableForZoning(key, code);
+    },
+  };
+});
 
 describe("resolveAuthoritativeSetbacks", () => {
   it("R-1 falsifier: a NEWER lower-tier atom (real sourceVintage) beats an OLDER codified table, despite tier -- the exact case the old tier-first ranking got wrong", () => {
@@ -270,5 +288,59 @@ describe("effectiveDateForTable", () => {
         districts: [],
       } as never),
     ).toBe("unreadable");
+  });
+});
+
+/**
+ * W3 PR #805 review: getSetbackTableForZoning now throws a named setback refusal for a Burnet
+ * district whose source is unverified, superseded, ambiguous, conditional, has no dimensional
+ * standards, or clears the register with no vendored table -- instead of silently returning null.
+ * resolveAuthoritativeSetbacks has no live route today (P-465/A-324 retired it; see the module doc)
+ * and no richer decline shape to carry the refusal code onto, so it joins the refusal family into
+ * its own EXISTING "no usable candidate on either side" null -- its own prior documented decline,
+ * never a new wire shape. A non-refusal error (a real bug) must still throw.
+ */
+describe("resolveAuthoritativeSetbacks declines the setback-refusal family, never throws it (W3 PR #805 review)", () => {
+  it("a Marble Falls parcel (ENZ.2, SETBACK_EDITION_UNVERIFIED after the W3 register downgrade) declines to null, no throw", () => {
+    expect(() =>
+      resolveAuthoritativeSetbacks({
+        jurisdictionKey: "marble-falls-tx",
+        districtCode: "ENZ.2",
+        atomRule: null,
+      }),
+    ).not.toThrow();
+    expect(
+      resolveAuthoritativeSetbacks({
+        jurisdictionKey: "marble-falls-tx",
+        districtCode: "ENZ.2",
+        atomRule: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("a served Bertram district (R-1-2) still resolves to a real row, unaffected by the refusal handling", () => {
+    const resolved = resolveAuthoritativeSetbacks({
+      jurisdictionKey: "bertram-tx",
+      districtCode: "R-1-2",
+      atomRule: null,
+    });
+    expect(resolved).not.toBeNull();
+    expect(resolved!.sourceKind).toBe("codified-ordinance");
+    expect(resolved!.scalars).toEqual({
+      front_ft: 20,
+      side_ft: 5,
+      rear_ft: 15,
+      side_corner_ft: 15,
+    });
+  });
+
+  it("a non-refusal error (a real bug) still throws, uncaught", () => {
+    expect(() =>
+      resolveAuthoritativeSetbacks({
+        jurisdictionKey: "__non_refusal_bug__",
+        districtCode: "ANY",
+        atomRule: null,
+      }),
+    ).toThrow(/real bug/);
   });
 });
