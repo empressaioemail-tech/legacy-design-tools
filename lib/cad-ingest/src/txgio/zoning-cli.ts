@@ -30,6 +30,12 @@
  * the zoning layer + stamps + prints a summary, then exits (0 on success, 1
  * on fatal error or an empty zoning layer).
  *
+ * A FULL (unscoped, unlimited), non-dry run also writes a row to
+ * `zoning_stamp_run` (migration 0112) after the stamp completes — the
+ * independent reference hauska-factory's gate 1 (load-reconciliation-gate)
+ * reconciles stored zoning rows against, per city. A `--limit` or
+ * `--prop-ids-file` run (a sample, a smoke test) deliberately writes none.
+ *
  * FEATURES AND ACCOUNTS (P-259b). `parcels read` counts FEATURES
  * (`DISTINCT ON feature_index`). A feature carrying no CAD account
  * (`prop_id` '0', empty or NULL) is SKIPPED — it writes no row and is never
@@ -71,7 +77,7 @@ import {
   type ZoningLayerMeta,
 } from "./zoning-service";
 import { buildParcelIdIndex, buildZoningIndex } from "./zoning-stamp";
-import { stampCountyZoning } from "./zoning-stamp-db";
+import { stampCountyZoning, buildZoningStampRunRow, writeZoningStampRun } from "./zoning-stamp-db";
 import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 
 /**
@@ -479,6 +485,7 @@ async function main(): Promise<void> {
   }
   const pool = new Pool({ connectionString: databaseUrl });
   let summary;
+  let runRecordId: number | undefined;
   try {
     const db = drizzle(pool);
     log(`${dryRun ? "DRY-RUN " : ""}stamping ${cfg.countyFips} parcels...`);
@@ -494,6 +501,25 @@ async function main(): Promise<void> {
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
+    // Run record (migration 0112), FULL non-dry runs only. A `--limit` or
+    // `--prop-ids-file` run stamps a PARTIAL population on purpose (a sample,
+    // a bounded smoke test) -- recording it as "the latest run" would make
+    // gate 1 (hauska-factory load-reconciliation-gate) compare the full
+    // county's stored row count against a sample's tiny numbers and refuse a
+    // correct countywide stamp as ZONING_LOAD_UNRECONCILED. Only an
+    // unscoped, unlimited, non-dry run is the countywide population gate 1
+    // means to reconcile against.
+    if (!dryRun && propIds === undefined && limit === undefined) {
+      const row = buildZoningStampRunRow({
+        countyFips: cfg.countyFips,
+        cityKey: cfg.cityKey,
+        layerUrl: cfg.layerUrl,
+        layerReadAt: new Date(startedAt),
+        summary,
+      });
+      const inserted = await writeZoningStampRun(db, row);
+      runRecordId = inserted.id;
+    }
   } finally {
     await pool.end();
   }
@@ -566,6 +592,15 @@ async function main(): Promise<void> {
       "unrecognised / null / no-district-on-layer / skipped-no-account)",
   );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
+  log(
+    `run record:       ${
+      runRecordId !== undefined
+        ? `zoning_stamp_run id=${runRecordId}`
+        : dryRun
+          ? "none (dry-run)"
+          : "none (scoped run -- --limit or --prop-ids-file; not the countywide population gate 1 reconciles against)"
+    }`,
+  );
   const interimVals = sortedHist(summary.interimValueHistogram);
   if (interimVals.length > 0) {
     log(

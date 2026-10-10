@@ -125,6 +125,29 @@ export const txgioParcel = pgTable(
      * run log.
      */
     zoningDistrictInterim: boolean("zoning_district_interim"),
+    /**
+     * CityKey of the ZONING_LAYERS entry whose OWN feature declared this parcel
+     * has no district (Burnet stage 3 Bug 2: a parcel-id-matched city feature
+     * carrying a blank code, e.g. Horseshoe Bay 69366/106280). Written ONLY on
+     * that path (`zoning-stamp-db.ts`'s no-district-on-layer branch), alongside
+     * `zoning_district` and `zoning_jurisdiction` staying NULL on the same row.
+     *
+     * A SEPARATE column from `zoning_jurisdiction` on purpose: that column's
+     * existing contract (migration 0062) is "NULL means outside every wired
+     * layer", read by several other consumers (hauska-factory's
+     * `parcel-r5-zoning.mjs`, `zoning-layer-completeness.mjs`, the `ctx-w2`
+     * coverage scripts; hauska-engine's `rail-keys.ts`) that would be given a
+     * false "this parcel has a jurisdiction" signal if the no-district case
+     * started setting `zoning_jurisdiction` with a NULL `zoning_district`. This
+     * column is purely additive: every row this migration does not touch stays
+     * NULL, including every row with a non-NULL `zoning_jurisdiction`.
+     *
+     * Exists so hauska-factory's gate 1 (load-reconciliation-gate) can count a
+     * registered city's declared no-district population from stored rows,
+     * which `zoning_jurisdiction` alone cannot distinguish from "outside every
+     * wired layer" (migration 0112).
+     */
+    zoningNoDistrictLayer: text("zoning_no_district_layer"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
     /**

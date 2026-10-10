@@ -68,7 +68,7 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { txgioParcel } from "@workspace/db/schema";
+import { txgioParcel, zoningStampRun } from "@workspace/db/schema";
 import {
   normalizeDigitId,
   pointInGeometry,
@@ -437,6 +437,39 @@ async function flushBatch(
 }
 
 /**
+ * Flush one batch of no-district-on-layer feature indexes (migration 0112):
+ * the city's own parcel-id-matched feature carries a blank code, which this
+ * repo treats as a DECLARED fact, never a neighbour's PIP code. Writes ONLY
+ * `zoning_no_district_layer` — `zoning_district` and `zoning_jurisdiction`
+ * are left exactly as `flushBatch` would leave an untouched row (NULL on a
+ * fresh stamp; whatever a prior run wrote on a re-stamp — this path does not
+ * attempt to clear a stale value from before this fix existed, same as
+ * `flushBatch` never did for its own rows). Returns rows updated, same shape
+ * as `flushBatch`.
+ */
+async function flushNoDistrictBatch(
+  db: ZoningStampDb,
+  countyFips: string,
+  cityKey: string,
+  featureIndexes: number[],
+): Promise<number> {
+  if (featureIndexes.length === 0) return 0;
+  // sql.param(...) (not a bare `${featureIndexes}`) forces this to bind as ONE real array-typed
+  // parameter -- drizzle's default interpolation of a plain JS array instead expands it into a
+  // parenthesized tuple (`ANY(($1, $2, $3))`), which Postgres rejects when cast to `integer[]`
+  // ("cannot cast type record to integer[]", confirmed live against production, read-only). Same
+  // fix `etjDerive.ts`'s own `ANY(${keys}::text[])` already uses (`sql.param([...cityKeys])`).
+  const stmt = sql`
+    UPDATE ${txgioParcel} AS t
+    SET zoning_no_district_layer = ${cityKey}::text
+    WHERE t.county_fips = ${countyFips}
+      AND t.feature_index = ANY(${sql.param(featureIndexes)}::integer[])
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+  return res?.rowCount ?? 0;
+}
+
+/**
  * Stamp one county's parcels from the zoning index. When `dryRun`, does the
  * PIP + histogram but writes nothing (still exit-bounded). `onProgress`
  * fires every `progressEvery` parcels. `cityKey` is persisted as
@@ -539,6 +572,11 @@ export async function stampCountyZoning(opts: {
   const noZoningPolygonHit: string[] = [];
   const unrecognisedPropIds: string[] = [];
   const noDistrictOnLayerPropIds: string[] = [];
+  // Attribution for the no-district-on-layer bucket (migration 0112): feature
+  // indexes to flush through `flushNoDistrictBatch`, parallel to `matches` but
+  // carrying no code (zoning_district/zoning_jurisdiction stay NULL on these
+  // rows — only zoning_no_district_layer is written).
+  const noDistrictFeatureIndexes: number[] = [];
   const skippedNoAccountPropIds: string[] = [];
   const foundPropIds = new Set<string>();
   const accounts = new Set<string>();
@@ -630,6 +668,7 @@ export async function stampCountyZoning(opts: {
     }
     if (idEntry && idEntry.code === null) {
       summary.parcelsNoDistrictOnLayer += 1;
+      noDistrictFeatureIndexes.push(p.featureIndex);
       if (scoped && p.propId) {
         noDistrictOnLayerPropIds.push(p.propId);
         perParcel.push({
@@ -639,6 +678,10 @@ export async function stampCountyZoning(opts: {
           kind: "no-district-on-layer",
           matchMethod: "parcel-id-blank",
         });
+      }
+      if (!dryRun && noDistrictFeatureIndexes.length >= ZONING_STAMP_BATCH_SIZE) {
+        rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
+        noDistrictFeatureIndexes.length = 0;
       }
       continue;
     }
@@ -764,6 +807,9 @@ export async function stampCountyZoning(opts: {
   if (!dryRun && matches.length > 0) {
     rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
   }
+  if (!dryRun && noDistrictFeatureIndexes.length > 0) {
+    rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
+  }
   summary.rowsUpdated = rowsUpdated;
   summary.accountsRead = accounts.size;
 
@@ -781,6 +827,112 @@ export async function stampCountyZoning(opts: {
   }
 
   return summary;
+}
+
+/** Sum two code->count histograms. Neither input is mutated. */
+function mergeHistograms(
+  a: Record<string, number>,
+  b: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = { ...a };
+  for (const [code, count] of Object.entries(b)) {
+    out[code] = (out[code] ?? 0) + count;
+  }
+  return out;
+}
+
+/** The row {@link writeZoningStampRun} inserts, before `id`/`finishedAt` (DB-assigned). */
+export interface ZoningStampRunRowInput {
+  countyFips: string;
+  cityKey: string;
+  layerUrl: string;
+  layerReadAt: Date;
+  featuresRead: number;
+  matched: number;
+  noDistrictOnLayer: number;
+  parcelsNull: number;
+  idGeometryMismatch: number;
+  codeHistogram: Record<string, number>;
+}
+
+/**
+ * Derive the run-record row (migration 0112) from a completed, non-dry
+ * `ZoningStampSummary`. Pure — no DB — so the mapping from summary fields to
+ * run-record columns can be unit-tested without a database. See the
+ * migration file's own comment for why each field is defined the way it is.
+ *
+ * `matched` folds in `parcelsPlannedDevelopment` and `parcelsUnrecognised`:
+ * every bucket that writes SOME code to `zoning_district`, because gate 1
+ * reconciles against what is actually STORED, and all three store a code.
+ * `codeHistogram` is `summary.codeHistogram` merged with
+ * `summary.unrecognisedHistogram` for the same reason — the vocabulary this
+ * run could have written is the union of both.
+ */
+export function buildZoningStampRunRow(opts: {
+  countyFips: string;
+  cityKey: string;
+  layerUrl: string;
+  layerReadAt: Date;
+  summary: ZoningStampSummary;
+}): ZoningStampRunRowInput {
+  const { countyFips, cityKey, layerUrl, layerReadAt, summary } = opts;
+  return {
+    countyFips,
+    cityKey,
+    layerUrl,
+    layerReadAt,
+    featuresRead: summary.parcelsRead,
+    matched:
+      summary.parcelsMatched +
+      summary.parcelsPlannedDevelopment +
+      summary.parcelsUnrecognised,
+    noDistrictOnLayer: summary.parcelsNoDistrictOnLayer,
+    parcelsNull: summary.parcelsUnmatched,
+    idGeometryMismatch: summary.parcelsIdGeometryMismatch,
+    codeHistogram: mergeHistograms(summary.codeHistogram, summary.unrecognisedHistogram),
+  };
+}
+
+/**
+ * Persist the run record (migration 0112's `zoning_stamp_run`). Called by
+ * `zoning-cli.ts`'s `main()` AFTER `stampCountyZoning`'s batched UPDATEs
+ * complete, for a non-dry run only — never called at all for `--dry-run`
+ * (the CHECK on `dry_run` in the migration makes that invariant visible in
+ * the schema too). Returns the inserted row's `id` for the CLI to log.
+ *
+ * Raw `execute(sql...)`, like `flushBatch`/`flushNoDistrictBatch` — keeps
+ * this on the same narrow `ZoningStampDb` surface (`selectDistinctOn` +
+ * `execute`) the CLI's real pool and the test fake both already satisfy,
+ * rather than widening that type just for one insert.
+ *
+ * NOT inside the same transaction as the stamp's own UPDATEs — see the
+ * migration file's comment for why (the stamp's write path is already a
+ * sequence of independently-committed batches, not one transaction to join)
+ * and how a crash between the two is detected (gate 1 finds stamped rows
+ * with no matching run record and refuses `ZONING_NOT_STAMPED`).
+ */
+export async function writeZoningStampRun(
+  db: ZoningStampDb,
+  row: ZoningStampRunRowInput,
+): Promise<{ id: number }> {
+  const stmt = sql`
+    INSERT INTO ${zoningStampRun} (
+      county_fips, city_key, layer_url, layer_read_at, features_read,
+      matched, no_district_on_layer, parcels_null, id_geometry_mismatch,
+      code_histogram, dry_run
+    ) VALUES (
+      ${row.countyFips}, ${row.cityKey}, ${row.layerUrl}, ${row.layerReadAt},
+      ${row.featuresRead}, ${row.matched}, ${row.noDistrictOnLayer},
+      ${row.parcelsNull}, ${row.idGeometryMismatch},
+      ${JSON.stringify(row.codeHistogram)}::jsonb, false
+    )
+    RETURNING id
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rows: { id: number | string }[] };
+  // `id` is `bigserial`; node-postgres returns a `bigint` column as a STRING by default (avoids
+  // silent precision loss above 2^53) -- coerced here so callers get the `number` the type says,
+  // safe because a run-record id is never anywhere near that magnitude.
+  return { id: Number(res.rows[0].id) };
 }
 
 /** Exposed for the CLI's row-count clarity. */
