@@ -3,7 +3,7 @@
   "jurisdictionKey": "bertram-tx",
   "jurisdictionDisplayName": "City of Bertram, TX",
   "effectiveDate": "2026-08-11",
-  "note": "City of Bertram, TX. INSTRUMENT: Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1 (yards/height/lot area), § 20(k) Chart 2 (lot coverage) and Chart 3 (F.A.R.); current through Ord. No. 215-081126 (2026-08-11). SOURCE: ecode360.com, pack C (2026-10-07), cross-matched against the register (LDT #800). SCOPE: 20 of Bertram's 21 districts. R-1-A stays UNROWED (SETBACK_CONDITIONAL_NOT_EVALUATED: its side-yard cell states a misleadingly simple 5 ft in Chart 1 but a footnote states the real zero-lot-line rule separately -- the register refuses rather than serve either number alone). READING RULES: (1) Chart 2's \"X% main building(s); Y% main and all accessory\" pattern (R-4-1/2/3, C, C-1, CBD, O, LI, HI) is a MAIN-vs-MAIN-PLUS-ACCESSORY split of the SAME building-coverage metric, not a buildings-vs-impervious split (no impervious figure is stated anywhere in this chapter) -- the base case coded is the lower, main-building-only figure, and the higher main-plus-accessory total is the quoted condition; max_impervious_pct is not_specified throughout this city for the same reason. (2) R-4-1/2/3's height footnotes (6)/(7)/(8) state a STORY cap (\"not to exceed one/two/three stories\") alongside the stated feet figure, not a competing number -- the feet figure is coded and the story cap is quoted. (3) CBD, PUD and H (Historic Overlay) carry Chart-1 cells that are bare footnote references -- (9) or (10) -- reading \"see the base-use district\" or \"see Section 40\", NOT numbers; a correct reader that dropped the parenthesis and read \"10\" or \"9\" as feet would silently invent a setback the ordinance never states for that cell. front_ft/side_ft/rear_ft (and, for CBD and H, side_corner_ft and max_height_ft too) are therefore not_specified for these three districts, with the deferral footnote quoted verbatim. PUD's own corner yard (15 ft) and height (45 ft) ARE stated directly in Chart 1 and are coded normally. H has NO independently stated dimension at all (every Chart-1 cell for H is the same base-use deferral) -- its row is included because the register marks it verified-browser-read/SETBACK_EDITION_CURRENT (not one of the three stay-refused codes), but every field in it is not_specified; see this PR's report for why that register classification is itself questionable for a district with zero independent standards. SENTINELS: not_specified = 100, except max_height_ft's canonical 999 (used for CBD and H only). No code-section atom corpus exists yet for bertram_tx; every value is primary-source-verified.",
+  "note": "City of Bertram, TX. INSTRUMENT: Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1 (yards/height/lot area), § 20(k) Chart 2 (lot coverage) and Chart 3 (F.A.R.); current through Ord. No. 215-081126 (2026-08-11). SOURCE: ecode360.com, pack C (2026-10-07), cross-matched against the register (LDT #800). SCOPE: 19 of Bertram's 21 districts. R-1-A stays UNROWED (SETBACK_CONDITIONAL_NOT_EVALUATED: its side-yard cell states a misleadingly simple 5 ft in Chart 1 but a footnote states the real zero-lot-line rule separately -- the register refuses rather than serve either number alone). H (Historic Overlay) ALSO stays UNROWED as of the 2026-10-09 W3 PR #805 review: every one of its Chart-1 cells is the same bare footnote reference to \"whichever base-use district governs the proposed use\" -- unlike CBD and PUD below, H has no cell this footnote does not cover, so there is no base case left to code, and it is now SETBACK_NO_DIMENSIONAL_STANDARDS in the register (the same code Meadowlakes' districts carry) rather than verified-browser-read. READING RULES: (1) Chart 2's \"X% main building(s); Y% main and all accessory\" pattern (R-4-1/2/3, C, C-1, CBD, O, LI, HI) is a MAIN-vs-MAIN-PLUS-ACCESSORY split of the SAME building-coverage metric, not a buildings-vs-impervious split (no impervious figure is stated anywhere in this chapter) -- the base case coded is the lower, main-building-only figure, and the higher main-plus-accessory total is the quoted condition; max_impervious_pct is not_specified throughout this city for the same reason. (2) R-4-1/2/3's height footnotes (6)/(7)/(8) state a STORY cap (\"not to exceed one/two/three stories\") alongside the stated feet figure, not a competing number -- the feet figure is coded and the story cap is quoted. (3) CBD and PUD carry Chart-1 cells that are bare footnote references -- (9) or (10) -- reading \"see the base-use district\" or \"see Section 40\", NOT numbers; a correct reader that dropped the parenthesis and read \"10\" or \"9\" as feet would silently invent a setback the ordinance never states for that cell. front_ft/side_ft/rear_ft (and, for CBD, side_corner_ft and max_height_ft too) are therefore not_specified for these two districts, with the deferral footnote quoted verbatim. PUD's own corner yard (15 ft) and height (45 ft) ARE stated directly in Chart 1 and are coded normally -- the distinguishing fact from H is that PUD and CBD each have AT LEAST ONE cell the footnote does not cover (PUD's corner/height; CBD's own lot-coverage split), so a real base case survives for them. SENTINELS: not_specified = 100, except max_height_ft's canonical 999 (used for CBD only). No code-section atom corpus exists yet for bertram_tx; every value is primary-source-verified.",
   "districts": [
     {
       "district_name": "A Agricultural - District A (A)",
@@ -1084,68 +1084,6 @@
       "side_ft": 100,
       "side_corner_ft": 15,
       "max_height_ft": 45,
-      "max_lot_coverage_pct": 100,
-      "max_impervious_pct": 100
-    },
-    {
-      "district_name": "H Historic Overlay District (H)",
-      "citation_url": "https://ecode360.com/39872099",
-      "provenance": {
-        "front_ft": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- front yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "rear_ft": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- rear yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "side_ft": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- side yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "side_corner_ft": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "max_height_ft": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum height (district \"H\", Historic Overlay District): \"(10)\". Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "max_lot_coverage_pct": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum lot coverage (district \"H\", Historic Overlay District): \"NOT SPECIFIED\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        },
-        "max_impervious_pct": {
-          "section_number": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3",
-          "confidence": 0.85,
-          "verification_state": "primary-source-verified",
-          "not_specified": true,
-          "quote": "Zoning Ordinance (Exhibit 14A) § 20(j) Chart 1; § 20(k) Chart 2; Chart 3 -- maximum impervious cover (district \"H\", Historic Overlay District): \"NOT SPECIFIED\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: (10) The Conditions and Limitations, Setbacks and Lot requirements set forth in Chart 1 applicable to the District governing the proposed base use of the property shall apply within this District, i.e., if the proposed use of property within the District is a use provided for in the C-1 District the conditions and limitations applicable to the C-1 District shall apply to the property."
-        }
-      },
-      "front_ft": 100,
-      "rear_ft": 100,
-      "side_ft": 100,
-      "side_corner_ft": 100,
-      "max_height_ft": 999,
       "max_lot_coverage_pct": 100,
       "max_impervious_pct": 100
     }

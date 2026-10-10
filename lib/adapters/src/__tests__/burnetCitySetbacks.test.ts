@@ -14,7 +14,17 @@
  * no atom to round-trip against) -- the same shape as belton-tx / seguin-tx / cibolo-tx.
  */
 import { describe, expect, it } from "vitest";
-import { getSetbackTable, getSetbackTableForZoning } from "../local/setbacks/index.js";
+import {
+  getSetbackTable,
+  getSetbackTableForZoning,
+  assertTableVendoredForClearedVerdict,
+  SETBACK_TABLE_ABSENT,
+  SETBACK_EDITION_CURRENT,
+  SETBACK_EDITION_UNVERIFIED,
+  checkSetbackEditionCurrency,
+  burnetOrdinanceRegister,
+  type EditionCurrencyVerdict,
+} from "../local/setbacks/index.js";
 import { runSetbackGate, type GatedSetbackTable } from "../local/setbacks/gate.js";
 
 function gateReport(key: string) {
@@ -148,9 +158,9 @@ describe("cottonwood-shores-tx", () => {
 });
 
 describe("bertram-tx", () => {
-  it("carries exactly the 20 districts the register clears (of 21 total)", () => {
+  it("carries exactly the 19 districts the register clears (of 21 total; H reclassified SETBACK_NO_DIMENSIONAL_STANDARDS 2026-10-09)", () => {
     const table = getSetbackTable("bertram-tx")!;
-    expect(table.districts).toHaveLength(20);
+    expect(table.districts).toHaveLength(19);
   });
 
   it("passes the acceptance gate with zero blocks", () => {
@@ -173,21 +183,27 @@ describe("bertram-tx", () => {
     }
   });
 
-  it("CBD and H (Historic Overlay), whose Chart 1 cells are bare footnote references to the base-use district, carry not_specified yards -- never the footnote NUMBER read as feet", () => {
+  it("CBD, whose Chart 1 yard cells are bare footnote references to the base-use district, carries not_specified yards -- never the footnote NUMBER read as feet -- but its own stated coverage split is coded", () => {
     const table = getSetbackTable("bertram-tx")!;
     const cbd = table.districts.find((d) => d.district_name.includes("(CBD)"))!;
-    const h = table.districts.find((d) => d.district_name.includes("(H)"))!;
-    for (const d of [cbd, h]) {
-      expect(d.front_ft).toBe(100);
-      expect(d.side_ft).toBe(100);
-      expect(d.rear_ft).toBe(100);
-      expect(d.side_corner_ft).toBe(100);
-    }
-    // H has NO independently stated dimension at all -- every field not_specified.
-    expect(h.max_height_ft).toBe(999);
-    expect(h.max_lot_coverage_pct).toBe(100);
+    expect(cbd.front_ft).toBe(100);
+    expect(cbd.side_ft).toBe(100);
+    expect(cbd.rear_ft).toBe(100);
+    expect(cbd.side_corner_ft).toBe(100);
     // CBD's coverage IS stated (main-vs-accessory split) even though its yards are deferred.
     expect(cbd.max_lot_coverage_pct).toBe(60);
+  });
+
+  it("H (Historic Overlay) is NOT in this table -- 2026-10-09 W3 review reclassified it SETBACK_NO_DIMENSIONAL_STANDARDS in the register (every Chart-1 cell for H, unlike CBD/PUD, is the same base-use deferral with no surviving base case)", () => {
+    const table = getSetbackTable("bertram-tx")!;
+    expect(table.districts.some((d) => d.district_name.includes("(H)"))).toBe(false);
+    expect(() => getSetbackTableForZoning("bertram-tx", "H")).toThrow();
+    try {
+      getSetbackTableForZoning("bertram-tx", "H");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe("SETBACK_NO_DIMENSIONAL_STANDARDS");
+    }
   });
 
   it("PUD's directly-stated corner yard (15 ft) and height (45 ft) are coded normally despite its deferred front/side/rear", () => {
@@ -230,12 +246,148 @@ describe("highland-haven-tx", () => {
 });
 
 describe("Marble Falls, Horseshoe Bay and Meadowlakes remain untabled (separate task / see PR report)", () => {
-  it("Marble Falls and Horseshoe Bay still fall through to null even though their own registers clear this gate for some districts", () => {
-    expect(getSetbackTableForZoning("marble-falls-tx", "FR")).toBeNull();
-    expect(getSetbackTableForZoning("horseshoe-bay-tx", "R-1")).toBeNull();
-  });
-
   it("Meadowlakes has no served district at all, so every code still throws SETBACK_NO_DIMENSIONAL_STANDARDS", () => {
     expect(() => getSetbackTableForZoning("meadowlakes-tx", "R-1")).toThrow();
+  });
+});
+
+/**
+ * BEFORE / AFTER, 2026-10-09 W3 review of this PR -- the Marble Falls / Horseshoe Bay silent-null
+ * gap. BEFORE (origin/main as of #805's first revision): Marble Falls' register marked most
+ * districts "transcribed" and Horseshoe Bay's marked most "source: city GIS layer..."; both states
+ * passed isUsableVerification, so checkSetbackEditionCurrency returned SETBACK_EDITION_CURRENT, and
+ * getSetbackTableForZoning fell through `SETBACK_TABLES[normalized] ?? null` to a bare `null` --
+ * indistinguishable from "no codified rules exist," which was false (a current ordinance DOES exist
+ * for these districts; nobody had keyed its numbers in). AFTER (this revision): two independent
+ * fixes close the gap from both directions --
+ *   (1) the register downgrade below: neither source was ordinance-quality (a third-party mirror
+ *       for Marble Falls, un-cross-checked GIS attributes for Horseshoe Bay), so both are now
+ *       "unverified" and refuse SETBACK_EDITION_UNVERIFIED -- their OWN correct code -- before ever
+ *       reaching the table lookup;
+ *   (2) GATE 3 (SETBACK_TABLE_ABSENT, see index.ts) as a general backstop for the shape itself: ANY
+ *       future cleared verdict with no vendored table -- not just these two cities, not just
+ *       Burnet -- refuses by name instead of returning null. Demonstrated below with a synthetic
+ *       verdict, since no real cleared-but-untabled row exists anymore today.
+ */
+describe("the Marble Falls / Horseshoe Bay silent-null gap (2026-10-09 W3 review)", () => {
+  it("BEFORE/AFTER, real end-to-end: a Marble Falls parcel's ENZ.2 district used to resolve to a silent null and now throws SETBACK_EDITION_UNVERIFIED by name", () => {
+    // AFTER: real call, no synthetic register -- this IS today's production behavior.
+    expect(() => getSetbackTableForZoning("marble-falls-tx", "ENZ.2")).toThrow();
+    try {
+      getSetbackTableForZoning("marble-falls-tx", "ENZ.2");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+    }
+    // BEFORE, reconstructed: the same district, with its verification value restored to the
+    // pre-downgrade "transcribed" string the register carried before this review, clears the gate
+    // and (since no table exists for marble-falls-tx) returns a bare null -- exactly the silent
+    // shape this review closed. This does not mutate the real register; it passes a synthetic one.
+    const realRow = burnetOrdinanceRegister().find(
+      (r) => r.city === "Marble Falls" && r.district_code === "ENZ.2",
+    )!;
+    const beforeRegister = burnetOrdinanceRegister().map((r) =>
+      r.city === "Marble Falls" && r.district_code === "ENZ.2"
+        ? { ...realRow, verification: "transcribed" }
+        : r,
+    );
+    const beforeVerdict = checkSetbackEditionCurrency({
+      city: "Marble Falls",
+      districtCode: "ENZ.2",
+      register: beforeRegister,
+    });
+    expect(beforeVerdict.code).toBe(SETBACK_EDITION_CURRENT);
+    // GATE 3 catches exactly this reconstructed "before" verdict and refuses by name instead of
+    // falling through to null -- the second, general half of the fix.
+    expect(() =>
+      assertTableVendoredForClearedVerdict({
+        normalizedJurisdictionKey: "marble-falls-tx",
+        verdict: beforeVerdict,
+        sourceLabel: "Marble Falls's ordinance register",
+      }),
+    ).toThrow();
+  });
+
+  it("Horseshoe Bay's downgrade is the same shape: a live-stamped district (R-1) now refuses SETBACK_EDITION_UNVERIFIED instead of resolving to null", () => {
+    expect(() => getSetbackTableForZoning("horseshoe-bay-tx", "R-1")).toThrow();
+    try {
+      getSetbackTableForZoning("horseshoe-bay-tx", "R-1");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+    }
+  });
+
+  it("Horseshoe Bay's genuinely-non-dimensional GIS labels (n/a: MOR, LA, CA, UNK) were left untouched by the downgrade -- still n/a, still SETBACK_EDITION_UNVERIFIED", () => {
+    const row = burnetOrdinanceRegister().find(
+      (r) => r.city === "Horseshoe Bay" && r.district_code === "MOR",
+    )!;
+    expect(row.verification).toBe("n/a");
+  });
+});
+
+/**
+ * GATE 3 -- SETBACK_TABLE_ABSENT, the general mechanism. Unit-tested directly against
+ * assertTableVendoredForClearedVerdict (rather than only through getSetbackTableForZoning) so the
+ * three required shapes are each provable in isolation: cleared-but-untabled refuses with the new
+ * code; a real tabled district still serves; a district the gate itself refuses keeps refusing with
+ * ITS OWN code (GATE 3 never fires for it -- it is a no-op for every non-cleared verdict).
+ */
+describe("GATE 3 (SETBACK_TABLE_ABSENT) -- general, not Burnet-specific", () => {
+  const clearedVerdict: EditionCurrencyVerdict = {
+    verdict: "pass",
+    code: SETBACK_EDITION_CURRENT,
+    city: "Some Future County Town",
+    districtCode: "R-9",
+    detail: "Some Future County Town R-9 cites a real ordinance, verification \"verified-browser-read\".",
+    ordinance: "Ord. 2099-01",
+    effectiveDate: "2099-01-01",
+    citation: "Ch. 1 Sec. 1",
+    verification: "verified-browser-read",
+  };
+
+  it("a register-served jurisdiction with no vendored table refuses SETBACK_TABLE_ABSENT -- any jurisdiction key, not just a Burnet one", () => {
+    expect(() =>
+      assertTableVendoredForClearedVerdict({
+        normalizedJurisdictionKey: "some-future-county-town-tx",
+        verdict: clearedVerdict,
+        sourceLabel: "Some Future County's ordinance register",
+      }),
+    ).toThrow(/SETBACK_TABLE_ABSENT|no SETBACK_TABLES entry/);
+    try {
+      assertTableVendoredForClearedVerdict({
+        normalizedJurisdictionKey: "some-future-county-town-tx",
+        verdict: clearedVerdict,
+        sourceLabel: "Some Future County's ordinance register",
+      });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe(SETBACK_TABLE_ABSENT);
+    }
+  });
+
+  it("a jurisdiction that DOES have a vendored table is a no-op, even for the same cleared-verdict shape", () => {
+    expect(() =>
+      assertTableVendoredForClearedVerdict({
+        normalizedJurisdictionKey: "burnet-tx",
+        verdict: { ...clearedVerdict, city: "Burnet" },
+        sourceLabel: "Burnet's ordinance register",
+      }),
+    ).not.toThrow();
+  });
+
+  it("a non-cleared verdict is a no-op regardless of table presence -- GATE 3 never overrides GATE 2's own refusal code", () => {
+    const refusedVerdict: EditionCurrencyVerdict = {
+      ...clearedVerdict,
+      verdict: "fail",
+      code: SETBACK_EDITION_UNVERIFIED,
+    };
+    expect(() =>
+      assertTableVendoredForClearedVerdict({
+        normalizedJurisdictionKey: "some-future-county-town-tx",
+        verdict: refusedVerdict,
+        sourceLabel: "Some Future County's ordinance register",
+      }),
+    ).not.toThrow();
   });
 });
