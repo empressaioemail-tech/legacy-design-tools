@@ -443,6 +443,8 @@ describe("lib/db schema integration", () => {
         "viewpoint_renders",
         // QA-57 — pilot workspace branding (firm display name, logo URL).
         "workspace_settings",
+        // Migration 0112 — the zoning-stamp CLI's own run record (hauska-factory gate 1 Tier 3).
+        "zoning_stamp_run",
       ]);
     });
   });
