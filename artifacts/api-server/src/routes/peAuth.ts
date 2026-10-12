@@ -13,6 +13,7 @@ import { upsertPeOidcIdentity } from "../lib/peIdentity";
 import { completePeSignIn } from "../lib/peSignInCompletion";
 import { verifyPeExchangeAuth } from "../lib/peExchangeAuth";
 import { logger } from "../lib/logger";
+import { normalizeAdMatch } from "../lib/peAdMatch";
 
 const router: IRouter = Router();
 
@@ -29,6 +30,12 @@ const ExchangeBodySchema = z.object({
    * arrived with no parameters; absence is `ss_src_direct` downstream.
    */
   campaign: z.string().max(512).optional(),
+  /**
+   * The signing-in browser's Meta match keys (hauska-map
+   * api/_lib/meta-signin-handoff.ts metaMatchForCortex). Shape-validated by
+   * normalizeAdMatch; a malformed value is dropped, never a 400.
+   */
+  metaMatch: z.unknown().optional(),
 });
 
 router.post("/auth/session-exchange", async (req: Request, res: Response) => {
@@ -46,6 +53,7 @@ router.post("/auth/session-exchange", async (req: Request, res: Response) => {
     const body = await completePeSignIn(req, res, identity, {
       ...(parsed.data.installId ? { installId: parsed.data.installId } : {}),
       ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
+      adMatch: normalizeAdMatch(parsed.data.metaMatch),
     });
     res.status(identity.isNewUser ? 201 : 200).json(body);
   } catch (err) {

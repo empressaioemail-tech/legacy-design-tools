@@ -26,6 +26,7 @@
  * brokerage extension seam.
  */
 
+import { adMatchToStripeParams, type AdMatch } from "./peAdMatch";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -407,6 +408,12 @@ export async function createPeSubscriptionCheckoutSession(input: {
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
   /**
+   * Ad-platform match keys from the visitor's browser (forwarded by the BFF on
+   * checkout creation). Stored on the Checkout SESSION metadata only, never the
+   * subscription, so the Stripe webhook's server-side Purchase is matchable.
+   */
+  adMatch?: AdMatch;
+  /**
    * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
    * `promotekitReferral.ts`; an id that does not look like one is dropped,
    * never an error.
@@ -530,6 +537,7 @@ export async function createPeSubscriptionCheckoutSession(input: {
   applyPromotekitReferral(params, input.promotekitReferral, {
     subscription: true,
   });
+  Object.assign(params, adMatchToStripeParams(input.adMatch ?? {}));
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, {
     custom,
@@ -557,6 +565,12 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   returnUrl?: string;
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
+  /**
+   * Ad-platform match keys from the visitor's browser (forwarded by the BFF on
+   * checkout creation). Stored on the Checkout SESSION metadata only, never the
+   * subscription, so the Stripe webhook's server-side Purchase is matchable.
+   */
+  adMatch?: AdMatch;
   /**
    * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
    * `promotekitReferral.ts`; an id that does not look like one is dropped,
@@ -622,6 +636,7 @@ export async function createPePropertyUnlockCheckoutSession(input: {
     params["metadata[install_id]"] = input.installId;
   }
   applyPromotekitReferral(params, input.promotekitReferral);
+  Object.assign(params, adMatchToStripeParams(input.adMatch ?? {}));
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, { custom, publishableKey });
 }

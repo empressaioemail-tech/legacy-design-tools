@@ -57,6 +57,19 @@ export const ALLOWED_PAYLOAD_KEYS = [
   "billing",
   "value",
   "currency",
+  // Ad-platform match keys (peAdMatch.ts AD_MATCH_PAYLOAD_KEYS): the visitor's
+  // own ip / user agent / Meta cookies / GA ids, captured at sign-in or
+  // checkout so the Meta and GA4 legs can match a server event. Scalars, never
+  // parcel data; read ONLY by the Meta/GA leg, never projected or sent to
+  // Resend (ssContactProjection reads named keys only).
+  "adClientIp",
+  "adClientUa",
+  "adFbp",
+  "adFbc",
+  "adGaClientId",
+  "adGaSessionId",
+  // Stripe Checkout Session id: GA4 purchase transaction_id (dedup).
+  "transactionId",
 ] as const;
 
 export type DenylistHit = { path: string; key: string };

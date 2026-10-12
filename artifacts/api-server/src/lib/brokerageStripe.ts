@@ -9,6 +9,8 @@
  *   STRIPE_MAX_PRICE_ID
  */
 
+import { adMatchFromStripeMetadata } from "./peAdMatch";
+import { subscriptionItemsAmount } from "./peStripeBillingLifecycle";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
@@ -631,6 +633,10 @@ export async function handleStripeWebhook(
         billing: "none",
         value: stripeAmount(obj) ?? 15,
         currency: stripeCurrency(obj),
+        // Visitor match keys captured at checkout creation (peAdMatch.ts):
+        // the webhook has no browser request of its own.
+        adMatch: adMatchFromStripeMetadata(obj.metadata),
+        transactionId: stripeCheckoutSessionId(obj),
       });
       return {
         handled: true,
@@ -729,6 +735,8 @@ export async function handleStripeWebhook(
         billing: billing.billingInterval === "year" ? "annual" : billing.billingInterval === "month" ? "monthly" : "none",
         value: stripeAmount(obj),
         currency: stripeCurrency(obj),
+        adMatch: adMatchFromStripeMetadata(obj.metadata),
+        transactionId: stripeCheckoutSessionId(obj),
         lifecycleEvent: "e5_plan_started",
         idempotencyKey: planStartedIdempotencyKey({
           stripeEventId: event.id ?? `plan:${peMeta.peUserId}:${grantTier}`,
@@ -877,8 +885,12 @@ export async function handleStripeWebhook(
                 : billing.billingInterval === "month"
                   ? "monthly"
                   : "none",
-            value: stripeAmount(obj),
+            // A subscription object carries no amount_total; without this the
+            // Purchase went to Meta with no value (Meta requires value +
+            // currency on Purchase). Sum of the items' unit_amount x quantity.
+            value: stripeAmount(obj) ?? subscriptionItemsAmount(obj),
             currency: stripeCurrency(obj),
+            transactionId: typeof obj.id === "string" ? obj.id : null,
             lifecycleEvent: "e5_plan_started",
             idempotencyKey: planStartedIdempotencyKey({
               stripeEventId,

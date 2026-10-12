@@ -19,6 +19,7 @@ import { dispatchLifecycleEvent } from "./peLifecycleDispatch";
 import { e6IdempotencyKey } from "./peLifecycleOutbox";
 import { logger } from "./logger";
 import { LIFECYCLE_EVENT_ID_FIELD } from "./peLifecycleTypes";
+import type { AdMatch } from "./peAdMatch";
 
 function applicantSession(userId: string) {
   return {
@@ -70,6 +71,12 @@ export type PeSignInOptions = {
    * from the sealed OIDC state or the magic-link verify body.
    */
   campaign?: string;
+  /**
+   * The signing-in browser's ad-platform match keys (ip, ua, _fbp, _fbc),
+   * forwarded by the BFF from its own browser request. Lands on the E1 row so
+   * the server CompleteRegistration is matchable.
+   */
+  adMatch?: AdMatch;
 };
 
 export async function completePeSignIn(
@@ -99,6 +106,7 @@ export async function completePeSignIn(
         email: identity.email,
         displayName: identity.displayName,
         ...(opts.campaign ? { campaign: opts.campaign } : {}),
+        ...(opts.adMatch ? { adMatch: opts.adMatch } : {}),
       });
       if (eventId) lifecycleEventId = eventId;
     } catch (err) {
