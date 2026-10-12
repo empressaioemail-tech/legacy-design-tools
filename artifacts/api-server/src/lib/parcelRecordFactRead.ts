@@ -57,15 +57,44 @@ export interface ParcelRecordQueryable {
   ): Promise<{ rows: T[] }>;
 }
 
+/**
+ * One flood companion row (card F1, `2026-10-12_whole_parcel_flood_design.md`
+ * §3.B). The OLD single-point payload (`{zone, floodway, bfe, dfirmId,
+ * method}`) and the NEW whole-parcel payload (adds `subtype`, `isSfha`,
+ * `areaShare`, `overlap`) both parse into this same shape: a field the old
+ * payload never carried reads as `null` (areaShare, subtype) or its
+ * documented default (`overlap: "single"`, `isSfha: null` meaning "not
+ * stated -- the caller falls back to the zone-letter rule, never guessed
+ * here").
+ */
+export type ParcelRecordFloodZoneRow = {
+  zone: string | null;
+  subtype: string | null;
+  /** `null` only for the old payload, which carries no SFHA_TF flag. */
+  isSfha: boolean | null;
+  floodway: boolean;
+  baseFloodElevation: number | null;
+  dfirmId: string | null;
+  /** 0..1, or `null` for the old single-point payload (one row, whole parcel). */
+  areaShare: number | null;
+  /** Verbatim from the row's own payload; defaults to "single" when absent (the old payload's only row). */
+  overlap: "single" | "partial" | "sliver";
+  method: string | null;
+  sourceVintage: string | null;
+};
+
 export type ParcelRecordFloodValue = {
   state: "value";
   source: typeof PARCEL_RECORD_FLOOD_SOURCE;
   placeKey: string;
+  /** Row 0 -- the largest-share zone. Kept for compatibility; a new reader should use `zones`. */
   floodZone: string | null;
   floodway: boolean;
   baseFloodElevation: number | null;
   method: string | null;
   sourceVintage: string | null;
+  /** EVERY companion row for this parcel, row 0 first (the largest share). Never truncated to one. */
+  zones: ParcelRecordFloodZoneRow[];
 };
 
 export type ParcelRecordFloodAbsentVerified = {
@@ -108,14 +137,22 @@ export type ParcelRecordFloodRead =
   | ParcelRecordFloodUnaccounted
   | ParcelRecordFloodRefusal;
 
-type CellRow = { cell_state: unknown; payload: unknown };
+type CellRow = { cell_state: unknown; row_index: number | null; payload: unknown };
 
+/**
+ * EVERY companion row for (place_key, rail_key), not just row_index=0
+ * (card F2, `2026-10-12_whole_parcel_flood_design.md` §3.C). The LEFT JOIN
+ * still yields exactly one row (cr.* null) when `parcel_record_cell` exists
+ * but has no companion rows -- the same "kind=value but no payload" shape
+ * `interpretFloodCellRow` already refuses as malformed-cell.
+ */
 const SELECT_FLOOD_CELL = `
-SELECT c.cell_state, cr.payload
+SELECT c.cell_state, cr.row_index, cr.payload
   FROM parcel_record_cell c
   LEFT JOIN parcel_record_companion_row cr
-    ON cr.place_key = c.place_key AND cr.rail_key = c.rail_key AND cr.row_index = 0
+    ON cr.place_key = c.place_key AND cr.rail_key = c.rail_key
  WHERE c.place_key = $1 AND c.rail_key = $2
+ ORDER BY cr.row_index ASC
 `;
 
 let injectedQueryable: ParcelRecordQueryable | null | undefined;
@@ -160,8 +197,21 @@ function factoryQueryableFromEnv(): ParcelRecordQueryable | null {
       }
       const rail = record.rails[railKey];
       if (!rail || rail.cell === null) return { rows: [] as unknown as T[] };
-      const payload = (rail.companions[0] as { payload?: unknown } | undefined)?.payload ?? null;
-      return { rows: [{ cell_state: rail.cell, payload }] as unknown as T[] };
+      // EVERY companion row, in the order the retrieval service returns them
+      // (row_index order) -- not just companions[0]. Mirrors the LEFT JOIN
+      // shape below: zero companions still yields one row so a kind=value
+      // cell with no payload is still visible to interpretFloodCellRow.
+      const companions = rail.companions as Array<{ payload?: unknown } | undefined>;
+      if (companions.length === 0) {
+        return { rows: [{ cell_state: rail.cell, row_index: null, payload: null }] as unknown as T[] };
+      }
+      return {
+        rows: companions.map((c, i) => ({
+          cell_state: rail.cell,
+          row_index: i,
+          payload: c?.payload ?? null,
+        })) as unknown as T[],
+      };
     },
   };
 }
@@ -184,15 +234,36 @@ function asNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/** A single companion row's payload, old or new shape, into the typed row (card F1/F2). Never guesses a field the payload does not carry. */
+function parseZoneRow(payload: Record<string, unknown>): ParcelRecordFloodZoneRow {
+  const overlap =
+    payload.overlap === "partial" || payload.overlap === "sliver" ? payload.overlap : "single";
+  return {
+    zone: asNullableString(payload.zone),
+    subtype: asNullableString(payload.subtype),
+    isSfha: typeof payload.isSfha === "boolean" ? payload.isSfha : null,
+    floodway: payload.floodway === true,
+    baseFloodElevation: asNullableNumber(payload.bfe),
+    dfirmId: asNullableString(payload.dfirmId),
+    areaShare: asNullableNumber(payload.areaShare),
+    overlap,
+    method: asNullableString(payload.method),
+    sourceVintage: asNullableString(payload.sourceVintage),
+  };
+}
+
 /**
- * Interpret an already-fetched cell row. Pure. Tests drive this with fixtures
- * so every cell kind is observed without a store.
+ * Interpret EVERY already-fetched companion row for one cell (card F2:
+ * read every row, not `[0]`). Pure. Tests drive this with fixtures so every
+ * cell kind -- and a re-read with several companion rows -- is observed
+ * without a store. `rows` share one `cell_state` (one parcel_record_cell
+ * row); only the `value` kind has more than one companion row to speak of.
  */
 export function interpretFloodCellRow(
   placeKey: string,
-  row: CellRow | undefined,
+  rowList: ReadonlyArray<CellRow>,
 ): ParcelRecordFloodRead {
-  if (!row) {
+  if (rowList.length === 0) {
     return {
       state: "refused",
       code: "cell-miss",
@@ -201,7 +272,7 @@ export function interpretFloodCellRow(
       reason: `No parcel_record_cell row for ${placeKey} rail flood. This parcel is not in parcel_record -- not a flood determination.`,
     };
   }
-  const cellState = asRecord(row.cell_state);
+  const cellState = asRecord(rowList[0].cell_state);
   const kind = cellState?.kind;
   if (typeof kind !== "string") {
     return {
@@ -243,8 +314,18 @@ export function interpretFloodCellRow(
     };
   }
   if (kind === "value") {
-    const payload = asRecord(row.payload);
-    if (!payload) {
+    // EVERY companion row, row_index ascending (row 0 = largest share, per
+    // the writer's own contract -- card F1 §3.B). A row whose payload did
+    // not parse to an object is dropped, not inserted as a fabricated zone;
+    // zero survivors is the same malformed-cell refusal the old single-row
+    // code gave for a missing payload.
+    const sorted = [...rowList].sort((a, b) => (a.row_index ?? 0) - (b.row_index ?? 0));
+    const zones: ParcelRecordFloodZoneRow[] = [];
+    for (const r of sorted) {
+      const payload = asRecord(r.payload);
+      if (payload) zones.push(parseZoneRow(payload));
+    }
+    if (zones.length === 0) {
       return {
         state: "refused",
         code: "malformed-cell",
@@ -253,15 +334,17 @@ export function interpretFloodCellRow(
         reason: `parcel_record_cell for ${placeKey} rail flood is kind=value but its companion row payload is missing or malformed. Refusing rather than inventing a zone.`,
       };
     }
+    const primary = zones[0];
     return {
       state: "value",
       source: PARCEL_RECORD_FLOOD_SOURCE,
       placeKey,
-      floodZone: asNullableString(payload.zone),
-      floodway: payload.floodway === true,
-      baseFloodElevation: asNullableNumber(payload.bfe),
-      method: asNullableString(payload.method),
-      sourceVintage: asNullableString(payload.sourceVintage),
+      floodZone: primary.zone,
+      floodway: primary.floodway,
+      baseFloodElevation: primary.baseFloodElevation,
+      method: primary.method,
+      sourceVintage: primary.sourceVintage,
+      zones,
     };
   }
   return {
@@ -316,15 +399,28 @@ export async function loadParcelRecordFloodFact(
       reason: `parcel_record flood cell read via the retrieval service failed for ${placeKey}: ${err instanceof Error ? err.message : String(err)}. Refusing rather than crashing or fabricating an absence.`,
     };
   }
-  return interpretFloodCellRow(placeKey, result.rows[0]);
+  // EVERY companion row -- card F2. interpretFloodCellRow sorts by row_index
+  // itself; this just hands over everything the store returned.
+  return interpretFloodCellRow(placeKey, result.rows);
 }
 
-/** In-memory parcel_record for tests. Refuses any query that is not this SELECT, and any write. */
+/**
+ * In-memory parcel_record for tests. Refuses any query that is not this
+ * SELECT, and any write.
+ *
+ * `payload` (singular) is the pre-F2 single-row fixture shape, kept so
+ * every existing test keeps working unchanged. `payloads` (plural) is the
+ * new multi-row fixture shape (card F2) -- pass an array of companion row
+ * payloads, row 0 first. Passing both is refused as ambiguous; passing
+ * neither (an absent-verified/not-applicable/unaccounted/refused fixture)
+ * yields zero companion rows, matching a real LEFT JOIN with no match.
+ */
 export function memoryParcelRecordFlood(
   rows: ReadonlyArray<{
     placeKey: string;
     cellState: Record<string, unknown>;
     payload?: Record<string, unknown> | null;
+    payloads?: ReadonlyArray<Record<string, unknown>>;
   }>,
 ): ParcelRecordQueryable {
   return {
@@ -348,10 +444,23 @@ export function memoryParcelRecordFlood(
         throw new Error(`memoryParcelRecordFlood: expected rail_key flood, got ${String(railKey)}`);
       }
       const hit = rows.find((r) => r.placeKey === placeKey);
+      if (!hit) return { rows: [] as T[] };
+      if (hit.payload !== undefined && hit.payloads !== undefined) {
+        throw new Error(
+          "memoryParcelRecordFlood: fixture carries both payload and payloads -- pick one",
+        );
+      }
+      const payloads = hit.payloads ?? (hit.payload != null ? [hit.payload] : []);
+      if (payloads.length === 0) {
+        // Mirrors a real LEFT JOIN with no companion match: one row, cr.* null.
+        return { rows: [{ cell_state: hit.cellState, row_index: null, payload: null }] as unknown as T[] };
+      }
       return {
-        rows: hit
-          ? ([{ cell_state: hit.cellState, payload: hit.payload ?? null }] as unknown as T[])
-          : ([] as T[]),
+        rows: payloads.map((payload, i) => ({
+          cell_state: hit.cellState,
+          row_index: i,
+          payload,
+        })) as unknown as T[],
       };
     },
   };

@@ -45,6 +45,17 @@ export type DrawOverlay = {
   /** P-445: why source+vintage cannot be attached. Declared, never blank. */
   citationsUnavailableReason?: string;
   vintageDeclaredWhy?: string;
+  /** CARD F2: flood only -- every zone touching the parcel, row 0 first (the largest share). */
+  zones?: Array<{
+    zone: string | null;
+    subtype: string | null;
+    isSfha: boolean;
+    floodway: boolean;
+    bfe: number | null;
+    areaShare: number | null;
+  }>;
+  /** CARD F2, operator ruling D1: a sliver SFHA touch -- never "in", never hidden. */
+  touchesSfhaEdge?: boolean;
 };
 
 export type DrawFrameAnchor = { lat: number; lng: number };
@@ -169,6 +180,17 @@ export type AssembleParcelDrawInput = {
         zoneSubtype: string | null;
         inSpecialFloodHazardArea: boolean;
         citations?: string[];
+        /** CARD F2: every zone touching the parcel, row 0 first (the largest share). */
+        zones?: Array<{
+          zone: string | null;
+          subtype: string | null;
+          isSfha: boolean;
+          floodway: boolean;
+          bfe: number | null;
+          areaShare: number | null;
+        }>;
+        /** Operator ruling D1: a sliver SFHA touch -- never "in", never hidden. */
+        touchesSfhaEdge?: boolean;
       }
     | { state: "refused" | "absent"; sourceVintage?: string | null };
   /**
@@ -574,9 +596,19 @@ function floodOverlay(
   }
   const zone = flood.floodZone?.trim() || "unlabelled";
   const subtype = flood.zoneSubtype?.trim();
-  const label = subtype
-    ? `Zone ${zone} ${subtype}`
-    : `Zone ${zone}`;
+  const zones = flood.zones ?? [];
+  const extraZoneCount = zones.length > 1 ? zones.length - 1 : 0;
+  // CARD F2, operator ruling D1: a sliver SFHA touch is never "in" the
+  // flood zone -- the ring's own label must not claim it is, even though
+  // inSpecialFloodHazardArea is already false for this case. Every zone's
+  // share still ships on `zones` for a consumer that wants the full list.
+  const label = flood.touchesSfhaEdge
+    ? `Touches Zone ${zone} at the edge`
+    : subtype
+      ? `Zone ${zone} ${subtype}`
+      : extraZoneCount > 0
+        ? `Zone ${zone} (+${extraZoneCount} more zone${extraZoneCount > 1 ? "s" : ""})`
+        : `Zone ${zone}`;
   const citations = citationPosture(
     flood.citations?.filter(isHttpCitation) ?? httpCitationUrls(flood),
   );
@@ -588,6 +620,8 @@ function floodOverlay(
     geom: "none",
     draw: "tint-ring",
     state: "present",
+    ...(zones.length > 0 ? { zones } : {}),
+    ...(flood.touchesSfhaEdge !== undefined ? { touchesSfhaEdge: flood.touchesSfhaEdge } : {}),
     ...citations,
   };
 }

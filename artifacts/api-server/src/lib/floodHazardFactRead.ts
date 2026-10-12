@@ -42,13 +42,38 @@ export function floodHazardFactBindKeys(
   return [parcelNodeId, `${parcelNodeId}${PADDED_SUFFIX}`];
 }
 
+/**
+ * One zone's share of the parcel, as the whole-parcel flood wire carries it
+ * (card F1/F2, `2026-10-12_whole_parcel_flood_design.md` §3.C). `bfe` is the
+ * wire's own field name (matching the companion row payload's own `bfe`),
+ * not `baseFloodElevation` -- the top-level scalar below keeps that name
+ * for compatibility; this is the new array, free to match the rail payload.
+ */
+export type FloodHazardFactZone = {
+  zone: string | null;
+  subtype: string | null;
+  isSfha: boolean;
+  floodway: boolean;
+  bfe: number | null;
+  areaShare: number | null;
+};
+
 export type FloodHazardFactPresent = {
   state: "present";
   source: typeof FLOOD_HAZARD_FACT_SOURCE;
   boundAs: string;
   tried: FloodHazardFactBindKeys;
   entityId: string;
+  /**
+   * Whole-parcel D1: true when any zone has `isSfha` and `areaShare > 0`,
+   * EXCEPT a qualifying zone whose own `overlap` is "sliver" -- that touch
+   * sets `touchesSfhaEdge` instead (below), never this flag, and never
+   * silently drops the touch. For the atom path and the old single-point
+   * payload (one zone, `overlap: "single"`), this is the same zone-letter
+   * derivation as always.
+   */
   inSpecialFloodHazardArea: boolean;
+  /** Row 0 -- the largest-share zone. Kept for compatibility; a new reader should use `zones`. */
   floodZone: string | null;
   zoneSubtype: string | null;
   baseFloodElevation: number | null;
@@ -56,6 +81,18 @@ export type FloodHazardFactPresent = {
   sourceVintage: string | null;
   sourceCitation: string | null;
   evaluatedAt: string | null;
+  /** EVERY zone touching the parcel, row 0 first (the largest share). The old payload maps to one entry, `areaShare: null`. */
+  zones: FloodHazardFactZone[];
+  /** Row 0's own overlap classification. "single" for the atom path and the old payload (one point, one zone). */
+  overlap: "single" | "partial" | "sliver";
+  /**
+   * Operator ruling D1: an SFHA zone whose only qualifying touch is a
+   * sliver (below the writer's 1%-of-parcel-and-50m² threshold) is never
+   * "in" the flood zone and never hidden -- it sets this instead. True only
+   * when `inSpecialFloodHazardArea` is false and at least one zone has
+   * `isSfha` with a sliver `overlap`.
+   */
+  touchesSfhaEdge: boolean;
 };
 
 export type FloodHazardFactTypedAbsence = {
@@ -230,6 +267,9 @@ function interpretBody(
     };
   }
 
+  const floodZone = typeof rec.floodZone === "string" ? rec.floodZone : null;
+  const zoneSubtype = typeof rec.zoneSubtype === "string" ? rec.zoneSubtype : null;
+  const baseFloodElevation = asNullableNumber(rec.baseFloodElevation);
   return {
     state: "present",
     source: FLOOD_HAZARD_FACT_SOURCE,
@@ -237,13 +277,30 @@ function interpretBody(
     tried,
     entityId,
     inSpecialFloodHazardArea: rec.inSpecialFloodHazardArea,
-    floodZone: typeof rec.floodZone === "string" ? rec.floodZone : null,
-    zoneSubtype: typeof rec.zoneSubtype === "string" ? rec.zoneSubtype : null,
-    baseFloodElevation: asNullableNumber(rec.baseFloodElevation),
+    floodZone,
+    zoneSubtype,
+    baseFloodElevation,
     sourceAdapter: asNullableString(rec.sourceAdapter),
     sourceVintage: asNullableString(rec.sourceVintage),
     sourceCitation: asNullableString(rec.sourceCitation),
     evaluatedAt: asNullableString(rec.evaluatedAt),
+    // The atom path is always a single point, one zone: the same "old
+    // payload" shape the whole-parcel design maps to `overlap: "single"`,
+    // `areaShare: null`. Atoms carry no floodway field (parcel_record's
+    // flood companion does; see that module's own header comment), so
+    // this is always false here, never guessed from the free-text zone label.
+    zones: [
+      {
+        zone: floodZone,
+        subtype: zoneSubtype,
+        isSfha: rec.inSpecialFloodHazardArea,
+        floodway: false,
+        bfe: baseFloodElevation,
+        areaShare: null,
+      },
+    ],
+    overlap: "single",
+    touchesSfhaEdge: false,
   };
 }
 

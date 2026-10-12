@@ -24,7 +24,9 @@ import type {
   ParcelRecordFloodRead,
   ParcelRecordFloodValue,
   ParcelRecordFloodAbsentVerified,
+  ParcelRecordFloodZoneRow,
 } from "./parcelRecordFactRead";
+import { resolveInSfha, resolveIsSfha } from "./floodHazardFactFromParcelRecord";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 import type { EnvelopeDrawOutcome } from "./buildableEnvelope/envelopeDrawOutcome";
@@ -263,6 +265,37 @@ export function drainageDisposition(
   return Object.keys(record).length > 0 ? "present" : "unread";
 }
 
+/**
+ * Every zone's share, in wire order (row 0 = largest), as a short clause
+ * list -- "AE (23%), X (77%)". A `null` areaShare (the old single-point
+ * payload, or the atom path) omits the percentage: there is no share to
+ * report, not a 100% claim this module did not earn.
+ */
+function zoneShareClauses(zones: FloodHazardFactPresent["zones"]): string {
+  return zones
+    .map((z) => {
+      const name = z.zone?.trim() || "unmapped";
+      return typeof z.areaShare === "number" ? `${name} (${Math.round(z.areaShare * 100)}%)` : name;
+    })
+    .join(", ");
+}
+
+/**
+ * Whole-parcel D1: the sliver sentence takes priority over everything else
+ * below -- "touches the flood zone at the edge" is never silently folded
+ * into the ordinary in/outside-SFHA prose, and the full zone list still
+ * ships so the sliver is never hidden either.
+ */
+function sliverEdgeSentence(fact: FloodHazardFactPresent): string {
+  const edgeZone = fact.zones.find((z) => z.isSfha);
+  const name = edgeZone?.zone?.trim() || fact.floodZone || "a mapped SFHA zone";
+  return (
+    `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
+    `sliver threshold. Every mapped zone on this parcel: ${zoneShareClauses(fact.zones)}. ` +
+    "Touching the edge is never reported as 'in' the flood zone, and is never dropped from the record."
+  );
+}
+
 /** Exported for unit tests. Zone X + inSFHA:false is often misread as minimal risk. */
 export function summarizeFloodZoneExposure(
   fact: FloodHazardFactPresent,
@@ -278,6 +311,16 @@ export function summarizeFloodZoneExposure(
     );
   }
 
+  if (fact.touchesSfhaEdge) {
+    return sliverEdgeSentence(fact);
+  }
+
+  // Whole-parcel (card F2): when more than one zone touches the parcel,
+  // every row and its share is named -- "A consumer that prints one zone
+  // must print every zone with its share" (hiding a second zone is a
+  // CONTRACT_RULES.md breach, same rule the map already honors).
+  const multiZone = fact.zones.length > 1 ? ` Zones on this parcel: ${zoneShareClauses(fact.zones)}.` : "";
+
   if (fact.inSpecialFloodHazardArea) {
     const bfe =
       typeof fact.baseFloodElevation === "number"
@@ -285,7 +328,7 @@ export function summarizeFloodZoneExposure(
         : "";
     return (
       `Mapped FEMA flood zone ${fact.floodZone} is in a Special Flood Hazard Area ` +
-      `(1% annual-chance floodplain).${bfe}`
+      `(1% annual-chance floodplain).${bfe}${multiZone}`
     );
   }
 
@@ -294,27 +337,37 @@ export function summarizeFloodZoneExposure(
       return (
         `Mapped Zone ${fact.floodZone} with 0.2% annual-chance flood hazard` +
         (fact.zoneSubtype ? ` (${fact.zoneSubtype})` : "") +
-        ". Outside the SFHA but not minimal risk. Shaded Zone X still carries flood exposure."
+        `. Outside the SFHA but not minimal risk. Shaded Zone X still carries flood exposure.${multiZone}`
       );
     }
     if (fact.zoneSubtype) {
       return (
         `Mapped Zone ${fact.floodZone} outside the SFHA (${fact.zoneSubtype}). ` +
-        "Zone X is not automatically minimal risk. Read the zone subtype."
+        `Zone X is not automatically minimal risk. Read the zone subtype.${multiZone}`
       );
     }
     return (
       "Mapped Zone X outside the SFHA. Zone X with inSpecialFloodHazardArea: false is " +
       "often misread as minimal risk; confirm unshaded Zone X versus 0.2% annual-chance " +
-      "shaded X. Zone subtype was not recorded on this atom."
+      `shaded X. Zone subtype was not recorded on this atom.${multiZone}`
     );
   }
 
   return (
     `Mapped FEMA flood zone ${fact.floodZone} is outside the Special Flood Hazard Area` +
     (fact.zoneSubtype ? ` (${fact.zoneSubtype})` : "") +
-    "."
+    `.${multiZone}`
   );
+}
+
+/** Same clause-list shape as the atom-path's zoneShareClauses, over the parcel_record row shape. */
+function parcelRecordZoneShareClauses(zones: ReadonlyArray<ParcelRecordFloodZoneRow>): string {
+  return zones
+    .map((z) => {
+      const name = z.zone?.trim() || "unmapped";
+      return typeof z.areaShare === "number" ? `${name} (${Math.round(z.areaShare * 100)}%)` : name;
+    })
+    .join(", ");
 }
 
 /**
@@ -324,6 +377,13 @@ export function summarizeFloodZoneExposure(
  * own header comment) and no zoneSubtype field, so this is a distinct
  * function from summarizeFloodZoneExposure, not a reuse: the input shapes
  * genuinely differ, not just the source.
+ *
+ * CARD F2 (whole-parcel flood): `fact.zones` carries EVERY companion row.
+ * `inSpecialFloodHazardArea`/the sliver exception are computed here with
+ * the SAME `resolveInSfha` rule floodHazardFactFromParcelRecord.ts applies
+ * -- not reimplemented, so the two surfaces cannot drift (operator ruling
+ * D1: a sliver touch is "touches the flood zone at the edge", never "in",
+ * never hidden).
  */
 export function summarizeParcelRecordFloodZoneExposure(
   fact: ParcelRecordFloodValue,
@@ -339,23 +399,65 @@ export function summarizeParcelRecordFloodZoneExposure(
     typeof fact.baseFloodElevation === "number"
       ? ` Base flood elevation ${fact.baseFloodElevation} ft.`
       : "";
+  // The old single-point payload (every row's areaShare is null) keeps its
+  // ORIGINAL "any letter but X" rule byte-for-byte -- this function predates
+  // isSfhaZone and this dispatch does not relitigate it for a payload shape
+  // it was already shipping against. Only a real whole-parcel payload (at
+  // least one row with a real areaShare) takes the new D1 path below.
+  const isWholeParcelPayload = fact.zones.some((z) => typeof z.areaShare === "number");
+  if (!isWholeParcelPayload) {
+    if (fact.floodway) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} is within the regulatory floodway.${bfe} ` +
+        "The floodway carries the most restrictive federal and local development standards."
+      );
+    }
+    const zone = zoneRaw.toUpperCase();
+    const inSpecialFloodHazardArea = zone !== "X" && !zone.startsWith("X");
+    if (inSpecialFloodHazardArea) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
+        `(1% annual-chance floodplain).${bfe}`
+      );
+    }
+    return (
+      `Mapped Zone ${zoneRaw} outside the Special Flood Hazard Area. ` +
+      "Zone X is not automatically minimal risk."
+    );
+  }
+
+  // Whole-parcel (card F2): `fact.zones` carries EVERY companion row.
+  // inSfha/the sliver exception use the SAME `resolveInSfha` rule
+  // floodHazardFactFromParcelRecord.ts applies -- not reimplemented, so the
+  // two surfaces cannot drift (operator ruling D1).
+  const { inSfha, touchesSfhaEdge } = resolveInSfha(fact.zones);
+  const multiZone =
+    fact.zones.length > 1 ? ` Zones on this parcel: ${parcelRecordZoneShareClauses(fact.zones)}.` : "";
+
+  if (touchesSfhaEdge) {
+    const edgeZone = fact.zones.find((z) => resolveIsSfha(z));
+    const name = edgeZone?.zone?.trim() || zoneRaw;
+    return (
+      `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
+      `sliver threshold.${multiZone} Touching the edge is never reported as 'in' the flood zone, ` +
+      "and is never dropped from the record."
+    );
+  }
   if (fact.floodway) {
     return (
       `Mapped FEMA flood zone ${zoneRaw} is within the regulatory floodway.${bfe} ` +
-      "The floodway carries the most restrictive federal and local development standards."
+      `The floodway carries the most restrictive federal and local development standards.${multiZone}`
     );
   }
-  const zone = zoneRaw.toUpperCase();
-  const inSpecialFloodHazardArea = zone !== "X" && !zone.startsWith("X");
-  if (inSpecialFloodHazardArea) {
+  if (inSfha) {
     return (
       `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
-      `(1% annual-chance floodplain).${bfe}`
+      `(1% annual-chance floodplain).${bfe}${multiZone}`
     );
   }
   return (
     `Mapped Zone ${zoneRaw} outside the Special Flood Hazard Area. ` +
-    "Zone X is not automatically minimal risk."
+    `Zone X is not automatically minimal risk.${multiZone}`
   );
 }
 

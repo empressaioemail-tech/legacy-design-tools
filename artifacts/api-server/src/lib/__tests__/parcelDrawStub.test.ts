@@ -323,6 +323,72 @@ describe("assembleParcelDraw citation honesty (P-91 item 9)", () => {
     expect(flood).not.toHaveProperty("citationsDegraded");
   });
 
+  it("CARD F2: a multi-zone flood input carries every zone on the overlay, and the label names the extra zone count (never just the primary)", () => {
+    const url = "https://hazards.fema.gov/nfhlv2/output/State/NFHL_48_20260101.zip";
+    const draw = assembleParcelDraw(
+      goldInput({
+        flood: {
+          state: "present",
+          floodZone: "AE",
+          zoneSubtype: null,
+          inSpecialFloodHazardArea: true,
+          citations: [url],
+          zones: [
+            { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 820, areaShare: 0.23 },
+            { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.77 },
+          ],
+          touchesSfhaEdge: false,
+        },
+      }),
+    );
+    const flood = draw.overlays.find((o) => o.id === "flood");
+    expect(flood).toMatchObject({ state: "present", sfha: true });
+    expect((flood as { zones?: unknown[] }).zones).toHaveLength(2);
+    expect(flood?.label).toMatch(/\+1 more zone/);
+  });
+
+  it("CARD F2, operator ruling D1: a sliver SFHA touch never labels the overlay 'in' the zone -- it says 'touches ... at the edge'", () => {
+    const url = "https://hazards.fema.gov/nfhlv2/output/State/NFHL_48_20260101.zip";
+    const draw = assembleParcelDraw(
+      goldInput({
+        flood: {
+          state: "present",
+          floodZone: "X",
+          zoneSubtype: null,
+          inSpecialFloodHazardArea: false,
+          citations: [url],
+          zones: [
+            { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.993 },
+            { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, areaShare: 0.007 },
+          ],
+          touchesSfhaEdge: true,
+        },
+      }),
+    );
+    const flood = draw.overlays.find((o) => o.id === "flood");
+    expect(flood?.label).toBe("Touches Zone X at the edge");
+    expect(flood).toMatchObject({ sfha: false });
+    expect((flood as { touchesSfhaEdge?: boolean }).touchesSfhaEdge).toBe(true);
+    expect((flood as { zones?: unknown[] }).zones).toHaveLength(2);
+  });
+
+  it("the OLD single-zone flood input (no zones field) keeps the exact old label, byte-for-byte", () => {
+    const draw = assembleParcelDraw(
+      goldInput({
+        flood: {
+          state: "present",
+          floodZone: "X",
+          zoneSubtype: "shaded, 0.2% annual chance",
+          inSpecialFloodHazardArea: false,
+        },
+      }),
+    );
+    const flood = draw.overlays.find((o) => o.id === "flood");
+    expect(flood?.label).toBe("Zone X shaded, 0.2% annual chance");
+    expect(flood).not.toHaveProperty("zones");
+    expect(flood).not.toHaveProperty("touchesSfhaEdge");
+  });
+
   it("attaches an http landUse citation when the source carries one", () => {
     const url = "https://example.test/bastrop-cad";
     const draw = assembleParcelDraw(

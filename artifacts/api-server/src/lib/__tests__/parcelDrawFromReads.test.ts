@@ -228,6 +228,35 @@ describe("parcelDrawFromReads sourceVintage (item 4, both arms)", () => {
   });
 });
 
+describe("CARD F2: parcelDrawFromReads threads zones/touchesSfhaEdge through from the flood fact", () => {
+  it("a present atom flood fact carries its single-entry zones array and touchesSfhaEdge:false through to the draw overlay", () => {
+    const draw = drawFrom({
+      floodRows: [
+        {
+          entity_id: "48021:99999",
+          body: {
+            entityType: "flood-hazard-fact",
+            sourceTier: "fema-nfhl",
+            inSpecialFloodHazardArea: true,
+            floodZone: "AE",
+            zoneSubtype: null,
+            baseFloodElevation: 512.3,
+            sourceAdapter: "fema-nfhl-bulk-v1",
+            sourceVintage: "NFHL_48_20260101",
+          },
+        },
+      ],
+    });
+    const flood = draw?.overlays.find((o) => o.id === "flood") as
+      | { zones?: unknown[]; touchesSfhaEdge?: boolean }
+      | undefined;
+    expect(flood?.zones).toEqual([
+      { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 512.3, areaShare: null },
+    ]);
+    expect(flood?.touchesSfhaEdge).toBe(false);
+  });
+});
+
 describe("parcelDrawFromReads one-liners", () => {
   it("attrs.landUse.desc and taxYear populate from bake description/vintage", () => {
     const draw = drawFrom({});

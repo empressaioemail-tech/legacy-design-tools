@@ -40,6 +40,10 @@ const atomPresentFixture: FloodHazardFactPresent = {
   sourceVintage: "NFHL_48_20260101",
   sourceCitation: null,
   evaluatedAt: "2026-08-11T23:13:43.774Z",
+  // CARD F2: the atom path is always one point, one zone.
+  zones: [{ zone: "AO", subtype: null, isSfha: true, floodway: false, bfe: null, areaShare: null }],
+  overlap: "single",
+  touchesSfhaEdge: false,
 };
 
 const zoneXShadedFixture: FloodHazardFactPresent = {
@@ -50,6 +54,16 @@ const zoneXShadedFixture: FloodHazardFactPresent = {
   inSpecialFloodHazardArea: false,
   floodZone: "X",
   zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+  zones: [
+    {
+      zone: "X",
+      subtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+      isSfha: false,
+      floodway: false,
+      bfe: null,
+      areaShare: null,
+    },
+  ],
 };
 
 const zoneXUnsubtypedFixture: FloodHazardFactPresent = {
@@ -328,6 +342,42 @@ describe("F2 flood prose is withheld while the citation is degraded", () => {
       expect(summarizeFloodZoneExposure(fixture) ?? "").not.toMatch(/—/);
     }
   });
+
+  it("CARD F2: a multi-zone FloodHazardFactPresent names every zone and its share", () => {
+    const multiZone: FloodHazardFactPresent = {
+      ...atomPresentFixture,
+      floodZone: "AE",
+      inSpecialFloodHazardArea: true,
+      sourceCitation: femaCitation,
+      zones: [
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: null, areaShare: 0.23 },
+        { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.77 },
+      ],
+      overlap: "partial",
+    };
+    const summary = summarizeFloodZoneExposure(multiZone);
+    expect(summary).toMatch(/AE \(23%\)/);
+    expect(summary).toMatch(/X \(77%\)/);
+  });
+
+  it("CARD F2: touchesSfhaEdge produces the edge sentence, never 'in', never without the full zone list", () => {
+    const edge: FloodHazardFactPresent = {
+      ...atomPresentFixture,
+      floodZone: "X",
+      inSpecialFloodHazardArea: false,
+      touchesSfhaEdge: true,
+      sourceCitation: femaCitation,
+      zones: [
+        { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.993 },
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, areaShare: 0.007 },
+      ],
+      overlap: "sliver",
+    };
+    const summary = summarizeFloodZoneExposure(edge);
+    expect(summary).toMatch(/touches Zone AE at the edge/i);
+    expect(summary).not.toMatch(/\bis in a Special Flood Hazard Area\b/);
+    expect(summary).toMatch(/AE \(1%\)/);
+  });
 });
 
 /**
@@ -356,6 +406,21 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     baseFloodElevation: null,
     method: "point-on-surface",
     sourceVintage: "NFHL_48_20260101",
+    // CARD F2: the old single-point payload maps to one zone row, areaShare null.
+    zones: [
+      {
+        zone: "X",
+        subtype: null,
+        isSfha: null,
+        floodway: false,
+        baseFloodElevation: null,
+        dfirmId: null,
+        areaShare: null,
+        overlap: "single",
+        method: "point-on-surface",
+        sourceVintage: "NFHL_48_20260101",
+      },
+    ],
   };
 
   it("a parcel_record value wins over an atoms present fixture, and carries the reconciled zone/floodway/BFE in data", () => {
@@ -389,6 +454,50 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
       parcelRecordValue as Extract<ParcelRecordFloodRead, { state: "value" }>,
     );
     expect(summary).not.toMatch(/Base flood elevation/);
+  });
+
+  describe("CARD F2: whole-parcel flood prose", () => {
+    const wholeParcelValue: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+      state: "value",
+      source: "parcel_record",
+      placeKey: "48053:1001",
+      floodZone: "AE",
+      floodway: false,
+      baseFloodElevation: 820,
+      method: "whole-parcel-area-share",
+      sourceVintage: "NFHL_48_20260101",
+      zones: [
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, baseFloodElevation: 820, dfirmId: "48053C", areaShare: 0.23, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+        { zone: "X", subtype: null, isSfha: false, floodway: false, baseFloodElevation: null, dfirmId: "48053C", areaShare: 0.77, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+      ],
+    };
+
+    it("a multi-zone parcel names every zone and its share, not just the primary", () => {
+      const summary = summarizeParcelRecordFloodZoneExposure(wholeParcelValue);
+      expect(summary).toMatch(/Special Flood Hazard Area/);
+      expect(summary).toMatch(/AE \(23%\)/);
+      expect(summary).toMatch(/X \(77%\)/);
+    });
+
+    it("a sliver touch says 'touches ... at the edge', never 'in', and still names every zone", () => {
+      const sliver: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+        ...wholeParcelValue,
+        floodZone: "X",
+        zones: [
+          { zone: "X", subtype: null, isSfha: false, floodway: false, baseFloodElevation: null, dfirmId: "48053C", areaShare: 0.993, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+          { zone: "AE", subtype: null, isSfha: true, floodway: false, baseFloodElevation: 810, dfirmId: "48053C", areaShare: 0.007, overlap: "sliver", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+        ],
+      };
+      const summary = summarizeParcelRecordFloodZoneExposure(sliver);
+      expect(summary).toMatch(/touches Zone AE at the edge/i);
+      expect(summary).not.toMatch(/\bis in a Special Flood Hazard Area\b/);
+      expect(summary).toMatch(/AE \(1%\)/);
+      expect(summary).toMatch(/X \(99%\)/);
+    });
+
+    it("this function's own summary never emits an em dash either", () => {
+      expect(summarizeParcelRecordFloodZoneExposure(wholeParcelValue)).not.toMatch(/—/);
+    });
   });
 
   it("a parcel_record value with no citation is citationsDegraded (F2 discipline applies here too): data still ships, prose is withheld", () => {

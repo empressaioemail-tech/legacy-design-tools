@@ -120,4 +120,119 @@ describe("floodHazardFactFromParcelRecord", () => {
     if (result.state !== "refused") throw new Error("unreachable");
     expect(result.code).toBe("parcel-record-malformed-cell");
   });
+
+  describe("CARD F2: whole-parcel flood (2026-10-12_whole_parcel_flood_design.md)", () => {
+    it("the OLD single-point payload is unchanged: present, inSFHA from the zone letter, zones has one entry, overlap single, touchesSfhaEdge false", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48021:34137",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            payload: { zone: "AE", floodway: false, bfe: 512.3, method: "point-on-surface", sourceVintage: "NFHL_48_20260101" },
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48021:34137");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.floodZone).toBe("AE");
+      expect(result.inSpecialFloodHazardArea).toBe(true);
+      expect(result.baseFloodElevation).toBe(512.3);
+      expect(result.sourceAdapter).toBe("parcel_record");
+      expect(result.zones).toEqual([
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 512.3, areaShare: null },
+      ]);
+      expect(result.overlap).toBe("single");
+      expect(result.touchesSfhaEdge).toBe(false);
+    });
+
+    it("a new whole-parcel payload: 23% AE / 77% X -> zones in order, inSfha true, overlap partial", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48053:1001",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            payloads: [
+              { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 820, dfirmId: "48053C", areaShare: 0.23, overlap: "partial", method: "whole-parcel-area-share" },
+              { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, dfirmId: "48053C", areaShare: 0.77, overlap: "partial", method: "whole-parcel-area-share" },
+            ],
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48053:1001");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.zones).toHaveLength(2);
+      expect(result.zones.map((z) => z.zone)).toEqual(["AE", "X"]);
+      expect(result.zones[0]).toMatchObject({ zone: "AE", isSfha: true, areaShare: 0.23 });
+      expect(result.zones[1]).toMatchObject({ zone: "X", isSfha: false, areaShare: 0.77 });
+      expect(result.inSpecialFloodHazardArea).toBe(true);
+      expect(result.overlap).toBe("partial");
+      expect(result.touchesSfhaEdge).toBe(false);
+    });
+
+    it("a sliver SFHA touch: inSfha false, touchesSfhaEdge true -- never 'in', never hidden (operator ruling D1)", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48053:1002",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            payloads: [
+              { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, dfirmId: "48053C", areaShare: 0.993, overlap: "partial", method: "whole-parcel-area-share" },
+              { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, dfirmId: "48053C", areaShare: 0.007, overlap: "sliver", method: "whole-parcel-area-share" },
+            ],
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48053:1002");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.inSpecialFloodHazardArea).toBe(false);
+      expect(result.touchesSfhaEdge).toBe(true);
+      // Still never hidden: the sliver zone is in the list with its share.
+      expect(result.zones.some((z) => z.zone === "AE" && z.areaShare === 0.007)).toBe(true);
+    });
+
+    it("unmapped: a parcel outside any NFHL polygon gets an explicit 'unmapped' zone, never 'X'", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48053:1003",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            payloads: [
+              { zone: "unmapped", subtype: null, isSfha: false, floodway: false, bfe: null, dfirmId: null, areaShare: 1, overlap: "single", method: "whole-parcel-area-share" },
+            ],
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48053:1003");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.floodZone).toBe("unmapped");
+      expect(result.inSpecialFloodHazardArea).toBe(false);
+      expect(result.touchesSfhaEdge).toBe(false);
+    });
+
+    it("a re-read with 3 companion rows carries every zone through this adapter too", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48053:1004",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            payloads: [
+              { zone: "AE", isSfha: true, floodway: false, bfe: 480, areaShare: 0.5, overlap: "partial", method: "whole-parcel-area-share" },
+              { zone: "X", isSfha: false, floodway: false, bfe: null, areaShare: 0.3, overlap: "partial", method: "whole-parcel-area-share" },
+              { zone: "VE", isSfha: true, floodway: false, bfe: 495, areaShare: 0.2, overlap: "partial", method: "whole-parcel-area-share" },
+            ],
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48053:1004");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.zones).toHaveLength(3);
+      expect(result.zones.map((z) => z.zone)).toEqual(["AE", "X", "VE"]);
+      expect(result.inSpecialFloodHazardArea).toBe(true);
+    });
+  });
 });
