@@ -80,7 +80,16 @@ export const sourceFeature = pgTable(
     payload: jsonb("payload").notNull(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.provider, t.countyFips, t.providerObjectId] }),
+    // Explicit `name` so drizzle-kit (CI's test DB, built via `push`, not the
+    // numbered migration) names this constraint IDENTICALLY to migration
+    // 0111's `CONSTRAINT "source_feature_pk"` -- without it, drizzle's own
+    // auto-naming convention (`<table>_<col>_..._pk`) produces a different,
+    // much longer name than the migration's hand-written one (caught live,
+    // 2026-10-12: CI's fixture-drift diff showed the auto-generated name).
+    pk: primaryKey({
+      name: "source_feature_pk",
+      columns: [t.provider, t.countyFips, t.providerObjectId],
+    }),
   }),
 );
 

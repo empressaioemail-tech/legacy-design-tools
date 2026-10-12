@@ -54,7 +54,13 @@ export const sourceFeatureStage = pgTable(
     payload: jsonb("payload").notNull(),
   },
   (t) => ({
+    // Explicit `name` so drizzle-kit names this identically to migration
+    // 0111's `CONSTRAINT "source_feature_stage_pk"` -- see sourceFeature.ts's
+    // matching comment for why (the un-named auto-generated form is
+    // different AND gets silently truncated by Postgres' 63-char identifier
+    // limit, caught live in CI's fixture-drift diff, 2026-10-12).
     pk: primaryKey({
+      name: "source_feature_stage_pk",
       columns: [t.provider, t.countyFips, t.loadRunId, t.providerObjectId],
     }),
   }),
