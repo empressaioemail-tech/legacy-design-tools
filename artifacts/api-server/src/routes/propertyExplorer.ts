@@ -4,6 +4,7 @@
  * WDLL items 13, 14, 15, 17 (R1 scaffold).
  */
 
+import { adMatchFromHeaders } from "../lib/peAdMatch";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
 import { and, desc, eq } from "drizzle-orm";
@@ -1720,6 +1721,7 @@ router.post(
         promotekitReferral: parsed.data.promotekitReferral as
           | string
           | undefined,
+        adMatch: adMatchFromHeaders(req),
       });
       res.json({
         ...session,
@@ -2088,6 +2090,7 @@ router.post(
         promotekitReferral: parsed.data.promotekitReferral as
           | string
           | undefined,
+        adMatch: adMatchFromHeaders(req),
       });
       res.json({
         ...session,

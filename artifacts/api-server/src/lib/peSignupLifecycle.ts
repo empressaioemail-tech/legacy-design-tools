@@ -8,6 +8,7 @@
  */
 
 import { logger } from "./logger";
+import { adMatchToPayload, type AdMatch } from "./peAdMatch";
 import { dispatchLifecycleEvent } from "./peLifecycleDispatch";
 import { e1IdempotencyKey } from "./peLifecycleOutbox";
 import { LIFECYCLE_EVENT_ID_FIELD } from "./peLifecycleTypes";
@@ -19,6 +20,8 @@ export type NewPeSignupInput = {
   email: string;
   displayName: string;
   campaign?: string;
+  /** The signing-in browser's match keys, forwarded by the BFF. */
+  adMatch?: AdMatch;
 };
 
 export async function notifyLifecycleOfNewPeSignup(
@@ -35,6 +38,7 @@ export async function notifyLifecycleOfNewPeSignup(
         displayName: input.displayName,
         event: "e1_account_created",
         ...(input.campaign ? { campaign: input.campaign } : {}),
+        ...adMatchToPayload(input.adMatch),
         plan: "free",
         billing: "none",
       },

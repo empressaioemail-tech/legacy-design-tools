@@ -38,6 +38,7 @@ import { sendMagicLinkEmail } from "../lib/peMagicLinkEmail";
 import { upsertPeOidcIdentity } from "../lib/peIdentity";
 import { completePeSignIn } from "../lib/peSignInCompletion";
 import { logger } from "../lib/logger";
+import { normalizeAdMatch } from "../lib/peAdMatch";
 
 const router: IRouter = Router();
 
@@ -115,6 +116,8 @@ const VerifyBodySchema = z.object({
    * Absent means `ss_src_direct`, not a guessed tag.
    */
   campaign: z.string().max(512).optional(),
+  /** The verifying browser's Meta match keys; see peAuth.ts. */
+  metaMatch: z.unknown().optional(),
 });
 
 router.post("/auth/email/verify", async (req: Request, res: Response) => {
@@ -150,6 +153,7 @@ router.post("/auth/email/verify", async (req: Request, res: Response) => {
     const body = await completePeSignIn(req, res, identity, {
       ...(parsed.data.installId ? { installId: parsed.data.installId } : {}),
       ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
+      adMatch: normalizeAdMatch(parsed.data.metaMatch),
     });
     res.status(identity.isNewUser ? 201 : 200).json(body);
   } catch (err) {

@@ -25,22 +25,38 @@ import {
   type MetaLegResult,
   type OutboxRecord,
 } from "./peLifecycleOutbox";
-import { META_REFUSED_BY_NAME, sendMetaCapiEvent } from "./peMetaCapi";
+import { ga4PurchaseInputFromOutboxRow, sendGa4Purchase } from "./peGa4Mp";
+import {
+  META_REFUSED_BY_NAME,
+  metaCapiInputFromOutboxRow,
+  sendMetaCapiEvent,
+} from "./peMetaCapi";
 import { sendLifecycleToResend } from "./peResendLifecycle";
 
 type Db = typeof prodDb;
 
+/**
+ * GA4 purchase rides the ad-platform leg, sent ONCE (first attempt of the
+ * Meta leg) so a Meta retry never duplicates it. Its outcome is logged and
+ * never changes the Meta leg's state: GA is best-effort, Meta is the leg.
+ */
+async function ga4PurchaseOnce(row: OutboxRecord): Promise<void> {
+  const input = ga4PurchaseInputFromOutboxRow(row);
+  if (!input) return;
+  if (row.legs.meta.attempts > 0) return;
+  const r = await sendGa4Purchase(input);
+  if (!r.ok) {
+    logger.info({ eventId: row.id, error: r.error }, "pe lifecycle: GA4 purchase not sent");
+  }
+}
+
 async function metaLeg(row: OutboxRecord, now: Date): Promise<MetaLegResult> {
-  const value = row.payload["value"];
-  const currency = row.payload["currency"];
-  const m = await sendMetaCapiEvent({
-    event: row.eventType,
-    eventId: row.id,
-    email: row.email,
-    eventTime: Math.floor(now.getTime() / 1000),
-    value: typeof value === "number" ? value : undefined,
-    currency: typeof currency === "string" ? currency : undefined,
-  });
+  try {
+    await ga4PurchaseOnce(row);
+  } catch (err) {
+    logger.info({ err, eventId: row.id }, "pe lifecycle: GA4 purchase threw (ignored)");
+  }
+  const m = await sendMetaCapiEvent(metaCapiInputFromOutboxRow(row, now));
   if (m.ok) return { ok: true };
   return {
     ok: false,

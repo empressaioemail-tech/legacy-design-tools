@@ -18,6 +18,8 @@ import {
 } from "./peLifecycleOutbox";
 import { getPeUserEmail } from "./peIdentity";
 import type { LifecycleEventType, SsBilling, SsPlan } from "./peLifecycleTypes";
+import type { AdMatch } from "./peAdMatch";
+import { stripeLifecycleApply } from "./peStripeBillingLifecycle";
 
 /**
  * @deprecated Prefer explicit lifecycle event types from the Stripe webhook;
@@ -94,6 +96,10 @@ export async function emitLifecycleFromStripeWebhook(input: {
   billing?: SsBilling;
   value?: number;
   currency?: string;
+  /** Visitor match keys read back from the Checkout Session metadata. */
+  adMatch?: AdMatch;
+  /** Stripe Checkout Session id; GA4 purchase transaction_id. */
+  transactionId?: string | null;
 }): Promise<string | null> {
   try {
     const email = await getPeUserEmail(input.userId);
@@ -104,14 +110,7 @@ export async function emitLifecycleFromStripeWebhook(input: {
       event: input.event,
       idempotencyKey: input.idempotencyKey,
       source: "stripe_webhook",
-      apply: {
-        email,
-        event: input.event,
-        ...(input.plan !== undefined ? { plan: input.plan } : {}),
-        ...(input.billing !== undefined ? { billing: input.billing } : {}),
-        value: input.value,
-        currency: input.currency ?? "USD",
-      },
+      apply: stripeLifecycleApply({ ...input, email }),
     });
   } catch (err) {
     logger.info(
@@ -133,6 +132,8 @@ export async function emitPaidFromStripeWebhook(input: {
   /** When set, used instead of deriving from kind/plan (P-494). */
   lifecycleEvent?: LifecycleEventType;
   idempotencyKey?: string;
+  adMatch?: AdMatch;
+  transactionId?: string | null;
 }): Promise<string | null> {
   const event =
     input.lifecycleEvent ?? paidEventTypeForStripe(input.kind, input.plan);
@@ -155,5 +156,7 @@ export async function emitPaidFromStripeWebhook(input: {
     billing: input.billing,
     value: input.value,
     currency: input.currency,
+    ...(input.adMatch ? { adMatch: input.adMatch } : {}),
+    ...(input.transactionId ? { transactionId: input.transactionId } : {}),
   });
 }

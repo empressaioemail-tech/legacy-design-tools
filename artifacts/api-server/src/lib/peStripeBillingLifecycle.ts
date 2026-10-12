@@ -5,7 +5,55 @@
  * Stripe account API: 2026-05-27.dahlia (period fields on items; invoice.parent).
  */
 
-import type { LifecycleEventType } from "./peLifecycleTypes";
+import type { LifecycleEventType, SsBilling, SsPlan } from "./peLifecycleTypes";
+import { adMatchToPayload, type AdMatch } from "./peAdMatch";
+
+/**
+ * The outbox `apply` payload for a Stripe-webhook lifecycle event. Pure, so
+ * the webhook Purchase payload is unit-testable without a database: the
+ * Meta and GA4 legs read value, currency, the ad match keys and the
+ * transaction id back off exactly this object.
+ */
+export function stripeLifecycleApply(input: {
+  email: string;
+  event: LifecycleEventType;
+  plan?: SsPlan;
+  billing?: SsBilling;
+  value?: number;
+  currency?: string;
+  adMatch?: AdMatch;
+  transactionId?: string | null;
+}): Record<string, unknown> {
+  return {
+    email: input.email,
+    event: input.event,
+    ...(input.plan !== undefined ? { plan: input.plan } : {}),
+    ...(input.billing !== undefined ? { billing: input.billing } : {}),
+    value: input.value,
+    currency: input.currency ?? "USD",
+    ...adMatchToPayload(input.adMatch),
+    ...(input.transactionId ? { transactionId: input.transactionId } : {}),
+  };
+}
+
+/**
+ * The recurring amount of a Stripe Subscription object, in major units:
+ * sum over items.data of price.unit_amount x quantity. Undefined when any
+ * item's amount is not a plain number (tiered prices), never a guess.
+ */
+export function subscriptionItemsAmount(obj: Record<string, unknown>): number | undefined {
+  const items = (obj["items"] as { data?: unknown } | undefined)?.data;
+  if (!Array.isArray(items) || items.length === 0) return undefined;
+  let cents = 0;
+  for (const raw of items) {
+    const item = raw as { price?: { unit_amount?: unknown }; quantity?: unknown };
+    const unit = item.price?.unit_amount;
+    const qty = typeof item.quantity === "number" ? item.quantity : 1;
+    if (typeof unit !== "number") return undefined;
+    cents += unit * qty;
+  }
+  return cents / 100;
+}
 
 /** Paid access while Stripe retries; never downgrade or emit on `past_due` alone. */
 export function peStatusRetainsPaidEntitlement(status: string): boolean {
