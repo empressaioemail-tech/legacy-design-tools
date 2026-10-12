@@ -113,6 +113,17 @@ export type OverlayRow = {
   paint?: CellState;
   /** A client-side downgrade note; only when the wire carries no reason of its own. */
   paintReason?: string;
+  /** CARD F2: flood only -- every zone touching the parcel, row 0 first (the largest share), as the wire carries them. */
+  zones?: Array<{
+    zone: string | null;
+    subtype: string | null;
+    isSfha: boolean;
+    floodway: boolean;
+    bfe: number | null;
+    areaShare: number | null;
+  }>;
+  /** CARD F2, operator ruling D1: a sliver SFHA touch -- never "in", never hidden. */
+  touchesSfhaEdge?: boolean;
 };
 
 /** The refusal object a brief section may carry, field by field; a missing field is null, never a default. */
@@ -2456,7 +2467,42 @@ export function floodFactsHtml(s: BriefSection, i: number, overlaySfha?: boolean
   const summary = s.zoneExposureSummary
     ? `<div class="fsum" data-zone-exposure="1">${escapeHtml(s.zoneExposureSummary)}</div>`
     : "";
-  return `<div class="facts flood" data-flood-state="present">${head}${cites ? ` ${cites}` : ""}${meta}<div class="kvs">${rows}</div>${summary}${why}${note}</div>`;
+  /**
+   * CARD F2 (whole-parcel flood, operator ruling D1): "a consumer that
+   * prints one zone must print every zone with its share." The kv rows
+   * above still describe the primary (largest-share) zone for
+   * compatibility; this block is the full disclosure -- every zone on
+   * `d.zones`, named with its share, and a sliver touch's own edge note
+   * (never "in", never dropped).
+   */
+  const zones = Array.isArray((d as { zones?: unknown[] }).zones)
+    ? ((d as { zones: unknown[] }).zones
+        .map((z) => (z && typeof z === "object" ? (z as Record<string, unknown>) : null))
+        .filter((z): z is Record<string, unknown> => z !== null))
+    : [];
+  const zoneShareText = (z: Record<string, unknown>): string => {
+    const name = stringOrNull(z.zone) ?? "unmapped";
+    const share = numberOrNull(z.areaShare);
+    return share === null ? name : `${name} ${Math.round(share * 100)}%`;
+  };
+  const zonesHtml =
+    zones.length > 1
+      ? `<div class="fzones" data-flood-zones="${zones.length}">${zones
+          .map(
+            (z, idx) =>
+              `<span class="kv" data-fact-zone-share="${idx}">${escapeHtml(zoneShareText(z))}</span>`,
+          )
+          .join(" ")}</div>`
+      : "";
+  const touchesEdge = d.touchesSfhaEdge === true;
+  const edgeHtml = touchesEdge
+    ? reasonLineHtml(
+        "note",
+        "Touches the flood zone at the edge -- a Special Flood Hazard Area share below the sliver threshold. Never reported as 'in' the flood zone.",
+        'data-flood-touches-edge="1"',
+      )
+    : "";
+  return `<div class="facts flood" data-flood-state="present">${head}${cites ? ` ${cites}` : ""}${meta}<div class="kvs">${rows}</div>${zonesHtml}${edgeHtml}${summary}${why}${note}</div>`;
 }
 
 /**
@@ -3024,6 +3070,22 @@ export function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
     const citations = httpsCitations(rec.citations);
     if (citations.length > 0) row.citations = citations;
     if (rec.citationsDegraded === true) row.citationsDegraded = true;
+    /* CARD F2: flood's every-zone list and the sliver-touch flag, as the wire carries them. */
+    const zones = Array.isArray(rec.zones)
+      ? rec.zones
+          .map((z) => asRecord(z))
+          .filter((z): z is Record<string, unknown> => z !== null)
+          .map((z) => ({
+            zone: stringOrNull(z.zone),
+            subtype: stringOrNull(z.subtype),
+            isSfha: z.isSfha === true,
+            floodway: z.floodway === true,
+            bfe: numberOrNull(z.bfe),
+            areaShare: numberOrNull(z.areaShare),
+          }))
+      : [];
+    if (zones.length > 0) row.zones = zones;
+    if (typeof rec.touchesSfhaEdge === "boolean") row.touchesSfhaEdge = rec.touchesSfhaEdge;
     const painted = overlayPaint(row);
     row.paint = painted.paint;
     if (painted.paintReason) row.paintReason = painted.paintReason;

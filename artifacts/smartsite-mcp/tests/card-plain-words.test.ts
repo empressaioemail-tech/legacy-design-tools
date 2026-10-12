@@ -15,6 +15,7 @@ import {
   landUseNameFromCode,
   overlayCustomerLabel,
   overlayRowHtml,
+  overlaysFromDraw,
   parcelFactSubheadHtml,
   ringSvg,
   type BriefSection,
@@ -128,6 +129,99 @@ describe("card plain words", () => {
     expect(html).not.toContain("adapter");
     expect(html).not.toContain("NFHL_");
     expect(html).toContain("2026-01-01");
+  });
+
+  it("CARD F2: prints every zone with its share, not just the primary -- 'a consumer that prints one zone must print every zone with its share'", () => {
+    const section = {
+      id: "flood",
+      title: "Flood",
+      disposition: "present",
+      asOf: "NFHL_48_20260101",
+      data: {
+        floodZone: "AE",
+        inSpecialFloodHazardArea: true,
+        method: "whole-parcel-area-share",
+        sourceVintage: "NFHL_48_20260101",
+        zones: [
+          { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 820, areaShare: 0.23 },
+          { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.77 },
+        ],
+        overlap: "partial",
+        touchesSfhaEdge: false,
+      },
+      citations: [],
+      citationsDegraded: true,
+      paint: "present",
+    } as BriefSection;
+    const html = floodFactsHtml(section, 0, true);
+    expect(html).toContain("AE 23%");
+    expect(html).toContain("X 77%");
+  });
+
+  it("CARD F2, operator ruling D1: a sliver touch prints 'touches the flood zone at the edge', never 'in', and the zone is never dropped", () => {
+    const section = {
+      id: "flood",
+      title: "Flood",
+      disposition: "present",
+      asOf: "NFHL_48_20260101",
+      data: {
+        floodZone: "X",
+        inSpecialFloodHazardArea: false,
+        method: "whole-parcel-area-share",
+        sourceVintage: "NFHL_48_20260101",
+        zones: [
+          { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.993 },
+          { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, areaShare: 0.007 },
+        ],
+        overlap: "sliver",
+        touchesSfhaEdge: true,
+      },
+      citations: [],
+      citationsDegraded: true,
+      paint: "present",
+    } as BriefSection;
+    const html = floodFactsHtml(section, 0, false);
+    expect(html).toMatch(/touches the flood zone at the edge/i);
+    expect(html).toContain("AE 1%");
+    expect(html).not.toMatch(/\bin the flood zone\b/);
+  });
+
+  it("CARD F2: a single-zone section (old payload shape) never prints the extra zones block -- unchanged output", () => {
+    const section = {
+      id: "flood",
+      title: "Flood",
+      disposition: "present",
+      asOf: "NFHL_48_20260101",
+      data: { floodZone: "AE", method: "point-on-surface", sourceVintage: "NFHL_48_20260101" },
+      citations: [],
+      citationsDegraded: true,
+      paint: "present",
+    } as BriefSection;
+    const html = floodFactsHtml(section, 0, true);
+    expect(html).not.toContain("fzones");
+    expect(html).not.toContain("touches the flood zone at the edge");
+  });
+
+  it("CARD F2: overlaysFromDraw parses a draw overlay's zones and touchesSfhaEdge from the wire", () => {
+    const rows = overlaysFromDraw({
+      overlays: [
+        {
+          id: "flood",
+          state: "present",
+          label: "Touches Zone AE at the edge",
+          sfha: false,
+          zones: [
+            { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.993 },
+            { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, areaShare: 0.007 },
+          ],
+          touchesSfhaEdge: true,
+        },
+      ],
+    });
+    const flood = rows.find((r) => r.id === "flood");
+    expect(flood?.zones).toHaveLength(2);
+    expect(flood?.zones?.[1]).toMatchObject({ zone: "AE", isSfha: true, areaShare: 0.007 });
+    expect(flood?.touchesSfhaEdge).toBe(true);
   });
 
   it("does not draw an unknown pipeline as absent", () => {

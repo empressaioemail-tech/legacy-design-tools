@@ -141,6 +141,11 @@ function floodInput(read: FloodHazardFactRead): AssembleParcelDrawInput["flood"]
       zoneSubtype: read.zoneSubtype,
       inSpecialFloodHazardArea: read.inSpecialFloodHazardArea,
       citations: httpCitationUrls(read),
+      // CARD F2 (whole-parcel flood): every zone and its share, plus the
+      // sliver-touch flag, through to the draw overlay -- a consumer that
+      // prints one zone must print every zone with its share.
+      zones: read.zones,
+      touchesSfhaEdge: read.touchesSfhaEdge,
     };
   }
   if (read.state === "absent") {

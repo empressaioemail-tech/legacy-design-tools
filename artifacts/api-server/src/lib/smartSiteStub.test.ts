@@ -354,6 +354,19 @@ describe("D2 stub is a projection of node", () => {
     sourceVintage: "NFHL_48_20260101",
     sourceCitation: null,
     evaluatedAt: "2026-08-11T23:13:43.774Z",
+    // CARD F2: the atom path is always one point, one zone.
+    zones: [
+      {
+        zone: "X",
+        subtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+        isSfha: false,
+        floodway: false,
+        bfe: null,
+        areaShare: null,
+      },
+    ],
+    overlap: "single",
+    touchesSfhaEdge: false,
   };
   const floodTypedAbsence: FloodHazardFactRead = {
     state: "absent",
