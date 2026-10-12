@@ -403,13 +403,57 @@ export function addressSwapLockNamespace(countyFips: string): string {
 }
 
 /**
+ * `SET LOCAL statement_timeout` for the whole swap transaction (2026-10-12
+ * W3 review). Bounds EVERY statement in the transaction, including the
+ * DELETE and each insert batch — never the transaction as a whole, since
+ * `statement_timeout` resets per statement.
+ *
+ * Sized for the largest of the six live reload counties, Bexar
+ * (721,120 rows, measured 2026-10-09). The DELETE removes rows under the
+ * primary key btree ((county_fips, object_id), migration 0110) AND
+ * maintains the normalized-`full_addr` functional index (migration 0058,
+ * `txgio_address_fulladdr_norm_idx`) for every row it touches — on a
+ * shared Neon server (noisy-neighbor contention is real there, not
+ * hypothetical), a bare single-statement budget of 120s can plausibly be
+ * exceeded by a DELETE this size even though it is not, by itself, a slow
+ * operation: measured 2026-10-12 on an UNTHROTTLED standalone Postgres
+ * with the same two indexes (PK + the migration-0058 functional index) and
+ * the real `swapCountyAddresses` code path (not a bare `psql`), DELETE of
+ * 721,120 Bexar rows took 580-970ms across repeated runs — comfortably
+ * under 120s there, which is exactly why 120s was not sized for Neon's
+ * noisy-neighbor case; this number is a local floor, not a Neon ceiling.
+ * 30 minutes bounds the worst case generously while still failing (and
+ * rolling back, never leaving a county half-replaced) if something is
+ * genuinely stuck rather than just slow.
+ */
+export const ADDRESS_SWAP_STATEMENT_TIMEOUT = "30min";
+
+/**
+ * `SET LOCAL lock_timeout` for the whole swap transaction (2026-10-12 W3
+ * review). Applies to the advisory-lock wait below (which goes through
+ * the ordinary lock manager, so `lock_timeout` governs it) as well as any
+ * other lock this transaction might wait on.
+ *
+ * Short and DELIBERATELY much tighter than `statement_timeout`: a second
+ * load of the SAME county should fail FAST and loud rather than silently
+ * queue for up to 30 minutes behind a peer that might itself be mid-swap
+ * on all 721,120 Bexar rows. A fast, visible failure is retried or
+ * rescheduled by the operator/job runner; a 30-minute silent queue is not
+ * materially different from a hang, from the caller's point of view.
+ */
+export const ADDRESS_SWAP_LOCK_TIMEOUT = "10s";
+
+/**
  * Take the swap's transaction-scoped advisory lock, keyed on
  * ('txgio_address', county_fips). BLOCKING (`pg_advisory_xact_lock`, never
- * the `_try_` variant): two loads of the SAME county must SERIALIZE, one
- * waiting for the other, not refuse. Postgres queues the waiter until the
- * holder's transaction ends (COMMIT or ROLLBACK), which releases the lock
- * automatically — even a crashed holder's connection closing releases it,
- * so there is no stale-lock window to manage.
+ * the `_try_` variant): two loads of the SAME county SERIALIZE, one
+ * waiting for the other — up to `ADDRESS_SWAP_LOCK_TIMEOUT`, after which
+ * Postgres cancels the wait with a lock_timeout error (propagates out of
+ * `swapCountyAddresses`, rolling back; the live county is untouched
+ * either way). Within that window, the holder's transaction ending
+ * (COMMIT or ROLLBACK) releases the lock automatically — even a crashed
+ * holder's connection closing releases it, so there is no stale-lock
+ * window to manage.
  *
  * `hashtextextended(key || '|' || current_schema(), 0)` is the same
  * schema-qualified hashing idiom `clusterLock.ts` and
@@ -446,6 +490,14 @@ export interface AddressSwapOptions {
    * depend on timing/sleeps.
    */
   onBeforeCommit?: () => Promise<void>;
+  /**
+   * TEST-ONLY. Overrides `ADDRESS_SWAP_LOCK_TIMEOUT` for this call. The CLI
+   * never sets this. Tests use a short override (e.g. `'200ms'`) to prove
+   * the fail-fast behavior itself — waiting out the real 10s default on
+   * every run would make that proof prohibitively slow — without
+   * duplicating the lock/timeout wiring in a separate test-only code path.
+   */
+  lockTimeoutOverride?: string;
 }
 
 export interface AddressSwapSummary {
@@ -453,6 +505,12 @@ export interface AddressSwapSummary {
   rowsDeleted: number;
   rowsInserted: number;
   batches: number;
+  /** Wall-clock time of the DELETE statement alone (2026-10-12 W3 review —
+   *  the operation `ADDRESS_SWAP_STATEMENT_TIMEOUT` is sized for). */
+  deleteMs: number;
+  /** Wall-clock time of every insert batch combined (excludes the DELETE
+   *  and the lock wait). */
+  insertMs: number;
 }
 
 /**
@@ -541,18 +599,39 @@ export async function swapCountyAddresses(
   opts: AddressSwapOptions,
 ): Promise<AddressSwapSummary> {
   return await db.transaction(async (tx) => {
-    // Safety net, NEVER a session-level SET (brief rule 3 / P-499 review
-    // note): bounds every single statement in this transaction, including
-    // the advisory-lock wait below, so a stuck peer or a runaway query
-    // cannot hang this swap forever. SET LOCAL is scoped to this
-    // transaction only and cannot leak onto another client's connection
-    // the way a session-level SET did on 2026-10-07 (hauska_mcp pooler
-    // incident).
-    await tx.execute(sql`SET LOCAL statement_timeout = '120s'`);
+    // Safety nets, NEVER session-level SET (brief rule 3 / P-499 review
+    // note): both scoped to this transaction only, so neither can leak
+    // onto another client's connection the way a session-level SET did on
+    // 2026-10-07 (hauska_mcp pooler incident).
+    //
+    // statement_timeout bounds every statement (DELETE, each insert
+    // batch) at a budget sized for Bexar, the largest county; lock_timeout
+    // is far tighter, so a peer's lock wait fails fast instead of queueing
+    // for the whole statement_timeout window — see both constants' own
+    // comments for the full reasoning and the row counts behind them.
+    // sql.raw, not a bound ${} parameter: SET's grammar takes a literal,
+    // not a placeholder. The statement_timeout value is always this
+    // module's own constant. lock_timeout can be test-overridden
+    // (`lockTimeoutOverride`) — validated against Postgres's own GUC
+    // time-value shape before it ever reaches raw SQL, so even a test
+    // typo fails loudly here rather than opening an injection surface.
+    const lockTimeout = opts.lockTimeoutOverride ?? ADDRESS_SWAP_LOCK_TIMEOUT;
+    if (!/^\d+(ms|s|min|h|d)?$/.test(lockTimeout)) {
+      throw new Error(`swapCountyAddresses: invalid lockTimeoutOverride ${JSON.stringify(lockTimeout)}`);
+    }
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${ADDRESS_SWAP_STATEMENT_TIMEOUT}'`));
+    await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${lockTimeout}'`));
     await takeAddressSwapLock(tx, countyFips);
     const rowsDeleted = await countCountyAddresses(tx, countyFips);
+
+    const deleteStartedAt = Date.now();
     await deleteCountyAddresses(tx, countyFips);
+    const deleteMs = Date.now() - deleteStartedAt;
+
+    const insertStartedAt = Date.now();
     const { rowsInserted, batches } = await insertAddressRows(tx, records, opts);
+    const insertMs = Date.now() - insertStartedAt;
+
     if (rowsInserted !== records.length) {
       throw new Error(
         `AddressSwapRowCountMismatch: county ${countyFips} inserted ${rowsInserted} row(s) ` +
@@ -560,6 +639,6 @@ export async function swapCountyAddresses(
       );
     }
     await opts.onBeforeCommit?.();
-    return { rowsDeleted, rowsInserted, batches };
+    return { rowsDeleted, rowsInserted, batches, deleteMs, insertMs };
   });
 }

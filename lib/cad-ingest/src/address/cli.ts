@@ -281,7 +281,11 @@ async function main(): Promise<void> {
   log(
     dryRun
       ? "swap: skipped (dry-run)"
-      : `swap: deleted ${swapSummary?.rowsDeleted ?? 0}, inserted ${swapSummary?.rowsInserted ?? 0} in one transaction`,
+      : `swap: deleted ${swapSummary?.rowsDeleted ?? 0} in ${(
+          (swapSummary?.deleteMs ?? 0) / 1000
+        ).toFixed(1)}s, inserted ${swapSummary?.rowsInserted ?? 0} in ${(
+          (swapSummary?.insertMs ?? 0) / 1000
+        ).toFixed(1)}s (one transaction)`,
   );
   log(`features skipped:  ${counters.rowsSkipped} (no addr / no objectid / no geometry)`);
   log(

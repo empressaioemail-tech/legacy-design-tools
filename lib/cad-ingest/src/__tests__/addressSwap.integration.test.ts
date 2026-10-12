@@ -323,6 +323,59 @@ describe.skipIf(!hasDb)("swapCountyAddresses (P-499 stage-check-swap, txgio_addr
     });
   });
 
+  it("a blocked lock FAILS FAST (lock_timeout) rather than queueing for the whole statement_timeout window (2026-10-12 W3 review)", async () => {
+    await withTestSchema(async ({ db, schemaName }) => {
+      await seedRows(db, [rec(1)]);
+
+      const holdFor = deferred<void>();
+      const second = openSecondHandle(schemaName);
+      try {
+        // Swap A holds the lock open indefinitely (released only when the
+        // test resolves holdFor), standing in for a peer that is itself
+        // mid-swap on a large county.
+        const swapA = swapCountyAddresses(db, FIPS, [rec(901)], {
+          sourceFile: SOURCE_FILE,
+          sourceVintage: "vA",
+          onBeforeCommit: async () => {
+            await holdFor.promise;
+          },
+        });
+
+        await delay(50); // let A actually acquire the lock first
+
+        // Swap B overrides lock_timeout down to 200ms -- far below the
+        // real 10s default (ADDRESS_SWAP_LOCK_TIMEOUT), so this test does
+        // not have to wait out the production value to prove the
+        // mechanism: it must fail well under a second, not hang until A
+        // is released.
+        const startedAt = Date.now();
+        await expect(
+          swapCountyAddresses(second.db, FIPS, [rec(902)], {
+            sourceFile: SOURCE_FILE,
+            sourceVintage: "vB",
+            lockTimeoutOverride: "200ms",
+          }),
+        ).rejects.toThrow();
+        const elapsedMs = Date.now() - startedAt;
+
+        // Generous upper bound (2s) so this is about "fails fast", not a
+        // brittle exact-timing assertion; still ten times tighter than
+        // A's indefinite hold, which proves B did not simply queue.
+        expect(elapsedMs).toBeLessThan(2000);
+
+        holdFor.resolve();
+        await swapA;
+
+        // B's failed attempt touched nothing -- A's own swap still lands
+        // normally once released.
+        expect(await objectIdsFor(db, FIPS)).toEqual([901]);
+      } finally {
+        holdFor.resolve();
+        await second.pool.end();
+      }
+    });
+  });
+
   it("works through the existing drizzle(pool) shape (createTestSchema's own multi-connection pool)", async () => {
     const ctx = await createTestSchema();
     try {
@@ -331,7 +384,9 @@ describe.skipIf(!hasDb)("swapCountyAddresses (P-499 stage-check-swap, txgio_addr
         sourceFile: SOURCE_FILE,
         sourceVintage: "v-pool",
       });
-      expect(summary).toEqual({ rowsDeleted: 1, rowsInserted: 2, batches: 1 });
+      expect(summary).toMatchObject({ rowsDeleted: 1, rowsInserted: 2, batches: 1 });
+      expect(summary.deleteMs).toBeGreaterThanOrEqual(0);
+      expect(summary.insertMs).toBeGreaterThanOrEqual(0);
       expect(await objectIdsFor(ctx.db, FIPS)).toEqual([901, 902]);
     } finally {
       await dropTestSchema(ctx);
@@ -349,7 +404,9 @@ describe.skipIf(!hasDb)("swapCountyAddresses (P-499 stage-check-swap, txgio_addr
           sourceFile: SOURCE_FILE,
           sourceVintage: "v-direct",
         });
-        expect(summary).toEqual({ rowsDeleted: 2, rowsInserted: 1, batches: 1 });
+        expect(summary).toMatchObject({ rowsDeleted: 2, rowsInserted: 1, batches: 1 });
+        expect(summary.deleteMs).toBeGreaterThanOrEqual(0);
+        expect(summary.insertMs).toBeGreaterThanOrEqual(0);
       } finally {
         await direct.client.end();
       }
