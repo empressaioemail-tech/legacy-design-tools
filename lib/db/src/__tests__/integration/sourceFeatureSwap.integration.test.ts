@@ -2,14 +2,25 @@
  * `swapStagedCounty` (P-499, OPS-16 A-382/A-383; `sourceFeatureSwap.ts`).
  *
  * Runs migration `0111_source_feature.sql` directly against the per-test
- * schema rather than relying on the committed
- * `__fixtures__/schema.sql.template` replay, because that fixture can only
- * be regenerated against a real Postgres with BOTH postgis and pgvector
- * (`pnpm --filter @workspace/db run test:fixture:schema`) and this card's
- * own report says whether that happened. The migration's `CREATE TABLE IF
- * NOT EXISTS` makes this safe either way: once the fixture does carry
- * `source_feature`/`source_feature_stage`, re-applying the same DDL here
- * is a no-op.
+ * schema rather than trusting the committed
+ * `__fixtures__/schema.sql.template` replay to have the real shape.
+ *
+ * WHY THE FIXTURE REPLAY ISN'T ENOUGH (found live, CI run 38265853893,
+ * 2026-10-12): the fixture is captured via `drizzle-kit push` reading the
+ * TS schema (`lib/db/src/schema/sourceFeature.ts`), and drizzle-orm has no
+ * `PARTITION BY` syntax at all -- so by the time `withTestSchema` has
+ * replayed the fixture, `source_feature`/`source_feature_stage` ALREADY
+ * EXIST as PLAIN, unpartitioned tables. Migration 0111's `CREATE TABLE IF
+ * NOT EXISTS ... PARTITION BY LIST (...)` then silently no-ops against
+ * that wrong shape (the table exists, so Postgres skips the whole
+ * statement, partition clause included) -- "source_feature is not
+ * partitioned" is exactly the error this produced before this fix. This
+ * only affects THIS test file: production never runs `drizzle-kit push`
+ * at all (`migrate-prod.mjs` applies only the numbered files), so the
+ * real deploy path always gets the migration's real, partitioned DDL.
+ * `setUpSourceFeatureTables` below drops whatever the fixture replay
+ * created first, so this test always exercises migration 0111's actual
+ * DDL, not a push-shaped stand-in for it.
  *
  * `source_feature` is list-partitioned on `provider` with ZERO partitions
  * committed (migration 0111's header: a card that only lands the shape,
@@ -51,11 +62,17 @@ const COUNTY = "48053"; // Burnet
 const OTHER_COUNTY = "48491"; // Williamson
 
 /**
- * Applies migration 0111 (idempotent via `CREATE TABLE IF NOT EXISTS`) and
- * creates the test-only partitions this suite needs, scoped to `ctx`'s
- * schema via its pre-configured `search_path`.
+ * Drops whatever the fixture replay created (see the module header -- a
+ * PLAIN, unpartitioned stand-in from `drizzle-kit push`), then applies
+ * migration 0111's real DDL and creates the test-only partitions this
+ * suite needs. Scoped to `ctx`'s schema via its pre-configured
+ * `search_path`; CASCADE is harmless here (a fresh schema's
+ * `source_feature` never has partitions attached yet).
  */
 async function setUpSourceFeatureTables(ctx: TestSchemaContext): Promise<void> {
+  await ctx.pool.query(
+    `DROP TABLE IF EXISTS "source_feature_stage"; DROP TABLE IF EXISTS "source_feature" CASCADE;`,
+  );
   const migrationSql = readFileSync(MIGRATION_PATH, "utf8");
   await ctx.pool.query(migrationSql);
   await ctx.pool.query(
