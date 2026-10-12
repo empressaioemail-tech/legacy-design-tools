@@ -365,6 +365,11 @@ describe("lib/db schema integration", () => {
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",
         "snapshots",
+        // P-499 — one national source-table shape, keyed on the provider's
+        // own id, list-partitioned by provider (migration 0111). Stage is
+        // the stage-check-swap write path's holding table.
+        "source_feature",
+        "source_feature_stage",
         // P-492 — Smart Site contact record (system of record for the
         // lifecycle) and the scheduled drain's per-tick record.
         "ss_contact",

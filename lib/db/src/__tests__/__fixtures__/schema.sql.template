@@ -2267,6 +2267,38 @@ CREATE TABLE @@SCHEMA@@.snapshots (
 );
 
 
+-- Name: source_feature; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.source_feature (
+    provider text NOT NULL,
+    provider_object_id text NOT NULL,
+    state_fips text NOT NULL,
+    county_fips text NOT NULL,
+    vintage text NOT NULL,
+    fetched_at timestamp with time zone NOT NULL,
+    load_run_id text NOT NULL,
+    source_url text NOT NULL,
+    geom public.geometry(Geometry,4326),
+    payload jsonb NOT NULL
+);
+
+
+-- Name: source_feature_stage; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.source_feature_stage (
+    provider text NOT NULL,
+    provider_object_id text NOT NULL,
+    state_fips text NOT NULL,
+    county_fips text NOT NULL,
+    vintage text NOT NULL,
+    fetched_at timestamp with time zone NOT NULL,
+    load_run_id text NOT NULL,
+    source_url text NOT NULL,
+    geom public.geometry(Geometry,4326),
+    payload jsonb NOT NULL
+);
+
+
 -- Name: ss_contact; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.ss_contact (
@@ -3545,6 +3577,18 @@ ALTER TABLE ONLY @@SCHEMA@@.snapshot_ifc_files
 
 ALTER TABLE ONLY @@SCHEMA@@.snapshots
     ADD CONSTRAINT snapshots_pkey PRIMARY KEY (id);
+
+
+-- Name: source_feature source_feature_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.source_feature
+    ADD CONSTRAINT source_feature_pk PRIMARY KEY (provider, county_fips, provider_object_id);
+
+
+-- Name: source_feature_stage source_feature_stage_pk; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.source_feature_stage
+    ADD CONSTRAINT source_feature_stage_pk PRIMARY KEY (provider, county_fips, load_run_id, provider_object_id);
 
 
 -- Name: ss_contact ss_contact_pkey; Type: CONSTRAINT; Schema: public; Owner: -
