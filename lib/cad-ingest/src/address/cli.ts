@@ -21,14 +21,36 @@
  * DATABASE_URL must point at the target Postgres unless --dry-run /
  * --count-only.
  *
- * Replace semantics: the county's existing rows are deleted before the
- * insert pass, so re-runs and fresher vintages are idempotent. The run
- * is EXIT-BOUNDED and county-partitioned: count -> page -> load ->
- * summary, then exit. A statewide crawl is the operator looping this CLI
- * over counties (each resumable at its county boundary); this CLI never
- * pulls the full ~11.7M statewide set in one invocation. Pass --limit
- * for a bounded sample. Exit code 0 on success, 1 on fatal errors or
- * when zero features parsed (non-count/dry-run).
+ * Replace semantics: FETCH-THEN-SWAP (P-499 stage-check-swap, applied to
+ * the existing txgio_address table — 2026-10-12). The whole county is
+ * crawled and buffered in memory FIRST; only a crawl that looks complete
+ * (features read == the service's own count, every read feature
+ * accounted for as parsed or skipped, at least one record survives the
+ * objectid dedupe) ever reaches the database, and then the county's old
+ * rows are deleted and the new ones inserted in ONE transaction. Before
+ * this, the delete and the insert were two separate statements with the
+ * network crawl streaming DURING the insert half — for a live county
+ * that deleted the serving rows the moment the delete ran and rebuilt
+ * them gradually over the whole crawl (Bexar: 721,120 points, on the
+ * order of 10-20 minutes partial or missing), and a crawl that died
+ * midway left the county permanently partly empty. See `./ingest.ts`'s
+ * module comment and `bufferAddressRecords` / `checkAddressFetchComplete`
+ * / `swapCountyAddresses` for the three pieces.
+ *
+ * Re-runs and fresher vintages are idempotent either way: a wholesale
+ * swap replaces the county whole, so object_id churn across vintages
+ * never has to reconcile against stale rows.
+ *
+ * The run is EXIT-BOUNDED and county-partitioned: count -> page -> load
+ * -> summary, then exit. A statewide crawl is the operator looping this
+ * CLI over counties (each resumable at its county boundary); this CLI
+ * never pulls the full ~11.7M statewide set in one invocation. Pass
+ * --limit for a bounded DRY-RUN sample — on a real (non-dry-run) write,
+ * a --limit below the service's own count is a short crawl by
+ * definition and is refused (ADDRESS_FETCH_INCOMPLETE) rather than
+ * swapping a partial sample into a live county. Exit code 0 on success,
+ * 1 on a fatal error or zero features parsed (dry-run/count-only), 2 on
+ * a coded refusal (LAPTOP_WRITE_FROZEN or ADDRESS_FETCH_INCOMPLETE).
  */
 
 import { parseArgs } from "node:util";
@@ -44,9 +66,11 @@ import {
 } from "./service";
 import { normalizeAddressFeature, type AddressFeature } from "./parse";
 import {
-  deleteCountyAddresses,
-  upsertAddresses,
   ADDRESS_DEFAULT_BATCH_SIZE,
+  bufferAddressRecords,
+  checkAddressFetchComplete,
+  swapCountyAddresses,
+  type AddressSwapSummary,
 } from "./ingest";
 import { newCounters, type ParseCounters } from "../types";
 import type { TxgioAddressRecord } from "./parse";
@@ -196,40 +220,55 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. Load (or drain when --dry-run).
-  let rowsInserted = 0;
-  let duplicateObjectIds = 0;
-  if (dryRun) {
-    for await (const _rec of records()) {
-      // parse-only
+  // 3. FETCH EVERYTHING FIRST, for every mode (P-499 stage-check-swap):
+  // the whole crawl is buffered in memory, deduped by objectid, BEFORE
+  // any DB connection is opened. --dry-run stops here; --count-only
+  // already returned above and never reaches this line.
+  const { records: buffered, duplicateObjectIds } = await bufferAddressRecords(
+    records(),
+  );
+
+  // 4. CHECK, then SWAP (real writes only — dry-run writes nothing
+  // regardless, so it is never refused).
+  let swapSummary: AddressSwapSummary | null = null;
+  if (!dryRun) {
+    const refusal = checkAddressFetchComplete({
+      countyFips: fips as string,
+      countyName: countyName as string,
+      serviceCount: count,
+      rowsRead: counters.rowsRead,
+      rowsParsed: counters.rowsParsed,
+      rowsSkipped: counters.rowsSkipped,
+      bufferedAfterDedupe: buffered.length,
+    });
+    if (refusal) {
+      console.error(JSON.stringify({ event: "address-ingest.refused", ...refusal }));
+      process.exit(2);
     }
-  } else {
+
     const pool = new Pool({ connectionString: databaseUrl });
     try {
       const db = drizzle(pool);
-      log(`replacing existing ${fips} rows`);
-      await deleteCountyAddresses(db, fips as string);
-      const summary = await upsertAddresses(db, records(), {
+      log(`swapping ${fips}: lock -> delete -> insert ${buffered.length} row(s) -> commit`);
+      swapSummary = await swapCountyAddresses(db, fips as string, buffered, {
         sourceFile,
         sourceVintage: vintage,
         batchSize:
           values["batch-size"] !== undefined
             ? Number(values["batch-size"])
             : ADDRESS_DEFAULT_BATCH_SIZE,
-        onBatch: (total) => {
+        onBatchInserted: (total) => {
           if (total % 25_000 < ADDRESS_DEFAULT_BATCH_SIZE) {
             log(`inserted ${total} rows...`);
           }
         },
       });
-      rowsInserted = summary.rowsInserted;
-      duplicateObjectIds = summary.duplicateObjectIds;
     } finally {
       await pool.end();
     }
   }
 
-  // 4. Summary.
+  // 5. Summary.
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   log("---- ingest summary ----");
   log(`county:            ${fips} (${countyName})`);
@@ -237,10 +276,16 @@ async function main(): Promise<void> {
   log(`vintage:           ${vintage}`);
   log(`features read:     ${counters.rowsRead}`);
   log(`features parsed:   ${counters.rowsParsed}`);
-  log(`rows inserted:     ${dryRun ? "0 (dry-run)" : rowsInserted}`);
+  log(`fetch complete: read ${counters.rowsRead} = service ${count}`);
+  log(`rows inserted:     ${dryRun ? "0 (dry-run)" : swapSummary?.rowsInserted ?? 0}`);
+  log(
+    dryRun
+      ? "swap: skipped (dry-run)"
+      : `swap: deleted ${swapSummary?.rowsDeleted ?? 0}, inserted ${swapSummary?.rowsInserted ?? 0} in one transaction`,
+  );
   log(`features skipped:  ${counters.rowsSkipped} (no addr / no objectid / no geometry)`);
   log(
-    `duplicate objectids dropped: ${dryRun ? "0 (dry-run)" : duplicateObjectIds}` +
+    `duplicate objectids dropped: ${duplicateObjectIds}` +
       " (same objectid seen twice in this load -- should be 0; a reconciliation gap means it was not)",
   );
   if (limit !== undefined) log(`limit:             ${limit} (bounded sample)`);
