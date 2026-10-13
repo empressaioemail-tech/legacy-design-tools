@@ -360,10 +360,30 @@ export async function callerGrantsOwnerFact(
   req: Request,
   parcelNodeId: string,
 ): Promise<boolean> {
+  const caller = await resolveOwnerFactCaller(req);
+  if (caller == null) return false;
+  return grantsOwnerCoGatedFields(caller.userId, caller.subscriptionTier, parcelNodeId);
+}
+
+/**
+ * The caller half of {@link callerGrantsOwnerFact}, split out so a surface
+ * that serves MANY parcels per request (the map-data `parcels` gis-layer,
+ * the motivated-seller composite) resolves the caller ONCE and then asks
+ * `grantsOwnerCoGatedFields` per parcel — the plan grant covers every
+ * parcel, a Property Unlock covers only its own parcel. `null` = no
+ * identified brokerage user session (anonymous, operator / extension /
+ * service key): such a caller is never granted owner co-gated fields.
+ */
+export async function resolveOwnerFactCaller(
+  req: Request,
+): Promise<{
+  userId: string | null;
+  subscriptionTier: Awaited<ReturnType<typeof resolvePeEntitlement>>["subscriptionTier"];
+} | null> {
   applyExistingIdentifiedBrokerageSession(req);
-  if (authenticatedBrokerageUserId(req) == null) return false;
+  if (authenticatedBrokerageUserId(req) == null) return null;
   const snap = await resolvePeEntitlement(req);
-  return grantsOwnerCoGatedFields(snap.userId, snap.subscriptionTier, parcelNodeId);
+  return { userId: snap.userId, subscriptionTier: snap.subscriptionTier };
 }
 
 function isOwnerIshKey(key: string): boolean {
