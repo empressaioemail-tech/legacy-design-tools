@@ -427,3 +427,87 @@ describe("fail closed, metering and privacy", () => {
     expect(hashIp("203.0.113.70")).not.toBe(a);
   });
 });
+
+describe("direct (non-proxy) callers are counted BEFORE validation", () => {
+  // DO App Platform shape: XFF's last entry is the ingress server, which
+  // rotates; do-connecting-ip carries the client.
+  const platform = (ip: string, ingress = "10.1.1.1") =>
+    direct().set("do-connecting-ip", ip).set("X-Forwarded-For", `7.7.7.7, ${ingress}`);
+
+  it("a burst of {} gets 400s then 429 at the cap, with the model never called", async () => {
+    for (let i = 0; i < 3; i++) {
+      // ingress address rotates per request; the client does not
+      const bad = await platform("203.0.113.61", `10.1.1.${i}`).send({});
+      expect(bad.status).toBe(400);
+    }
+    const blocked = await platform("203.0.113.61", "10.1.1.9").send({});
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
+    expect(anthropicMocks.calls).toBe(0);
+  });
+
+  it("an oversize body is counted, then refused with 429", async () => {
+    const big = { message: "x".repeat(MESSAGE_MAX_CHARS + 500) };
+    for (let i = 0; i < 3; i++) {
+      expect((await platform("203.0.113.62").send(big)).status).toBe(400);
+    }
+    expect((await platform("203.0.113.62").send(big)).status).toBe(429);
+    expect(anthropicMocks.calls).toBe(0);
+  });
+
+  it("the global anonymous ceiling applies to direct callers across IPs", async () => {
+    vi.stubEnv("HELP_CHAT_ANON_GLOBAL_PER_DAY", "2");
+    expect((await platform("203.0.113.71").send({})).status).toBe(400);
+    expect((await platform("203.0.113.72").send({})).status).toBe(400);
+    const blocked = await platform("203.0.113.73").send({});
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toBe("help_busy");
+    expect(anthropicMocks.calls).toBe(0);
+  });
+
+  it("a client-supplied leftmost X-Forwarded-For entry cannot change the bucket", async () => {
+    for (let i = 0; i < 3; i++) {
+      await direct()
+        .set("do-connecting-ip", "203.0.113.81")
+        .set("X-Forwarded-For", `9.9.9.${i}, 10.2.2.2`)
+        .send({});
+    }
+    const blocked = await direct()
+      .set("do-connecting-ip", "203.0.113.81")
+      .set("X-Forwarded-For", "9.9.9.200, 10.2.2.2")
+      .send({});
+    expect(blocked.status).toBe(429);
+  });
+
+  it("a rotating ingress address (XFF last entry) no longer splits one client across buckets", async () => {
+    // Without the platform header this is the live defect: every request lands
+    // in a fresh bucket, so 400s never reach 429.
+    for (let i = 0; i < 3; i++) {
+      await platform("203.0.113.91", `10.3.3.${i}`).send({});
+    }
+    expect((await platform("203.0.113.91", "10.3.3.77").send({})).status).toBe(429);
+  });
+
+  it("with the platform header disabled, a rotating XFF tail never reaches the cap (documents the defect)", async () => {
+    vi.stubEnv("HELP_CHAT_PLATFORM_IP_HEADER", "none");
+    for (let i = 0; i < 6; i++) {
+      const r = await platform("203.0.113.92", `10.4.4.${i}`).send({});
+      expect(r.status).toBe(400);
+    }
+  });
+
+  it("logs refusals with caller class and ipHash, never a raw IP", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    for (let i = 0; i < 4; i++) await platform("203.0.113.95").send({});
+    const line = warn.mock.calls.find(
+      (c) => (c[0] as { event?: string })?.event === "pe_help_chat",
+    );
+    expect(line).toBeTruthy();
+    const obj = line![0] as Record<string, unknown>;
+    expect(obj["callerClass"]).toBe("anon");
+    expect(typeof obj["ipHash"]).toBe("string");
+    expect(obj["xffEntries"]).toBe(2);
+    expect(obj["platformHeader"]).toBe(true);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("203.0.113.95");
+  });
+});

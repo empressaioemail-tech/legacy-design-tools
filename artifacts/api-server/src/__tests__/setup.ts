@@ -25,6 +25,7 @@ import {
 import { ctx } from "./test-context";
 import { sessionMiddleware } from "../middlewares/session";
 import { userRateLimitMiddleware } from "../middlewares/userRateLimit";
+import { browserProxyEndUserMiddleware } from "../middlewares/browserProxyEndUser";
 
 /**
  * Tables that the api-server tests touch. CASCADE handles FK chains, so
@@ -357,6 +358,9 @@ export async function buildTestApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(sessionMiddleware);
+  // Mirror app.ts: browser-proxy end-user identity sits between the session
+  // and per-user metering.
+  app.use(browserProxyEndUserMiddleware);
   app.use(userRateLimitMiddleware);
   app.use("/api", router);
   return app;

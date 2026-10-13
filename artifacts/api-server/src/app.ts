@@ -12,6 +12,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { userRateLimitMiddleware } from "./middlewares/userRateLimit";
+import { browserProxyEndUserMiddleware } from "./middlewares/browserProxyEndUser";
 import { mountSpaStatic } from "./middlewares/spaStatic";
 import { stripeWebhookHandler } from "./routes/brokerageBilling";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
@@ -93,6 +94,10 @@ app.use(express.urlencoded({ extended: true }));
 // See `middlewares/session.ts` for the cookie shape and the
 // dev-only header overrides honored when NODE_ENV !== "production".
 app.use(sessionMiddleware);
+// Browser-proxy end-user identity: AFTER the session (it may replace it with
+// the proxied end user's own verified session, or force anonymous) and BEFORE
+// per-user metering, so a proxied signed-in user is metered as themselves.
+app.use(browserProxyEndUserMiddleware);
 app.use(userRateLimitMiddleware);
 
 app.use("/api", router);

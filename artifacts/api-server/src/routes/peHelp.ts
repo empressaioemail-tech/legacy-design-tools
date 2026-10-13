@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "../lib/logger";
 import { PE_HELP_WIDGET_SYSTEM_PROMPT } from "../lib/peHelpWidgetPrompt";
-import { checkAndCountHelpRequest } from "../lib/peHelpLimiter";
+import { checkAndCountHelpRequest, describeHelpIpInputs } from "../lib/peHelpLimiter";
 
 /**
  * POST /api/pe-help/chat — the Smart Site Help widget's backend (P-118 /
@@ -109,6 +109,7 @@ router.post("/pe-help/chat", async (req: Request, res: Response) => {
         reason: decision.reason,
         callerClass: decision.caller.cls,
         ipHash: decision.caller.cls === "anon" ? decision.caller.ipHash : undefined,
+        ...describeHelpIpInputs(req),
       },
       "pe-help: refused before model call",
     );
@@ -126,6 +127,17 @@ router.post("/pe-help/chat", async (req: Request, res: Response) => {
 
   const parse = HelpChatBody.safeParse(req.body);
   if (!parse.success) {
+    // Counted above already; log it so a zero-cost probe is visible.
+    logger.info(
+      {
+        event: "pe_help_chat",
+        outcome: "invalid",
+        callerClass: decision.caller.cls,
+        ipHash: decision.caller.cls === "anon" ? decision.caller.ipHash : undefined,
+        ...describeHelpIpInputs(req),
+      },
+      "pe-help: invalid body (counted, no model call)",
+    );
     res.status(400).json({
       error: "invalid_request",
       message: "Body must be { message: string, history?: {role, content}[] }",
