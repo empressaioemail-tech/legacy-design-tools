@@ -224,6 +224,54 @@ describe("card plain words", () => {
     expect(flood?.touchesSfhaEdge).toBe(true);
   });
 
+  it("THE 908 PINE ST CASE: overlaysFromDraw keeps a null wire isSfha as null -- never collapses unknown to false", () => {
+    const rows = overlaysFromDraw({
+      overlays: [
+        {
+          id: "flood",
+          state: "present",
+          label: "Zone D",
+          sfha: null,
+          zones: [
+            // The legacy row this bug is about: no stated SFHA_TF (the wire
+            // carries `isSfha: null`) and a non-decisive zone letter (D).
+            { zone: "D", subtype: null, isSfha: null, floodway: false, bfe: null, areaShare: null },
+          ],
+        },
+      ],
+    });
+    const flood = rows.find((r) => r.id === "flood");
+    expect(flood?.zones).toHaveLength(1);
+    expect(flood?.zones?.[0].isSfha).toBeNull();
+  });
+
+  it("MUTATION CHECK: putting back the old `z.isSfha === true` coercion fails this test -- a null wire value must survive as null", () => {
+    const wireZones = [{ zone: "D", subtype: null, isSfha: null, floodway: false, bfe: null, areaShare: null }];
+    // The fix (current panel-lib.ts behavior, exercised through the public API):
+    const rows = overlaysFromDraw({ overlays: [{ id: "flood", state: "present", label: "Zone D", zones: wireZones }] });
+    const fixedIsSfha = rows.find((r) => r.id === "flood")?.zones?.[0].isSfha;
+    expect(fixedIsSfha).toBeNull();
+    // The bug this replaces (panel-lib.ts:3081 before this PR, reproduced
+    // inline so this test documents and proves the regression it fixes):
+    const oldBuggyCoercion = wireZones.map((z) => ({ ...z, isSfha: z.isSfha === true }));
+    expect(oldBuggyCoercion[0].isSfha).toBe(false); // the old bug: null -> false
+    expect(oldBuggyCoercion[0].isSfha).not.toBe(fixedIsSfha); // proves the two disagree
+  });
+
+  it("a wire isSfha of exactly false still reads as false (not weakened to null)", () => {
+    const rows = overlaysFromDraw({
+      overlays: [
+        {
+          id: "flood",
+          state: "present",
+          label: "Zone X",
+          zones: [{ zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: null }],
+        },
+      ],
+    });
+    expect(rows.find((r) => r.id === "flood")?.zones?.[0].isSfha).toBe(false);
+  });
+
   it("does not draw an unknown pipeline as absent", () => {
     const row: OverlayRow = {
       id: "pipeline",

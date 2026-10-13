@@ -287,7 +287,7 @@ function zoneShareClauses(zones: FloodHazardFactPresent["zones"]): string {
  * ships so the sliver is never hidden either.
  */
 function sliverEdgeSentence(fact: FloodHazardFactPresent): string {
-  const edgeZone = fact.zones.find((z) => z.isSfha);
+  const edgeZone = fact.zones.find((z) => z.isSfha === true);
   const name = edgeZone?.zone?.trim() || fact.floodZone || "a mapped SFHA zone";
   return (
     `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
@@ -321,7 +321,18 @@ export function summarizeFloodZoneExposure(
   // CONTRACT_RULES.md breach, same rule the map already honors).
   const multiZone = fact.zones.length > 1 ? ` Zones on this parcel: ${zoneShareClauses(fact.zones)}.` : "";
 
-  if (fact.inSpecialFloodHazardArea) {
+  // 2026-10-12 tristate fix: `null` is genuinely unknown (no stated SFHA_TF
+  // and a non-decisive zone letter) -- never folded into the "outside the
+  // SFHA" prose below, which would silently turn "unknown" into "no".
+  if (fact.inSpecialFloodHazardArea === null) {
+    return (
+      `Mapped FEMA flood zone ${fact.floodZone} does not state a Special Flood Hazard Area ` +
+      "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+      `not treated as 'in' and not treated as 'outside' the SFHA.${multiZone}`
+    );
+  }
+
+  if (fact.inSpecialFloodHazardArea === true) {
     const bfe =
       typeof fact.baseFloodElevation === "number"
         ? ` Base flood elevation ${fact.baseFloodElevation} ft.`
@@ -435,7 +446,7 @@ export function summarizeParcelRecordFloodZoneExposure(
     fact.zones.length > 1 ? ` Zones on this parcel: ${parcelRecordZoneShareClauses(fact.zones)}.` : "";
 
   if (touchesSfhaEdge) {
-    const edgeZone = fact.zones.find((z) => resolveIsSfha(z));
+    const edgeZone = fact.zones.find((z) => resolveIsSfha(z) === true);
     const name = edgeZone?.zone?.trim() || zoneRaw;
     return (
       `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
@@ -449,10 +460,21 @@ export function summarizeParcelRecordFloodZoneExposure(
       `The floodway carries the most restrictive federal and local development standards.${multiZone}`
     );
   }
-  if (inSfha) {
+  if (inSfha === true) {
     return (
       `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
       `(1% annual-chance floodplain).${bfe}${multiZone}`
+    );
+  }
+  // 2026-10-12 tristate fix: `null` is genuinely unknown (no stated SFHA_TF
+  // and a non-decisive zone letter across every qualifying zone) -- never
+  // folded into the "outside the SFHA" prose below, which would silently
+  // turn "unknown" into "no".
+  if (inSfha === null) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} does not state a Special Flood Hazard Area ` +
+      "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+      `not treated as 'in' and not treated as 'outside' the SFHA.${multiZone}`
     );
   }
   return (
@@ -475,8 +497,20 @@ function composeFloodBriefSectionFromParcelRecord(
   fact: ParcelRecordFloodValue | ParcelRecordFloodAbsentVerified,
 ): BriefSectionParts {
   if (fact.state === "value") {
+    // 2026-10-12 tristate fix: `data.zones[*].isSfha` must agree with the
+    // map/card overlay's resolved value for the SAME row -- both now call
+    // the SAME `resolveIsSfha` (`resolveZoneIsSfha`) rather than this
+    // section exposing the row's raw, unresolved SFHA_TF flag while the
+    // overlay exposes a resolved one (the exact "brief says null, overlay
+    // says false" disagreement this fixes). `resolveIsSfha` is idempotent on
+    // an already-boolean `isSfha`, so this is a pure widening of what this
+    // section already claims, never a narrower one.
+    const resolvedFact: ParcelRecordFloodValue = {
+      ...fact,
+      zones: fact.zones.map((z) => ({ ...z, isSfha: resolveIsSfha(z) })),
+    };
     const posture = withCitationPosture({
-      data: fact,
+      data: resolvedFact,
       // parcel_record's flood companion carries provenance (method, source
       // vintage) rather than a clickable URL; urlsFrom only recognizes real
       // http(s) URLs, so this is honestly empty, not a citation we chose to

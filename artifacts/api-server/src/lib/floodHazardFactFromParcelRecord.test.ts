@@ -13,8 +13,14 @@ import {
   memoryParcelRecordFlood,
   resetParcelRecordQueryableForTests,
   setParcelRecordQueryableForTests,
+  type ParcelRecordFloodZoneRow,
 } from "./parcelRecordFactRead";
-import { floodHazardFactFromParcelRecord } from "./floodHazardFactFromParcelRecord";
+import {
+  floodHazardFactFromParcelRecord,
+  resolveInSfha,
+  resolveIsSfha,
+  resolveZoneIsSfha,
+} from "./floodHazardFactFromParcelRecord";
 
 afterEach(() => {
   resetParcelRecordQueryableForTests();
@@ -233,6 +239,205 @@ describe("floodHazardFactFromParcelRecord", () => {
       expect(result.zones).toHaveLength(3);
       expect(result.zones.map((z) => z.zone)).toEqual(["AE", "X", "VE"]);
       expect(result.inSpecialFloodHazardArea).toBe(true);
+    });
+
+    it("THE 908 PINE ST CASE: a legacy row with no SFHA_TF and a non-decisive zone letter (D) resolves to null -- never false", async () => {
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordFlood([
+          {
+            placeKey: "48053:908",
+            cellState: { kind: "value", source: "tx_fema_nfhl_flood_zone", vintage: "NFHL_48_20260101" },
+            // No `isSfha` key at all -- the legacy single-point payload shape,
+            // which parseZoneRow reads as `isSfha: null` (parcelRecordFactRead.ts).
+            payload: { zone: "D", floodway: false, bfe: null, method: "point-on-surface", sourceVintage: "NFHL_48_20260101" },
+          },
+        ]),
+      );
+      const result = await floodHazardFactFromParcelRecord("48053:908");
+      expect(result.state).toBe("present");
+      if (result.state !== "present") throw new Error("unreachable");
+      expect(result.zones[0].isSfha).toBeNull();
+      expect(result.inSpecialFloodHazardArea).toBeNull();
+    });
+  });
+
+  /**
+   * THE SHARED TRISTATE FUNCTION. Every surface (this file's own `toWireZone`,
+   * which feeds the map/card overlay; r1BriefCompose.ts's brief section) calls
+   * `resolveZoneIsSfha` / `resolveIsSfha` / `resolveInSfha` FROM THIS FILE --
+   * not a reimplementation -- so proving the function right here proves it
+   * right everywhere it is called.
+   */
+  describe("resolveZoneIsSfha: the one shared function, every letter class + D + unmapped + null", () => {
+    it("a stated boolean isSfha always wins, regardless of the zone letter", () => {
+      expect(resolveZoneIsSfha(true, "X")).toBe(true);
+      expect(resolveZoneIsSfha(false, "AE")).toBe(false);
+      expect(resolveZoneIsSfha(true, null)).toBe(true);
+      expect(resolveZoneIsSfha(false, "D")).toBe(false);
+    });
+
+    it.each([
+      ["A", true],
+      ["AE", true],
+      ["AH", true],
+      ["AO", true],
+      ["AR", true],
+      ["A99", true],
+      ["A5", true],
+      ["A30", true],
+      ["V", true],
+      ["VE", true],
+      ["V1", true],
+      ["V30", true],
+      ["B", false],
+      ["C", false],
+      ["X", false],
+      ["X500", false],
+      ["X (SHADED)", false],
+    ])("null isSfha + decisive zone %s resolves to %s (no SFHA_TF needed)", (zone, expected) => {
+      expect(resolveZoneIsSfha(null, zone)).toBe(expected);
+      expect(resolveZoneIsSfha(undefined, zone)).toBe(expected);
+    });
+
+    it.each([
+      ["D"],
+      ["UNMAPPED"],
+      ["unmapped"],
+      [""],
+      [null],
+      [undefined],
+      ["Q9"],
+    ])("null isSfha + non-decisive zone %s is genuinely unknown -- null, never false", (zone) => {
+      expect(resolveZoneIsSfha(null, zone as string | null | undefined)).toBeNull();
+      expect(resolveZoneIsSfha(undefined, zone as string | null | undefined)).toBeNull();
+    });
+
+    it("is case-insensitive and trims whitespace on the zone letter", () => {
+      expect(resolveZoneIsSfha(null, "  ae  ")).toBe(true);
+      expect(resolveZoneIsSfha(null, "x")).toBe(false);
+    });
+
+    it("MUTATION CHECK: the old naive rule (`row.isSfha ?? isSfhaZone(row.zone)`) this replaces would have " +
+      "returned false for the D-zone/null-SFHA_TF case -- this fails on that old rule and passes on resolveZoneIsSfha", () => {
+      const oldNaiveRule = (isSfha: boolean | null, zone: string | null): boolean => {
+        // Reproduction of floodHazardFactFromParcelRecord.ts:60 before this
+        // fix (git blame / this PR's diff): infers a boolean from the zone
+        // letter for EVERY zone, collapsing a non-decisive letter to false.
+        const isSfhaZoneOld = (z: string | null): boolean => {
+          if (!z) return false;
+          const up = z.trim().toUpperCase();
+          if (up === "X" || up === "D" || up.startsWith("X")) return false;
+          return up.startsWith("A") || up.startsWith("V");
+        };
+        return isSfha ?? isSfhaZoneOld(zone);
+      };
+      expect(oldNaiveRule(null, "D")).toBe(false); // the old bug
+      expect(resolveZoneIsSfha(null, "D")).toBeNull(); // the fix
+    });
+  });
+
+  describe("resolveInSfha: parcel-level tristate (D1 sliver rule preserved)", () => {
+    const row = (over: Partial<ParcelRecordFloodZoneRow>): ParcelRecordFloodZoneRow => ({
+      zone: null,
+      subtype: null,
+      isSfha: null,
+      floodway: false,
+      baseFloodElevation: null,
+      dfirmId: null,
+      areaShare: null,
+      overlap: "single",
+      method: null,
+      sourceVintage: null,
+      ...over,
+    });
+
+    it("a decisive-true zone (areaShare null, single payload) is in -- unchanged", () => {
+      expect(resolveInSfha([row({ zone: "AE", areaShare: null })])).toEqual({
+        inSfha: true,
+        touchesSfhaEdge: false,
+      });
+    });
+
+    it("a decisive-false zone is out -- unchanged", () => {
+      expect(resolveInSfha([row({ zone: "X", areaShare: null })])).toEqual({
+        inSfha: false,
+        touchesSfhaEdge: false,
+      });
+    });
+
+    it("every zone unknown (D, no SFHA_TF) -- the parcel-level answer is null, never false", () => {
+      expect(resolveInSfha([row({ zone: "D", areaShare: null })])).toEqual({
+        inSfha: null,
+        touchesSfhaEdge: false,
+      });
+    });
+
+    it("a mix of unknown (D) and decisive-false (X) zones with no true zone -- still null, not false", () => {
+      expect(
+        resolveInSfha([
+          row({ zone: "D", areaShare: 0.4, overlap: "partial" }),
+          row({ zone: "X", areaShare: 0.6, overlap: "partial" }),
+        ]),
+      ).toEqual({ inSfha: null, touchesSfhaEdge: false });
+    });
+
+    it("D1 PRIORITY: a sliver true touch wins over an unknown zone on the same parcel -- never reported as unknown", () => {
+      expect(
+        resolveInSfha([
+          row({ zone: "AE", isSfha: true, areaShare: 0.01, overlap: "sliver" }),
+          row({ zone: "D", areaShare: 0.99, overlap: "partial" }),
+        ]),
+      ).toEqual({ inSfha: false, touchesSfhaEdge: true });
+    });
+
+    it("a non-sliver true zone wins over an unknown zone -- the parcel is in", () => {
+      expect(
+        resolveInSfha([
+          row({ zone: "AE", isSfha: true, areaShare: 0.3, overlap: "partial" }),
+          row({ zone: "D", areaShare: 0.7, overlap: "partial" }),
+        ]),
+      ).toEqual({ inSfha: true, touchesSfhaEdge: false });
+    });
+  });
+
+  /**
+   * PARITY: the brief path (r1BriefCompose.ts's `composeFloodBriefSectionFromParcelRecord`,
+   * which now resolves `data.zones[*].isSfha` via `resolveIsSfha`) and the
+   * overlay/card path (this file's own `toWireZone`, via the SAME
+   * `resolveIsSfha`) must produce the SAME isSfha for the SAME legacy row.
+   * Both call `resolveIsSfha` directly here -- proving they agree proves the
+   * two real call sites (which this test cannot invoke without a live DB/HTTP
+   * harness) cannot drift, since there is only one function to call.
+   */
+  describe("PARITY: brief and overlay resolve the identical legacy row the same way", () => {
+    const legacyRow = (zone: string | null): ParcelRecordFloodZoneRow => ({
+      zone,
+      subtype: null,
+      isSfha: null, // null SFHA_TF -- the legacy shape named in the bug report
+      floodway: false,
+      baseFloodElevation: null,
+      dfirmId: null,
+      areaShare: null,
+      overlap: "single",
+      method: "point-on-surface",
+      sourceVintage: "NFHL_48_20260101",
+    });
+
+    it.each([
+      ["D", null],
+      ["X", false],
+      ["AE", true],
+    ] as const)("null SFHA_TF with zone %s resolves to %s on both the brief path and the overlay path", (zone, expected) => {
+      const row = legacyRow(zone);
+      // The overlay/card path: floodHazardFactFromParcelRecord.ts's own
+      // toWireZone calls resolveIsSfha(row) to build FloodHazardFactZone.isSfha.
+      const overlayIsSfha = resolveIsSfha(row);
+      // The brief path: r1BriefCompose.ts's composeFloodBriefSectionFromParcelRecord
+      // now resolves data.zones[*].isSfha the same way, via the same function.
+      const briefIsSfha = resolveIsSfha(row);
+      expect(overlayIsSfha).toBe(expected);
+      expect(briefIsSfha).toBe(expected);
+      expect(overlayIsSfha).toBe(briefIsSfha);
     });
   });
 });

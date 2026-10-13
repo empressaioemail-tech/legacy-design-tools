@@ -10,6 +10,7 @@ import {
   type FloodHazardFactRefusal,
 } from "../lib/floodHazardFactRead";
 import type { ParcelRecordFloodRead } from "../lib/parcelRecordFactRead";
+import { resolveIsSfha } from "../lib/floodHazardFactFromParcelRecord";
 import {
   buildR1Brief,
   summarizeFloodZoneExposure,
@@ -423,6 +424,79 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     ],
   };
 
+  // 2026-10-12 tristate fix: `data.zones[*].isSfha` is now RESOLVED (via the
+  // same `resolveIsSfha` the map/card overlay uses), not the row's raw,
+  // unresolved SFHA_TF flag -- that is the fix this PR makes (previously the
+  // brief kept this row's `isSfha: null` verbatim while the overlay resolved
+  // zone X to `false` for the SAME row; now both agree). Zone X is decisive
+  // (never SFHA), so the resolved value here is `false`, not the fixture's
+  // raw stated `null`.
+  const parcelRecordValueAsPresent = parcelRecordValue as Extract<
+    ParcelRecordFloodRead,
+    { state: "value" }
+  >;
+  const resolvedParcelRecordValue: ParcelRecordFloodRead = {
+    ...parcelRecordValueAsPresent,
+    zones: [{ ...parcelRecordValueAsPresent.zones[0], isSfha: false }],
+  };
+
+  /**
+   * THE 908 PINE ST PARITY TEST (end-to-end through the real `buildR1Brief`
+   * entry point, the SAME function `propertyExplorer.ts`'s `assembleNodeBriefBody`
+   * calls). For a legacy row with no SFHA_TF, the brief's served
+   * `data.zones[0].isSfha` must equal what the map/card overlay's own
+   * `floodHazardFactFromParcelRecord.ts` resolves for the IDENTICAL row via
+   * `resolveIsSfha` -- the exact function the overlay's `toWireZone` calls.
+   * Before this fix the brief exposed the row's raw, unresolved `isSfha`
+   * (always `null` for a legacy row) while the overlay always resolved a
+   * boolean; this proves they now agree for every letter class this bug
+   * named: D (unknown), X (decisive false), AE (decisive true).
+   */
+  describe("PARITY: the brief's served data and the map/card overlay resolve a legacy row (null SFHA_TF) the same way", () => {
+    it.each([
+      ["D", null],
+      ["X", false],
+      ["AE", true],
+    ] as const)("zone %s with no stated SFHA_TF -> isSfha %s on both the brief's data and the overlay's resolver", (zone, expected) => {
+      const legacyRow: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+        state: "value",
+        source: "parcel_record",
+        placeKey: "48053:908",
+        floodZone: zone,
+        floodway: false,
+        baseFloodElevation: null,
+        method: "point-on-surface",
+        sourceVintage: "NFHL_48_20260101",
+        zones: [
+          {
+            zone,
+            subtype: null,
+            isSfha: null, // the legacy shape this bug report names: no SFHA_TF stated
+            floodway: false,
+            baseFloodElevation: null,
+            dfirmId: null,
+            areaShare: null,
+            overlap: "single",
+            method: "point-on-surface",
+            sourceVintage: "NFHL_48_20260101",
+          },
+        ],
+      };
+      const brief = buildR1Brief(
+        { baseFacts: { landUse: { code: "A1" } } },
+        null,
+        { parcelRecordFloodFact: legacyRow },
+      );
+      const floodSection = brief.sections.find((section) => section.id === "flood");
+      const briefIsSfha = (floodSection?.data as { zones: { isSfha: boolean | null }[] } | undefined)
+        ?.zones[0].isSfha;
+      const overlayIsSfha = resolveIsSfha(legacyRow.zones[0]);
+      expect(briefIsSfha).toBe(expected);
+      expect(overlayIsSfha).toBe(expected);
+      expect(briefIsSfha).toBe(overlayIsSfha);
+    });
+  });
+
   it("a parcel_record value wins over an atoms present fixture, and carries the reconciled zone/floodway/BFE in data", () => {
     const brief = buildR1Brief(
       { baseFacts: { landUse: { code: "A1" } } },
@@ -431,7 +505,7 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     );
     const flood = brief.sections.find((section) => section.id === "flood");
     expect(flood?.disposition).toBe("present");
-    expect(flood?.data).toEqual(parcelRecordValue);
+    expect(flood?.data).toEqual(resolvedParcelRecordValue);
     expect(flood?.data).not.toEqual(atomPresentFixture);
   });
 
@@ -509,7 +583,7 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     const flood = brief.sections.find((section) => section.id === "flood");
     expect(flood?.citationsDegraded).toBe(true);
     expect(flood).not.toHaveProperty("zoneExposureSummary");
-    expect(flood?.data).toEqual(parcelRecordValue);
+    expect(flood?.data).toEqual(resolvedParcelRecordValue);
   });
 
   it("absent-verified maps to disposition absent -- a real determination, never promoted past absent at section level (same rule as the atoms path's own typed absence)", () => {

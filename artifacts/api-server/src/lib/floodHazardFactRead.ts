@@ -52,7 +52,16 @@ export function floodHazardFactBindKeys(
 export type FloodHazardFactZone = {
   zone: string | null;
   subtype: string | null;
-  isSfha: boolean;
+  /**
+   * `null` when neither the writer's own SFHA_TF nor a decisive zone letter
+   * (A/V prefix true; B/C/X prefix false) can answer it -- D, "unmapped",
+   * blank, or any unrecognized code (2026-10-12 tristate fix, operator
+   * ruling D1 extended: genuinely unknown is never defaulted to false).
+   * See `floodHazardFactFromParcelRecord.ts`'s `resolveZoneIsSfha`, the one
+   * shared function every surface (brief, map/card overlay) resolves this
+   * through.
+   */
+  isSfha: boolean | null;
   floodway: boolean;
   bfe: number | null;
   areaShare: number | null;
@@ -65,14 +74,18 @@ export type FloodHazardFactPresent = {
   tried: FloodHazardFactBindKeys;
   entityId: string;
   /**
-   * Whole-parcel D1: true when any zone has `isSfha` and `areaShare > 0`,
-   * EXCEPT a qualifying zone whose own `overlap` is "sliver" -- that touch
-   * sets `touchesSfhaEdge` instead (below), never this flag, and never
-   * silently drops the touch. For the atom path and the old single-point
-   * payload (one zone, `overlap: "single"`), this is the same zone-letter
-   * derivation as always.
+   * Whole-parcel D1: true when any zone RESOLVES true (via
+   * `resolveZoneIsSfha`) with a real `areaShare > 0`, EXCEPT a qualifying
+   * zone whose own `overlap` is "sliver" -- that touch sets
+   * `touchesSfhaEdge` instead (below), never this flag, and never silently
+   * drops the touch. `null` (2026-10-12 tristate fix) when no zone resolves
+   * true but at least one qualifying zone resolves genuinely unknown (D,
+   * "unmapped", blank, or an unrecognized code with no stated SFHA_TF) --
+   * never defaulted to false. The atom path's own body always states a
+   * definite boolean (see `interpretBody` below), so this is only ever
+   * `null` for a parcel_record-sourced read.
    */
-  inSpecialFloodHazardArea: boolean;
+  inSpecialFloodHazardArea: boolean | null;
   /** Row 0 -- the largest-share zone. Kept for compatibility; a new reader should use `zones`. */
   floodZone: string | null;
   zoneSubtype: string | null;
