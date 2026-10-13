@@ -9,6 +9,7 @@ import {
   queryCompositeLayer,
   MOTIVATED_SELLER_SIGNAL_MODEL,
 } from "../brokerageGisCompositeLayers";
+import { femaFloodSeverity } from "../brokerageGisCompositeLayers";
 import * as gisLayers from "../brokerageGisLayers";
 import * as federalLayers from "../brokerageGisFederalLayers";
 import type { MotivatedSellerSignalDb } from "../brokerageMotivatedSellerSignals";
@@ -812,5 +813,21 @@ describe("deriveMotivatedSellerHeat (transparent public-record weighted-sum + ho
     expect(envelope.source.adapter).toContain("brokerage:composite");
     expect(JSON.stringify(envelope.payload)).not.toMatch(/0\.74/);
     expect(JSON.stringify(envelope.payload)).not.toMatch(/"propensity"/);
+  });
+});
+
+describe("femaFloodSeverity ranks by exact zone code", () => {
+  it.each([
+    ["VE", {}, 4],
+    ["V12", {}, 4],
+    ["AE", {}, 3],
+    ["A99", {}, 3],
+    ["AREA NOT INCLUDED", {}, 0],
+    ["OPEN WATER", {}, 1],
+    ["X", { ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" }, 2],
+    ["X", {}, 0],
+    ["D", {}, 1],
+  ])("%s %j -> %i", (zone, extra, rank) => {
+    expect(femaFloodSeverity({ FLD_ZONE: zone, ...extra })).toBe(rank);
   });
 });

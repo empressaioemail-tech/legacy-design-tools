@@ -27,6 +27,7 @@ import type {
   ParcelRecordFloodZoneRow,
 } from "./parcelRecordFactRead";
 import { resolveInSfha, resolveIsSfha } from "./floodHazardFactFromParcelRecord";
+import { classifyFemaZoneSfha } from "./femaZoneCode";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
 import type { EnvelopeDrawOutcome } from "./buildableEnvelope/envelopeDrawOutcome";
@@ -343,7 +344,7 @@ export function summarizeFloodZoneExposure(
     );
   }
 
-  if (zone === "X" || zone.startsWith("X")) {
+  if (zone === "X" || zone === "X500" || zone.startsWith("X ")) {
     if (subty.includes("0.2 PCT") || subty.includes("0.2%")) {
       return (
         `Mapped Zone ${fact.floodZone} with 0.2% annual-chance flood hazard` +
@@ -423,9 +424,17 @@ export function summarizeParcelRecordFloodZoneExposure(
         "The floodway carries the most restrictive federal and local development standards."
       );
     }
-    const zone = zoneRaw.toUpperCase();
-    const inSpecialFloodHazardArea = zone !== "X" && !zone.startsWith("X");
-    if (inSpecialFloodHazardArea) {
+    // Exact-code rule (femaZoneCode.ts): D / AREA NOT INCLUDED / OPEN WATER
+    // are unknown, never "in" (was: any letter but X).
+    const legacySfha = classifyFemaZoneSfha(zoneRaw);
+    if (legacySfha === null) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} does not state a Special Flood Hazard Area ` +
+        "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+        "not treated as 'in' and not treated as 'outside' the SFHA."
+      );
+    }
+    if (legacySfha === true) {
       return (
         `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
         `(1% annual-chance floodplain).${bfe}`

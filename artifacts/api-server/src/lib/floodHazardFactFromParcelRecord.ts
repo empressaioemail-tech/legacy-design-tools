@@ -41,13 +41,9 @@ import {
   type FloodHazardFactRead,
   type FloodHazardFactZone,
 } from "./floodHazardFactRead";
+import { classifyFemaZoneSfha } from "./femaZoneCode";
 
 export { FLOOD_RAIL_KEY };
-
-/** Decisive SFHA zone-letter prefixes: A, AE, AH, AO, AR, A99, A1-A30, V, VE, V1-V30. */
-const SFHA_DECISIVE_TRUE_PREFIXES = ["A", "V"] as const;
-/** Decisive NON-SFHA zone-letter prefixes: B, C, X (any subtype). */
-const SFHA_DECISIVE_FALSE_PREFIXES = ["B", "C", "X"] as const;
 
 /**
  * THE ONE SHARED FUNCTION (2026-10-12 tristate fix): every surface that
@@ -61,9 +57,9 @@ const SFHA_DECISIVE_FALSE_PREFIXES = ["B", "C", "X"] as const;
  *
  * - A stated boolean `isSfha` (the writer's own SFHA_TF) always wins --
  *   never second-guessed by a zone-letter heuristic.
- * - `null`/`undefined` infers ONLY from a DECISIVE zone letter: an A/V-
- *   prefixed code is SFHA (true); a B/C/X-prefixed code (any subtype) is
- *   NOT SFHA (false).
+ * - `null`/`undefined` infers ONLY from an EXACT zone code (femaZoneCode.ts):
+ *   A, AE, AH, AO, AR, A99, A1-A30, V, VE, V1-V30 is SFHA (true); B, C, X
+ *   (any subtype) is NOT SFHA (false). No prefix matching.
  * - Everything else -- D, "unmapped", blank, or any code this rule does not
  *   recognize -- is genuinely unknown and returns `null`. Never defaulted
  *   to false.
@@ -73,11 +69,7 @@ export function resolveZoneIsSfha(
   zone: string | null | undefined,
 ): boolean | null {
   if (typeof isSfha === "boolean") return isSfha;
-  const z = zone?.trim().toUpperCase();
-  if (!z) return null;
-  if (SFHA_DECISIVE_TRUE_PREFIXES.some((p) => z.startsWith(p))) return true;
-  if (SFHA_DECISIVE_FALSE_PREFIXES.some((p) => z.startsWith(p))) return false;
-  return null;
+  return classifyFemaZoneSfha(zone);
 }
 
 /**

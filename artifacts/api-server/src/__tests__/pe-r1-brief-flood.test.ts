@@ -530,6 +530,19 @@ describe("parcel_record flood preferred over the atoms path when earned", () => 
     expect(summary).not.toMatch(/Base flood elevation/);
   });
 
+  it("legacy single-point payload: AREA NOT INCLUDED and D read as unknown, never as 'in' the SFHA", () => {
+    for (const floodZone of ["AREA NOT INCLUDED", "D", "OPEN WATER"]) {
+      const summary = summarizeParcelRecordFloodZoneExposure({
+        ...parcelRecordValue,
+        floodZone,
+        floodway: false,
+        zones: parcelRecordValue.zones.map((z) => ({ ...z, areaShare: null })),
+      } as Extract<ParcelRecordFloodRead, { state: "value" }>);
+      expect(summary).toMatch(/status unknown/);
+      expect(summary).not.toMatch(/is in a Special Flood Hazard Area/);
+    }
+  });
+
   describe("CARD F2: whole-parcel flood prose", () => {
     const wholeParcelValue: Extract<ParcelRecordFloodRead, { state: "value" }> = {
       state: "value",
