@@ -109,7 +109,7 @@ describe("jurisdictionKeyFromParcelNode — Dashwood 48453:280210 (WDLL 2)", () 
 describe("jurisdictionKeyFromParcelNode declines the setback-refusal family, never throws it (W3 PR #805 review)", () => {
   const BURNET_NODE = "48053:12487"; // sample #12, City of Burnet
 
-  it("a Burnet parcel node with a Horseshoe-Bay-shaped district code declines to null, no throw -- both wired candidate cities refuse (MH-1 is unverified for Horseshoe Bay, unregistered for Marble Falls)", () => {
+  it("a Burnet parcel node with a Horseshoe-Bay-shaped district code declines to null, no throw -- both wired candidate cities refuse (MH-1 is source-pending for Horseshoe Bay, unregistered for Marble Falls)", () => {
     expect(() =>
       jurisdictionKeyFromParcelNode({
         parcelNodeId: BURNET_NODE,

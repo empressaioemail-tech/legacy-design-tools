@@ -148,6 +148,18 @@ export const txgioParcel = pgTable(
      * wired layer" (migration 0112).
      */
     zoningNoDistrictLayer: text("zoning_no_district_layer"),
+    /**
+     * The city layer's own GEOGRAPHIC SUB-AREA for this parcel, read from the SAME feature whose
+     * code was stamped into `zoning_district` (migration 0113, OPS-24 Burnet per-parcel setbacks,
+     * 2026-10-13). Written ONLY for a layer whose ZONING_LAYERS entry sets `subareaField` --
+     * today Horseshoe Bay, whose standards for one district code differ by the ordinance's
+     * geographic zone, and whose layer carries that zone as `SUBDIVISION` (PROPER, SOUTH,
+     * PENINSULA, ...). Read by lib/adapters' per-parcel setback resolver
+     * (burnet-parcel-setbacks.ts), which maps it to a zone through an explicit reviewed table.
+     * NULL on every other row (no such layer field, nothing stamped, or not re-stamped since 0113),
+     * and NULL means "zone unknown" -- the resolver declines SETBACK_ZONE_UNRESOLVED, never guesses.
+     */
+    zoningSubarea: text("zoning_subarea"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
     /**

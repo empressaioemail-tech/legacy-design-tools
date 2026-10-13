@@ -73,6 +73,8 @@ export interface ZoningPolygon {
    * Absent for every other layer, where the published code IS the district.
    */
   parse?: BaseCodeParse;
+  /** The layer's `subareaField` value on this polygon (Horseshoe Bay SUBDIVISION); absent otherwise. */
+  subarea?: string | null;
 }
 
 /**
@@ -88,6 +90,7 @@ export function buildZoningIndex(
     description?: string | null;
     geometry: GeoJsonGeometry | null | undefined;
     parse?: BaseCodeParse;
+    subarea?: string | null;
   }>,
 ): ZoningPolygon[] {
   const out: ZoningPolygon[] = [];
@@ -103,6 +106,7 @@ export function buildZoningIndex(
       geometry: f.geometry,
       bbox,
       parse: f.parse,
+      ...(f.subarea !== undefined ? { subarea: f.subarea } : {}),
     });
   }
   return out;
@@ -233,7 +237,7 @@ export function zoningCodeAtPoint(
   index: ZoningPolygon[],
   longitude: number,
   latitude: number,
-): { code: string; description?: string | null; parse?: BaseCodeParse } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse; subarea?: string | null } | null {
   const pointBbox: GeoBbox = {
     westLng: longitude,
     southLat: latitude,
@@ -247,6 +251,7 @@ export function zoningCodeAtPoint(
         code: poly.code,
         description: poly.description,
         parse: poly.parse,
+        ...(poly.subarea !== undefined ? { subarea: poly.subarea } : {}),
       };
     }
   }
@@ -317,7 +322,7 @@ export function isInterimDistrict(
 export function stampParcelZoning(
   index: ZoningPolygon[],
   parcelGeometry: GeoJsonGeometry,
-): { code: string; description?: string | null; parse?: BaseCodeParse } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse; subarea?: string | null } | null {
   const centroid = representativePoint(parcelGeometry);
   if (centroid && pointInGeometry(centroid.longitude, centroid.latitude, parcelGeometry)) {
     const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);
@@ -354,6 +359,8 @@ export interface ParcelIdZoningEntry {
   description?: string | null;
   parse?: BaseCodeParse;
   geometry: GeoJsonGeometry | null;
+  /** The feature's `subareaField` value (Horseshoe Bay SUBDIVISION); absent for a layer without one. */
+  subarea?: string | null;
 }
 
 /**
@@ -411,6 +418,7 @@ export function buildParcelIdIndex(
     parse?: BaseCodeParse;
     geometry?: GeoJsonGeometry | null;
     parcelIdDiscriminator?: string | null;
+    subarea?: string | null;
   }>,
   opts?: {
     /**
@@ -451,6 +459,7 @@ export function buildParcelIdIndex(
       description: f.description ?? null,
       parse: f.parse,
       geometry: f.geometry ?? null,
+      ...(f.subarea !== undefined ? { subarea: f.subarea } : {}),
     });
   }
   return out;

@@ -35,6 +35,7 @@
     "./local/summaries": "./src/local/summaries.ts",
     "./setbacks": "./src/local/setbacks/index.ts",
     "./setbacks/gate": "./src/local/setbacks/gate.ts",
+    "./setbacks/burnet-parcel": "./src/local/setbacks/burnet-parcel-setbacks.ts",
     "./arcgis": "./src/arcgis.ts",
     "./txCountyApn": "./src/txCountyApn.ts"
   },
