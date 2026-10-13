@@ -1,4 +1,12 @@
 /**
+ * ONE DOOR (WP-L, `_design/2026-10-13_one_door_build_spec.md`): SCHEDULED
+ * FOR DELETION at cutover step 5 ("after every county is `on` for a week:
+ * delete ... the LDT/engine slate copies"). The slate now lives in the reader
+ * (retrieval-api). This file still decides serving for counties in one-door
+ * `off` and `shadow` mode (the old path needs it); in `on` mode nothing reads
+ * it — the cortex facets and brief routes compose from the reader alone
+ * (`lib/oneDoor/`). Do not add pairs here for a county that is `on`.
+ *
  * The rail-scoped serve allowlist (F-01, PARCEL-B-READER,
  * `_decisions/2026-09-02_step7_consumer_c_then_b.md`).
  *

@@ -150,7 +150,9 @@ export function anchorFromFacetsBody(bodyText: string): AnchorOutcome {
   const body = asRecord(parsed);
   if (!body) return failed("anchor_body_not_json");
 
-  const fact = asRecord(body.cityLimitsFact);
+  // ONE DOOR `on` (WP-L): the facets body carries no cityLimitsFact; the same
+  // bake coordinate rides under `placement` (placement only, never a fact).
+  const fact = asRecord(body.cityLimitsFact) ?? asRecord(body.placement);
   if (!fact) return absent("city_limits_fact_absent");
 
   const point = asRecord(fact.queryPoint);

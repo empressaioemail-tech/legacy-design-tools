@@ -60,7 +60,22 @@ import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
   readBakedNodeFacetSnapshot,
+  readBakedPlacementQueryPoint,
 } from "./brokerageNodeFacets";
+import {
+  oneDoorEntitlementsFor,
+  oneDoorModeOf,
+  readOneDoorRecord,
+  recordHasFailedFact,
+  transportFailedRecord,
+} from "../lib/oneDoor/oneDoorReaderClient";
+import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
+import {
+  composeOneDoorBriefBody,
+  oneDoorShadowDiffRows,
+  oneDoorSitusLabel,
+  ONE_DOOR_SURFACE_RAILS,
+} from "../lib/oneDoor/oneDoorSurfaces";
 import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadParcelRecordFloodFact } from "../lib/parcelRecordFactRead";
 import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
@@ -96,6 +111,7 @@ import { attachCadRollOverlaysToFacets } from "../lib/structuralFactToFacetsWire
 import { parseParcelNodeId } from "../lib/parcelNodeId";
 import {
   tryAssembleParcelDrawFromReads,
+  tryAssembleGeometryOnlyParcelDraw,
   atomPathPending,
 } from "../lib/parcelDrawFromReads";
 import { tryComposeEnvelopeModelForDraw } from "../lib/buildableEnvelope/parcelDrawEnvelopeModel";
@@ -495,6 +511,81 @@ async function assembleNodeBriefBody(
   },
     exemptionDetailLevelForOwnerCoGate(grantsCadRollValuation),
   );
+}
+
+/**
+ * ONE DOOR (WP-L): the node-depth brief through the per-county one-door mode.
+ *
+ * - `off`: exactly `assembleNodeBriefBody` (today's path, byte-identical).
+ * - `shadow`: today's body is served unchanged; the reader's answer is diffed
+ *   against it off the response path (`oneDoorShadowDiff.ts`).
+ * - `on`: every fact is the reader's. No baked base facts (`onRecord`), no
+ *   atom or store fact reads, no LDT slate, no local absence wording. The
+ *   only other inputs are placement: the bake coordinate and the
+ *   boundary-edge geometry for the drawing's ring (there is no geometry rail
+ *   the reader serves yet, spec §6 gap 3), whose output carries no fact.
+ *
+ * `grantsCadRollValuation` is the END USER's `grantsOwnerCoGatedFields` grant
+ * (#813/#814), which is exactly what the reader's entitlement header carries.
+ */
+type OneDoorBriefOutcome =
+  | { kind: "body"; body: Record<string, unknown> | null; noStore: boolean }
+  | { kind: "parcel-not-found" };
+
+async function assembleNodeBriefOneDoor(
+  parcelNodeId: string,
+  grantsCadRollValuation: boolean,
+): Promise<OneDoorBriefOutcome> {
+  const read = await readOneDoorRecord(parcelNodeId, {
+    entitlements: oneDoorEntitlementsFor(grantsCadRollValuation),
+  });
+  const mode = oneDoorModeOf(read);
+  if (mode === "on") {
+    if (read.kind === "parcel-not-found") return { kind: "parcel-not-found" };
+    const record =
+      read.kind === "record"
+        ? read.record
+        : transportFailedRecord(parcelNodeId, ONE_DOOR_SURFACE_RAILS);
+    const [queryPoint, boundary] = await Promise.all([
+      readBakedPlacementQueryPoint(parcelNodeId).catch(() => null),
+      loadBoundaryEdgeFactAtom(parcelNodeId),
+    ]);
+    const draw = tryAssembleGeometryOnlyParcelDraw({
+      parcelNodeId,
+      label: oneDoorSitusLabel(record),
+      queryPoint,
+      boundary,
+    });
+    return {
+      kind: "body",
+      body: composeOneDoorBriefBody({
+        runId: buildR1RunId(parcelNodeId, record.readAt),
+        parcelNodeId,
+        record,
+        draw: (draw as Record<string, unknown> | undefined) ?? null,
+      }),
+      noStore: recordHasFailedFact(record),
+    };
+  }
+  const body = await assembleNodeBriefBody(parcelNodeId, grantsCadRollValuation);
+  if (mode === "shadow" && read.kind === "record") {
+    const record = read.record;
+    setImmediate(() => {
+      try {
+        enqueueOneDoorShadowDiffs(
+          oneDoorShadowDiffRows({
+            surface: "cortex-brief",
+            parcelNodeId,
+            record,
+            oldBody: body ?? {},
+          }),
+        );
+      } catch {
+        // shadow evidence is best-effort and never affects a response
+      }
+    });
+  }
+  return { kind: "body", body, noStore: false };
 }
 
 async function assembleStubBody(parcelNodeId: string) {
@@ -1382,15 +1473,21 @@ router.post(
         res.json(stub);
         return;
       }
-      const body = await assembleNodeBriefBody(
+      const outcome = await assembleNodeBriefOneDoor(
         parcelNodeId,
         await grantsCadRollValuationFor(parcelNodeId),
       );
-      if (!body) {
+      if (outcome.kind === "parcel-not-found") {
+        // ONE DOOR `on`: the reader's own distinct 404 (§2), not a bake miss.
+        res.status(404).json({ error: "parcel_not_found", parcelNodeId, parcelExists: false });
+        return;
+      }
+      if (!outcome.body) {
         await sendBriefMiss(res, parcelNodeId);
         return;
       }
-      res.json(body);
+      if (outcome.noStore) res.setHeader("Cache-Control", "no-store");
+      res.json(outcome.body);
       return;
     }
 
@@ -1405,11 +1502,13 @@ router.post(
         if (!isValidParcelNodeId(id)) {
           return { id, row: null };
         }
-        const row =
-          parsed.depth === "node"
-            ? await assembleNodeBriefBody(id, await grantsCadRollValuationFor(id))
-            : await assembleStubBody(id);
-        return { id, row };
+        if (parsed.depth === "node") {
+          const outcome = await assembleNodeBriefOneDoor(id, await grantsCadRollValuationFor(id));
+          return outcome.kind === "parcel-not-found"
+            ? { id, row: null, readerNotFound: true, noStore: false }
+            : { id, row: outcome.body, readerNotFound: false, noStore: outcome.noStore };
+        }
+        return { id, row: await assembleStubBody(id), readerNotFound: false, noStore: false };
       }),
     );
     // Each miss carries its reason (fix register C6). No existence probe runs
@@ -1420,10 +1519,15 @@ router.post(
       if (item.row) parcels.push(item.row);
       else {
         notFound.push(item.id);
-        notFoundReasons[item.id] = isValidParcelNodeId(item.id)
-          ? { reason: "baked_snapshot_not_found", parcelExists: "unmeasured" }
-          : { reason: "invalid_parcel_node_id", parcelExists: false };
+        notFoundReasons[item.id] = !isValidParcelNodeId(item.id)
+          ? { reason: "invalid_parcel_node_id", parcelExists: false }
+          : "readerNotFound" in item && item.readerNotFound
+            ? { reason: "parcel_not_found", parcelExists: false }
+            : { reason: "baked_snapshot_not_found", parcelExists: "unmeasured" };
       }
+    }
+    if (results.some((item) => "noStore" in item && item.noStore)) {
+      res.setHeader("Cache-Control", "no-store");
     }
     res.json({ parcels, notFound, notFoundReasons });
   },

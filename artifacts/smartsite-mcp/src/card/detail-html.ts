@@ -16,6 +16,7 @@ import {
   groundLayerHtml,
   groundPlan,
   landUseCustomerName,
+  oneDoorLandUseValue,
   mapboxAttributionHtml,
   nearestNeighborsListHtml,
   ringFit,
@@ -62,8 +63,11 @@ function displayState(paint: string): string {
 }
 
 function sectionValue(s: BriefSection): string {
+  // ONE DOOR `on` (WP-L): the reader's words, verbatim, for every non-value state.
+  if (typeof s.words === "string") return s.words;
   if (s.paint !== "present" || !s.data) return displayState(s.paint);
   const d = s.data;
+  if (s.oneDoorState && s.id === "land-use") return oneDoorLandUseValue(d) || displayState(s.paint);
   if (s.id === "zoning" && typeof d.district === "string") return d.district;
   if (s.id === "flood" && typeof d.floodZone === "string") return `Zone ${String(d.floodZone).toUpperCase()}`;
   if (s.id === "land-use") return landUseCustomerName(d) || displayState(s.paint);
@@ -109,6 +113,15 @@ function rowHtml(s: BriefSection, i: number): string {
 
 export function ownerDetailSectionHtml(owner: OwnerPanelDisplay | undefined | null): string {
   if (!owner) return "";
+  if (owner.kind === "words") {
+    // ONE DOOR `on` (WP-L): the reader's words for the owner state, verbatim.
+    return (
+      `<section class="ss-group" data-owner="words">` +
+      `<h3>${escapeHtml(OWNER_DETAIL_HEADING)}</h3>` +
+      `<div class="ss-owner-row" data-state="words"><span>${escapeHtml(owner.words)}</span></div>` +
+      `</section>`
+    );
+  }
   if (owner.kind === "gated") {
     return (
       `<section class="ss-group" data-owner="gated">` +
@@ -138,7 +151,13 @@ function panelHtml(model: PanelModel): string {
   const sections = model.sections ?? [];
   const used = new Set<string>();
   const groups = GROUPS.map((g) => {
-    const rows = sections.filter((s) => g.ids.includes(s.id) && s.paint === "present");
+    // ONE DOOR `on` (WP-L): a reader finding (not on record / not applicable)
+    // is an answer, printed in its group with the reader's words.
+    const rows = sections.filter(
+      (s) =>
+        g.ids.includes(s.id) &&
+        (s.paint === "present" || (typeof s.words === "string" && s.paint === "absent-verified")),
+    );
     for (const s of rows) used.add(s.id);
     if (!rows.length) return "";
     return `<section class="ss-group"><h3>${escapeHtml(g.title)}</h3>${rows.map((s, i) => rowHtml(s, i)).join("")}</section>`;

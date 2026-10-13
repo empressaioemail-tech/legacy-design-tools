@@ -325,3 +325,47 @@ export function tryAssembleParcelDrawFromReads(args: {
     return undefined;
   }
 }
+
+/**
+ * ONE DOOR `on` mode (WP-L). The parcel drawing with GEOMETRY ONLY: the ring
+ * and edges from the boundary-edge geometry, the frame anchor from the bake
+ * coordinate (placement, §1 "the bake stays only for search, tiles and
+ * placement"), and the label the caller read from the reader's situs rail.
+ *
+ * No fact rides on this draw: `attrs` is empty (no baked zoning / land use /
+ * CAD dollars / year built) and `overlays` is empty (every overlay label —
+ * flood, footprint, envelope, pipeline, well, special district — is a fact
+ * with local absence wording; in `on` mode those facts come from the reader's
+ * brief sections instead). The fact inputs below are inert placeholders that
+ * `assembleParcelDraw` requires and whose output is discarded.
+ */
+export function tryAssembleGeometryOnlyParcelDraw(args: {
+  parcelNodeId: string;
+  label: string | null;
+  queryPoint?: { latitude: number; longitude: number } | null;
+  boundary: BoundaryEdgeFactRead;
+}): ParcelDrawStub | undefined {
+  try {
+    const draw = assembleParcelDraw({
+      parcelNodeId: args.parcelNodeId,
+      label: args.label,
+      bakedAt: null,
+      countyFips: args.parcelNodeId.split(":")[0] ?? null,
+      zoning: null,
+      landUse: null,
+      yearBuilt: null,
+      anchor: anchorFromQueryPoint(args.queryPoint),
+      boundary: boundaryInput(args.boundary),
+      flood: { state: "refused" },
+      envelopeRefusalReason: "one-door-geometry-only",
+      envelopeModelled: null,
+      pipeline: { state: "refused" },
+      well: { state: "refused" },
+      specialDistrict: { state: "refused" },
+      buildingFootprint: null,
+    });
+    return { ...draw, attrs: {}, overlays: [] };
+  } catch {
+    return undefined;
+  }
+}

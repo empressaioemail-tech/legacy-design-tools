@@ -4,7 +4,14 @@
  * does not derive it.
  */
 
-import { customerDate, customerSitus, customerSource, landUseCustomerName, landUseNameFromCode } from "./card/panel-lib.js";
+import {
+  customerDate,
+  customerSitus,
+  customerSource,
+  landUseCustomerName,
+  landUseNameFromCode,
+  oneDoorLandUseValue,
+} from "./card/panel-lib.js";
 import { customerBriefReason, isMachineCustomerString } from "./customer-brief-reason.js";
 
 /** P-458's land-use table. The inline card does not keep a second copy. */
@@ -278,7 +285,92 @@ function stampFact(host: Record<string, unknown>, id: (typeof FACT_ORDER)[number
   return { ...next, detail: factDetail(sec, next.state) };
 }
 
+// ---------------------------------------------------------------------------
+// ONE DOOR `on` (WP-L). Every inline fact is the reader's: a value rendered
+// from the section's data, or the reader's `words` verbatim. No local absence
+// wording ("absent, verified", "Not on this result"), no local plan name
+// ("Solo plan"), no local land-use code table. A fact the reader did not
+// return is omitted rather than worded here.
+// ---------------------------------------------------------------------------
+
+/** True when this result's facts come from the one-door reader. */
+export function isOneDoorOn(host: Record<string, unknown>): boolean {
+  return host.oneDoorMode === "on";
+}
+
+const ONE_DOOR_INLINE_STATE: Record<string, InlineFactState> = {
+  value: "present",
+  "not-on-record": "absent-verified",
+  "not-applicable": "absent",
+  "not-loaded": "not-read",
+  held: "refused",
+  "plan-gated": "gated",
+  failed: "unknown",
+};
+
+const ONE_DOOR_LABELS: Record<(typeof FACT_ORDER)[number], string> = {
+  zoning: "Zoning",
+  "land-use": "Land use",
+  flood: "Flood",
+  "setbacks-envelope": "Setbacks",
+};
+
+function oneDoorValueText(id: (typeof FACT_ORDER)[number], data: Record<string, unknown> | null): string | null {
+  if (!data) return null;
+  if (id === "zoning") return str(data.district);
+  if (id === "land-use") return oneDoorLandUseValue(data);
+  if (id === "flood") {
+    const zone = str(data.floodZone) ?? str(data.zone);
+    if (zone) {
+      const point = str(data.method) === "point-on-surface" ? ", read at a point on the parcel" : "";
+      return `Zone ${zone.toUpperCase()}${point}`;
+    }
+    return str(data.value);
+  }
+  const front = feet(data.frontFt);
+  const side = feet(data.sideFt);
+  const rear = feet(data.rearFt);
+  const corner = feet(data.cornerFt);
+  if (!front && !side && !rear && !corner) return null;
+  const part = (n: string | null, word: string) => (n ? `${n} ft ${word}` : null);
+  return [part(front, "front"), part(side, "side"), part(rear, "rear"), part(corner, "corner")]
+    .filter((x): x is string => !!x)
+    .join(", ");
+}
+
+function oneDoorDetail(oneDoor: Record<string, unknown>, sec: Record<string, unknown>): string | undefined {
+  const source = asRecord(oneDoor.source);
+  const adapter = str(source?.adapter);
+  const named = adapter ? customerSource(adapter) : null;
+  const dated = dateLong(customerDate(str(sec.asOf) || str(source?.asOf) || str(source?.vintage)) || "");
+  const bits = [named, dated].filter((b): b is string => !!b);
+  return bits.length ? bits.join(". ") : undefined;
+}
+
+export function oneDoorFacts(host: Record<string, unknown>): InlineFact[] {
+  const out: InlineFact[] = [];
+  for (const id of FACT_ORDER) {
+    const sec = section(host, id);
+    const oneDoor = asRecord(sec?.oneDoor);
+    const state = str(oneDoor?.state);
+    if (!sec || !oneDoor || !state) continue;
+    const words = typeof oneDoor.words === "string" ? oneDoor.words : "";
+    const value = state === "value" ? oneDoorValueText(id, asRecord(sec.data)) : null;
+    const text = value ?? words;
+    if (!text) continue;
+    const detail = oneDoorDetail(oneDoor, sec);
+    out.push({
+      label: ONE_DOOR_LABELS[id],
+      value: text,
+      state: ONE_DOOR_INLINE_STATE[state] ?? "unknown",
+      ...(detail ? { detail } : {}),
+    });
+  }
+  return out;
+}
+
 export function fourFacts(host: Record<string, unknown>): InlineFact[] {
+  if (isOneDoorOn(host)) return oneDoorFacts(host);
   const byId: Record<(typeof FACT_ORDER)[number], InlineFact> = {
     zoning: zoningFact(host),
     "land-use": landUseFact(host),
@@ -319,6 +411,13 @@ function addressOf(host: Record<string, unknown>): string {
 }
 
 export function answerLineFromHost(host: Record<string, unknown>): string {
+  if (isOneDoorOn(host)) {
+    // ONE DOOR on: the reader's values and words, verbatim (no customer-reason rewrite).
+    const bits = oneDoorFacts(host)
+      .filter((f) => f.label !== "Setbacks")
+      .map((f) => `${f.label}: ${f.value}`);
+    return bits.length ? `${addressOf(host)}. ${bits.join(". ")}.` : `${addressOf(host)}.`;
+  }
   const facts = fourFacts(host).filter((f) => f.label !== "Setbacks");
   const bits = facts.map((f) => `${f.label} ${f.value}`);
   const line = `${addressOf(host)}. ${bits.join(". ")}.`;

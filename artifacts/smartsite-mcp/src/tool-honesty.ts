@@ -114,9 +114,10 @@ export function stripSavedPropertiesForExternal(
 }
 
 export type RunReportHonestyFields = {
-  reportKind: "R1-baked-snapshot";
+  /** ONE DOOR `on` (WP-L): `R1-one-door` when every fact came from the reader; no baked-snapshot label then. */
+  reportKind: "R1-baked-snapshot" | "R1-one-door";
   /** How the MCP server delivered the report (sync read). Distinct from cortex `mode`. */
-  reportReadMode: "baked-snapshot-read";
+  reportReadMode: "baked-snapshot-read" | "parcel-record-reader-read";
   async: false;
   parcelNodeId: string;
 };
@@ -139,6 +140,10 @@ export function buildRunReportEnvelope(
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if ((parsed as Record<string, unknown>).oneDoorMode === "on") {
+        honesty.reportKind = "R1-one-door";
+        honesty.reportReadMode = "parcel-record-reader-read";
+      }
       return {
         ...honesty,
         ...normalizeR1BodyForExternal(parsed as Record<string, unknown>, canSeeOwner),
@@ -612,6 +617,58 @@ export function stripValueHistoryDollarsForCaller<
 }
 
 /**
+ * ONE DOOR `on` (WP-L). The reader's gated rails (LDT #813's list). Defense in
+ * depth only, mirroring stripOwnerFactForCaller: the reader already projects
+ * these for the end user's entitlement, and a caller this server does not
+ * grant owner data never receives a gated VALUE from the `facts` map even if
+ * an upstream regression sends one. The reader's words are kept.
+ */
+export const ONE_DOOR_GATED_RAILS = [
+  "owner",
+  "exemptionCodes",
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+  "valueHistory",
+  "salesHistory",
+] as const;
+
+export const ONE_DOOR_PLAN_GATED_GUARD_WORDS = "Included in Studio";
+
+export function stripOneDoorGatedFactsForCaller<T extends Record<string, unknown>>(
+  body: T,
+  canSeeOwner: boolean,
+): T {
+  if (canSeeOwner) return body;
+  const facts = body.facts;
+  if (!facts || typeof facts !== "object" || Array.isArray(facts)) return body;
+  const next: Record<string, unknown> = { ...(facts as Record<string, unknown>) };
+  let changed = false;
+  for (const rail of ONE_DOOR_GATED_RAILS) {
+    const fact = next[rail];
+    if (!fact || typeof fact !== "object" || Array.isArray(fact)) continue;
+    const rec = fact as Record<string, unknown>;
+    if (rec.state !== "value" && !("value" in rec)) continue;
+    const { value: _dropped, ...rest } = rec;
+    // Guard copy of the reader's default plan-gated phrase (spec §2); only
+    // ever seen if the reader failed to project this rail itself.
+    next[rail] = { ...rest, state: "plan-gated", words: ONE_DOOR_PLAN_GATED_GUARD_WORDS };
+    changed = true;
+  }
+  return changed ? { ...body, facts: next } : body;
+}
+
+/** ONE DOOR `on`: the reader's words on a section, when it carries them. */
+function oneDoorWords(section: Record<string, unknown>): string | null {
+  const od = section.oneDoor;
+  if (!od || typeof od !== "object" || Array.isArray(od)) return null;
+  const rec = od as Record<string, unknown>;
+  if (rec.state === "value") return null;
+  return typeof rec.words === "string" && rec.words.trim() ? rec.words : null;
+}
+
+/**
  * Ensures MCP clients never see bare null section data without a disposition.
  * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
  * `draw` is optional; invalid stubs are omitted (fail closed).
@@ -621,8 +678,11 @@ export function normalizeR1BodyForExternal(
   canSeeOwner = false,
 ): Record<string, unknown> {
   const draw = sanitizeExternalDraw(body.draw);
-  const withDraw: Record<string, unknown> = stripValueHistoryDollarsForCaller(
-    stripOwnerFactForCaller({ ...body }, canSeeOwner),
+  const withDraw: Record<string, unknown> = stripOneDoorGatedFactsForCaller(
+    stripValueHistoryDollarsForCaller(
+      stripOwnerFactForCaller({ ...body }, canSeeOwner),
+      canSeeOwner,
+    ),
     canSeeOwner,
   );
   delete withDraw.draw;
@@ -648,20 +708,24 @@ export function normalizeR1BodyForExternal(
     const section = raw as Record<string, unknown>;
     const disposition = sectionDisposition(section);
     const id = typeof section.id === "string" ? section.id : undefined;
+    // ONE DOOR on (WP-L): the reader's words are the display text, verbatim.
+    const readerWords = oneDoorWords(section);
     // V4: every non-present facet gets guidance, not only setbacks-envelope
     // refused. A wire-supplied agentGuidance always wins (never overwritten).
     const agentGuidance =
       typeof section.agentGuidance === "string"
         ? section.agentGuidance
-        : disposition !== "present"
-          ? facetGuidance(id, disposition)
-          : undefined;
+        : readerWords
+          ? `The record says: "${readerWords}". Say that, and do not invent ${(id && FACET_TOPIC[id]) ?? GENERIC_FACET_TOPIC}.`
+          : disposition !== "present"
+            ? facetGuidance(id, disposition)
+            : undefined;
     return {
       ...section,
       data: section.data ?? null,
       disposition,
       // V3: the exact display string beside the machine code, additive.
-      dispositionDisplayText: WIRE_DISPOSITION_DISPLAY_TEXT[disposition],
+      dispositionDisplayText: readerWords ?? WIRE_DISPOSITION_DISPLAY_TEXT[disposition],
       ...(agentGuidance ? { agentGuidance } : {}),
     } as ExternalBriefSection;
   });

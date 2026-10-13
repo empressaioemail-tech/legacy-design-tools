@@ -297,6 +297,20 @@ import {
 } from "../middlewares/brokerageAuth";
 import { verifySessionToken } from "../lib/sessionToken";
 import {
+  oneDoorEntitlementsFor,
+  oneDoorModeOf,
+  readOneDoorRecord,
+  recordHasFailedFact,
+  transportFailedRecord,
+  type OneDoorRead,
+} from "../lib/oneDoor/oneDoorReaderClient";
+import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
+import {
+  composeOneDoorFacetsBody,
+  oneDoorShadowDiffRows,
+  ONE_DOOR_SURFACE_RAILS,
+} from "../lib/oneDoor/oneDoorSurfaces";
+import {
   extractEnvelopeBriefRefusal,
   type EnvelopeBriefRefusal,
 } from "../lib/envelopeBriefRefusal";
@@ -787,6 +801,98 @@ export async function loadBakedNodeFacetSnapshot(
   return read.kind === "snapshot" ? read.snapshot : null;
 }
 
+/**
+ * ONE DOOR (WP-L): PLACEMENT ONLY. The bake's rounded coordinate for this
+ * node, and nothing else from the snapshot row: `on` mode keeps the bake for
+ * placement (spec §1) and reads no baked fact. `null` when there is no tier-1
+ * row or the coordinate is unusable.
+ */
+export async function readBakedPlacementQueryPoint(
+  parcelNodeId: string,
+): Promise<{ longitude: number; latitude: number } | null> {
+  const rows = await db
+    .select({
+      latRounded: placeLayerSnapshots.latRounded,
+      lngRounded: placeLayerSnapshots.lngRounded,
+    })
+    .from(placeLayerSnapshots)
+    .where(
+      and(
+        eq(placeLayerSnapshots.adapterKey, TIER1_ADAPTER_KEY),
+        eq(placeLayerSnapshots.placeKey, placeKeyForNode(parcelNodeId)),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return usableCityLimitsQueryPoint(Number(row.lngRounded), Number(row.latRounded));
+}
+
+/** Test seam for the placement read (the route suites mock `db`). */
+let placementReader: (parcelNodeId: string) => Promise<{ longitude: number; latitude: number } | null> =
+  readBakedPlacementQueryPoint;
+export function setOneDoorPlacementReaderForTests(
+  next: ((parcelNodeId: string) => Promise<{ longitude: number; latitude: number } | null>) | null,
+): void {
+  placementReader = next ?? readBakedPlacementQueryPoint;
+}
+
+async function placementOrNull(
+  parcelNodeId: string,
+): Promise<{ longitude: number; latitude: number } | null> {
+  try {
+    return await placementReader(parcelNodeId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ONE DOOR `on` mode for the facets route: every fact from the reader, the
+ * bake only for the placement coordinate. A reader that is unreachable for an
+ * `on` county serves every surface fact as `failed` (never cached).
+ */
+async function serveOneDoorFacets(
+  res: Response,
+  parcelNodeId: string,
+  read: OneDoorRead,
+): Promise<void> {
+  if (read.kind === "parcel-not-found") {
+    res.status(404).json(
+      gtmErrorBody("no_coverage", "parcel-not-found", "No parcel on record for this node", {
+        oneDoorMode: "on",
+      }),
+    );
+    return;
+  }
+  const record =
+    read.kind === "record"
+      ? read.record
+      : transportFailedRecord(parcelNodeId, ONE_DOOR_SURFACE_RAILS);
+  const queryPoint = await placementOrNull(parcelNodeId);
+  if (recordHasFailedFact(record)) res.setHeader("Cache-Control", "no-store");
+  res.json(composeOneDoorFacetsBody({ parcelNodeId, record, placement: { queryPoint } }));
+}
+
+/** ONE DOOR `shadow` mode: diff what this response showed against the reader, off the response path. */
+function shadowFacetsAfterResponse(
+  read: OneDoorRead,
+  parcelNodeId: string,
+  oldBody: unknown,
+): void {
+  if (read.kind !== "record" || read.record.mode !== "shadow") return;
+  const record = read.record;
+  setImmediate(() => {
+    try {
+      enqueueOneDoorShadowDiffs(
+        oneDoorShadowDiffRows({ surface: "cortex-facets", parcelNodeId, record, oldBody }),
+      );
+    } catch {
+      // shadow evidence is best-effort and never affects a response
+    }
+  });
+}
+
 brokerageNodeFacetsRouter.get(
   "/node/:parcelNodeId/facets",
   async (req: Request, res: Response) => {
@@ -810,6 +916,16 @@ brokerageNodeFacetsRouter.get(
     }
 
     const grantsOwnerFact = await callerGrantsOwnerFact(req, parcelNodeId);
+    // ONE DOOR (WP-L): the reader decides the mode per request, read as the
+    // END USER (#813/#814 entitlement). `off` falls through to today's path
+    // unchanged; `on` never reaches the fan-out below.
+    const oneDoorRead = await readOneDoorRecord(parcelNodeId, {
+      entitlements: oneDoorEntitlementsFor(grantsOwnerFact),
+    });
+    if (oneDoorModeOf(oneDoorRead) === "on") {
+      await serveOneDoorFacets(res, parcelNodeId, oneDoorRead);
+      return;
+    }
     let bakedRead: BakedNodeFacetRead;
     let floodHazardFact;
     let landUseFactRaw;
@@ -961,6 +1077,7 @@ brokerageNodeFacetsRouter.get(
             { retirement: bakedRead.retirement },
           ),
         );
+        shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, {});
         return;
       }
       res.status(404).json(
@@ -970,10 +1087,11 @@ brokerageNodeFacetsRouter.get(
           "No baked facets for this parcel node",
         ),
       );
+      shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, {});
       return;
     }
 
-    res.json(
+    const servedBody =
       applyExemptionTypesServeToNodeFacetsResponse(
         enrichFacetsResponseWithRegistry({
       parcelNodeId,
@@ -1106,7 +1224,8 @@ brokerageNodeFacetsRouter.get(
       maxFootprintSqFtFact,
       }),
         exemptionDetailLevelForOwnerCoGate(grantsOwnerFact),
-      ),
-    );
+      );
+    res.json(servedBody);
+    shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, servedBody);
   },
 );

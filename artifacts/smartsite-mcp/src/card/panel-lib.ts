@@ -159,6 +159,15 @@ export type BriefSection = {
   agentGuidance?: string;
   paint: CellState;
   paintReason?: string;
+  /**
+   * ONE DOOR `on` (WP-L): the reader's state for this section's fact, and its
+   * words for every non-value state. When `words` is set it is the text the
+   * panel prints, verbatim, in place of the local state word and reason.
+   */
+  oneDoorState?: string;
+  words?: string;
+  /** ONE DOOR `on`: the reader's source adapter for this fact. */
+  oneDoorSource?: string | null;
 };
 
 export type RingPt = { x: number; y: number };
@@ -362,7 +371,9 @@ export type OwnerPanelDisplay =
       taxYear: number | null;
       sourceLabel: string | null;
     }
-  | { kind: "gated" };
+  | { kind: "gated" }
+  /** ONE DOOR `on` (WP-L): the reader's words for a non-value owner state, verbatim. */
+  | { kind: "words"; words: string };
 
 export const OWNER_DETAIL_HEADING = "Owner of record, county appraisal roll";
 export const OWNER_GATED_VALUE = "Studio plan";
@@ -2243,7 +2254,8 @@ export function sectionPaint(
 }
 
 /** F6: data.sourceAdapter, else refusal.producer, else a string data.provenance; never a guess. */
-export function sourceOf(s: Pick<BriefSection, "data" | "refusal">): string | null {
+export function sourceOf(s: Pick<BriefSection, "data" | "refusal"> & { oneDoorSource?: string | null }): string | null {
+  if (s.oneDoorSource) return s.oneDoorSource;
   const adapter = s.data ? stringOrNull(s.data.sourceAdapter) : null;
   if (adapter) return adapter;
   if (s.refusal && s.refusal.producer) return s.refusal.producer;
@@ -2259,6 +2271,32 @@ export function dateOnly(iso: string | null | undefined): string | null {
 
 export function stateWord(state: CellState): string {
   return STATE_WORDS[state];
+}
+
+/**
+ * The text a section's state prints as. ONE DOOR `on`: the reader's words,
+ * verbatim, for every non-value state. Otherwise the local state word.
+ */
+export function sectionStateText(s: Pick<BriefSection, "paint" | "words">): string {
+  return typeof s.words === "string" ? s.words : stateWord(s.paint);
+}
+
+/** The reason line a section prints. With reader words there is none: the words are the answer. */
+export function sectionReasonText(s: Pick<BriefSection, "reason" | "refusal" | "words">): string | null {
+  if (typeof s.words === "string") return null;
+  return s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+}
+
+/**
+ * ONE DOOR `on`: land use as the reader has it -- the description when on
+ * record, else the code, verbatim. No local code table.
+ */
+export function oneDoorLandUseValue(data: Record<string, unknown> | null | undefined): string | null {
+  if (!data) return null;
+  const description = typeof data.landUseDescription === "string" ? data.landUseDescription.trim() : "";
+  if (description) return description;
+  const code = typeof data.landUseCode === "string" ? data.landUseCode.trim() : "";
+  return code || null;
 }
 
 /** F1: one control per https citation, posting ui/open-link on click; degraded prints the text and never a link. */
@@ -2438,15 +2476,15 @@ export function overlayRowHtml(o: OverlayRow, i: number): string {
 
 /** F2: the flood row under the drawing, every value read off the flood section's data; a non-present section prints its state. */
 export function floodFactsHtml(s: BriefSection, i: number, overlaySfha?: boolean): string {
-  const head = `<span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="key">flood</span> <span class="lbl">${escapeHtml(s.title)}</span>`;
+  const head = `<span class="g ${glyphClass(s.paint)}" title="${escapeHtml(sectionStateText(s))}"></span> <span class="key">flood</span> <span class="lbl">${escapeHtml(s.title)}</span>`;
   const meta = metaHtml(s.asOf, sourceOf(s));
   const cites = citationHtml(s.citations, s.citationsDegraded);
   const ask = whyControlHtml("section", s.paint, { i: String(i) });
-  const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+  const reason = sectionReasonText(s);
   const why = reason ? reasonLineHtml("reason", reason) : "";
   const note = s.paintReason ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`) : "";
   if (s.paint !== "present") {
-    return `<div class="facts flood" data-flood-state="${s.paint}">${head} <span class="sw">${stateWord(s.paint)}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${meta}${why}${note}</div>`;
+    return `<div class="facts flood" data-flood-state="${s.paint}">${head} <span class="sw">${escapeHtml(sectionStateText(s))}</span>${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${meta}${why}${note}</div>`;
   }
   const d: Record<string, unknown> = s.data ? s.data : {};
   const str = (k: string): string => stringOrNull(d[k]) ?? UNSTATED;
@@ -2531,7 +2569,7 @@ export function reportHtml(sections: BriefSection[]): string {
   if (sections.length === 0) return `<div class="report" data-report="1"><p class="empty">${NO_BRIEF}</p></div>`;
   const rows = sections
     .map((s, i) => {
-      const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+      const reason = sectionReasonText(s);
       const cites = citationHtml(s.citations, s.citationsDegraded);
       const ask = whyControlHtml("section", s.paint, { i: String(i) });
       const note = s.paintReason ? reasonLineHtml("note", s.paintReason, `data-paint-reason="${escapeHtml(s.paintReason)}"`) : "";
@@ -2540,7 +2578,7 @@ export function reportHtml(sections: BriefSection[]): string {
       const subtypeHtml = subtype
         ? ` <span class="fsub" data-flood-subtype="${escapeHtml(subtype)}">${escapeHtml(subtype)}</span>`
         : "";
-      return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
+      return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${escapeHtml(sectionStateText(s))}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${escapeHtml(sectionStateText(s))}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
     })
     .join("");
   return `<div class="report" data-report="1"><div class="req">${REPORT_TOGGLE}</div>${rows}</div>`;
@@ -2818,7 +2856,7 @@ export function parcelFactSubheadHtml(sections: BriefSection[]): string {
       case "zoning":
         return typeof d.district === "string" ? d.district : null;
       case "land-use":
-        return landUseCustomerName(d);
+        return section.oneDoorState ? oneDoorLandUseValue(d) : landUseCustomerName(d);
       case "flood":
         return typeof d.floodZone === "string" ? `zone ${d.floodZone}` : null;
       default:
@@ -2845,7 +2883,7 @@ export function reportHtmlPartialDefault(sections: BriefSection[], open: boolean
     list
       .map((s) => {
         const i = sections.indexOf(s);
-        const reason = s.reason ? s.reason : s.refusal && s.refusal.reason ? s.refusal.reason : null;
+        const reason = sectionReasonText(s);
         const cites = citationHtml(s.citations, s.citationsDegraded);
         const ask = whyControlHtml("section", s.paint, { i: String(i) });
         const note = s.paintReason
@@ -2859,7 +2897,7 @@ export function reportHtmlPartialDefault(sections: BriefSection[], open: boolean
         const subtypeHtml = subtype
           ? ` <span class="fsub" data-flood-subtype="${escapeHtml(subtype)}">${escapeHtml(subtype)}</span>`
           : "";
-        return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${stateWord(s.paint)}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${stateWord(s.paint)}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
+        return `<div class="rsec" data-report-section="${escapeHtml(s.id)}" data-report-state="${s.paint}"><span class="g ${glyphClass(s.paint)}" title="${escapeHtml(sectionStateText(s))}"></span> <span class="rt">${escapeHtml(s.title)}</span> <span class="sw">${escapeHtml(sectionStateText(s))}</span>${subtypeHtml}${cites ? ` ${cites}` : ""}${ask ? ` ${ask}` : ""}${metaHtml(s.asOf, sourceOf(s))}${reason ? reasonLineHtml("reason", reason) : ""}${note}${guide}</div>`;
       })
       .join("");
   if (sections.length === 0) return `<div class="report" data-report="1"><p class="empty">${NO_BRIEF}</p></div>`;
@@ -2965,8 +3003,15 @@ export function sectionsFromBrief(host: Record<string, unknown>): BriefSection[]
       citationsDegraded: rec.citationsDegraded === true || (disposition === "present" && citations.length === 0),
       paint: painted.paint,
     };
+    const oneDoor = asRecord(rec.oneDoor);
+    const oneDoorState = oneDoor ? stringOrNull(oneDoor.state) : null;
+    if (oneDoor && oneDoorState) {
+      section.oneDoorState = oneDoorState;
+      if (oneDoorState !== "value" && typeof oneDoor.words === "string") section.words = oneDoor.words;
+      section.oneDoorSource = stringOrNull(asRecord(oneDoor.source)?.adapter);
+    }
     const reason = stringOrNull(rec.reason);
-    if (reason) section.reason = reason;
+    if (reason && section.words === undefined) section.reason = reason;
     const refusal = refusalFrom(rec.refusal);
     if (refusal) section.refusal = refusal;
     const summary = stringOrNull(rec.zoneExposureSummary);
@@ -3674,7 +3719,40 @@ export function ownerDisplayFrom(ownerFact: unknown): OwnerPanelDisplay | null {
   };
 }
 
+/**
+ * ONE DOOR `on` (WP-L): the owner row from the reader's `owner` fact. A
+ * value prints its name and mailing address; every other state prints the
+ * reader's words (e.g. its plan-gated phrase), never a local plan name.
+ */
+export function ownerDisplayFromOneDoor(ownerFact: unknown): OwnerPanelDisplay | null {
+  const rec = asRecord(ownerFact);
+  if (!rec) return null;
+  const state = stringOrNull(rec.state);
+  if (!state) return null;
+  if (state !== "value") {
+    return typeof rec.words === "string" && rec.words.trim() ? { kind: "words", words: rec.words } : null;
+  }
+  const value = asRecord(rec.value);
+  const name = value ? stringOrNull(value.ownerName) ?? stringOrNull(value.name) : stringOrNull(rec.value);
+  const mailingAddress = value
+    ? stringOrNull(value.ownerMailingAddress) ?? stringOrNull(value.mailingAddress)
+    : null;
+  if (!name && !mailingAddress) return null;
+  return {
+    kind: "present",
+    name: name ?? "",
+    mailingAddress: mailingAddress ?? "",
+    taxYear: value ? numberOrNull(value.taxYear) : null,
+    sourceLabel: customerSource(stringOrNull(asRecord(rec.source)?.adapter)),
+  };
+}
+
 function attachOwnerDisplay(model: PanelModel, rec: Record<string, unknown>): void {
+  if (rec.oneDoorMode === "on") {
+    const fromReader = ownerDisplayFromOneDoor(asRecord(rec.facts)?.owner);
+    if (fromReader) model.ownerDisplay = fromReader;
+    return;
+  }
   const owner = ownerDisplayFrom(rec.ownerFact);
   if (owner) model.ownerDisplay = owner;
 }
