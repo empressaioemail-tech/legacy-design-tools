@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "../lib/logger";
 import { PE_HELP_WIDGET_SYSTEM_PROMPT } from "../lib/peHelpWidgetPrompt";
+import { checkAndCountHelpRequest } from "../lib/peHelpLimiter";
 
 /**
  * POST /api/pe-help/chat — the Smart Site Help widget's backend (P-118 /
@@ -10,7 +11,15 @@ import { PE_HELP_WIDGET_SYSTEM_PROMPT } from "../lib/peHelpWidgetPrompt";
  * (allowlisted there as a browse-safe path; see apps/property-explorer/
  * api/spine.ts isCortexBrowsePathAllowed).
  *
- * DELIBERATELY UNGATED. This is a SEPARATE surface from
+ * DELIBERATELY UNAUTHENTICATED, BUT BOUNDED. Every accepted request is one
+ * paid model call, so the route is spend-capped (lib/peHelpLimiter.ts):
+ * per-IP window and daily caps and a global daily ceiling for anonymous
+ * callers, higher per-user caps for a verified signed-in session, all
+ * counted in Postgres and enforced BEFORE the model call (a refused request
+ * costs nothing). Input size, max_tokens and the request timeout are capped
+ * below. Anonymous visitors still get help; they just cannot run it up.
+ *
+ * This is a SEPARATE surface from
  * routes/brokerageBrief.ts's "/research/chat" (the per-property, tier-gated
  * chat wired to ChatTool.tsx). This route:
  *   - requires no session, no install id, no API key, no entitlement check
@@ -34,10 +43,21 @@ const HELP_UNAVAILABLE = `The assistant could not answer just now. Email us at $
 
 const router: IRouter = Router();
 
-const HISTORY_TURN_MAX_CHARS = 4000;
-const MESSAGE_MAX_CHARS = 4000;
+/**
+ * Model-work caps. The system prompt is ~11.5k chars; these bound the rest.
+ * A history turn may be one of our own earlier answers (up to max_tokens),
+ * so it is allowed more room than a visitor's question.
+ */
+export const MESSAGE_MAX_CHARS = 2000;
+export const HISTORY_TURN_MAX_CHARS = 3000;
+/** Whole request (message + every history turn). */
+export const TOTAL_INPUT_MAX_CHARS = 12000;
 /** Mirrors ChatTool.tsx's own "last-8-turn history window" convention. */
-const MAX_HISTORY_TURNS = 8;
+export const MAX_HISTORY_TURNS = 8;
+/** Hard ceiling on output per call; the client cannot raise it. */
+export const PE_HELP_MAX_TOKENS = 600;
+/** Per-call wall clock, and no SDK retries (a retry is a second paid call). */
+export const PE_HELP_TIMEOUT_MS = 25_000;
 
 const HelpChatBody = z.object({
   message: z.string().trim().min(1).max(MESSAGE_MAX_CHARS),
@@ -50,7 +70,13 @@ const HelpChatBody = z.object({
     )
     .max(MAX_HISTORY_TURNS)
     .optional(),
-});
+}).refine(
+  (b) =>
+    b.message.length +
+      (b.history ?? []).reduce((n, t) => n + t.content.length, 0) <=
+    TOTAL_INPUT_MAX_CHARS,
+  { message: `Total input exceeds ${TOTAL_INPUT_MAX_CHARS} characters` },
+);
 
 export type HelpChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -71,6 +97,33 @@ export function buildHelpWidgetMessages(
 }
 
 router.post("/pe-help/chat", async (req: Request, res: Response) => {
+  // Spend cap FIRST, before validation and before any model call. Counting
+  // invalid bodies too means a burst of bad requests is bounded the same way
+  // (and lets the caps be checked without spending a model call).
+  const decision = await checkAndCountHelpRequest(req);
+  if (!decision.ok) {
+    logger.warn(
+      {
+        event: "pe_help_chat",
+        outcome: "refused",
+        reason: decision.reason,
+        callerClass: decision.caller.cls,
+        ipHash: decision.caller.cls === "anon" ? decision.caller.ipHash : undefined,
+      },
+      "pe-help: refused before model call",
+    );
+    res.setHeader("Retry-After", String(decision.retryAfterSeconds));
+    const busy = decision.reason === "global_day" || decision.status === 503;
+    res.status(decision.status).json({
+      error: busy ? "help_busy" : "rate_limited",
+      retryAfterSeconds: decision.retryAfterSeconds,
+      message: busy
+        ? `Help is busy right now. Please try again later, or email us at ${HELP_SUPPORT_EMAIL}.`
+        : `You have sent a lot of questions. Please wait a bit and try again, or email us at ${HELP_SUPPORT_EMAIL}.`,
+    });
+    return;
+  }
+
   const parse = HelpChatBody.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({
@@ -83,12 +136,28 @@ router.post("/pe-help/chat", async (req: Request, res: Response) => {
   const { message, history } = parse.data;
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: PE_HELP_WIDGET_SYSTEM_PROMPT,
-      messages: buildHelpWidgetMessages(message, history),
-    });
+    const response = await anthropic.messages.create(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: PE_HELP_MAX_TOKENS,
+        system: PE_HELP_WIDGET_SYSTEM_PROMPT,
+        messages: buildHelpWidgetMessages(message, history),
+      },
+      { timeout: PE_HELP_TIMEOUT_MS, maxRetries: 0 },
+    );
+    // Spend visibility: one structured line per model call, by caller class.
+    logger.info(
+      {
+        event: "pe_help_chat",
+        outcome: "answered",
+        callerClass: decision.caller.cls,
+        ipHash: decision.caller.cls === "anon" ? decision.caller.ipHash : undefined,
+        userId: decision.caller.cls === "user" ? decision.caller.userId : undefined,
+        inputTokens: response.usage?.input_tokens,
+        outputTokens: response.usage?.output_tokens,
+      },
+      "pe-help: model call",
+    );
     const textBlock = response.content.find(
       (block): block is Extract<typeof block, { type: "text" }> =>
         block.type === "text",
