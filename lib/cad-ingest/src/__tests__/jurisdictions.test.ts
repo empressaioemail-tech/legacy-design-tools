@@ -196,7 +196,7 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     expect(j.setbackTables).toEqual([getSetbackTable("new-braunfels-tx")]);
   });
 
-  it("Burnet (48053, OPS-24 Phase 1): geometry-only county (no CAD parser, no bulk source) now carries two city zoning layers, no setback tables yet", () => {
+  it("Burnet (48053, OPS-24 Phase 1): geometry-only county (no CAD parser, no bulk source) now carries two city zoning layers and, since pack E, Marble Falls' setback table", () => {
     const j = getJurisdictionConfig("48053");
     expect(j).toBeDefined();
     if (!j) throw new Error("expected Burnet");
@@ -223,12 +223,12 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       "marble-falls-tx",
       "horseshoe-bay-tx",
     ]);
-    // No SETBACK_TABLES entry exists for either Burnet city yet — the
-    // Gate 2 edition-currency check (county-edition-currency.ts) throws its
-    // own named refusal ahead of this lookup for every Burnet jurisdiction
-    // key, so the empty setback facet here is a separate, already-handled
-    // fact, not a silent gap this registration leaves open.
-    expect(j.setbackTables).toBeUndefined();
+    // Pack E (2026-10-13): marble-falls-tx now has a SETBACK_TABLES entry
+    // (the districts its register clears). horseshoe-bay-tx still has none —
+    // every stamped Horseshoe Bay code refuses in the Gate 2 edition-currency
+    // check (county-edition-currency.ts) ahead of this lookup.
+    expect(j.setbackTables).toEqual([getSetbackTable("marble-falls-tx")]);
+    expect(getSetbackTable("horseshoe-bay-tx")).toBeNull();
   });
 
   it("trims surrounding whitespace on the fips key", () => {

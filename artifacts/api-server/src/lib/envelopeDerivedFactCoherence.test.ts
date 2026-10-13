@@ -139,16 +139,18 @@ describe("P-445 envelope-derived fact coherence", () => {
  * throw.
  */
 describe("lookUpEnvelopeTableRow declines the setback-refusal family by code, never throws it (W3 PR #805 review)", () => {
-  it("a Marble Falls parcel (ENZ.2, SETBACK_EDITION_UNVERIFIED after the W3 register downgrade) declines, no throw, and carries the code onto the row", () => {
-    expect(() => lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2")).not.toThrow();
-    const row = lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2");
+  // Pack E (2026-10-13) made Marble Falls ENZ.2 a served row; Horseshoe Bay MH-1 (stamped, absent
+  // from the ordinance read) is the still-unverified example.
+  it("a Horseshoe Bay parcel (MH-1, SETBACK_EDITION_UNVERIFIED: unsourced in pack E) declines, no throw, and carries the code onto the row", () => {
+    expect(() => lookUpEnvelopeTableRow("horseshoe-bay-tx", "MH-1")).not.toThrow();
+    const row = lookUpEnvelopeTableRow("horseshoe-bay-tx", "MH-1");
     expect(row.tableHasDistrictRow).toBe(false);
     expect(row.district).toBeNull();
     expect(row.sourceRefusal?.code).toBe("SETBACK_EDITION_UNVERIFIED");
   });
 
   it("that refusal, reconciled onto an absent height fact, says WHY instead of the generic code-sets-none", () => {
-    const row = lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2");
+    const row = lookUpEnvelopeTableRow("horseshoe-bay-tx", "MH-1");
     const out = reconcileMaxHeightFtFact(PI_ABSENT_HEIGHT, true, row);
     expect(out.state).toBe("absent");
     if (out.state === "absent") {
@@ -156,6 +158,17 @@ describe("lookUpEnvelopeTableRow declines the setback-refusal family by code, ne
         `${ENVELOPE_ROUTER_SETBACK_SOURCE_REFUSED}:SETBACK_EDITION_UNVERIFIED`,
       );
     }
+  });
+
+  it("a Horseshoe Bay zone-varying code (R-1) declines with SETBACK_CONDITIONAL_NOT_EVALUATED, and a served Marble Falls code (ENZ.2) resolves its row", () => {
+    const hsb = lookUpEnvelopeTableRow("horseshoe-bay-tx", "R-1");
+    expect(hsb.district).toBeNull();
+    expect(hsb.sourceRefusal?.code).toBe("SETBACK_CONDITIONAL_NOT_EVALUATED");
+    const mf = lookUpEnvelopeTableRow("marble-falls-tx", "ENZ.2");
+    expect(mf.tableHasDistrictRow).toBe(true);
+    expect(mf.sourceRefusal).toBeUndefined();
+    expect(mf.district?.max_height_ft).toBe(35);
+    expect(mf.district?.max_lot_coverage_pct).toBe(50);
   });
 
   it("a served Bertram district (R-1-2) still resolves to a real row, unaffected by the refusal handling", () => {

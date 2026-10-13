@@ -74,13 +74,22 @@ import lakewayTx from "./lakeway-tx.json" with { type: "json" };
 // gate (isUsableVerification treats "transcribed" and "source: city GIS layer..." as usable) --
 // pack C never covered those two cities (it is scoped to the six cities in its own task doc), so
 // no quote-complete, section-cited source exists yet to build their tables from; see this PR's
-// report for the gap. Meadowlakes has zero served districts (all eight are
+// report for the gap (2026-10-13: pack E closed it for Marble Falls -- see below). Meadowlakes has zero served districts (all eight are
 // SETBACK_NO_DIMENSIONAL_STANDARDS) and so gets no table at all.
 import burnetTx from "./burnet-tx.json" with { type: "json" };
 import graniteShoalsTx from "./granite-shoals-tx.json" with { type: "json" };
 import cottonwoodShoresTx from "./cottonwood-shores-tx.json" with { type: "json" };
 import bertramTx from "./bertram-tx.json" with { type: "json" };
 import highlandHavenTx from "./highland-haven-tx.json" with { type: "json" };
+// OPS-24 Burnet stage 6, pack E (2026-10-13): Marble Falls, built from the official Municode text
+// (doc_repo/_inbox/2026-10-13_burnet_B3_groundtruth_browser_packE.csv) by
+// ../../../scripts/apply-packE-to-burnet-register.mjs. Serves the 7 districts the register clears
+// (ENZ.1-5, BP, IN); the other 10 stamped districts refuse SETBACK_CONDITIONAL_NOT_EVALUATED in the
+// register (see the table's note for the per-district building-type rule). Horseshoe Bay still gets
+// NO table: every stamped Horseshoe Bay code refuses in the register (its standards vary by
+// geographic zone and no parcel's zone is resolved yet), and its (code, zone) standards live in
+// horseshoe-bay-tx-zone-standards.json, which is deliberately NOT a SETBACK_TABLES entry.
+import marbleFallsTx from "./marble-falls-tx.json" with { type: "json" };
 import {
   BURNET_CITY_JURISDICTION_KEYS,
   SETBACK_CONDITIONAL_NOT_EVALUATED,
@@ -345,6 +354,8 @@ const SETBACK_TABLES: Readonly<Record<string, SetbackTable>> = {
   "cottonwood-shores-tx": cottonwoodShoresTx as SetbackTable,
   "bertram-tx": bertramTx as SetbackTable,
   "highland-haven-tx": highlandHavenTx as SetbackTable,
+  // OPS-24 Burnet stage 6, pack E (2026-10-13). See the import-site comment above.
+  "marble-falls-tx": marbleFallsTx as SetbackTable,
 };
 
 export const SETBACK_JURISDICTION_KEYS = Object.keys(SETBACK_TABLES);
@@ -563,10 +574,11 @@ export function getSetbackTableForZoning(
     }
     // GATE 3 (table registration, W3 PR #805 review): a cleared verdict is not a licence to fall
     // through to a silent null when no table has been vendored for this jurisdiction key -- see
-    // assertTableVendoredForClearedVerdict's own doc comment. marble-falls-tx and horseshoe-bay-tx
-    // hit this today (their registers clear many districts; neither has a table file yet);
-    // burnet-tx/granite-shoals-tx/cottonwood-shores-tx/bertram-tx/highland-haven-tx all have one, so
-    // this is a no-op for them. meadowlakes-tx never reaches here (its register never clears).
+    // assertTableVendoredForClearedVerdict's own doc comment. burnet-tx/granite-shoals-tx/
+    // cottonwood-shores-tx/bertram-tx/highland-haven-tx/marble-falls-tx all have a table, so this is a
+    // no-op for them. meadowlakes-tx never reaches here (its register never clears). horseshoe-bay-tx
+    // reaches it only for the three codes its register clears with no table vendored (R-6.5, R-16,
+    // M-1 -- none carried by a Burnet parcel), which refuse SETBACK_TABLE_ABSENT by design.
     assertTableVendoredForClearedVerdict({
       normalizedJurisdictionKey: normalized,
       verdict,
