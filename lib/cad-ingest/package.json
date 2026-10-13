@@ -9,7 +9,8 @@
     "./zoning-layers": "./src/txgio/zoning-layers.ts",
     "./boundary": "./src/boundary/containment.ts",
     "./city-limits": "./src/boundary/cityLimitsFact.ts",
-    "./etj": "./src/boundary/etjFact.ts"
+    "./etj": "./src/boundary/etjFact.ts",
+    "./area-share": "./src/boundary/areaShare.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -28,7 +29,8 @@
     "boundary-ingest": "tsx src/boundary/cli.ts",
     "etj-ingest": "tsx src/boundary/etjCli.ts",
     "etj-verify": "tsx src/boundary/etjCli.ts --verify",
-    "nfhl-ingest": "tsx src/nfhl/cli.ts"
+    "nfhl-ingest": "tsx src/nfhl/cli.ts",
+    "city-area-share-measure": "tsx src/boundary/cityAreaShareMeasureCli.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
@@ -36,6 +38,7 @@
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "^8.20.0",
+    "polygon-clipping": "^0.15.7",
     "shapefile": "^0.6.6",
     "yauzl": "^3.2.0"
   },

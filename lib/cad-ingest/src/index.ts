@@ -237,15 +237,42 @@ export type {
 } from "./boundary/containment";
 export {
   CITY_LIMITS_SOURCE,
+  cityLimitsAreaShareFromDecision,
   cityLimitsFactFromContainment,
   incorporationSettlesEtj,
+  parseCityLimitsAreaShare,
   unmeasuredCityLimitsFact,
   usableCityLimitsQueryPoint,
 } from "./boundary/cityLimitsFact";
 export type {
+  CityLimitsAreaShare,
   CityLimitsFact,
   CityLimitsStatus,
 } from "./boundary/cityLimitsFact";
+export {
+  AREA_SHARE_METHOD,
+  EQUAL_AREA_SRID,
+  MAJORITY_SHARE,
+  SLIVER_MAX_M2,
+  SLIVER_MAX_SHARE,
+  SPLIT_DISCLOSURE_BELOW_SHARE,
+  cityAreaShareSql,
+  decideByAreaShare,
+  describeAreaShareSplit,
+  formatShare,
+  geometryAreaM2,
+  groupCityAreaShareRows,
+  isSliverPiece,
+  measureJurisdictionPieces,
+  projectEpsg3083,
+} from "./boundary/areaShare";
+export type {
+  AreaShareDecision,
+  AreaSharePiece,
+  CityAreaShareSqlRow,
+  JurisdictionPolygon,
+  MeasuredJurisdictionPiece,
+} from "./boundary/areaShare";
 export {
   ETJ_SOURCE,
   etjFactFromContainment,
