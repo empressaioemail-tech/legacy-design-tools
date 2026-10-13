@@ -6,7 +6,7 @@
  * Flood Hazard Area. This module matches whole codes only.
  *
  * - true:  A, AE, AH, AO, AR, A99, A1-A30, V, VE, V1-V30
- * - false: B, C, X (a leading "X" token is decisive: "X 0.2 PCT ..." is X)
+ * - false: B, C, X, X500 (legacy shaded-X code, 0.2% annual chance) (a leading "X" token is decisive: "X 0.2 PCT ..." is X)
  * - null:  everything else (D, AREA NOT INCLUDED, OPEN WATER, blank, unknown)
  *
  * Canonical fixture: __tests__/fixtures/fema-zone-sfha-fixture.json
@@ -25,6 +25,6 @@ export function classifyFemaZoneSfha(zone: string | null | undefined): boolean |
   const z = normalizeFemaZoneCode(zone);
   if (!z) return null;
   if (SFHA_ZONE_RE.test(z)) return true;
-  if (z === "B" || z === "C" || z === "X" || z.startsWith("X ")) return false;
+  if (z === "B" || z === "C" || z === "X" || z === "X500" || z.startsWith("X ")) return false;
   return null;
 }

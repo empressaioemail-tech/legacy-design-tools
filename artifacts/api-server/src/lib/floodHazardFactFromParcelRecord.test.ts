@@ -292,8 +292,7 @@ describe("floodHazardFactFromParcelRecord", () => {
       ["B", false],
       ["C", false],
       ["X", false],
-      // Not an NFHL code in our data; exact-code rule treats it as unknown.
-      ["X500", null],
+      ["X500", false], // legacy FEMA code for shaded X (0.2% annual chance)
       ["X (SHADED)", false],
     ])("null isSfha + decisive zone %s resolves to %s (no SFHA_TF needed)", (zone, expected) => {
       expect(resolveZoneIsSfha(null, zone)).toBe(expected);

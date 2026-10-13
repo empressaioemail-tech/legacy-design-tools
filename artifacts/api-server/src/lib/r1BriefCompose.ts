@@ -344,7 +344,7 @@ export function summarizeFloodZoneExposure(
     );
   }
 
-  if (zone === "X" || zone.startsWith("X ")) {
+  if (zone === "X" || zone === "X500" || zone.startsWith("X ")) {
     if (subty.includes("0.2 PCT") || subty.includes("0.2%")) {
       return (
         `Mapped Zone ${fact.floodZone} with 0.2% annual-chance flood hazard` +
