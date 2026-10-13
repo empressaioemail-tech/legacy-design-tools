@@ -815,6 +815,52 @@ function escapeIlikeLiteral(prefix: string): string {
 }
 
 /**
+ * A prefix match on the normalized street expression that the
+ * `(county_fips, <normalized>)` btree indexes (0058) can actually range-scan.
+ *
+ * WHY. `<normalized> ILIKE '7 HUISACHE%'` is case-INSENSITIVE, so Postgres can
+ * only derive an index range from the pattern's leading NON-LETTER characters:
+ * live EXPLAIN 2026-10-13 shows `Index Cond: <normalized> >= '7 ' AND < '7!'`
+ * with the ILIKE as a Filter. Every situs in all 254 counties that starts with
+ * "7 " is fetched from the heap and has the whole regexp chain re-evaluated —
+ * 3,274 ms for one parcel-situs prefix (EXPLAIN ANALYZE, txgio_parcel 16.4M
+ * rows), past the 4 s bare-query budget once the street-key and address-point
+ * steps are added, so the Find box answered `situs-search-budget-exceeded` for
+ * "7 huisache" while "7 HUISACHE LN, WIMBERLEY" sits in the table.
+ *
+ * WHAT. The normalized expression is `upper(...)` with upper-case USPS
+ * abbreviations, and the query prefix is upper-cased by the same normalizer,
+ * so for the printable-ASCII head of the prefix a case-SENSITIVE `LIKE` is
+ * the same predicate — and LIKE's whole fixed prefix becomes the index range
+ * (database collation C.UTF-8): `>= '7 HUISACHE' AND < '7 HUISACHF'`, 9 ms.
+ * The original ILIKE stays beside it as the predicate of record, so this can
+ * only narrow the rows the index hands over, never widen what matches. A
+ * prefix with no printable-ASCII head gets no range and behaves as before.
+ */
+function indexRangePrefix(
+  column: "situs_address" | "full_addr",
+  prefix: string,
+) {
+  const head = /^[\x20-\x7E]*/.exec(prefix)?.[0] ?? "";
+  // A lower-case letter would make case-sensitive LIKE stricter than ILIKE
+  // against the upper-cased column. The normalizer never emits one; refuse
+  // to narrow past it rather than trust that.
+  const safe = head.replace(/[a-z][\s\S]*$/, "");
+  if (!safe.trim()) return null;
+  return sql`${normalizedColumnExpr(column)} LIKE ${`${escapeIlikeLiteral(safe)}%`}`;
+}
+
+/** `<normalized> ILIKE prefix%`, plus its index-range twin when one exists. */
+function normalizedPrefixMatch(
+  column: "situs_address" | "full_addr",
+  prefix: string,
+) {
+  const ilike = sql`${normalizedColumnExpr(column)} ILIKE ${`${escapeIlikeLiteral(prefix)}%`}`;
+  const range = indexRangePrefix(column, prefix);
+  return range ? and(range, ilike)! : ilike;
+}
+
+/**
  * REVERTED (P-177, 2026-09-13). P-175 briefly resolved a gate-blocked
  * county's parcel-situs hit to the CAD-account-keyed node its published
  * Geographic ID names (`loadSitusCrosswalk`/`situsNodeId`, removed here).
@@ -1000,7 +1046,6 @@ export async function searchSitusByPrefix(input: {
   );
 
   const database = input.database ?? defaultDb;
-  const pattern = `${escapeIlikeLiteral(prefix)}%`;
 
   const rows = (await database
     .select({
@@ -1012,7 +1057,7 @@ export async function searchSitusByPrefix(input: {
     .where(
       and(
         storeCountyFipsBound(txgioParcel.countyFips),
-        sql`${normalizedColumnExpr("situs_address")} ILIKE ${pattern}`,
+        normalizedPrefixMatch("situs_address", prefix),
       ),
     )
     .limit(limit * 8)) as {
@@ -1063,7 +1108,7 @@ async function searchSitusByPrefixWithLocality(input: {
 
   const database = input.database ?? defaultDb;
   const patterns = prefixes.map(
-    (p) => sql`${normalizedColumnExpr("situs_address")} ILIKE ${`${escapeIlikeLiteral(p)}%`}`,
+    (p) => normalizedPrefixMatch("situs_address", p),
   );
 
   const rows = (await database
@@ -1237,7 +1282,6 @@ export async function searchAddressPointsByPrefix(input: {
   );
 
   const database = input.database ?? defaultDb;
-  const pattern = `${escapeIlikeLiteral(prefix)}%`;
   const locality = input.locality ?? { city: null, state: null, zip: null };
 
   const localityFilters: ReturnType<typeof sql>[] = [];
@@ -1271,7 +1315,7 @@ export async function searchAddressPointsByPrefix(input: {
     .where(
       and(
         storeCountyFipsBound(txgioAddress.countyFips),
-        sql`${normalizedColumnExpr("full_addr")} ILIKE ${pattern}`,
+        normalizedPrefixMatch("full_addr", prefix),
         ...localityFilters,
       ),
     )
