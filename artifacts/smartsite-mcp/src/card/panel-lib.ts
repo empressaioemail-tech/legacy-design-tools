@@ -117,7 +117,14 @@ export type OverlayRow = {
   zones?: Array<{
     zone: string | null;
     subtype: string | null;
-    isSfha: boolean;
+    /**
+     * 2026-10-12 tristate fix: the wire states `null` for a genuinely
+     * unknown SFHA determination (no stated SFHA_TF and a non-decisive
+     * zone letter, e.g. D or "unmapped") -- never collapsed to `false`
+     * here, which previously turned "unknown" into "no" on this surface
+     * while the brief's own data kept `null` for the identical row.
+     */
+    isSfha: boolean | null;
     floodway: boolean;
     bfe: number | null;
     areaShare: number | null;
@@ -3078,7 +3085,13 @@ export function overlaysFromDraw(draw: Record<string, unknown>): OverlayRow[] {
           .map((z) => ({
             zone: stringOrNull(z.zone),
             subtype: stringOrNull(z.subtype),
-            isSfha: z.isSfha === true,
+            /* 2026-10-12 tristate fix: `z.isSfha === true` collapsed the
+             * wire's `null` (genuinely unknown) into `false` ("no") here --
+             * the exact bug that let this surface disagree with the brief's
+             * own data for the same row. A boolean wire value is read as
+             * that boolean; anything else (including `null`) stays `null`,
+             * never guessed. */
+            isSfha: z.isSfha === true ? true : z.isSfha === false ? false : null,
             floodway: z.floodway === true,
             bfe: numberOrNull(z.bfe),
             areaShare: numberOrNull(z.areaShare),

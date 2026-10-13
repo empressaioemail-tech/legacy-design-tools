@@ -27,7 +27,8 @@ export type DrawOverlay = {
    */
   geom?: "none" | [number, number][];
   scope?: string;
-  sfha?: boolean;
+  /** 2026-10-12 tristate fix: `null` is a genuinely unknown SFHA determination, never defaulted to false. */
+  sfha?: boolean | null;
   reason?: string;
   /**
    * P-153: a short caveat token for a `state: "present"` overlay whose
@@ -49,7 +50,8 @@ export type DrawOverlay = {
   zones?: Array<{
     zone: string | null;
     subtype: string | null;
-    isSfha: boolean;
+    /** 2026-10-12 tristate fix: `null` is a genuinely unknown SFHA determination, never defaulted to false. */
+    isSfha: boolean | null;
     floodway: boolean;
     bfe: number | null;
     areaShare: number | null;
@@ -178,13 +180,15 @@ export type AssembleParcelDrawInput = {
         state: "present";
         floodZone: string | null;
         zoneSubtype: string | null;
-        inSpecialFloodHazardArea: boolean;
+        /** 2026-10-12 tristate fix: `null` is a genuinely unknown SFHA determination, never defaulted to false. */
+        inSpecialFloodHazardArea: boolean | null;
         citations?: string[];
         /** CARD F2: every zone touching the parcel, row 0 first (the largest share). */
         zones?: Array<{
           zone: string | null;
           subtype: string | null;
-          isSfha: boolean;
+          /** 2026-10-12 tristate fix: `null` is a genuinely unknown SFHA determination, never defaulted to false. */
+          isSfha: boolean | null;
           floodway: boolean;
           bfe: number | null;
           areaShare: number | null;
