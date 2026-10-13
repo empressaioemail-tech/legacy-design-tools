@@ -24,8 +24,21 @@
  * present cell's `value` is the city name string directly; an absent-
  * verified cell's basis carries {disposition: "unincorporated", ...}, not
  * the {finding: "..."} shape wells/specialDistricts use.
+ *
+ * AREA SHARE (city limits by area share, area-share-3083-v1). A parcel's city
+ * is decided by the share of its area each city holds (lib/cad-ingest
+ * `boundary/areaShare.ts`), and the decision can say the parcel is SPLIT
+ * ("93% in Horseshoe Bay, 7% unincorporated"). The writer stores that decision
+ * on the cell as `areaShare`: on the value cell itself (`cell.raw.areaShare`)
+ * for an incorporated parcel, inside the absent-verified `basis` for an
+ * unincorporated one. This adapter serves it as the fact's optional
+ * `areaShare` (`parseCityLimitsAreaShare` re-derives the split from the
+ * stored pieces and drops anything malformed or contradicting the cell's own
+ * answer) and appends the split sentence to `basis`. A cell without it -- every
+ * cell written before the writer adopts the rule -- serves exactly as before.
  */
 
+import { parseCityLimitsAreaShare } from "@workspace/cad-ingest/city-limits";
 import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import { parseParcelNodeId } from "./parcelNodeId";
 import {
@@ -59,6 +72,15 @@ function unincorporatedBasis(basis: string | Record<string, unknown> | null): st
     return JSON.stringify(rec);
   }
   return "parcel_record marked this parcel's jurisdiction absent-verified with no basis recorded.";
+}
+
+/** Append the split sentence to a basis, only when the stored decision is a split. */
+function withSplit(
+  basis: string,
+  areaShare: ReturnType<typeof parseCityLimitsAreaShare>,
+): string {
+  if (!areaShare?.split || !areaShare.disclosure) return basis;
+  return `${basis} Split by area (${areaShare.method}): ${areaShare.disclosure}.`;
 }
 
 function unmeasured(basis: string, queryPoint: CityLimitsQueryPoint | null): CityLimitsFactWire {
@@ -96,11 +118,15 @@ export async function cityLimitsFactFromParcelRecord(
     // determination (unincorporated), never a sparse/pending gap for this
     // rail -- not-applicable has not been observed live, handled the same
     // way defensively (a real, not fabricated, absence).
+    const areaShare = parseCityLimitsAreaShare(asRecord(cell.basis)?.areaShare, {
+      cityName: null,
+    });
     return {
       status: "unincorporated",
       etjStatus: ETJ_UNRESOLVED,
       source: CITY_LIMITS_FACT_SOURCE,
-      basis: unincorporatedBasis(cell.basis),
+      basis: withSplit(unincorporatedBasis(cell.basis), areaShare),
+      ...(areaShare ? { areaShare } : {}),
       queryPoint,
     };
   }
@@ -113,12 +139,17 @@ export async function cityLimitsFactFromParcelRecord(
       queryPoint,
     );
   }
+  const areaShare = parseCityLimitsAreaShare(cell.raw?.areaShare, { cityName });
   return {
     status: "incorporated",
     etjStatus: ETJ_UNRESOLVED,
     source: CITY_LIMITS_FACT_SOURCE,
-    basis: `parcel_record cityLimits: incorporated, city '${cityName}' (source: ${cell.cellSource}, vintage: ${cell.vintage || "unknown"}).`,
+    basis: withSplit(
+      `parcel_record cityLimits: incorporated, city '${cityName}' (source: ${cell.cellSource}, vintage: ${cell.vintage || "unknown"}).`,
+      areaShare,
+    ),
     cityName,
+    ...(areaShare ? { areaShare } : {}),
     queryPoint,
   };
 }

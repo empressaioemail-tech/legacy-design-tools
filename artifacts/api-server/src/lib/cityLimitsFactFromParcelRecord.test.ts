@@ -129,3 +129,116 @@ describe("cityLimitsFactFromParcelRecord", () => {
     expect(result.queryPoint).toBeNull();
   });
 });
+
+describe("cityLimitsFactFromParcelRecord — area-share split carried from the record", () => {
+  const HSB_SPLIT = {
+    method: "area-share-3083-v1",
+    pieces: [
+      { cityName: "Horseshoe Bay", geoId: "4834862", share: 0.93, areaM2: 2145.2 },
+      { cityName: null, geoId: null, share: 0.07, areaM2: 161.5 },
+    ],
+  };
+
+  it("a cell written before the rule (no areaShare) serves exactly as before: no areaShare key, basis unchanged", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: "48021:34137",
+            railKey: CITY_LIMITS_RAIL_KEY,
+            cellState: { kind: "value", value: "Bastrop", source: "landing_parcel_jurisdiction", vintage: "2026-09-02T18:13:56.751Z" },
+          },
+        ],
+      }),
+    );
+    const result = await cityLimitsFactFromParcelRecord("48021:34137", POINT);
+    expect("areaShare" in result).toBe(false);
+    expect(result.basis).toBe(
+      "parcel_record cityLimits: incorporated, city 'Bastrop' (source: landing_parcel_jurisdiction, vintage: 2026-09-02T18:13:56.751Z).",
+    );
+  });
+
+  it("an incorporated value cell carrying a split serves it, and the basis discloses it", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: "48053:1",
+            railKey: CITY_LIMITS_RAIL_KEY,
+            cellState: {
+              kind: "value",
+              value: "Horseshoe Bay",
+              source: "landing_parcel_jurisdiction",
+              vintage: "2026-10-14",
+              areaShare: HSB_SPLIT,
+            },
+          },
+        ],
+      }),
+    );
+    const result = await cityLimitsFactFromParcelRecord("48053:1", POINT);
+    expect(result.status).toBe("incorporated");
+    expect(result.cityName).toBe("Horseshoe Bay");
+    expect(result.areaShare?.split).toBe(true);
+    expect(result.areaShare?.disclosure).toBe("93% in Horseshoe Bay, 7% unincorporated");
+    expect(result.basis).toMatch(/Split by area \(area-share-3083-v1\): 93% in Horseshoe Bay, 7% unincorporated\.$/);
+  });
+
+  it("an unincorporated (absent-verified) cell carries its split inside the basis object", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: "48053:2",
+            railKey: CITY_LIMITS_RAIL_KEY,
+            cellState: {
+              kind: "absent-verified",
+              basis: {
+                propId: "2",
+                source: "landing_parcel_jurisdiction",
+                vintage: "2026-10-14",
+                countyFips: "48053",
+                disposition: "unincorporated",
+                areaShare: {
+                  method: "area-share-3083-v1",
+                  pieces: [
+                    { cityName: null, share: 0.88, areaM2: 4048 },
+                    { cityName: "Bertram", geoId: "4807876", share: 0.12, areaM2: 552 },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      }),
+    );
+    const result = await cityLimitsFactFromParcelRecord("48053:2", POINT);
+    expect(result.status).toBe("unincorporated");
+    expect(result.areaShare?.disclosure).toBe("88% unincorporated, 12% in Bertram");
+    expect(result.basis).toMatch(/88% unincorporated, 12% in Bertram/);
+  });
+
+  it("a stored split that contradicts the cell's own answer is dropped, never served", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: "48053:3",
+            railKey: CITY_LIMITS_RAIL_KEY,
+            cellState: {
+              kind: "value",
+              value: "Marble Falls",
+              source: "landing_parcel_jurisdiction",
+              vintage: "2026-10-14",
+              areaShare: HSB_SPLIT,
+            },
+          },
+        ],
+      }),
+    );
+    const result = await cityLimitsFactFromParcelRecord("48053:3", POINT);
+    expect(result.status).toBe("incorporated");
+    expect("areaShare" in result).toBe(false);
+    expect(result.basis).not.toMatch(/Split by area/);
+  });
+});
