@@ -301,21 +301,34 @@ describe("effectiveDateForTable", () => {
  * never a new wire shape. A non-refusal error (a real bug) must still throw.
  */
 describe("resolveAuthoritativeSetbacks declines the setback-refusal family, never throws it (W3 PR #805 review)", () => {
-  it("a Marble Falls parcel (ENZ.2, SETBACK_EDITION_UNVERIFIED after the W3 register downgrade) declines to null, no throw", () => {
+  // Pack E (2026-10-13) made Marble Falls ENZ.2 a served row, so the still-refused example is now
+  // Horseshoe Bay MH-1 (stamped, but absent from the ordinance read: SETBACK_EDITION_UNVERIFIED).
+  it("a Horseshoe Bay parcel (MH-1, SETBACK_EDITION_UNVERIFIED: unsourced in pack E) declines to null, no throw", () => {
     expect(() =>
       resolveAuthoritativeSetbacks({
-        jurisdictionKey: "marble-falls-tx",
-        districtCode: "ENZ.2",
+        jurisdictionKey: "horseshoe-bay-tx",
+        districtCode: "MH-1",
         atomRule: null,
       }),
     ).not.toThrow();
     expect(
       resolveAuthoritativeSetbacks({
-        jurisdictionKey: "marble-falls-tx",
-        districtCode: "ENZ.2",
+        jurisdictionKey: "horseshoe-bay-tx",
+        districtCode: "MH-1",
         atomRule: null,
       }),
     ).toBeNull();
+  });
+
+  it("a Marble Falls parcel (ENZ.2, served since pack E) resolves to the ordinance row", () => {
+    const resolved = resolveAuthoritativeSetbacks({
+      jurisdictionKey: "marble-falls-tx",
+      districtCode: "ENZ.2",
+      atomRule: null,
+    });
+    expect(resolved).not.toBeNull();
+    expect(resolved!.sourceKind).toBe("codified-ordinance");
+    expect(resolved!.scalars).toEqual({ front_ft: 25, side_ft: 5, rear_ft: 10, side_corner_ft: 15 });
   });
 
   it("a served Bertram district (R-1-2) still resolves to a real row, unaffected by the refusal handling", () => {

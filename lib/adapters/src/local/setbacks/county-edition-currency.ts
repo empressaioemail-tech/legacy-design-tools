@@ -29,8 +29,17 @@
  * read that copied each code's own edition line verbatim; see
  * `../scripts/convert-ordinance-register-csv.mjs` and `../scripts/apply-packC-to-burnet-register.mjs`
  * for the (reusable) conversion. Meadowlakes was also refreshed from pack C, confirming its chapter
- * has no dimensional numbers at all. Marble Falls and Horseshoe Bay are untouched by pack C. The
- * `verification` column's vocabulary, as of pack C:
+ * has no dimensional numbers at all. Marble Falls and Horseshoe Bay are untouched by pack C.
+ *
+ * As of 2026-10-13 (pack E), the Marble Falls rows and the Horseshoe Bay rows pack E covers were
+ * REPLACED with rows converted from `doc_repo/_inbox/2026-10-13_burnet_B3_groundtruth_browser_packE.csv`
+ * (official hosts only: Municode for Marble Falls, eCode360 Ch. 14 Art. 14.02 for Horseshoe Bay) by
+ * `../scripts/apply-packE-to-burnet-register.mjs`. Marble Falls clears 7 districts (ENZ.1-5, BP, IN)
+ * and refuses the rest as conditional (one row per building type with no primary row, lot-width tiers,
+ * lake adjacency, build-to lines). Horseshoe Bay clears none of its stamped codes: the same district
+ * code carries different standards in different geographic zones and no parcel's zone is resolved yet
+ * (see `horseshoe-bay-tx-zone-standards.json`), so those rows refuse as conditional with
+ * `conditional_reason` naming that. The `verification` column's vocabulary:
  *   "transcribed" / "verified-browser-read" / "source: city GIS layer ..." -- USABLE (cleared, though
  *       not ordinance-verified for the GIS-sourced Horseshoe Bay numbers specifically -- see the CSV's
  *       own notes column).
@@ -135,6 +144,13 @@ export interface OrdinanceRegisterRow {
    * their resolved numbers here for provenance even though the district as a whole still refuses today.
    */
   conditional?: Record<string, string>;
+  /**
+   * Optional, alongside `conditional`: one sentence naming WHAT the unevaluated condition is when the
+   * per-field raw text alone does not say it (e.g. "standards vary by Horseshoe Bay geographic zone;
+   * parcel zone not resolved", or a Marble Falls district whose table gives one row per building
+   * type). Carried into the SETBACK_CONDITIONAL_NOT_EVALUATED refusal's `detail`.
+   */
+  conditional_reason?: string;
 }
 
 export type EditionCurrencyCode =
@@ -311,7 +327,7 @@ export function checkSetbackEditionCurrency(opts: {
         code: SETBACK_CONDITIONAL_NOT_EVALUATED,
         city: opts.city,
         districtCode: row.district_code,
-        detail: `${opts.city} ${row.district_code} has at least one dimensional value this pipeline cannot evaluate today, because the ordinance states more than one number and nothing resolves which applies to a given parcel -- ${branches || "see register notes"}. Recording the most-restrictive branch as THE setback would be wrong for every parcel where the other branch applies (WDLL check 8, zero wrong values), so no number is served.`,
+        detail: `${opts.city} ${row.district_code} has at least one dimensional value this pipeline cannot evaluate today, because the ordinance states more than one number and nothing resolves which applies to a given parcel${row.conditional_reason ? ` (reason: ${row.conditional_reason})` : ""} -- ${branches || "see register notes"}. Recording the most-restrictive branch as THE setback would be wrong for every parcel where the other branch applies (WDLL check 8, zero wrong values), so no number is served.`,
         ordinance: row.ordinance || null,
         effectiveDate: row.effective_date || null,
         citation: row.citation || null,

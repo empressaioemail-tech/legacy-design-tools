@@ -32,8 +32,10 @@ import { getSetbackTableForZoning } from "../local/setbacks/index.js";
 describe("the real Burnet register", () => {
   const register = burnetOrdinanceRegister();
 
-  it("loaded all 137 rows (47 untouched Marble Falls/Horseshoe Bay + 90 converted from pack C)", () => {
-    expect(register.length).toBe(137);
+  it("loaded all 139 rows (90 converted from pack C + 49 Marble Falls/Horseshoe Bay: 18 + 31 after pack E, which added Horseshoe Bay DR and PD)", () => {
+    expect(register.length).toBe(139);
+    expect(register.filter((r) => r.city === "Marble Falls").length).toBe(18);
+    expect(register.filter((r) => r.city === "Horseshoe Bay").length).toBe(31);
   });
 
   it("covers all eight Burnet cities named in the WDLL sample", () => {
@@ -43,18 +45,20 @@ describe("the real Burnet register", () => {
     }
   });
 
-  it("Marble Falls (FR district) is UNVERIFIED (2026-10-09 W3 review downgrade): a zoneomics-mirror transcription is not ordinance-quality, so the gate now refuses rather than passes -- still cites the real ordinance for audit", () => {
+  it("Marble Falls (FR district), re-read from Municode in pack E (2026-10-13), now refuses SETBACK_CONDITIONAL_NOT_EVALUATED (one row per building type, none primary) and cites the current codified edition, not the 2019 zoneomics-mirror one", () => {
     const v = checkSetbackEditionCurrency({ city: "Marble Falls", districtCode: "FR" });
     expect(v.verdict).toBe("fail");
-    expect(v.code).toBe(SETBACK_EDITION_UNVERIFIED);
-    expect(v.ordinance).toBe("2019-O-05A");
-    expect(v.effectiveDate).toBe("2019-05-21");
+    expect(v.code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    expect(v.detail).toMatch(/building type/);
+    expect(v.ordinance).toBe("Ord. No. 2026-O-04A");
+    expect(v.effectiveDate).toBe("2026-04-07");
   });
 
-  it("Horseshoe Bay (R-1, GIS-sourced) is UNVERIFIED (2026-10-09 W3 review downgrade): a live GIS attribute never cross-checked against ordinance text is not ordinance-quality, so the gate now refuses rather than passes", () => {
+  it("Horseshoe Bay R-1, re-read from eCode360 in pack E, refuses SETBACK_CONDITIONAL_NOT_EVALUATED because its standards vary by geographic zone and no parcel zone is resolved", () => {
     const v = checkSetbackEditionCurrency({ city: "Horseshoe Bay", districtCode: "R-1" });
     expect(v.verdict).toBe("fail");
-    expect(v.code).toBe(SETBACK_EDITION_UNVERIFIED);
+    expect(v.code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
+    expect(v.detail).toContain("standards vary by Horseshoe Bay geographic zone; parcel zone not resolved");
   });
 
   /* ------------------- pack C: the five cities newly cleared by a browser read ------------------- */
@@ -354,23 +358,23 @@ describe("getSetbackTableForZoning refuses Burnet by name instead of a silent nu
     }
   });
 
-  it("Marble Falls now THROWS instead of silently falling through to null (2026-10-09 W3 review: BEFORE this review FR cleared the gate and returned null here -- indistinguishable from an honest 'no rules' absence, even though a current ordinance exists; AFTER, the register downgrade makes it refuse by its own correct code before the table lookup is ever reached)", () => {
+  it("Marble Falls FR still THROWS rather than falling through to null -- since pack E (2026-10-13) by SETBACK_CONDITIONAL_NOT_EVALUATED (building type unknown), before that by SETBACK_EDITION_UNVERIFIED (mirror-sourced)", () => {
     expect(() => getSetbackTableForZoning("marble-falls-tx", "FR")).toThrow();
     try {
       getSetbackTableForZoning("marble-falls-tx", "FR");
       expect.unreachable();
     } catch (err) {
-      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+      expect((err as { code?: string }).code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
     }
   });
 
-  it("Horseshoe Bay, same shape: R-1 now throws SETBACK_EDITION_UNVERIFIED instead of falling through to null", () => {
+  it("Horseshoe Bay, same shape: R-1 throws SETBACK_CONDITIONAL_NOT_EVALUATED (zone-varying standards) instead of falling through to null", () => {
     expect(() => getSetbackTableForZoning("horseshoe-bay-tx", "R-1")).toThrow();
     try {
       getSetbackTableForZoning("horseshoe-bay-tx", "R-1");
       expect.unreachable();
     } catch (err) {
-      expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);
+      expect((err as { code?: string }).code).toBe(SETBACK_CONDITIONAL_NOT_EVALUATED);
     }
   });
 

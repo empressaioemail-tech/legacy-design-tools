@@ -126,3 +126,31 @@ describe("mapDistrict — single-district table", () => {
     expect(r.confidence).toBeGreaterThan(0.5);
   });
 });
+
+/**
+ * Burnet pack E (2026-10-13): Marble Falls is the first Burnet city whose stamped codes are a MIX of
+ * served and refused districts in one table. The edition gate refuses the 10 refused codes before
+ * mapDistrict is reached, but the whole table is also served raw (/local/setbacks/:key), so the
+ * table itself must never let a refused stamped code cross into a served row by prefix.
+ */
+describe("marble-falls-tx: every stamped code maps to its own row or to none (pack E)", () => {
+  const SERVED = ["ENZ.1", "ENZ.2", "ENZ.3", "ENZ.4", "ENZ.5", "BP", "IN"];
+  const REFUSED = ["NR", "GC", "DR", "NC", "DN", "TR", "DT", "RE", "FR", "MR"];
+
+  it("each served code is an exact match to its own row", () => {
+    for (const code of SERVED) {
+      const table = getSetbackTableForZoning("marble-falls-tx", code)!;
+      const r = mapDistrict(table, code)!;
+      expect(r.kind, code).toBe("matched");
+      expect(districtCode(r.district), code).toBe(normalizeCode(code));
+    }
+  });
+
+  it("each refused code maps to NO row of the raw table (no prefix crossing), and the edition gate refuses it by name", () => {
+    const table = getSetbackTable("marble-falls-tx")!;
+    for (const code of REFUSED) {
+      expect(mapDistrict(table, code), code).toBeNull();
+      expect(() => getSetbackTableForZoning("marble-falls-tx", code), code).toThrow();
+    }
+  });
+});
