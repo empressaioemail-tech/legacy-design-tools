@@ -302,8 +302,9 @@ describe("effectiveDateForTable", () => {
  */
 describe("resolveAuthoritativeSetbacks declines the setback-refusal family, never throws it (W3 PR #805 review)", () => {
   // Pack E (2026-10-13) made Marble Falls ENZ.2 a served row, so the still-refused example is now
-  // Horseshoe Bay MH-1 (stamped, but absent from the ordinance read: SETBACK_EDITION_UNVERIFIED).
-  it("a Horseshoe Bay parcel (MH-1, SETBACK_EDITION_UNVERIFIED: unsourced in pack E) declines to null, no throw", () => {
+  // Horseshoe Bay MH-1 (stamped, but absent from the ordinance read: SETBACK_SOURCE_PENDING since the
+  // 2026-10-13 per-parcel lane; SETBACK_EDITION_UNVERIFIED before).
+  it("a Horseshoe Bay parcel (MH-1, SETBACK_SOURCE_PENDING: unsourced in pack E) declines to null, no throw", () => {
     expect(() =>
       resolveAuthoritativeSetbacks({
         jurisdictionKey: "horseshoe-bay-tx",

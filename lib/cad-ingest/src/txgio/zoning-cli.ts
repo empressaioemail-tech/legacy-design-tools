@@ -498,6 +498,9 @@ async function main(): Promise<void> {
       limit,
       propIds,
       parcelIdIndex,
+      // Layers with a geographic sub-area field (Horseshoe Bay SUBDIVISION) also write
+      // txgio_parcel.zoning_subarea -- migration 0113 must be applied before a non-dry run.
+      writeSubarea: Boolean(cfg.subareaField),
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
@@ -631,6 +634,11 @@ async function main(): Promise<void> {
         overlays.map(([t, n]) => `${t} ${n}`).join(", "),
     );
   }
+  if (summary.subareaHistogram) {
+    const sub = sortedHist(summary.subareaHistogram);
+    log(`sub-area (${cfg.subareaField}) on stamped parcels (${sub.length} values, written to zoning_subarea):`);
+    for (const [v, n] of sub) log(`  ${v.padEnd(28)} ${n}`);
+  }
   log(`duration:         ${seconds}s`);
 
   if (propIds !== undefined) {
@@ -687,7 +695,8 @@ async function main(): Promise<void> {
             `${(row.matchMethod ?? "-").padEnd(29)} ${row.district ?? "(none)"}` +
             (row.publishedCode && row.publishedCode !== row.district
               ? `   [published: ${row.publishedCode}]`
-              : ""),
+              : "") +
+            (row.subarea !== undefined ? `   [subarea: ${row.subarea ?? "(blank)"}]` : ""),
         );
       }
     }

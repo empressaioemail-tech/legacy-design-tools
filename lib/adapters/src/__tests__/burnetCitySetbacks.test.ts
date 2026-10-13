@@ -275,9 +275,18 @@ describe("the Marble Falls / Horseshoe Bay silent-null gap (2026-10-09 W3 review
     // marble-falls-tx table (see burnetMfHsbSetbacks.test.ts for the values).
     const table = getSetbackTableForZoning("marble-falls-tx", "ENZ.2");
     expect(table?.jurisdictionKey).toBe("marble-falls-tx");
-    // A Burnet code whose source is still unread keeps refusing by name, never null.
+    // A Burnet code whose source is still unread keeps refusing by name, never null. Horseshoe Bay
+    // MH-1 (pack E's official read does not name it; pack F asks) refuses SETBACK_SOURCE_PENDING
+    // since 2026-10-13 (it was SETBACK_EDITION_UNVERIFIED before); Marble Falls PD still refuses
+    // SETBACK_EDITION_UNVERIFIED.
     try {
       getSetbackTableForZoning("horseshoe-bay-tx", "MH-1");
+      expect.unreachable();
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe("SETBACK_SOURCE_PENDING");
+    }
+    try {
+      getSetbackTableForZoning("marble-falls-tx", "PD");
       expect.unreachable();
     } catch (err) {
       expect((err as { code?: string }).code).toBe(SETBACK_EDITION_UNVERIFIED);

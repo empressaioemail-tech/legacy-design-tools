@@ -182,6 +182,17 @@ export interface ZoningLayerConfig {
   parcelIdDiscriminatorField?: string;
   /** See `parcelIdDiscriminatorField`. */
   parcelIdDiscriminatorValues?: string[];
+  /**
+   * OPTIONAL (OPS-24 Burnet per-parcel setbacks, 2026-10-13). A field on the SAME feature as
+   * `codeField` that names the city's own geographic sub-area for the parcel -- Horseshoe Bay's
+   * `SUBDIVISION` (a 17-value coded domain: PROPER, SOUTH, PENINSULA, SUMMIT ROCK, ...), the key
+   * its ordinance's zone-specific standards are written against. When set, the stamp reads it off
+   * the matched feature (id join or point lookup, whichever stamped the code) and writes it to
+   * `txgio_parcel.zoning_subarea` (migration 0113) in the same batched UPDATE; never taken from a
+   * different feature than the one whose code was stamped. Leave UNSET for every other layer:
+   * the column is then not written at all.
+   */
+  subareaField?: string;
 }
 
 /**
@@ -935,6 +946,9 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
     parcelIdField: "PROP_ID",
     parcelIdDiscriminatorField: "county",
     parcelIdDiscriminatorValues: ["GBU"],
+    // The ordinance's geographic zone key (Art. 14.02 standards differ by zone): persisted to
+    // txgio_parcel.zoning_subarea and mapped to a zone by lib/adapters burnet-parcel-setbacks.ts.
+    subareaField: "SUBDIVISION",
   },
 };
 

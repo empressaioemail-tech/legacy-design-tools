@@ -140,13 +140,14 @@ describe("P-445 envelope-derived fact coherence", () => {
  */
 describe("lookUpEnvelopeTableRow declines the setback-refusal family by code, never throws it (W3 PR #805 review)", () => {
   // Pack E (2026-10-13) made Marble Falls ENZ.2 a served row; Horseshoe Bay MH-1 (stamped, absent
-  // from the ordinance read) is the still-unverified example.
-  it("a Horseshoe Bay parcel (MH-1, SETBACK_EDITION_UNVERIFIED: unsourced in pack E) declines, no throw, and carries the code onto the row", () => {
+  // from the ordinance read) is the still-refused example -- SETBACK_SOURCE_PENDING since the
+  // per-parcel lane (2026-10-13; it was SETBACK_EDITION_UNVERIFIED), pending pack F.
+  it("a Horseshoe Bay parcel (MH-1, SETBACK_SOURCE_PENDING: unsourced in pack E) declines, no throw, and carries the code onto the row", () => {
     expect(() => lookUpEnvelopeTableRow("horseshoe-bay-tx", "MH-1")).not.toThrow();
     const row = lookUpEnvelopeTableRow("horseshoe-bay-tx", "MH-1");
     expect(row.tableHasDistrictRow).toBe(false);
     expect(row.district).toBeNull();
-    expect(row.sourceRefusal?.code).toBe("SETBACK_EDITION_UNVERIFIED");
+    expect(row.sourceRefusal?.code).toBe("SETBACK_SOURCE_PENDING");
   });
 
   it("that refusal, reconciled onto an absent height fact, says WHY instead of the generic code-sets-none", () => {
@@ -155,7 +156,7 @@ describe("lookUpEnvelopeTableRow declines the setback-refusal family by code, ne
     expect(out.state).toBe("absent");
     if (out.state === "absent") {
       expect(out.absence?.reason).toBe(
-        `${ENVELOPE_ROUTER_SETBACK_SOURCE_REFUSED}:SETBACK_EDITION_UNVERIFIED`,
+        `${ENVELOPE_ROUTER_SETBACK_SOURCE_REFUSED}:SETBACK_SOURCE_PENDING`,
       );
     }
   });

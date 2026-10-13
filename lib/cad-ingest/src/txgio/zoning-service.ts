@@ -123,6 +123,11 @@ export interface RawZoningFeature {
    * does not match a parcel to the wrong CAD's feature.
    */
   parcelIdDiscriminator?: string | null;
+  /**
+   * OPTIONAL (2026-10-13). Set only when the layer config carries `subareaField` -- the trimmed
+   * value of that field on this feature (Horseshoe Bay: SUBDIVISION), null when blank.
+   */
+  subarea?: string | null;
 }
 
 function str(v: unknown): string | null {
@@ -200,6 +205,7 @@ export function reduceZoningFeature(
     | "baseCodeParse"
     | "parcelIdField"
     | "parcelIdDiscriminatorField"
+    | "subareaField"
   >,
 ): RawZoningFeature {
   const { properties: props, geometry } = normalizeZoningPageFeature(feature);
@@ -219,11 +225,14 @@ export function reduceZoningFeature(
   const parcelIdDiscriminator = cfg.parcelIdDiscriminatorField
     ? codeFieldRaw(props[cfg.parcelIdDiscriminatorField])
     : null;
+  // Only present (key and all) for a layer that configures it, so every other layer's reduced
+  // feature is byte-identical to before.
+  const sub = cfg.subareaField ? { subarea: str(props[cfg.subareaField]) } : {};
   if (isNullDistrictCode(code, cfg.nullDistrictCodes)) {
-    return { code: null, description, geometry, parcelId, parcelIdDiscriminator };
+    return { code: null, description, geometry, parcelId, parcelIdDiscriminator, ...sub };
   }
   if (!cfg.baseCodeParse || code === null) {
-    return { code, description, geometry, parcelId, parcelIdDiscriminator };
+    return { code, description, geometry, parcelId, parcelIdDiscriminator, ...sub };
   }
   // Base-code layers (Austin): resolve the compound published value to its
   // base district. `unrecognised` keeps the RAW value in `code` — the published
@@ -242,6 +251,7 @@ export function reduceZoningFeature(
     parse,
     parcelId,
     parcelIdDiscriminator,
+    ...sub,
   };
 }
 
@@ -411,6 +421,7 @@ export async function fetchZoningFeatures(
       opts.cfg.descriptionField,
       opts.cfg.parcelIdField,
       opts.cfg.parcelIdDiscriminatorField,
+      opts.cfg.subareaField,
     ]
       .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(",");

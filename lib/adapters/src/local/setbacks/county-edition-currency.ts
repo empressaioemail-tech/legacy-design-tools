@@ -51,6 +51,8 @@
  *   "no-dimensional-standards" -- NOT USABLE. The row's zoning text was read and confirmed to have no
  *       dimensional numbers for this district (Meadowlakes' eight districts; Granite Shoals AG;
  *       Highland Haven A and B -- see SETBACK_NO_DIMENSIONAL_STANDARDS).
+ *   "source-pending" -- NOT USABLE. The official text was read and does not name the district; a named
+ *       follow-up read is pending (Horseshoe Bay MH-1 -> pack F; see SETBACK_SOURCE_PENDING).
  *   "conditional-not-evaluated" -- NOT USABLE. At least one dimensional field's value genuinely
  *       depends on a condition this pipeline cannot evaluate today -- road pavement width, unit or
  *       tenant count, abutting-zone, which physical side of the lot, lot position relative to a lake
@@ -71,7 +73,11 @@
  *   SETBACK_EDITION_AMBIGUOUS   -- the row's own source cannot say which edition is current.
  *   SETBACK_NO_DIMENSIONAL_STANDARDS -- the row's zoning text has no numbers for this district.
  *   SETBACK_CONDITIONAL_NOT_EVALUATED -- at least one of the row's dimensional values has more than
- *                                  one real number and this pipeline cannot pick between them.
+ *                                  one real number and this pipeline cannot pick between them BY
+ *                                  DISTRICT CODE. For Marble Falls and Horseshoe Bay the per-parcel
+ *                                  resolver (burnet-parcel-setbacks.ts) evaluates the condition from
+ *                                  the parcel's own data.
+ *   SETBACK_SOURCE_PENDING      -- the district's text is not in the official read yet (pending read).
  *
  * Executes: wired into `getSetbackTableForZoning` (./index.ts) for Burnet's eight city jurisdiction
  * keys, ahead of the generic SETBACK_TABLES lookup -- see that file's own comment at the call site.
@@ -114,6 +120,13 @@ export const SETBACK_NO_DIMENSIONAL_STANDARDS = "SETBACK_NO_DIMENSIONAL_STANDARD
  * refuses as a whole.
  */
 export const SETBACK_CONDITIONAL_NOT_EVALUATED = "SETBACK_CONDITIONAL_NOT_EVALUATED";
+/**
+ * The district's ordinance text has not been sourced yet and a named read is pending (2026-10-13:
+ * Horseshoe Bay MH-1, which pack E's reading of Art. 14.02 does not name; browser pack F asks for
+ * it). Distinct from UNVERIFIED (a source was read by a disallowed method, or nobody tried): here the
+ * official text was read and the district is not in it, so the only way forward is the pending read.
+ */
+export const SETBACK_SOURCE_PENDING = "SETBACK_SOURCE_PENDING";
 
 export interface OrdinanceRegisterRow {
   city: string;
@@ -160,7 +173,8 @@ export type EditionCurrencyCode =
   | typeof SETBACK_EDITION_SUPERSEDED
   | typeof SETBACK_EDITION_AMBIGUOUS
   | typeof SETBACK_NO_DIMENSIONAL_STANDARDS
-  | typeof SETBACK_CONDITIONAL_NOT_EVALUATED;
+  | typeof SETBACK_CONDITIONAL_NOT_EVALUATED
+  | typeof SETBACK_SOURCE_PENDING;
 
 export interface EditionCurrencyVerdict {
   verdict: "pass" | "fail";
@@ -213,7 +227,7 @@ export function isUsableVerification(verification: string | null | undefined): b
   const v = (verification ?? "").trim().toLowerCase();
   if (!v || v === "unverified" || v === "n/a") return false;
   if (v.startsWith("provisional")) return false;
-  if (v === "edition-ambiguous" || v === "no-dimensional-standards" || v === "conditional-not-evaluated") return false;
+  if (v === "edition-ambiguous" || v === "no-dimensional-standards" || v === "conditional-not-evaluated" || v === "source-pending") return false;
   return true;
 }
 
@@ -307,6 +321,19 @@ export function checkSetbackEditionCurrency(opts: {
         city: opts.city,
         districtCode: row.district_code,
         detail: `${opts.city} ${row.district_code}'s zoning text was read and carries no dimensional (front/side/rear/corner) numbers at all -- serving a number here would invent one the ordinance does not state.`,
+        ordinance: row.ordinance || null,
+        effectiveDate: row.effective_date || null,
+        citation: row.citation || null,
+        verification: row.verification || null,
+      };
+    }
+    if (v === "source-pending") {
+      return {
+        verdict: "fail",
+        code: SETBACK_SOURCE_PENDING,
+        city: opts.city,
+        districtCode: row.district_code,
+        detail: `${opts.city} ${row.district_code}: the official ordinance text read so far does not state this district's standards and a follow-up read is pending, so no number is served -- ${row.notes || "see register notes"}`,
         ordinance: row.ordinance || null,
         effectiveDate: row.effective_date || null,
         citation: row.citation || null,
