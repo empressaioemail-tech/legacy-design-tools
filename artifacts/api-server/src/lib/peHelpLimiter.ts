@@ -48,6 +48,43 @@ import { logger } from "./logger";
 /** Header the browser proxy uses to hand cortex the visitor's IP. */
 export const HELP_CLIENT_IP_HEADER = "x-hauska-client-ip";
 
+/**
+ * Header DigitalOcean App Platform's ingress sets to the connecting client's
+ * IP. DO documents that x-forwarded-for carries the INGRESS server's IP on
+ * App Platform, not the client's, so counting XFF entries from the right keys
+ * every direct caller on a rotating ingress address (many buckets, no cap
+ * ever reached). Override the name with HELP_CHAT_PLATFORM_IP_HEADER; set it
+ * to "none" to disable and fall back to XFF hop counting.
+ */
+export const DEFAULT_PLATFORM_IP_HEADER = "do-connecting-ip";
+
+function platformIpHeaderName(): string | null {
+  const raw = process.env["HELP_CHAT_PLATFORM_IP_HEADER"]?.trim().toLowerCase();
+  if (raw === "none") return null;
+  return raw || DEFAULT_PLATFORM_IP_HEADER;
+}
+
+function headerValue(req: Request, name: string): string | undefined {
+  const raw = req.headers[name];
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/** Non-sensitive facts for the log, to measure the real ingress shape. */
+export function describeHelpIpInputs(req: Request): {
+  xffEntries: number;
+  platformHeader: boolean;
+} {
+  const xff = req.headers["x-forwarded-for"];
+  const s = Array.isArray(xff) ? xff.join(",") : xff;
+  const name = platformIpHeaderName();
+  return {
+    xffEntries:
+      typeof s === "string" ? s.split(",").filter((p) => p.trim()).length : 0,
+    platformHeader: name ? headerValue(req, name) !== undefined : false,
+  };
+}
+
 export const HELP_WINDOW_SECONDS = 600;
 
 export interface HelpLimits {
@@ -196,11 +233,16 @@ export function normalizeIp(raw: string): string | null {
  *
  *  1. Trusted proxy: the value of X-Hauska-Client-IP (set by hauska-map
  *     api/spine.ts from the platform's own header, never from the browser).
- *  2. Everyone else: the entry the platform ingress appended to
+ *  2. The platform's own client-IP header (do-connecting-ip on DO App
+ *     Platform), when present and a valid IP. Whether DO overwrites a
+ *     client-supplied copy is NOT documented; if it did not, a direct caller
+ *     could rotate it to dodge the per-IP caps, but never the global
+ *     anonymous ceiling.
+ *  3. Otherwise the entry the platform ingress appended to
  *     X-Forwarded-For, i.e. counted from the RIGHT by
  *     HELP_CHAT_TRUSTED_PROXY_HOPS (default 1). Entries to the left of that
  *     are client-supplied and are ignored; a client can only prepend.
- *  3. Last resort: the socket address.
+ *  4. Last resort: the socket address.
  * X-Hauska-Client-IP from an untrusted caller is never read.
  */
 export function resolveHelpClientIp(
@@ -212,6 +254,12 @@ export function resolveHelpClientIp(
     const v = Array.isArray(raw) ? raw[0] : raw;
     const ip = typeof v === "string" ? normalizeIp(v) : null;
     if (ip) return ip;
+  }
+  const platformName = platformIpHeaderName();
+  if (platformName) {
+    const pv = headerValue(req, platformName);
+    const pip = pv ? normalizeIp(pv.split(",")[0] ?? "") : null;
+    if (pip) return pip;
   }
   const xff = req.headers["x-forwarded-for"];
   const xffStr = Array.isArray(xff) ? xff.join(",") : xff;
