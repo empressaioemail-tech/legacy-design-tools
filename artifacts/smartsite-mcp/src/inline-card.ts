@@ -315,6 +315,13 @@ const ONE_DOOR_LABELS: Record<(typeof FACT_ORDER)[number], string> = {
   "setbacks-envelope": "Setbacks",
 };
 
+/** A reader scalar in feet: a number, or a numeric string, printed verbatim. */
+function readerFeet(v: unknown): string | null {
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : null;
+  if (typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim())) return v.trim();
+  return null;
+}
+
 function oneDoorValueText(id: (typeof FACT_ORDER)[number], data: Record<string, unknown> | null): string | null {
   if (!data) return null;
   if (id === "zoning") return str(data.district);
@@ -327,10 +334,10 @@ function oneDoorValueText(id: (typeof FACT_ORDER)[number], data: Record<string, 
     }
     return str(data.value);
   }
-  const front = feet(data.frontFt);
-  const side = feet(data.sideFt);
-  const rear = feet(data.rearFt);
-  const corner = feet(data.cornerFt);
+  const front = readerFeet(data.frontFt);
+  const side = readerFeet(data.sideFt);
+  const rear = readerFeet(data.rearFt);
+  const corner = readerFeet(data.cornerFt);
   if (!front && !side && !rear && !corner) return null;
   const part = (n: string | null, word: string) => (n ? `${n} ft ${word}` : null);
   return [part(front, "front"), part(side, "side"), part(rear, "rear"), part(corner, "corner")]

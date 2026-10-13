@@ -36,6 +36,7 @@ export function odReaderBody(
   return {
     parcelNodeId: OD_PARCEL,
     countyFips: "48209",
+    contract: "one-door-v1",
     mode,
     readAt: "2026-10-13T12:00:00.000Z",
     facts,
@@ -50,7 +51,8 @@ export function odDefaultFacts(): Record<string, unknown> {
     zoningDistrict: odState("not-applicable"),
     landUseCode: odValue("C1"),
     landUseDescription: odState("not-loaded"),
-    flood: odValue({ floodZone: "X", inSpecialFloodHazardArea: false }),
+    // A companion rail: an array of row payloads (one-door-v1).
+    flood: odValue([{ zone: "X", subtype: null, isSfha: false }]),
     setbackFrontFt: odState("held"),
     owner: odState("plan-gated"),
     marketValue: odState("plan-gated"),

@@ -16,7 +16,7 @@
  */
 
 import { logger } from "../logger";
-import { oneDoorReaderEndpoint, type OneDoorState } from "./oneDoorReaderClient";
+import { oneDoorReaderEndpoint, type OneDoorMode, type OneDoorState } from "./oneDoorReaderClient";
 
 export type OneDoorSurface = "cortex-facets" | "cortex-brief";
 
@@ -28,20 +28,29 @@ export type OneDoorShownAnswer = {
   words?: string | null;
 };
 
+/**
+ * One sink row, in the reader's field names (contract `one-door-v1`,
+ * `POST /one-door/shadow-diff` body `{ rows: [...] }`, 1-500 rows).
+ * `oldShown` is any JSON: here the old door's answer on the reader's
+ * vocabulary plus which of state / value / words differed.
+ */
 export type OneDoorShadowDiffRow = {
-  countyFips: string | null;
+  countyFips: string;
   parcelNodeId: string;
   surface: OneDoorSurface;
   fact: string;
-  oldShown: OneDoorShownAnswer;
-  reader: { state: OneDoorState; value?: unknown; words: string };
-  /** Which of state / value / words differed. */
-  differs: Array<"state" | "value" | "words">;
-  observedAt: string;
+  oldShown: OneDoorShownAnswer & { differs: Array<"state" | "value" | "words"> };
+  readerState: OneDoorState;
+  /** The reader's value when `readerState === "value"` (and the rail is not gated), else null. */
+  readerValue: unknown;
+  readerWords?: string;
+  mode?: OneDoorMode;
+  observedAt?: string;
 };
 
 const DEFAULT_PATH = "/one-door/shadow-diff";
 const FLUSH_DELAY_MS = 2000;
+/** The sink accepts 1-500 rows per call. */
 const MAX_BATCH = 200;
 const MAX_BUFFER = 5000;
 const ABSENT_BACKOFF_MS = 10 * 60 * 1000;
@@ -61,7 +70,7 @@ const defaultPoster: OneDoorShadowDiffPoster = async (rows) => {
         Authorization: `Bearer ${endpoint.key}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ diffs: rows }),
+      body: JSON.stringify({ rows }),
       signal: controller.signal,
     });
     return { status: res.status };
@@ -86,7 +95,10 @@ async function flushNow(): Promise<void> {
     }
     try {
       const res = await poster(batch);
-      if (res && (res.status === 404 || res.status === 405 || res.status === 501)) {
+      // Absent (404/405/501) or not configured on the reader (503
+      // sink-not-configured): stop posting for a while. 202 {accepted, dropped}
+      // is success.
+      if (res && (res.status === 404 || res.status === 405 || res.status === 501 || res.status === 503)) {
         disabledUntil = Date.now() + ABSENT_BACKOFF_MS;
         buffer = [];
         logger.info({ status: res.status }, "one_door_shadow_diff_sink_absent");

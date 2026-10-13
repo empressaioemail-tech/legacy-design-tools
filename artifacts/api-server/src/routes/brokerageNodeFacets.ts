@@ -305,6 +305,7 @@ import {
   type OneDoorRead,
 } from "../lib/oneDoor/oneDoorReaderClient";
 import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
+import { enterRecordEntitlements } from "../lib/oneDoor/recordEntitlementsContext";
 import {
   composeOneDoorFacetsBody,
   oneDoorShadowDiffRows,
@@ -919,13 +920,18 @@ brokerageNodeFacetsRouter.get(
     // ONE DOOR (WP-L): the reader decides the mode per request, read as the
     // END USER (#813/#814 entitlement). `off` falls through to today's path
     // unchanged; `on` never reaches the fan-out below.
+    const recordEntitlements = oneDoorEntitlementsFor(grantsOwnerFact);
     const oneDoorRead = await readOneDoorRecord(parcelNodeId, {
-      entitlements: oneDoorEntitlementsFor(grantsOwnerFact),
+      entitlements: recordEntitlements,
     });
     if (oneDoorModeOf(oneDoorRead) === "on") {
       await serveOneDoorFacets(res, parcelNodeId, oneDoorRead);
       return;
     }
+    // Every legacy /record read below runs as the END USER (#525 withholds the
+    // gated rails on the legacy wire unless X-Hauska-Entitlements grants them).
+    // One parcel per request, so the rest of this handler is one scope.
+    enterRecordEntitlements(recordEntitlements);
     let bakedRead: BakedNodeFacetRead;
     let floodHazardFact;
     let landUseFactRaw;

@@ -85,7 +85,9 @@ export type ValueHistoryFactRefusalCode =
   | "parcel-record-engine-refused"
   | "parcel-record-cell-miss"
   | "parcel-record-malformed-cell"
-  | "parcel-record-store-not-configured";
+  | "parcel-record-store-not-configured"
+  /** hauska-engine #525: the reader withheld the rail for this caller's plan. */
+  | "studio-gated";
 
 export type ValueHistoryFactRefusal = {
   state: "refused";

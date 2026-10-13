@@ -34,9 +34,11 @@ function row(fact: string): OneDoorShadowDiffRow {
     parcelNodeId: OD_PARCEL,
     surface: "cortex-facets",
     fact,
-    oldShown: { state: "old:missing" },
-    reader: { state: "held", words: "Held while we verify this source" },
-    differs: ["state"],
+    oldShown: { state: "old:missing", differs: ["state"] },
+    readerState: "held",
+    readerValue: null,
+    readerWords: "Held while we verify this source",
+    mode: "shadow",
     observedAt: "2026-10-13T00:00:00.000Z",
   };
 }
@@ -101,10 +103,10 @@ describe("shadow comparison: what the old body showed vs the reader", () => {
     const rows = oneDoorShadowDiffRows({ surface: "cortex-facets", parcelNodeId: OD_PARCEL, record, oldBody });
     const byFact = Object.fromEntries(rows.map((r) => [r.fact, r]));
     expect(byFact.apn).toBeUndefined();
-    expect(byFact.situsAddress?.differs).toEqual(["value"]);
+    expect(byFact.situsAddress?.oldShown.differs).toEqual(["value"]);
     // The C1 contradiction: old door says held, the reader has the code.
     expect(byFact.landUseCode?.oldShown.state).toBe("held");
-    expect(byFact.landUseCode?.reader.state).toBe("value");
+    expect(byFact.landUseCode?.readerState).toBe("value");
   });
 
   it("brief: the not-applicable zoning finding shown as a coverage gap is a state diff", () => {
@@ -119,8 +121,9 @@ describe("shadow comparison: what the old body showed vs the reader", () => {
     const rows = oneDoorShadowDiffRows({ surface: "cortex-brief", parcelNodeId: OD_PARCEL, record, oldBody });
     const zoning = rows.find((r) => r.fact === "zoningDistrict")!;
     expect(zoning.oldShown.state).toBe("not-on-record");
-    expect(zoning.reader.state).toBe("not-applicable");
-    expect(zoning.reader.words).toBe(OD_WORDS["not-applicable"]);
+    expect(zoning.readerState).toBe("not-applicable");
+    expect(zoning.readerWords).toBe(OD_WORDS["not-applicable"]);
+    expect(zoning.mode).toBe("shadow");
     expect(rows.find((r) => r.fact === "flood")).toBeUndefined();
   });
 

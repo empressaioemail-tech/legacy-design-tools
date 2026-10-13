@@ -3732,7 +3732,8 @@ export function ownerDisplayFromOneDoor(ownerFact: unknown): OwnerPanelDisplay |
   if (state !== "value") {
     return typeof rec.words === "string" && rec.words.trim() ? { kind: "words", words: rec.words } : null;
   }
-  const value = asRecord(rec.value);
+  // A companion rail value is an array of row payloads (one-door-v1): row 0.
+  const value = asRecord(Array.isArray(rec.value) ? rec.value[0] : rec.value);
   const name = value ? stringOrNull(value.ownerName) ?? stringOrNull(value.name) : stringOrNull(rec.value);
   const mailingAddress = value
     ? stringOrNull(value.ownerMailingAddress) ?? stringOrNull(value.mailingAddress)

@@ -42,7 +42,7 @@ const s = (state: Exclude<OneDoorState, "value">) => ({ state, words: WORDS[stat
 
 function onBody(facts: Record<string, unknown>): Record<string, unknown> {
   const record = parseOneDoorRecord(
-    { parcelNodeId: PARCEL, countyFips: "48209", mode: "on", readAt: "2026-10-13T12:00:00.000Z", facts },
+    { parcelNodeId: PARCEL, countyFips: "48209", contract: "one-door-v1", mode: "on", readAt: "2026-10-13T12:00:00.000Z", facts },
     PARCEL,
   )!;
   return composeOneDoorBriefBody({
@@ -69,7 +69,8 @@ const DEFAULT_FACTS = {
   zoningDistrict: s("not-applicable"),
   landUseCode: v("C1"),
   landUseDescription: s("not-loaded"),
-  flood: v({ floodZone: "X", inSpecialFloodHazardArea: false }),
+  // Companion rail: an array of row payloads (one-door-v1).
+  flood: v([{ zone: "X", subtype: null, isSfha: false }]),
   setbackFrontFt: s("held"),
   owner: s("plan-gated"),
 };
@@ -113,7 +114,7 @@ describe("inline card in `on` mode", () => {
   });
 
   it("a fact the reader did not return is omitted (no \"Not on this result\")", () => {
-    const facts = inlineFacts(onBody({ flood: v({ floodZone: "AE" }) }));
+    const facts = inlineFacts(onBody({ flood: v([{ zone: "AE", isSfha: true }]) }));
     expect(Object.keys(facts)).toEqual(["Flood"]);
   });
 
@@ -127,6 +128,17 @@ describe("inline card in `on` mode", () => {
     expect(facts.Flood!.value).toBe(WORDS.failed);
     expect(facts.Flood!.state).toBe("unknown");
   });
+});
+
+it("companion owner rows (array value) render in the detail view for an entitled caller", () => {
+  const body = onBody({ owner: v([{ ownerName: "SYNTHETIC OWNER", ownerMailingAddress: "1 SYNTHETIC WAY" }]) });
+  const model = parseToolResult(JSON.stringify(normalizeR1BodyForExternal(body, true)));
+  expect(model.ownerDisplay).toEqual(expect.objectContaining({ kind: "present", name: "SYNTHETIC OWNER" }));
+});
+
+it("setback scalars arrive as numbers or numeric strings and print verbatim", () => {
+  const facts = inlineFacts(onBody({ setbackFrontFt: v("25"), setbackSideFt: v(5) }));
+  expect(facts.Setbacks!.value).toBe("25 ft front, 5 ft side");
 });
 
 describe("panel and detail view in `on` mode", () => {

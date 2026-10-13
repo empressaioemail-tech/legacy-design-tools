@@ -70,6 +70,7 @@ import {
   transportFailedRecord,
 } from "../lib/oneDoor/oneDoorReaderClient";
 import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
+import { withRecordEntitlements } from "../lib/oneDoor/recordEntitlementsContext";
 import {
   composeOneDoorBriefBody,
   oneDoorShadowDiffRows,
@@ -567,7 +568,12 @@ async function assembleNodeBriefOneDoor(
       noStore: recordHasFailedFact(record),
     };
   }
-  const body = await assembleNodeBriefBody(parcelNodeId, grantsCadRollValuation);
+  // The legacy /record reads run as the END USER too (#525 withholds the
+  // gated rails on the legacy wire unless X-Hauska-Entitlements grants them).
+  const body = await withRecordEntitlements(
+    oneDoorEntitlementsFor(grantsCadRollValuation),
+    () => assembleNodeBriefBody(parcelNodeId, grantsCadRollValuation),
+  );
   if (mode === "shadow" && read.kind === "record") {
     const record = read.record;
     setImmediate(() => {

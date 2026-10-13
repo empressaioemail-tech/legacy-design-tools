@@ -34,8 +34,11 @@
 import { loadCellServeDecision } from "./cellServeRule";
 import { parseParcelNodeId } from "./parcelNodeId";
 import { valueHistoryFactFromParcelRecord } from "./valueHistoryFactFromParcelRecord";
+import { isRailPlanGatedOnRecord } from "./parcelRecordReaderClient";
+import { isSlatedForCellServe } from "./cellServeRule";
 import {
   notCutOverValueHistoryFact,
+  VALUE_HISTORY_FACT_SOURCE,
   VALUE_HISTORY_RAIL_KEY,
   type ValueHistoryFactRead,
 } from "./valueHistoryFactRead";
@@ -46,6 +49,23 @@ export async function loadValueHistoryFactForServe(
   const parsed = parseParcelNodeId(parcelNodeId);
   if (!parsed) {
     return notCutOverValueHistoryFact(parcelNodeId);
+  }
+  // hauska-engine #525: a value history the reader withheld for this caller's
+  // plan is a studio-gated refusal, not a cell miss. (Before #525 such a
+  // caller saw the entries with every dollar figure studio-gated; the reader
+  // now sends no entries at all without the grant.)
+  if (
+    isSlatedForCellServe(parsed.countyFips, VALUE_HISTORY_RAIL_KEY) &&
+    (await isRailPlanGatedOnRecord(`${parsed.countyFips}:${parsed.propId}`, VALUE_HISTORY_RAIL_KEY))
+  ) {
+    return {
+      state: "refused",
+      code: "studio-gated",
+      source: VALUE_HISTORY_FACT_SOURCE,
+      entityId: parcelNodeId,
+      reason:
+        "County tax-assessed value history is Studio or Team only, or requires an active property unlock on this parcel.",
+    };
   }
   const decision = await loadCellServeDecision(
     parsed.countyFips,

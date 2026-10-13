@@ -208,7 +208,10 @@ describe("facets route (CFR) per one-door mode", () => {
   });
 
   it("on: the reader's parcel-not-found is a 404 of its own", async () => {
-    reader({ error: "parcel-not-found", mode: "on" }, 404);
+    reader(
+      { error: "not_found", errorClass: "parcel-not-found", parcelNodeId: OD_PARCEL, countyFips: "48209", contract: "one-door-v1", mode: "on", message: "x" },
+      404,
+    );
     const res = await request(app()).get(facetsUrl);
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("parcel-not-found");
@@ -222,6 +225,49 @@ describe("facets route (CFR) per one-door mode", () => {
     const seen = reader(odReaderBody("on"));
     await request(app()).get(facetsUrl).set("x-test-tier", tier);
     expect(seen[0]!.entitlementsHeader).toBe(expected);
+  });
+});
+
+describe("legacy /record reads carry the END USER's entitlements in every mode (#525)", () => {
+  async function legacyHeaders(path: "facets" | "brief", tier: "anonymous" | "solo" | "studio") {
+    const seen: Array<string | null> = [];
+    const prevKey = process.env.HAUSKA_RETRIEVAL_API_KEY;
+    process.env.HAUSKA_RETRIEVAL_API_KEY = "legacy-route-test-key"; // arms the env-backed cell reader
+    setParcelRecordFetcherForTests(async (_placeKey, header) => {
+      seen.push(header);
+      return null; // the old path's own failure handling; only the header matters here
+    });
+    reader(odReaderBody("off"));
+    try {
+      if (path === "facets") await request(app()).get(facetsUrl).set("x-test-tier", tier);
+      else
+        await request(app())
+          .post("/api/property-explorer/v1/research/brief")
+          .set("x-test-tier", tier)
+          .send({ parcelNodeId: OD_PARCEL, depth: "node" });
+    } finally {
+      if (prevKey === undefined) delete process.env.HAUSKA_RETRIEVAL_API_KEY;
+      else process.env.HAUSKA_RETRIEVAL_API_KEY = prevKey;
+    }
+    return seen;
+  }
+
+  it.each(["facets", "brief"] as const)("%s: Studio sends the gated rail list on every legacy read", async (path) => {
+    const seen = await legacyHeaders(path, "studio");
+    expect(seen.length).toBeGreaterThan(0);
+    for (const h of seen) expect(h).toBe([...ONE_DOOR_GATED_RAILS].sort().join(","));
+  });
+
+  it.each(["facets", "brief"] as const)("%s: Solo sends no header (default deny)", async (path) => {
+    const seen = await legacyHeaders(path, "solo");
+    expect(seen.length).toBeGreaterThan(0);
+    for (const h of seen) expect(h).toBeNull();
+  });
+
+  it("facets: anonymous sends no header", async () => {
+    const seen = await legacyHeaders("facets", "anonymous");
+    expect(seen.length).toBeGreaterThan(0);
+    for (const h of seen) expect(h).toBeNull();
   });
 });
 
@@ -246,7 +292,13 @@ describe("R1 brief (CB, what the MCP card renders) per one-door mode", () => {
       expect.objectContaining({ state: "not-applicable", words: OD_WORDS["not-applicable"] }),
     );
     expect(byId.zoning!.reason).toBe(OD_WORDS["not-applicable"]);
-    expect(byId.flood!.data).toEqual({ floodZone: "X", inSpecialFloodHazardArea: false });
+    expect(byId.flood!.data).toEqual(
+      expect.objectContaining({
+        floodZone: "X",
+        inSpecialFloodHazardArea: false,
+        rows: [{ zone: "X", subtype: null, isSfha: false }],
+      }),
+    );
     expect(byId["setbacks-envelope"]!.reason).toBe(OD_WORDS.held);
     expect(res.body.facts.owner.words).toBe(OD_WORDS["plan-gated"]);
   });

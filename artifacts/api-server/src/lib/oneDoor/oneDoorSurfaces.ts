@@ -156,6 +156,39 @@ export function dispositionForOneDoorState(state: OneDoorState): string {
   }
 }
 
+/**
+ * A companion rail's value is an array of row payloads, in row order
+ * (contract `one-door-v1`). The rows ride verbatim under `rows`. For flood,
+ * row 0's fields are also named the way the MCP card already reads a flood
+ * section (zone -> floodZone, subtype -> zoneSubtype, isSfha ->
+ * inSpecialFloodHazardArea) and every row is listed under `zones`: a rename of
+ * the reader's own fields, never a new value or a re-ranking.
+ */
+function companionSectionData(rail: string, value: unknown): JsonRecord {
+  if (!Array.isArray(value)) {
+    const obj = asRecord(value);
+    return obj ? { ...obj } : { value };
+  }
+  const rows = value.map(asRecord).filter((r): r is JsonRecord => !!r);
+  const out: JsonRecord = { rows: value };
+  if (rail === "flood" && rows[0]) {
+    const first = rows[0];
+    if ("zone" in first) out.floodZone = first.zone;
+    if ("subtype" in first) out.zoneSubtype = first.subtype;
+    if ("isSfha" in first) out.inSpecialFloodHazardArea = first.isSfha;
+    if ("baseFloodElevation" in first) out.baseFloodElevation = first.baseFloodElevation;
+    out.zones = rows.map((r) => ({
+      zone: r.zone ?? null,
+      subtype: r.subtype ?? null,
+      isSfha: r.isSfha ?? null,
+      floodway: r.floodway ?? null,
+      bfe: r.baseFloodElevation ?? null,
+      areaShare: r.areaShare ?? null,
+    }));
+  }
+  return out;
+}
+
 function sectionData(
   record: OneDoorRecord,
   spec: (typeof ONE_DOOR_BRIEF_SECTIONS)[number],
@@ -167,9 +200,7 @@ function sectionData(
     if (!fact || fact.state !== "value") continue;
     any = true;
     if (key === "*") {
-      const obj = asRecord(fact.value);
-      if (obj) Object.assign(data, obj);
-      else data.value = fact.value;
+      Object.assign(data, companionSectionData(rail, fact.value));
     } else {
       data[key] = fact.value;
     }
@@ -460,6 +491,8 @@ export const CB_SHOWN: Record<string, OldExtractor> = {
 
 /** The reader's value reduced to something comparable with an old scalar. */
 function readerComparable(value: unknown, valueKey: string | undefined): unknown {
+  // Companion rails: compare against row 0 (e.g. flood's zone).
+  if (Array.isArray(value)) value = value.length === 1 ? value[0] : undefined;
   const rec = asRecord(value);
   if (!rec) return value;
   for (const key of [valueKey, "value", "district", "floodZone", "zone", "code", "sqFt", "feet"]) {
@@ -513,7 +546,7 @@ export function oneDoorShadowDiffRows(args: {
     } catch {
       shown = OLD_MISSING;
     }
-    const differs: OneDoorShadowDiffRow["differs"] = [];
+    const differs: OneDoorShadowDiffRow["oldShown"]["differs"] = [];
     if (shown.state !== fact.state) differs.push("state");
     if (shown.state === "value" && fact.state === "value") {
       const same = sameScalar(shown.value, readerComparable(fact.value, VALUE_KEY_HINT[rail]));
@@ -536,17 +569,15 @@ export function oneDoorShadowDiffRows(args: {
       shown = rest;
     }
     rows.push({
-      countyFips: args.record.countyFips,
+      countyFips: args.record.countyFips ?? args.parcelNodeId.split(":")[0]!,
       parcelNodeId: args.parcelNodeId,
       surface: args.surface,
       fact: rail,
-      oldShown: shown,
-      reader: {
-        state: fact.state,
-        ...(fact.state === "value" && !redact ? { value: fact.value } : {}),
-        words: fact.words,
-      },
-      differs,
+      oldShown: { ...shown, differs },
+      readerState: fact.state,
+      readerValue: fact.state === "value" && !redact ? fact.value : null,
+      readerWords: fact.words,
+      mode: args.record.mode,
       observedAt,
     });
   }

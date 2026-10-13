@@ -3,11 +3,13 @@
  * client for the single reader, hauska-engine retrieval-api
  * `GET /property-nodes/:id/record`.
  *
- * THIS IS THE ONLY FILE THAT KNOWS THE READER'S WIRE FIELD NAMES. WP-R is
- * building the reader in parallel and publishes the final shape; everything
- * else in cortex and the MCP codes against the types exported here
- * (`OneDoorFact`, `OneDoorMode`, the seven `OneDoorState`s). Adapting to the
- * final wire is a change to `parseOneDoorRecord` below and nothing else.
+ * THIS IS THE ONLY FILE THAT KNOWS THE READER'S WIRE FIELD NAMES. Aligned to
+ * the published contract `one-door-v1` (hauska-engine PR #525, CONTRACT
+ * section): `contract`, top-level `mode`, `facts` keyed by rail key; 404
+ * `errorClass: "parcel-not-found"` (no facts); 503 `errorClass: read-failed |
+ * timeout | store-not-configured` (facts all `failed`, plus `mode`).
+ * Everything else in cortex and the MCP codes against the types exported here
+ * (`OneDoorFact`, `OneDoorMode`, the seven `OneDoorState`s).
  *
  * What the reader returns (§2), one object per fact keyed by rail key:
  *
@@ -205,21 +207,21 @@ export function parseOneDoorFact(value: unknown): OneDoorFact | null {
   return fact;
 }
 
+/** The contract version this client speaks (`contract` on every reader response). */
+export const ONE_DOOR_CONTRACT = "one-door-v1";
+
 /**
  * The reader body -> `OneDoorRecord`, or `null` when the body is not a reader
- * body at all. A body without a recognised `mode` (today's pre-WP-R `/record`)
- * is `mode: "off"` with whatever one-door facts it happens to carry (none).
- *
- * Accepted shapes, so WP-R's final naming is absorbed here:
- *   - facts under `facts` (preferred), else `rails`, keyed by rail key;
- *   - mode under `mode`, else `oneDoor.mode`, else `oneDoorMode`.
+ * body at all. A body that does not declare `contract: "one-door-v1"` with a
+ * recognised top-level `mode` (today's pre-#525 `/record`) is `mode: "off"`
+ * and carries no one-door facts: the legacy `rails` map is never read here.
  */
 export function parseOneDoorRecord(body: unknown, parcelNodeId: string): OneDoorRecord | null {
   const rec = asRecord(body);
   if (!rec) return null;
-  const modeRaw = rec.mode ?? asRecord(rec.oneDoor)?.mode ?? rec.oneDoorMode;
-  const mode: OneDoorMode = isOneDoorMode(modeRaw) ? modeRaw : "off";
-  const factsRaw = asRecord(rec.facts) ?? asRecord(rec.rails) ?? {};
+  const speaksContract = rec.contract === ONE_DOOR_CONTRACT;
+  const mode: OneDoorMode = speaksContract && isOneDoorMode(rec.mode) ? rec.mode : "off";
+  const factsRaw = (speaksContract && asRecord(rec.facts)) || {};
   const facts: Record<string, OneDoorFact> = {};
   for (const [rail, raw] of Object.entries(factsRaw)) {
     const fact = parseOneDoorFact(raw);
@@ -385,13 +387,26 @@ export async function readOneDoorRecord(
     return { kind: "unavailable", reason: result.kind, mode: lastKnownOneDoorMode(countyFips) };
   }
   const body = asRecord(result.body);
-  if (result.status === 404) {
-    const code = str(body?.error) ?? str(body?.code) ?? str(body?.state);
-    const modeRaw = body?.mode;
-    const mode = isOneDoorMode(modeRaw) ? modeRaw : lastKnownOneDoorMode(countyFips);
-    if (code === "parcel-not-found") {
-      rememberMode(countyFips, mode);
-      return { kind: "parcel-not-found", mode };
+  const errorClass = str(body?.errorClass);
+  if (result.status === 404 && errorClass === "parcel-not-found") {
+    const mode = isOneDoorMode(body?.mode) ? body.mode : lastKnownOneDoorMode(countyFips);
+    rememberMode(countyFips, mode);
+    return { kind: "parcel-not-found", mode };
+  }
+  // 503 read-failed | timeout | store-not-configured: the reader still speaks
+  // the contract -- its `facts` are `failed` (never cached) and it states the
+  // mode -- so the surface renders those facts like any other read.
+  if (
+    result.status === 503 &&
+    (errorClass === "read-failed" || errorClass === "timeout" || errorClass === "store-not-configured") &&
+    body?.contract === ONE_DOOR_CONTRACT &&
+    isOneDoorMode(body.mode) &&
+    asRecord(body.facts)
+  ) {
+    const parsed = parseOneDoorRecord(body, parcelNodeId);
+    if (parsed) {
+      rememberMode(parsed.countyFips ?? countyFips, parsed.mode);
+      return { kind: "record", record: enforceOneDoorEntitlements(parsed, opts.entitlements) };
     }
   }
   if (result.status < 200 || result.status >= 300) {

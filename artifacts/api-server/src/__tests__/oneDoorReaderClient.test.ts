@@ -81,9 +81,10 @@ describe("parseOneDoorRecord (the one place WP-R's field names live)", () => {
     expect(rec.facts.a!.words).toBe(ONE_DOOR_TRANSPORT_FAILED_WORDS);
   });
 
-  it("accepts mode under oneDoor.mode as well (shape tolerance)", () => {
-    const rec = parseOneDoorRecord({ oneDoor: { mode: "shadow" }, facts: {} }, OD_PARCEL)!;
-    expect(rec.mode).toBe("shadow");
+  it("a body that does not declare contract one-door-v1 is off, whatever mode/facts it carries", () => {
+    const rec = parseOneDoorRecord({ mode: "on", facts: { apn: odValue("R1") } }, OD_PARCEL)!;
+    expect(rec.mode).toBe("off");
+    expect(rec.facts).toEqual({});
   });
 });
 
@@ -159,7 +160,12 @@ describe("readOneDoorRecord", () => {
   });
 
   it("parcel-not-found is its own outcome, distinct from not-loaded", async () => {
-    setOneDoorFetcherForTests(fetcherReturning({ error: "parcel-not-found", mode: "on" }, 404).fetcher);
+    setOneDoorFetcherForTests(
+      fetcherReturning(
+        { error: "not_found", errorClass: "parcel-not-found", parcelNodeId: OD_PARCEL, countyFips: "48209", contract: "one-door-v1", mode: "on", message: "x" },
+        404,
+      ).fetcher,
+    );
     const read = await readOneDoorRecord(OD_PARCEL, { entitlements: [] });
     expect(read).toEqual({ kind: "parcel-not-found", mode: "on" });
   });
@@ -181,6 +187,38 @@ describe("readOneDoorRecord", () => {
     up = false;
     const read = await readOneDoorRecord(OD_PARCEL, { entitlements: [] });
     expect(read).toEqual({ kind: "unavailable", reason: "network", mode: "on" });
+  });
+
+  it("503 read-failed / timeout / store-not-configured: the reader's failed facts and mode are served", async () => {
+    for (const errorClass of ["read-failed", "timeout", "store-not-configured"]) {
+      setOneDoorFetcherForTests(
+        fetcherReturning(
+          {
+            error: "unavailable",
+            errorClass,
+            parcelNodeId: OD_PARCEL,
+            countyFips: "48209",
+            contract: "one-door-v1",
+            mode: "on",
+            facts: { apn: odState("failed"), situsAddress: odState("failed") },
+            message: "x",
+          },
+          503,
+        ).fetcher,
+      );
+      const read = await readOneDoorRecord(OD_PARCEL, { entitlements: [] });
+      expect(read.kind).toBe("record");
+      if (read.kind === "record") {
+        expect(read.record.mode).toBe("on");
+        expect(read.record.facts.apn!.state).toBe("failed");
+        expect(read.record.facts.apn!.words).toBe(OD_WORDS.failed);
+      }
+    }
+  });
+
+  it("a 404 without errorClass parcel-not-found is unavailable, not a not-found", async () => {
+    setOneDoorFetcherForTests(fetcherReturning({ error: "parcel-not-found" }, 404).fetcher);
+    expect((await readOneDoorRecord(OD_PARCEL, { entitlements: [] })).kind).toBe("unavailable");
   });
 
   it("a non-2xx reader answer is unavailable, not a fact", async () => {
