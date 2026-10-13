@@ -119,6 +119,18 @@ const ANONYMOUS_APPLICANT: SessionUser = Object.freeze({
 });
 
 /**
+ * Least-privilege session for a request that must run ANONYMOUSLY whatever
+ * the session middleware attached: the browser proxy with no verified end
+ * user (see middlewares/browserProxyEndUser.ts). No requestor at all, not
+ * even an ephemeral `anon_` owner (the proxy forwards no cookie, so that
+ * owner would be minted fresh per request and own nothing), no permissions,
+ * user audience.
+ */
+export function anonymousApplicantSession(): SessionUser {
+  return { ...ANONYMOUS_APPLICANT };
+}
+
+/**
  * Decode the `pr_session` cookie body. Returns `null` for missing /
  * malformed cookies so the caller can fall back to the anonymous default.
  *

@@ -99,11 +99,17 @@ services:
       # P-492 (2026-10-03) removed GOHIGHLEVEL_API_KEY and GOHIGHLEVEL_LOCATION_ID:
       # GoHighLevel is retired from Smart Site, hard cut, and CI fails if cortex
       # source names either again. That leaves 31.
+      # 2026-10-13 adds BROWSER_PROXY_API_KEYS (browser-proxy identity): 32.
       - { key: AI_INTEGRATIONS_ANTHROPIC_API_KEY, scope: RUN_TIME, type: SECRET }
       - { key: ATOMS_DATABASE_URL, scope: RUN_TIME, type: SECRET }
       - { key: BIM_MODEL_SHARED_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: BRIEF_RETRIEVAL_API_KEY, scope: RUN_TIME, type: SECRET }
       - { key: BROKERAGE_EXTENSION_PUBLIC_KEY, scope: RUN_TIME, type: SECRET }
+      # Browser-proxy credential(s) for hauska-map api/spine.ts (comma-separated
+      # for rotation). Transport auth only: a request carrying one runs as its
+      # verified end user or as anonymous, never as the service. Must differ
+      # from SERVICE_API_KEY. Paired with CORTEX_BROWSER_PROXY_KEY on Vercel.
+      - { key: BROWSER_PROXY_API_KEYS, scope: RUN_TIME, type: SECRET }
       # DATABASE_URL is the UNPOOLED `_DIRECT` endpoint, not the pooler. The
       # pooled string was injected read-only for thirteen hours on 2026-08-31
       # (register section 3) and cortex writes.

@@ -22,6 +22,7 @@ import {
 } from "./brokerageAuth";
 import { getServiceApiKey } from "../lib/serviceToken";
 import { buildGateServiceAuth } from "../lib/gateFrontSeam";
+import { isBrowserProxyCaller } from "./browserProxyEndUser";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -52,6 +53,16 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
   res: Response,
   next: NextFunction,
 ) => {
+  // Browser proxy (hauska-map api/spine.ts): transport already authenticated
+  // by browserProxyEndUserMiddleware, which ran the request AS its end user
+  // (verified session -> brokerageAuth "user") or as ANONYMOUS. Never a
+  // service caller, never Max by credential — the proxy key was stripped
+  // there, so the SERVICE_API_KEY comparison below cannot see it.
+  if (isBrowserProxyCaller(req)) {
+    next();
+    return;
+  }
+
   const provided = extractBrokerageApiKey(req);
 
   if (provided) {
