@@ -29,9 +29,15 @@ import {
   bboxOfGeometry,
   bboxesIntersect,
   pointInGeometry,
+  trueInteriorPoint,
   type GeoBbox,
   type GeoJsonGeometry,
 } from "../txgio/geo";
+import {
+  decideByAreaShare,
+  measureJurisdictionPieces,
+  type AreaShareDecision,
+} from "./areaShare";
 // TYPE-ONLY, deliberately: this module keeps its "no db, no network" purity at
 // runtime (the whole point of `@workspace/cad-ingest/boundary`), while the
 // served-status vocabulary stays owned by the table that stores it. `import
@@ -91,11 +97,18 @@ export type CityContainmentResult =
       gnis: string | null;
       etjStatus: EtjStatus;
       basis: string;
+      /**
+       * Present when a PARCEL GEOMETRY was decided (`resolveCityContainment`
+       * with a geometry): the area-share decision behind this answer, with its
+       * split (areaShare.ts). Absent for a bare point, which has no area.
+       */
+      areaShare?: AreaShareDecision;
     }
   | {
       status: "unincorporated";
       etjStatus: EtjStatus;
       basis: string;
+      areaShare?: AreaShareDecision;
     }
   | {
       status: "unmeasured";
@@ -110,6 +123,8 @@ export type CountyContainmentResult =
       countyFips: string;
       countyName: string;
       basis: string;
+      /** Present when a parcel geometry was decided by area share. */
+      areaShare?: AreaShareDecision;
     }
   | {
       status: "unresolved";
@@ -172,7 +187,19 @@ function isPosition(v: unknown): v is [number, number] {
   );
 }
 
-/** Representative interior point for a parcel polygon (centroid with vertex fallback). */
+/**
+ * Representative interior point for a parcel polygon: the largest part's
+ * centroid when it is inside the parcel, otherwise a point PROVEN strictly
+ * inside it (`trueInteriorPoint`, the rule LDT #804 gave the zoning stamp).
+ *
+ * Until the area-share change this fell back to the part's FIRST VERTEX, which
+ * sits on a boundary shared with a neighbour and can answer for the neighbour.
+ * It is no longer how a parcel's city or county is decided (that is
+ * `resolveCityContainment` / `resolveCountyContainment` by area share); it
+ * remains the query point for a question that is still asked at one point
+ * (the ETJ ring test, the NFHL intersect pre-check), and it never returns a
+ * boundary vertex for them.
+ */
 export function representativePoint(
   geometry: GeoJsonGeometry,
 ): [number, number] | null {
@@ -227,7 +254,31 @@ export function representativePoint(
     const lat = cy * f;
     if (pointInGeometry(lng, lat, geometry)) return [lng, lat];
   }
-  return best[0] ?? null;
+  const interior = trueInteriorPoint(geometry);
+  return interior ? [interior.longitude, interior.latitude] : null;
+}
+
+/** Percent with one decimal, for a basis sentence. */
+function pct(share: number): string {
+  return `${(share * 100).toFixed(1)}%`;
+}
+
+/** The basis sentence for an area-share decision. */
+function areaShareBasis(
+  decision: AreaShareDecision,
+  layer: string,
+  remainderLabel: string,
+): string {
+  const w = decision.winner;
+  const who = w.kind === "jurisdiction" ? `${w.name} (${w.id})` : remainderLabel;
+  const rule =
+    decision.rule === "majority"
+      ? `holds the majority (${pct(w.share)}) of the parcel's area`
+      : `holds the largest share (${pct(w.share)}) of the parcel's area; no piece holds a majority`;
+  return (
+    `area share against ${layer} in EPSG:3083 (${decision.method}): ${who} ${rule}` +
+    (decision.split ? `; split: ${decision.disclosure}` : "")
+  );
 }
 
 function etjUnresolved(): EtjStatus {
@@ -275,22 +326,69 @@ export function resolveCityContainmentAtPoint(
   };
 }
 
-/** Resolve city containment for a parcel geometry or point. */
+/**
+ * Resolve city containment for a parcel geometry or point.
+ *
+ * A GEOMETRY is decided by AREA SHARE (areaShare.ts): the city holding the
+ * majority of the parcel's area in EPSG:3083, unincorporated when the
+ * unincorporated remainder holds it, the largest piece when nothing does —
+ * never by one point. The decision, with its split, rides on the result as
+ * `areaShare`. A bare POINT has no area and is still a point-in-polygon
+ * answer (`resolveCityContainmentAtPoint`).
+ */
 export function resolveCityContainment(
   query: { longitude: number; latitude: number } | GeoJsonGeometry,
   index: CityBoundaryIndexEntry[],
 ): CityContainmentResult {
   if ("type" in query && "coordinates" in query) {
-    const pt = representativePoint(query);
-    if (pt === null) {
+    if (index.length === 0) {
       return {
         status: "unmeasured",
         etjStatus: etjUnresolved(),
         basis:
-          "parcel geometry yielded no representative point; city limits are unmeasured",
+          "tx_city_boundary index is empty; city limits are unmeasured, not unincorporated",
       };
     }
-    return resolveCityContainmentAtPoint(pt[0], pt[1], index);
+    const measured = measureJurisdictionPieces(
+      query,
+      index.map((e) => ({
+        id: e.geoId,
+        name: e.cityName,
+        gnis: e.gnis,
+        geometry: e.geometry,
+        bbox: e.bbox,
+      })),
+    );
+    const decision = measured
+      ? decideByAreaShare(measured.parcelM2, measured.pieces, "unincorporated")
+      : null;
+    if (decision === null) {
+      return {
+        status: "unmeasured",
+        etjStatus: etjUnresolved(),
+        basis:
+          "parcel geometry has no measurable area; city limits are unmeasured",
+      };
+    }
+    const basis = areaShareBasis(decision, "tx_city_boundary", "unincorporated");
+    const w = decision.winner;
+    if (w.kind === "jurisdiction") {
+      return {
+        status: "incorporated",
+        cityName: w.name,
+        geoId: w.id,
+        gnis: w.gnis,
+        etjStatus: etjUnresolved(),
+        basis,
+        areaShare: decision,
+      };
+    }
+    return {
+      status: "unincorporated",
+      etjStatus: etjUnresolved(),
+      basis,
+      areaShare: decision,
+    };
   }
   return resolveCityContainmentAtPoint(query.longitude, query.latitude, index);
 }
@@ -331,14 +429,39 @@ export function resolveCountyContainment(
   index: CountyBoundaryIndexEntry[],
 ): CountyContainmentResult {
   if ("type" in query && "coordinates" in query) {
-    const pt = representativePoint(query);
-    if (pt === null) {
+    // Same rule as a city, same function: the county holding the majority of
+    // the parcel's area. The remainder is land outside every county polygon
+    // in the index; a parcel mostly there is unresolved, never a guessed county.
+    const measured = measureJurisdictionPieces(
+      query,
+      index.map((e) => ({
+        id: e.countyFips,
+        name: e.countyName,
+        geometry: e.geometry,
+        bbox: e.bbox,
+      })),
+    );
+    const decision = measured
+      ? decideByAreaShare(measured.parcelM2, measured.pieces, "outside every county polygon")
+      : null;
+    if (decision === null) {
       return {
         status: "unresolved",
-        basis: "parcel geometry yielded no representative point",
+        basis: "parcel geometry has no measurable area",
       };
     }
-    return resolveCountyContainmentAtPoint(pt[0], pt[1], index);
+    const w = decision.winner;
+    const basis = areaShareBasis(decision, "tx_county_boundary", "outside every county polygon");
+    if (w.kind === "jurisdiction") {
+      return {
+        status: "resolved",
+        countyFips: w.id,
+        countyName: w.name,
+        basis,
+        areaShare: decision,
+      };
+    }
+    return { status: "unresolved", basis };
   }
   return resolveCountyContainmentAtPoint(query.longitude, query.latitude, index);
 }

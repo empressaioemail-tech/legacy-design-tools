@@ -171,7 +171,7 @@ describe("city containment helper", () => {
     expect(src).not.toMatch(/derive\w*\s+etj/i);
   });
 
-  it("resolves from parcel geometry via representative point", () => {
+  it("resolves from parcel geometry by area share", () => {
     const parcel = {
       type: "Polygon",
       coordinates: [
