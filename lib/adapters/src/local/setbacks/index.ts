@@ -89,6 +89,10 @@ import highlandHavenTx from "./highland-haven-tx.json" with { type: "json" };
 // NO table: every stamped Horseshoe Bay code refuses in the register (its standards vary by
 // geographic zone and no parcel's zone is resolved yet), and its (code, zone) standards live in
 // horseshoe-bay-tx-zone-standards.json, which is deliberately NOT a SETBACK_TABLES entry.
+// 2026-10-13 (per-parcel lane): the 10 conditional Marble Falls districts and every stamped Horseshoe
+// Bay district now resolve PER PARCEL in burnet-parcel-setbacks.ts (package export
+// "@workspace/adapters/setbacks/burnet-parcel"), from burnet-parcel-standards.json. By district code
+// alone this file still refuses them -- correctly: the conditions need the parcel.
 import marbleFallsTx from "./marble-falls-tx.json" with { type: "json" };
 import {
   BURNET_CITY_JURISDICTION_KEYS,
@@ -99,6 +103,7 @@ import {
   SETBACK_EDITION_UNVERIFIED,
   SETBACK_NO_DIMENSIONAL_STANDARDS,
   SETBACK_SOURCE_NOT_REGISTERED,
+  SETBACK_SOURCE_PENDING,
   checkSetbackEditionCurrency,
   type EditionCurrencyVerdict,
 } from "./county-edition-currency.js";
@@ -476,6 +481,7 @@ export const SETBACK_REFUSAL_CODES = [
   SETBACK_EDITION_AMBIGUOUS,
   SETBACK_NO_DIMENSIONAL_STANDARDS,
   SETBACK_CONDITIONAL_NOT_EVALUATED,
+  SETBACK_SOURCE_PENDING,
   SETBACK_TABLE_ABSENT,
 ] as const;
 
@@ -642,6 +648,7 @@ export {
   SETBACK_EDITION_UNVERIFIED,
   SETBACK_NO_DIMENSIONAL_STANDARDS,
   SETBACK_SOURCE_NOT_REGISTERED,
+  SETBACK_SOURCE_PENDING,
   SUPERSEDED_ORDINANCE_EDITIONS,
   burnetOrdinanceRegister,
   checkSetbackEditionCurrency,

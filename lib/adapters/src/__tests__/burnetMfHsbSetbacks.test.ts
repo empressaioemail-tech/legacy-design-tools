@@ -202,8 +202,10 @@ describe("Horseshoe Bay: one test per stamped code (varies by zone -> refuses; i
     expect(row.edition_line_verbatim).toContain("Includes legislation through Ord. No. 2026-18 adopted June 16, 2026");
   });
 
-  it("MH-1 (stamped on 746 parcels, absent from pack E) refuses as unsourced -- never mapped onto pack E's Zone-4B M-1", () => {
-    expect(refusalCode("horseshoe-bay-tx", "MH-1")).toBe(SETBACK_EDITION_UNVERIFIED);
+  it("MH-1 (stamped on 746 parcels, absent from pack E) refuses as source-pending (pack F) -- never mapped onto pack E's Zone-4B M-1", () => {
+    // 2026-10-13 per-parcel lane: was SETBACK_EDITION_UNVERIFIED; the register now says "source-pending".
+    expect(refusalCode("horseshoe-bay-tx", "MH-1")).toBe("SETBACK_SOURCE_PENDING");
+    expect(regRow("Horseshoe Bay", "MH-1")!.verification).toBe("source-pending");
     expect(regRow("Horseshoe Bay", "MH-1")!.notes).toMatch(/^UNSOURCED/);
     expect(zoneFile.code_spelling_map.some((m) => m.pack_e_code === "MH-1" || m.layer_zoning === "MH-1")).toBe(false);
   });

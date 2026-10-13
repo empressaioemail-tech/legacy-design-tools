@@ -2067,3 +2067,136 @@ describe("stampCountyZoning (parcelIdIndex — Bug 2)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// OPS-24 Burnet per-parcel setbacks (2026-10-13): the layer's geographic
+// SUB-AREA (Horseshoe Bay SUBDIVISION) travels with the SAME feature whose
+// code is stamped and is written to txgio_parcel.zoning_subarea (migration
+// 0113) -- only for a layer that configures `subareaField`.
+// ---------------------------------------------------------------------------
+
+describe("zoning sub-area (Horseshoe Bay SUBDIVISION -> zoning_subarea)", () => {
+  const COUNTY = "48053";
+  const CITY = "horseshoe-bay-tx";
+
+  it("only Horseshoe Bay configures a subareaField (SUBDIVISION); Marble Falls does not", () => {
+    expect(resolveZoningLayer("horseshoe-bay-tx")!.subareaField).toBe("SUBDIVISION");
+    expect(resolveZoningLayer("marble-falls-tx")!.subareaField).toBeUndefined();
+  });
+
+  it("reduceZoningFeature reads SUBDIVISION off the same feature (trimmed; blank -> null) and adds no key for a layer without one", () => {
+    const hsb = resolveZoningLayer("horseshoe-bay-tx")!;
+    const mf = resolveZoningLayer("marble-falls-tx")!;
+    const proper = reduceZoningFeature(
+      { attributes: { PROP_ID: 23169, ZONING: "R-4", SUB_ZONING: "R-4-MF", SUBDIVISION: " PROPER " }, geometry: null },
+      hsb,
+    );
+    expect(proper.code).toBe("R-4");
+    expect(proper.subarea).toBe("PROPER");
+    const blankCode = reduceZoningFeature(
+      { attributes: { PROP_ID: 69366, ZONING: null, SUBDIVISION: "PROPER" }, geometry: null },
+      hsb,
+    );
+    expect(blankCode.code).toBeNull();
+    expect(blankCode.subarea).toBe("PROPER");
+    expect(
+      reduceZoningFeature({ attributes: { PROP_ID: 1, ZONING: "R-1", SUBDIVISION: "  " }, geometry: null }, hsb).subarea,
+    ).toBeNull();
+    const mfReduced = reduceZoningFeature({ attributes: { Zone_ID: "NR", Zone_Name: "x" }, geometry: null }, mf);
+    expect("subarea" in mfReduced).toBe(false);
+  });
+
+  it("the point index and the parcel-id index both carry the feature's own sub-area", () => {
+    const index = buildZoningIndex([{ ...squareFeature("R-1", -98.3, 30.55, 0.01), subarea: "SOUTH" }]);
+    expect(zoningCodeAtPoint(index, -98.295, 30.555)).toMatchObject({ code: "R-1", subarea: "SOUTH" });
+    const plain = buildZoningIndex([squareFeature("NR", -98.3, 30.55, 0.01)]);
+    expect("subarea" in (zoningCodeAtPoint(plain, -98.295, 30.555) ?? {})).toBe(false);
+    const ids = buildParcelIdIndex([{ parcelId: "7", code: "GH", subarea: "PROPER", geometry: parcelSquare(-98.29, 30.56) }]);
+    expect(ids.get("7")).toMatchObject({ code: "GH", subarea: "PROPER" });
+  });
+
+  /** Fake txgio_parcel whose execute understands the 5-tuple (sub-area) UPDATE and records the SQL text. */
+  function subareaFakeDb(rows: Array<{ featureIndex: number; propId: string; geometry: GeoJsonGeometry }>) {
+    const table = rows.map((r) => ({ ...r, countyFips: COUNTY, zoningDistrict: null as string | null, zoningSubarea: null as string | null }));
+    const sqlTexts: string[] = [];
+    const db = {
+      selectDistinctOn() {
+        const chain = {
+          from: () => chain,
+          where: () => ({
+            orderBy: () =>
+              Promise.resolve(table.map((r) => ({ featureIndex: r.featureIndex, geometry: r.geometry, propId: r.propId }))),
+          }),
+        };
+        return chain;
+      },
+      execute(query: SQL) {
+        const { sql: text, params } = dialect.sqlToQuery(query);
+        sqlTexts.push(text);
+        const county = params[params.length - 1] as string;
+        const tuples = params.slice(0, params.length - 1);
+        const width = text.includes("zoning_subarea") ? 5 : 4;
+        let rowCount = 0;
+        for (let i = 0; i < tuples.length; i += width) {
+          for (const r of table) {
+            if (r.countyFips !== county || r.featureIndex !== Number(tuples[i])) continue;
+            r.zoningDistrict = String(tuples[i + 1]);
+            if (width === 5) r.zoningSubarea = (tuples[i + 4] as string | null) ?? null;
+            rowCount += 1;
+          }
+        }
+        return Promise.resolve({ rowCount });
+      },
+    } as unknown as ZoningStampDb;
+    return { db, table, sqlTexts };
+  }
+
+  const own = parcelSquare(-98.295, 30.555);
+  const pointIndex = buildZoningIndex([{ ...squareFeature("R-1", -98.3, 30.55, 0.01), subarea: "SOUTH" }]);
+  const idIndex = buildParcelIdIndex([{ parcelId: "100", code: "GH", subarea: "PROPER", geometry: own }]);
+
+  it("writeSubarea: an id-matched parcel gets ITS feature's sub-area, a point-matched one the polygon's, in the same UPDATE as the code", async () => {
+    const fake = subareaFakeDb([
+      { featureIndex: 1, propId: "100", geometry: own }, // id join -> GH / PROPER
+      { featureIndex: 2, propId: "300", geometry: own }, // absent id -> point lookup -> R-1 / SOUTH
+    ]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: pointIndex,
+      parcelIdIndex: idIndex,
+      writeSubarea: true,
+    });
+    expect(fake.table.find((r) => r.featureIndex === 1)).toMatchObject({ zoningDistrict: "GH", zoningSubarea: "PROPER" });
+    expect(fake.table.find((r) => r.featureIndex === 2)).toMatchObject({ zoningDistrict: "R-1", zoningSubarea: "SOUTH" });
+    expect(fake.sqlTexts).toHaveLength(1);
+    expect(fake.sqlTexts[0]).toContain("zoning_subarea");
+    expect(summary.subareaHistogram).toEqual({ PROPER: 1, SOUTH: 1 });
+  });
+
+  it("writeSubarea in a scoped dry run reports the sub-area per parcel and writes nothing", async () => {
+    const fake = subareaFakeDb([{ featureIndex: 1, propId: "100", geometry: own }]);
+    const summary = await stampCountyZoning({
+      db: fake.db,
+      countyFips: COUNTY,
+      cityKey: CITY,
+      index: pointIndex,
+      parcelIdIndex: idIndex,
+      propIds: new Set(["100"]),
+      dryRun: true,
+      writeSubarea: true,
+    });
+    expect(fake.sqlTexts).toHaveLength(0);
+    expect(summary.perParcel![0]).toMatchObject({ propId: "100", district: "GH", subarea: "PROPER" });
+  });
+
+  it("without writeSubarea the UPDATE never names zoning_subarea (every other city's stamp is unchanged and needs no migration 0113)", async () => {
+    const fake = subareaFakeDb([{ featureIndex: 2, propId: "300", geometry: own }]);
+    const summary = await stampCountyZoning({ db: fake.db, countyFips: COUNTY, cityKey: "marble-falls-tx", index: pointIndex });
+    expect(fake.sqlTexts).toHaveLength(1);
+    expect(fake.sqlTexts[0]).not.toContain("zoning_subarea");
+    expect(fake.table[0].zoningSubarea).toBeNull();
+    expect(summary.subareaHistogram).toBeUndefined();
+  });
+});

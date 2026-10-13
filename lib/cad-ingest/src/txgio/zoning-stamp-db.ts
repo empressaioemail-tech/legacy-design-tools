@@ -280,6 +280,11 @@ export interface ZoningStampSummary {
    */
   rowsUpdated: number;
   /**
+   * Only when the run writes a sub-area (`writeSubarea`, a layer with `subareaField`): stamped
+   * rows by the sub-area value written to `txgio_parcel.zoning_subarea` ("(blank)" for none).
+   */
+  subareaHistogram?: Record<string, number>;
+  /**
    * Scoped runs only (`propIds` supplied): size of the requested prop-id
    * list (post-dedupe). Undefined on an unscoped (whole-county) run.
    */
@@ -355,6 +360,8 @@ export interface ZoningStampSummary {
     publishedCode?: string | null;
     interim?: boolean;
     matchMethod?: ZoningMatchMethod;
+    /** The sub-area written (or that would be written) with the code; only on a `writeSubarea` run. */
+    subarea?: string | null;
   }[];
 }
 
@@ -377,6 +384,8 @@ interface StampPair {
   featureIndex: number;
   code: string;
   interim: boolean;
+  /** The matched feature's sub-area (migration 0113); written only when the run's `writeSubarea` is set. */
+  subarea?: string | null;
 }
 
 /**
@@ -413,8 +422,32 @@ async function flushBatch(
   countyFips: string,
   cityKey: string,
   batch: StampPair[],
+  writeSubarea = false,
 ): Promise<number> {
   if (batch.length === 0) return 0;
+  if (writeSubarea) {
+    // Same statement plus zoning_subarea (migration 0113), for a layer with `subareaField` only, so
+    // no other city's stamp names the column. The sub-area comes from the SAME feature as the code.
+    const values = sql.join(
+      batch.map(
+        (p) =>
+          sql`(${p.featureIndex}::integer, ${p.code}::text, ${cityKey}::text, ${p.interim}::boolean, ${p.subarea ?? null}::text)`,
+      ),
+      sql`, `,
+    );
+    const stmt = sql`
+      UPDATE ${txgioParcel} AS t
+      SET zoning_district = v.code,
+          zoning_jurisdiction = v.jurisdiction,
+          zoning_district_interim = v.interim,
+          zoning_subarea = v.subarea
+      FROM (VALUES ${values}) AS v(feature_index, code, jurisdiction, interim, subarea)
+      WHERE t.county_fips = ${countyFips}
+        AND t.feature_index = v.feature_index
+    `;
+    const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+    return res?.rowCount ?? 0;
+  }
   // (feature_index, code, jurisdiction, interim) tuples as bound params.
   const values = sql.join(
     batch.map(
@@ -515,10 +548,18 @@ export async function stampCountyZoning(opts: {
    * exactly — every existing caller that does not pass this is unaffected.
    */
   parcelIdIndex?: Map<string, ParcelIdZoningEntry>;
+  /**
+   * OPS-24 Burnet per-parcel setbacks (2026-10-13). Set by the CLI when the layer config carries
+   * `subareaField` (Horseshoe Bay): every stamped row also gets `zoning_subarea` from the SAME
+   * matched feature (migration 0113 must be applied first). Default false: the UPDATE is
+   * byte-identical to before and never names the column.
+   */
+  writeSubarea?: boolean;
   onProgress?: (done: number, matched: number) => void;
   progressEvery?: number;
 }): Promise<ZoningStampSummary> {
   const { db, countyFips, cityKey, index, dryRun, limit, propIds, parcelIdIndex } = opts;
+  const writeSubarea = opts.writeSubarea === true;
   const progressEvery = opts.progressEvery ?? 5000;
   if (!cityKey.trim()) {
     throw new Error("stampCountyZoning requires cityKey (ZONING_LAYERS key)");
@@ -567,6 +608,7 @@ export async function stampCountyZoning(opts: {
     unrecognisedHistogram: {},
     overlayHistogram: {},
     rowsUpdated: 0,
+    ...(writeSubarea ? { subareaHistogram: {} } : {}),
   };
 
   const noZoningPolygonHit: string[] = [];
@@ -697,8 +739,10 @@ export async function stampCountyZoning(opts: {
           : "point"
       : undefined;
     const hit = idEntry
-      ? { code: idEntry.code!, description: idEntry.description, parse: idEntry.parse }
+      ? { code: idEntry.code!, description: idEntry.description, parse: idEntry.parse, subarea: idEntry.subarea }
       : stampParcelZoning(index, p.geometry as GeoJsonGeometry);
+    const subarea = writeSubarea && hit ? (hit.subarea ?? null) : undefined;
+    if (writeSubarea && hit) bump(summary.subareaHistogram!, subarea ?? "(blank)");
     if (!hit) {
       // No zoning polygon holds the parcel's representative point: outside the
       // city, or an un-zoned pocket. Honest null, never a guessed district.
@@ -731,6 +775,7 @@ export async function stampCountyZoning(opts: {
         featureIndex: p.featureIndex,
         code: hit.code,
         interim: hit.parse.interim,
+        subarea,
       });
       if (scoped && p.propId) {
         unrecognisedPropIds.push(p.propId);
@@ -742,10 +787,11 @@ export async function stampCountyZoning(opts: {
           publishedCode: hit.code,
           interim: hit.parse.interim,
           matchMethod,
+          ...(writeSubarea ? { subarea } : {}),
         });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
-        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
         matches.length = 0;
       }
     } else {
@@ -782,6 +828,7 @@ export async function stampCountyZoning(opts: {
         featureIndex: p.featureIndex,
         code: hit.code,
         interim,
+        subarea,
       });
       if (scoped && p.propId) {
         perParcel.push({
@@ -792,10 +839,11 @@ export async function stampCountyZoning(opts: {
           publishedCode: hit.parse?.raw ?? hit.code,
           interim,
           matchMethod,
+          ...(writeSubarea ? { subarea } : {}),
         });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
-        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
         matches.length = 0;
       }
     }
@@ -805,7 +853,7 @@ export async function stampCountyZoning(opts: {
   }
 
   if (!dryRun && matches.length > 0) {
-    rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+    rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
   }
   if (!dryRun && noDistrictFeatureIndexes.length > 0) {
     rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
