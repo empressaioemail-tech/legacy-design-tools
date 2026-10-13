@@ -2,6 +2,7 @@
  * Max map composite reasoning layers — fixture-friendly EngineEnvelope responses.
  */
 
+import { classifyFemaZoneSfha } from "./femaZoneCode";
 import {
   wrapEngineEnvelope,
   type EngineEnvelope,
@@ -1170,7 +1171,7 @@ function boundsOverlap(a: Bounds, b: Bounds): boolean {
  * across the field-name variants the NFHL service emits. Higher = more
  * development-constraining. Zone X (minimal/outside SFHA) contributes 0.
  */
-function femaFloodSeverity(props: Record<string, unknown>): number {
+export function femaFloodSeverity(props: Record<string, unknown>): number {
   const raw =
     [props.FLD_ZONE, props.fld_zone, props.floodZone, props.FLOODZONE, props.ZONE]
       .find((v) => typeof v === "string" && (v as string).trim()) ?? "";
@@ -1182,10 +1183,13 @@ function femaFloodSeverity(props: Record<string, unknown>): number {
       ) ?? "",
     ).toUpperCase();
 
+  // Exact zone codes only (femaZoneCode.ts) -- never a prefix test: "AREA NOT
+  // INCLUDED" / "OPEN WATER" start with A / O and are not SFHA zones.
+  const sfha = classifyFemaZoneSfha(zone);
   // Coastal high-hazard (velocity) zones are the hardest constraint.
-  if (zone === "V" || zone === "VE" || zone.startsWith("V")) return 4;
-  // Special Flood Hazard Area (1% annual chance): AE/A/AO/AH/AR/A99.
-  if (zone.startsWith("A")) return 3;
+  if (sfha === true && zone.startsWith("V")) return 4;
+  // Special Flood Hazard Area (1% annual chance): AE/A/AO/AH/AR/A99/A1-A30.
+  if (sfha === true) return 3;
   // 0.2% annual chance (shaded X) is a real but lower constraint.
   if (subty.includes("0.2 PCT") || subty.includes("0.2%")) return 2;
   // Explicit "no SFHA" / minimal-hazard X is not a constraint.

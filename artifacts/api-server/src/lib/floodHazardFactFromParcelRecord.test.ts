@@ -292,7 +292,8 @@ describe("floodHazardFactFromParcelRecord", () => {
       ["B", false],
       ["C", false],
       ["X", false],
-      ["X500", false],
+      // Not an NFHL code in our data; exact-code rule treats it as unknown.
+      ["X500", null],
       ["X (SHADED)", false],
     ])("null isSfha + decisive zone %s resolves to %s (no SFHA_TF needed)", (zone, expected) => {
       expect(resolveZoneIsSfha(null, zone)).toBe(expected);
@@ -440,4 +441,20 @@ describe("floodHazardFactFromParcelRecord", () => {
       expect(overlayIsSfha).toBe(briefIsSfha);
     });
   });
+});
+
+// Drift-guard fixture: identical copy lives in hauska-map and hauska-engine
+// (canonical: this file in legacy-design-tools).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("resolveZoneIsSfha against the shared FEMA zone fixture", () => {
+  const rows = JSON.parse(
+    readFileSync(join(__dirname, "__tests__/fixtures/fema-zone-sfha-fixture.json"), "utf8"),
+  ) as Array<{ zone: string | null; isSfhaInput: boolean | null; expected: boolean | null }>;
+  for (const r of rows) {
+    it(`zone ${JSON.stringify(r.zone)} isSfha=${r.isSfhaInput} -> ${r.expected}`, () => {
+      expect(resolveZoneIsSfha(r.isSfhaInput, r.zone)).toBe(r.expected);
+    });
+  }
 });
