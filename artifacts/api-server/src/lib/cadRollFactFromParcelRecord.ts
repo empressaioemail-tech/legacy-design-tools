@@ -58,6 +58,7 @@ import {
   positiveSqftOrNull,
   type CadRollValueWire,
   type ValueBasis,
+  type CadRollValuationRefusal,
 } from "./cadRollValue";
 
 export const PARCEL_RECORD_CAD_SOURCE = "parcel_record" as const;
@@ -109,7 +110,7 @@ export type CadRollParcelRecordRefusal = {
 export type CadRollServedDollarWire = CadRollValueWire | CadRollParcelRecordRefusal;
 
 /** The four dollar rails' own served-field type, named once for the overlay. */
-export type CadRollServedDollarField = CadRollServedDollarWire | null;
+export type CadRollServedDollarField = CadRollServedDollarWire | CadRollValuationRefusal | null;
 
 export function parcelRecordRefusalFromCell(
   cell: ParcelRecordCellRefusal,

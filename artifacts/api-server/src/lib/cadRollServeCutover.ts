@@ -44,7 +44,8 @@ import {
   type LivingAreaSqftFromParcelRecord,
   type YearBuiltFromParcelRecord,
 } from "./cadRollFactFromParcelRecord";
-import type { ValueBasis } from "./cadRollValue";
+import { studioGatedCadRollValuationRefusal, type ValueBasis } from "./cadRollValue";
+import { isRailPlanGatedOnRecord } from "./parcelRecordReaderClient";
 
 export type CadRollOverlay = {
   marketValue: CadRollServedDollarField;
@@ -62,6 +63,13 @@ async function dollarOverlayIfSlated(
   valueBasis: ValueBasis | null,
 ): Promise<CadRollServedDollarField> {
   if (!isSlatedForCellServe(countyFips, railKey)) return null;
+  // hauska-engine #525: the reader withholds a dollar rail the END USER's
+  // X-Hauska-Entitlements does not grant. That is the plan gate, so it is
+  // served as the same studio-gated refusal the LDT gate already shows such a
+  // caller -- never as a cell miss, and never by falling back to the bake.
+  if (await isRailPlanGatedOnRecord(`${countyFips}:${propId}`, railKey)) {
+    return studioGatedCadRollValuationRefusal();
+  }
   return dollarFactFromParcelRecord(countyFips, propId, railKey, valueBasis);
 }
 

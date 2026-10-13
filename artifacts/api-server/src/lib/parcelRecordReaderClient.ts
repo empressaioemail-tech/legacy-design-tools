@@ -27,6 +27,11 @@
 
 import type { ParcelGateVerdictKind } from "./parcelGateVerdictVocabulary";
 import { requireRetrievalBaseUrl } from "./retrievalEndpoint";
+import {
+  ONE_DOOR_ENTITLEMENTS_HEADER,
+  oneDoorEntitlementsHeaderValue,
+} from "./oneDoor/oneDoorReaderClient";
+import { currentRecordEntitlements } from "./oneDoor/recordEntitlementsContext";
 
 /** Coalescing/cache window. Generous enough to cover one facets request's rail fan-out, short enough that staleness is negligible against a read-replica of already-committed values. */
 const CACHE_TTL_MS = 3000;
@@ -51,6 +56,12 @@ export interface ParcelRecordRailWire {
   atomBacked: boolean;
   rendering: { text: string; atomVersion: string; vocabVersion: string } | null;
   companions: unknown[];
+  /**
+   * hauska-engine #525 (cf782c8): a gated rail the request's
+   * `X-Hauska-Entitlements` does not grant comes back `serve: "refused"`
+   * with `refusal.code: "plan-gated"` and its cell / companions withheld.
+   */
+  refusal?: { code: string; reason?: string } | null;
 }
 
 export interface ParcelRecordWire {
@@ -67,11 +78,17 @@ type CacheEntry = { expiresAt: number; promise: Promise<ParcelRecordWire | null>
 
 const cache = new Map<string, CacheEntry>();
 
-let injectedFetcher: ((placeKey: string) => Promise<ParcelRecordWire | null>) | null | undefined;
+type ParcelRecordFetcher = (
+  placeKey: string,
+  /** The `X-Hauska-Entitlements` value this request sends (null = no header). */
+  entitlementsHeader: string | null,
+) => Promise<ParcelRecordWire | null>;
+
+let injectedFetcher: ParcelRecordFetcher | null | undefined;
 
 /** Test seam. `null` disables the network path entirely (returns null for every call). `undefined` (reset) restores the real env-resolved fetch. */
 export function setParcelRecordFetcherForTests(
-  fetcher: ((placeKey: string) => Promise<ParcelRecordWire | null>) | null,
+  fetcher: ParcelRecordFetcher | null,
 ): void {
   injectedFetcher = fetcher;
   cache.clear();
@@ -107,7 +124,10 @@ function resolveApiKey(): string | undefined {
   );
 }
 
-async function fetchFromRetrievalApi(placeKey: string): Promise<ParcelRecordWire | null> {
+async function fetchFromRetrievalApi(
+  placeKey: string,
+  entitlementsHeader: string | null,
+): Promise<ParcelRecordWire | null> {
   const key = resolveApiKey();
   if (!key) return null;
   // D-25: no default host. Raised before the try so the refusal cannot be
@@ -121,7 +141,13 @@ async function fetchFromRetrievalApi(placeKey: string): Promise<ParcelRecordWire
       `${baseUrl}/property-nodes/${encodeURIComponent(placeKey)}/record`,
       {
         method: "GET",
-        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+        headers: {
+          Authorization: `Bearer ${key}`,
+          Accept: "application/json",
+          // The END USER's entitlements (#525: gated rails are withheld on
+          // this legacy wire too unless granted). No header = default deny.
+          ...(entitlementsHeader ? { [ONE_DOOR_ENTITLEMENTS_HEADER]: entitlementsHeader } : {}),
+        },
       },
     );
     if (!res.ok) return null;
@@ -136,24 +162,29 @@ async function fetchFromRetrievalApi(placeKey: string): Promise<ParcelRecordWire
  * build (matching the retrieval service's own `parcelNodeId` path param).
  */
 export async function fetchParcelRecord(placeKey: string): Promise<ParcelRecordWire | null> {
+  // The request's END USER entitlements (`withRecordEntitlements`, set by the
+  // facets and brief routes). They are part of the cache key: two callers
+  // with different grants must never share a response.
+  const entitlementsHeader = oneDoorEntitlementsHeaderValue(currentRecordEntitlements());
   if (injectedFetcher !== undefined) {
-    return injectedFetcher ? injectedFetcher(placeKey) : null;
+    return injectedFetcher ? injectedFetcher(placeKey, entitlementsHeader) : null;
   }
+  const cacheKey = `${placeKey}|${entitlementsHeader ?? ""}`;
   const now = Date.now();
-  const cached = cache.get(placeKey);
+  const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.promise;
 
-  const promise = fetchFromRetrievalApi(placeKey).catch((error: unknown) => {
+  const promise = fetchFromRetrievalApi(placeKey, entitlementsHeader).catch((error: unknown) => {
     // D-25: keep this module's "failures are never cached" invariant for the
     // named refusal too, and never let it resolve into `null`.
-    cache.delete(placeKey);
+    cache.delete(cacheKey);
     throw error;
   });
-  cache.set(placeKey, { expiresAt: now + CACHE_TTL_MS, promise });
+  cache.set(cacheKey, { expiresAt: now + CACHE_TTL_MS, promise });
   const result = await promise;
   if (result === null) {
     // Never cache a failure -- let the next call retry immediately.
-    cache.delete(placeKey);
+    cache.delete(cacheKey);
   }
   return result;
 }
@@ -215,5 +246,25 @@ export async function fetchGateVerdict(
     return body.verdict;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * hauska-engine #525 (cf782c8): did the reader withhold this gated rail for
+ * the current request's END USER (`serve: "refused"`, `refusal.code:
+ * "plan-gated"`)? Reads the same coalesced `/record` response the rail
+ * adapters read, so it costs no extra upstream call. `false` whenever the
+ * record cannot be read: the adapters own that failure and report it.
+ */
+export async function isRailPlanGatedOnRecord(
+  placeKey: string,
+  railKey: string,
+): Promise<boolean> {
+  try {
+    const record = await fetchParcelRecord(placeKey);
+    const rail = record?.rails?.[railKey];
+    return rail?.serve === "refused" && rail.refusal?.code === "plan-gated";
+  } catch {
+    return false;
   }
 }
