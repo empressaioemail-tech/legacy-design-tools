@@ -61,6 +61,7 @@ import {
   rentAreaLayerFixtureResult,
 } from "../lib/brokerageGisRentAreaLayers";
 import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
+import { isBrowserProxyCaller } from "../middlewares/browserProxyEndUser";
 import { grantsOwnerCoGatedFields } from "../lib/peEntitlement";
 import { gateOwnerCoGatedFields } from "../lib/ownerCoGatedMapFields";
 import { isValidParcelNodeId, resolveOwnerFactCaller } from "./brokerageNodeFacets";
@@ -255,6 +256,26 @@ function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
 }
 
+/**
+ * The ONE map-data read the browser proxy serves below Max: the `parcels`
+ * gis-layer, which the Property Explorer fact-sheet resolver uses for every
+ * visitor to draw the parcel's own ring. Parcel boundaries are public record
+ * (the same polygons ship to every visitor in the parcels PMTiles), and every
+ * owner co-gated property on them (owner, mailing, exemptions, CAD values)
+ * is removed per caller by gateMapDataOwnerFields. Until the proxy carried
+ * the real end user, anonymous visitors reached this as Max; this keeps the
+ * geometry they already had and nothing else. Every other layer, the
+ * composites and the assemble stay Max-only. Scoped to proxy callers only, so
+ * no direct-API caller's access changes.
+ */
+export const BROWSER_PROXY_PUBLIC_GIS_LAYERS: ReadonlySet<string> = new Set([
+  "parcels",
+]);
+
+function browserProxyPublicGisLayer(req: Request, layer: string): boolean {
+  return isBrowserProxyCaller(req) && BROWSER_PROXY_PUBLIC_GIS_LAYERS.has(layer);
+}
+
 function sendTierRequired(
   res: Response,
   packageTier: ReturnType<typeof resolveInvestorPackageTier>,
@@ -360,7 +381,10 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
   const log = reqLog(req);
   const installId = installIdFromRequest(req);
   const { packageTier } = await resolveMapDataPackageTier(req, installId);
-  if (packageTier !== "max") {
+  if (
+    packageTier !== "max" &&
+    !browserProxyPublicGisLayer(req, parsed.data.layer)
+  ) {
     sendTierRequired(res, packageTier);
     return;
   }
