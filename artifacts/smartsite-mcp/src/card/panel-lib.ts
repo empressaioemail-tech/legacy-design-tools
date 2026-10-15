@@ -492,11 +492,19 @@ export const NOT_READY_INFIX = "is not ready";
 export const UPSTREAM_KEY = "upstream";
 export const SORT_COMPLETENESS_LABEL = "by completeness";
 
-/** CAPCOG county names by fips prefix. Source: artifacts/api-server/src/countyCoverageScoreCli.ts. */
+/**
+ * County names by fips prefix. CAPCOG source: artifacts/api-server/src/countyCoverageScoreCli.ts.
+ * Burnet (Phase 1) and Bell + Milam (Phase 2) are the one-door counties
+ * (burnet_publish_without_bake item 5); a name is a label, not a coverage
+ * claim, so listing a county here admits nothing.
+ */
 export const COUNTY_BY_FIPS: Record<string, string> = {
   "48021": "Bastrop",
+  "48027": "Bell",
+  "48053": "Burnet",
   "48055": "Caldwell",
   "48209": "Hays",
+  "48331": "Milam",
   "48453": "Travis",
   "48491": "Williamson",
 };

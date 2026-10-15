@@ -614,7 +614,17 @@ describe("Wave J honesty", () => {
     expect(notOnFileSentence("48453:1")).toBe("Not on file in Travis");
     expect(notOnFileSentence("48453:1")).not.toContain("Bastrop");
     expect(noBakedSnapshotSentence("48021:900099")).toBe("No baked snapshot yet for 48021:900099");
-    expect(Object.keys(COUNTY_BY_FIPS).sort()).toEqual(["48021", "48055", "48209", "48453", "48491"]);
+    // The CAPCOG five plus the one-door counties (Burnet; Bell + Milam).
+    expect(Object.keys(COUNTY_BY_FIPS).sort()).toEqual([
+      "48021",
+      "48027",
+      "48053",
+      "48055",
+      "48209",
+      "48331",
+      "48453",
+      "48491",
+    ]);
   });
 
   /**

@@ -63,12 +63,18 @@ export const ANCHOR_BATCH_READ_CAP = 12;
 /** Five decimal places on the bake lat/lng index, about 1.1 m. */
 export const ANCHOR_PRECISION = "1e-5-deg";
 export const ANCHOR_SOURCE = "bake-latlng-index";
+/**
+ * ONE DOOR `on` (burnet_publish_without_bake item 3): the reader's
+ * `parcelGeometry.placementPoint`, carried at the reader's own precision.
+ */
+export const ANCHOR_SOURCE_READER = "reader-parcel-geometry";
+export const ANCHOR_PRECISION_READER = "reader-point";
 
 export type ParcelAnchor = {
   lat: number;
   lon: number;
-  precision: typeof ANCHOR_PRECISION;
-  source: typeof ANCHOR_SOURCE;
+  precision: typeof ANCHOR_PRECISION | typeof ANCHOR_PRECISION_READER;
+  source: typeof ANCHOR_SOURCE | typeof ANCHOR_SOURCE_READER;
 };
 
 export type AnchorReadStatus = "ok" | "absent" | "error" | "skipped";
@@ -150,9 +156,13 @@ export function anchorFromFacetsBody(bodyText: string): AnchorOutcome {
   const body = asRecord(parsed);
   if (!body) return failed("anchor_body_not_json");
 
-  // ONE DOOR `on` (WP-L): the facets body carries no cityLimitsFact; the same
-  // bake coordinate rides under `placement` (placement only, never a fact).
+  // ONE DOOR `on` (WP-L): the facets body carries no cityLimitsFact; the
+  // placement point rides under `placement` (placement only, never a fact):
+  // the reader's parcelGeometry point when `placement.source` says so, else
+  // the bake coordinate.
   const fact = asRecord(body.cityLimitsFact) ?? asRecord(body.placement);
+  const fromReader =
+    !asRecord(body.cityLimitsFact) && fact?.source === ANCHOR_SOURCE_READER;
   if (!fact) return absent("city_limits_fact_absent");
 
   const point = asRecord(fact.queryPoint);
@@ -170,8 +180,8 @@ export function anchorFromFacetsBody(bodyText: string): AnchorOutcome {
     anchor: {
       lat,
       lon,
-      precision: ANCHOR_PRECISION,
-      source: ANCHOR_SOURCE,
+      precision: fromReader ? ANCHOR_PRECISION_READER : ANCHOR_PRECISION,
+      source: fromReader ? ANCHOR_SOURCE_READER : ANCHOR_SOURCE,
     },
     anchorRead: { status: "ok" },
   };

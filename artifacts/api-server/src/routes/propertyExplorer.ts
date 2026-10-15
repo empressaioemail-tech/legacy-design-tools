@@ -60,8 +60,9 @@ import {
   isValidParcelNodeId,
   loadBakedNodeFacetSnapshot,
   readBakedNodeFacetSnapshot,
-  readBakedPlacementQueryPoint,
+  resolveOneDoorPlacement,
 } from "./brokerageNodeFacets";
+import { oneDoorParcelGeometry } from "../lib/oneDoor/oneDoorParcelGeometry";
 import {
   oneDoorEntitlementsFor,
   oneDoorModeOf,
@@ -133,7 +134,7 @@ import {
   rollSitusCityIsDeclaredAbsent,
 } from "../lib/situsCompose";
 import { parseSmartSiteBriefRequest } from "../lib/smartSiteBriefRequest";
-import { assembleSmartSiteStubBody } from "../lib/smartSiteStubServe";
+import { assembleSmartSiteStubBody, readSmartSiteStub } from "../lib/smartSiteStubServe";
 import { resolveNearestParcelsQueryable } from "../lib/nearestParcelsDb";
 import { searchNearestParcels } from "../lib/txgioNearestParcels";
 import { loadNearestParcelFactRow } from "../lib/nearestParcelFacts";
@@ -522,9 +523,9 @@ async function assembleNodeBriefBody(
  *   against it off the response path (`oneDoorShadowDiff.ts`).
  * - `on`: every fact is the reader's. No baked base facts (`onRecord`), no
  *   atom or store fact reads, no LDT slate, no local absence wording. The
- *   only other inputs are placement: the bake coordinate and the
- *   boundary-edge geometry for the drawing's ring (there is no geometry rail
- *   the reader serves yet, spec §6 gap 3), whose output carries no fact.
+ *   only other input is placement, which carries no fact: the reader's
+ *   `parcelGeometry` (point + ring) when it has a value, else the bake
+ *   coordinate and the boundary-edge geometry.
  *
  * `grantsCadRollValuation` is the END USER's `grantsOwnerCoGatedFields` grant
  * (#813/#814), which is exactly what the reader's entitlement header carries.
@@ -547,15 +548,20 @@ async function assembleNodeBriefOneDoor(
       read.kind === "record"
         ? read.record
         : transportFailedRecord(parcelNodeId, ONE_DOOR_SURFACE_RAILS);
-    const [queryPoint, boundary] = await Promise.all([
-      readBakedPlacementQueryPoint(parcelNodeId).catch(() => null),
-      loadBoundaryEdgeFactAtom(parcelNodeId),
+    // Placement: the reader's parcelGeometry (point + outline) first; the
+    // bake coordinate and boundary-edge atoms only when the reader has no
+    // geometry value for this parcel (burnet_publish_without_bake item 3).
+    const readerGeometry = oneDoorParcelGeometry(record);
+    const [placement, boundary] = await Promise.all([
+      resolveOneDoorPlacement(parcelNodeId, record),
+      readerGeometry ? Promise.resolve(null) : loadBoundaryEdgeFactAtom(parcelNodeId),
     ]);
     const draw = tryAssembleGeometryOnlyParcelDraw({
       parcelNodeId,
       label: oneDoorSitusLabel(record),
-      queryPoint,
+      queryPoint: placement.queryPoint,
       boundary,
+      readerGeometry,
     });
     return {
       kind: "body",
@@ -1471,12 +1477,20 @@ router.post(
         return;
       }
       if (parsed.depth === "stub") {
-        const stub = await assembleStubBody(parcelNodeId);
-        if (!stub) {
+        const stubRead = await readSmartSiteStub(parcelNodeId);
+        if (stubRead.kind === "parcel-not-found") {
+          // ONE DOOR `on`: the reader's own distinct 404 (§2), not a bake miss.
+          res.status(404).json({ error: "parcel_not_found", parcelNodeId, parcelExists: false });
+          return;
+        }
+        if (stubRead.kind === "miss") {
           await sendBriefMiss(res, parcelNodeId);
           return;
         }
-        res.json(stub);
+        if (stubRead.record && recordHasFailedFact(stubRead.record)) {
+          res.setHeader("Cache-Control", "no-store");
+        }
+        res.json(stubRead.stub);
         return;
       }
       const outcome = await assembleNodeBriefOneDoor(
@@ -1514,7 +1528,15 @@ router.post(
             ? { id, row: null, readerNotFound: true, noStore: false }
             : { id, row: outcome.body, readerNotFound: false, noStore: outcome.noStore };
         }
-        return { id, row: await assembleStubBody(id), readerNotFound: false, noStore: false };
+        const stubRead = await readSmartSiteStub(id);
+        return stubRead.kind === "stub"
+          ? {
+              id,
+              row: stubRead.stub,
+              readerNotFound: false,
+              noStore: !!stubRead.record && recordHasFailedFact(stubRead.record),
+            }
+          : { id, row: null, readerNotFound: stubRead.kind === "parcel-not-found", noStore: false };
       }),
     );
     // Each miss carries its reason (fix register C6). No existence probe runs
