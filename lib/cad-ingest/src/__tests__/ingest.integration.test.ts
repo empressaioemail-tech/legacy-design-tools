@@ -239,4 +239,56 @@ describe.skipIf(!hasDb)("cad_property upsert", () => {
       expect(row.sourceVintage).toBe("tier:stratmap-roll;adapter:stratmap");
     });
   });
+
+  it("legal_acres round-trips from a StratMap row, blank stays NULL, and a later null never blanks it (migration 0114)", async () => {
+    await withTestSchema(async ({ db }) => {
+      const base = {
+        countyFips: "48053",
+        taxYear: 2025,
+        ownerName: null,
+        ownerMailingAddress: null,
+        situsAddress: null,
+        situsCity: null,
+        situsZip: null,
+        legalDescription: null,
+        exemptionCodes: null,
+        landValue: null,
+        improvementValue: null,
+        marketValue: null,
+        assessedValue: null,
+        yearBuilt: null,
+        livingAreaSqft: null,
+        landAcres: "0.9000",
+        propertyUseCode: "A1",
+        quickRefId: null,
+        propertyNumber: null,
+      };
+      const opts = {
+        sourceFile: "stratmap25-landparcels_48053_lp.dbf",
+        sourceVintage: "tier:stratmap-roll;adapter:stratmap",
+      };
+      await upsertCadProperties(
+        db,
+        [
+          { ...base, propId: "29742", legalAcres: "0.5700" },
+          { ...base, propId: "29743", legalAcres: null },
+        ],
+        opts,
+      );
+      const read = async (propId: string) =>
+        (await db.select().from(cadProperty).where(eq(cadProperty.propId, propId)))[0];
+      expect((await read("29742")).legalAcres).toBe("0.5700");
+      expect((await read("29742")).landAcres).toBe("0.9000");
+      expect((await read("29743")).legalAcres).toBeNull();
+
+      // A CAD-export adapter that does not publish legal_acres (undefined).
+      await upsertCadProperties(db, [{ ...base, propId: "29742", landAcres: "0.5800" }], {
+        sourceFile: "burnet_cad_export.zip",
+        sourceVintage: "tier:cad-export;adapter:bis-consultants",
+      });
+      const after = await read("29742");
+      expect(after.legalAcres).toBe("0.5700");
+      expect(after.landAcres).toBe("0.5800");
+    });
+  });
 });

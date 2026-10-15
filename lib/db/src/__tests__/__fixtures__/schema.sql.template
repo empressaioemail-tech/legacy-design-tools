@@ -378,7 +378,8 @@ CREATE TABLE @@SCHEMA@@.cad_property (
     quick_ref_id text,
     property_number text,
     roll_membership text,
-    declared_source_file text
+    declared_source_file text,
+    legal_acres numeric(14,4)
 );
 
 

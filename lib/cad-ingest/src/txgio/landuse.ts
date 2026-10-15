@@ -39,7 +39,12 @@
 
 import type { CadPropertyRecord, ParseCounters } from "../types";
 import { recordSkip } from "../types";
-import { landAcresFromGis, landAcresFromLegalDescription, parseYearBuilt } from "../p78Merge";
+import {
+  landAcresFromGis,
+  landAcresFromLegalDescription,
+  legalAcresFromStratMap,
+  parseYearBuilt,
+} from "../p78Merge";
 
 /** Raw DBF attribute bag for one StratMap land-parcel feature. */
 export type StratMapProperties = Record<string, unknown>;
@@ -191,6 +196,11 @@ export function normalizeStratMapLandUse(
       // real value from GIS_AREA is untouched by this fallback.
       return landAcresFromLegalDescription(properties.LEGAL_DESC);
     })(),
+    // The CAD's STATED legal acreage (LEGAL_AREA in LGL_AREA_U), kept
+    // separately from landAcres (GIS area) -- hauska-factory #295. Null
+    // when either field is blank/zero/non-numeric or the unit is not one
+    // we convert exactly; never a guessed unit.
+    legalAcres: legalAcresFromStratMap(properties.LEGAL_AREA, properties.LGL_AREA_U),
     propertyUseCode: normalizeStatLandUse(properties.STAT_LAND_),
     // CTX-HAYS-REBIND. HARDCODED NULL, and load-bearing. This loader is not
     // an appraisal roll: it must never write a CAD account's published

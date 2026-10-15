@@ -142,6 +142,22 @@ export const cadProperty = pgTable(
     rollMembership: text("roll_membership"),
     /** The export this row was marked against, when rollMembership is set. Provenance only; not read by any join. */
     declaredSourceFile: text("declared_source_file"),
+    /**
+     * The CAD's STATED legal acreage, distinct from `land_acres` (migration
+     * 0114, 2026-10-14). Declared last for the same fixture-order reason as
+     * the columns above.
+     *
+     * On a StratMap-loaded (`tier:stratmap-roll`) county `land_acres` is the
+     * GIS polygon area (`GIS_AREA`), not the CAD's figure: Burnet 48053:29742
+     * serves 0.90 ac where the CAD states 0.57 (hauska-factory #295). The
+     * StratMap land-parcels file also publishes the CAD's own `LEGAL_AREA` in
+     * the unit `LGL_AREA_U`; the loader now keeps it here, converted to acres
+     * only from a stated unit (acres / sq ft / hectares), NULL otherwise.
+     *
+     * NULL means "not published / not loaded", never zero. Rows loaded before
+     * 0114 stay NULL until their county's StratMap roll is re-run.
+     */
+    legalAcres: numeric("legal_acres", { precision: 14, scale: 4 }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.countyFips, t.propId, t.taxYear] }),

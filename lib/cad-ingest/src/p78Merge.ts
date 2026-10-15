@@ -61,6 +61,43 @@ export function landAcresFromGis(
 }
 
 /**
+ * The CAD's STATED legal acreage off a StratMap land-parcels row:
+ * `LEGAL_AREA` in the unit `LGL_AREA_U` names (both columns are in the
+ * TNRIS/TxGIO land-parcel schema documented in `txgio/parse.ts`).
+ *
+ * Distinct from `land_acres`, which on a StratMap-loaded county is the
+ * GIS polygon area (`GIS_AREA`). Measured in hauska-factory #295: Burnet
+ * 48053:29742 serves 0.90 ac (GIS) where the CAD states 0.57. This is the
+ * CAD's own figure, carried verbatim into `cad_property.legal_acres`.
+ *
+ * Defensive, never guessing: a blank / zero / negative / non-numeric
+ * `LEGAL_AREA` is null, and so is a blank or unrecognised `LGL_AREA_U`.
+ * A bare number with no stated unit is NOT assumed to be acres. The only
+ * conversions are the exact ones the GIS gate already uses (acres, square
+ * feet, hectares).
+ */
+export function legalAcresFromStratMap(
+  legalArea: unknown,
+  legalAreaU: unknown,
+): string | null {
+  const unit = typeof legalAreaU === "string" ? legalAreaU.trim().toUpperCase() : "";
+  if (unit.length === 0) return null;
+  let n: number;
+  if (typeof legalArea === "number") {
+    n = legalArea;
+  } else if (typeof legalArea === "string" && /^\s*[+]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/.test(legalArea)) {
+    n = Number(legalArea);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (ACRES_UNITS.has(unit)) return formatAcres(n);
+  if (SQFT_UNITS.has(unit)) return formatAcres(n / 43560);
+  if (HA_UNITS.has(unit)) return formatAcres(n * 2.471053814671653);
+  return null;
+}
+
+/**
  * McLennan leftover-farm fallback (F-01, OPS-19b Wave 1 item 4 follow-up,
  * `_inbox/2026-09-05_engine-williamson-mclennan-geomgap-nulls_close.json`).
  *
@@ -177,6 +214,7 @@ export type CadPropertyMergeRow = {
   marketValue?: number | null;
   assessedValue?: number | null;
   landAcres?: string | null;
+  legalAcres?: string | null;
   propertyUseCode?: string | null;
   quickRefId?: string | null;
   propertyNumber?: string | null;
@@ -206,6 +244,7 @@ const AUTHORITY_COALESCE_FIELDS = [
   "marketValue",
   "assessedValue",
   "landAcres",
+  "legalAcres",
   "propertyUseCode",
 ] as const;
 

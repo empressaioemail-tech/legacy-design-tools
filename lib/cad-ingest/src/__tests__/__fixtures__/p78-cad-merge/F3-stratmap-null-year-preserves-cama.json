@@ -20,6 +20,7 @@
     "yearBuilt": 1978,
     "livingAreaSqft": 1842,
     "landAcres": "0.1720",
+    "legalAcres": null,
     "propertyUseCode": "A1",
     "sourceFile": "DCAD_2025_certified.zip",
     "sourceVintage": "tier:cad-export;adapter:dcad-bulk-only;drop:DCAD_2025_certified.zip"
@@ -42,6 +43,7 @@
     "yearBuilt": null,
     "livingAreaSqft": null,
     "landAcres": null,
+    "legalAcres": null,
     "propertyUseCode": "A1",
     "sourceFile": "stratmap25-landparcels_48113_lp.dbf",
     "sourceVintage": "tier:stratmap-roll;adapter:stratmap;drop:stratmap25-landparcels_48113_lp"
@@ -64,6 +66,7 @@
     "yearBuilt": 1978,
     "livingAreaSqft": 1842,
     "landAcres": "0.1720",
+    "legalAcres": null,
     "propertyUseCode": "A1",
     "sourceFile": "stratmap25-landparcels_48113_lp.dbf",
     "sourceVintage": "tier:stratmap-roll;adapter:stratmap;drop:stratmap25-landparcels_48113_lp"
