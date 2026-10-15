@@ -70,7 +70,8 @@ const { setOneDoorFetcherForTests, resetOneDoorModeMemoryForTests } = await impo
 const { setParcelRecordFetcherForTests, resetParcelRecordFetcherForTests } = await import(
   "../lib/parcelRecordReaderClient"
 );
-const { assembleSmartSiteStubBody } = await import("../lib/smartSiteStubServe");
+const { assembleSmartSiteStubBody, newStubModeProbe } = await import("../lib/smartSiteStubServe");
+const { attachScreenStubs } = await import("../lib/peScreenSave");
 const { loadNearestParcelFactRow } = await import("../lib/nearestParcelFacts");
 const { searchNearestParcels, NEAREST_PARCELS_SERVING_COUNTIES } = await import(
   "../lib/txgioNearestParcels"
@@ -448,5 +449,91 @@ describe("cortex parcel county registry: Burnet by FIPS only", () => {
     ]) {
       expect(set.map((c) => c.fips)).not.toContain("48053");
     }
+  });
+});
+
+describe("stub depth reader cost: one reader call per request for an `off` county", () => {
+
+  function countingReader(modeFor: (fips: string) => "off" | "shadow" | "on"): string[] {
+    const asked: string[] = [];
+    setOneDoorFetcherForTests(async ({ parcelNodeId }) => {
+      asked.push(parcelNodeId);
+      const fips = parcelNodeId.slice(0, 5);
+      const mode = modeFor(fips);
+      const body =
+        fips === "48053"
+          ? burnetReaderBody(mode, burnetFacts(), parcelNodeId)
+          : { ...odReaderBody(mode), parcelNodeId, countyFips: fips };
+      return { kind: "ok", status: 200, body };
+    });
+    return asked;
+  }
+
+  const ids = (fips: string, n: number) => Array.from({ length: n }, (_, i) => `${fips}:${700000 + i}`);
+
+  function screenOf(parcelNodeIds: string[]) {
+    return {
+      id: "screen-synth",
+      name: "synthetic",
+      createdAt: "2026-10-15T00:00:00.000Z",
+      updatedAt: "2026-10-15T00:00:00.000Z",
+      rows: parcelNodeIds.map((parcelNodeId, i) => ({
+        id: `row-${i}`,
+        ordinal: i,
+        parcelNodeId,
+        query: parcelNodeId,
+        resolution: "resolved" as const,
+        source: "pasted" as const,
+      })),
+    };
+  }
+
+  it("a 50-row screen of an `off` county makes at most one reader call", async () => {
+    const asked = countingReader(() => "off");
+    const probe = newStubModeProbe();
+    await attachScreenStubs(screenOf(ids("48209", 50)) as never, (id) =>
+      assembleSmartSiteStubBody(id, probe),
+    );
+    expect(asked.length).toBeLessThanOrEqual(1);
+  });
+
+  it("a 50-id array stub request (the multi-hit wiring route) of an `off` county: at most one reader call", async () => {
+    const asked = countingReader(() => "off");
+    const res = await brief(ids("48209", 50), "stub");
+    expect(res.status).toBe(200);
+    expect(asked.length).toBeLessThanOrEqual(1);
+  });
+
+  it("an `on` county: every row comes from the reader", async () => {
+    const asked = countingReader(() => "on");
+    const rows = ids("48053", 12);
+    const res = await brief(rows, "stub");
+    expect(res.body.notFound).toEqual([]);
+    expect(res.body.parcels).toHaveLength(12);
+    for (const p of res.body.parcels as Array<{ zoning: string }>) expect(p.zoning).toBe("present");
+    expect(new Set(asked)).toEqual(new Set(rows));
+  });
+
+  it("a county flipped `off` -> `on` is picked up by the very next request", async () => {
+    let mode: "off" | "on" = "off";
+    countingReader(() => mode);
+    const rows = ids("48053", 5);
+    const before = await brief(rows, "stub");
+    expect(before.body.parcels).toHaveLength(0); // `off`, no bake: today's misses
+    mode = "on";
+    const after = await brief(rows, "stub");
+    expect(after.body.parcels).toHaveLength(5);
+    expect(after.body.notFound).toEqual([]);
+  });
+
+  it("a county flipped `on` -> `off` returns to the old path on the next request", async () => {
+    let mode: "off" | "on" = "on";
+    countingReader(() => mode);
+    const rows = ids("48053", 5);
+    expect((await brief(rows, "stub")).body.parcels).toHaveLength(5);
+    mode = "off";
+    const after = await brief(rows, "stub");
+    expect(after.body.parcels).toHaveLength(0);
+    expect(after.body.notFoundReasons[rows[0]!].reason).toBe("baked_snapshot_not_found");
   });
 });

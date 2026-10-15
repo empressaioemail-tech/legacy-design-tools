@@ -4,7 +4,7 @@
  */
 
 import { loadBakedNodeFacetSnapshot } from "../routes/brokerageNodeFacets";
-import { readSmartSiteStub } from "./smartSiteStubServe";
+import { readSmartSiteStub, type StubModeProbe } from "./smartSiteStubServe";
 import { oneDoorAcreage } from "./oneDoor/oneDoorStub";
 import type { SmartSiteRailState } from "./smartSiteStub";
 
@@ -49,8 +49,10 @@ export type NearestParcelFactRow = {
 export async function loadNearestParcelFactRow(input: {
   parcelNodeId: string;
   distanceFt: number;
+  /** One probe per nearest request (see `StubModeProbe`). */
+  probe?: StubModeProbe;
 }): Promise<NearestParcelFactRow | null> {
-  const read = await readSmartSiteStub(input.parcelNodeId);
+  const read = await readSmartSiteStub(input.parcelNodeId, input.probe);
   if (read.kind !== "stub") return null;
   const stub = read.stub;
   // ONE DOOR `on`: acreage is the reader's `acreageAcres`; no bake read.
