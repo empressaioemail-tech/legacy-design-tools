@@ -158,6 +158,21 @@ export interface TxParcelCounty {
    * (a store county is keyed by `txgio_parcel.prop_id` directly).
    */
   propIdFields?: readonly string[];
+  /**
+   * How a request reaches this county. "point-and-fips" (default): by a
+   * point/bbox (nearest-centroid and point-in-polygon routing, the situs
+   * candidate sets) AND by a parcel node id's FIPS. "fips-only": by node-id
+   * FIPS alone (the buildable-envelope identity hop and the parcel
+   * fetch-by-prop-id), never by a point. Used for a county onboarded to the
+   * one-door reader whose generous bbox would otherwise pull a live
+   * neighbour's border parcels into its store by centroid distance.
+   */
+  routing?: "point-and-fips" | "fips-only";
+}
+
+/** True when a point/bbox may route to this county (see `TxParcelCounty.routing`). */
+function pointRouted(county: TxParcelCounty): boolean {
+  return county.routing !== "fips-only";
 }
 
 function str(v: unknown): string | null {
@@ -463,6 +478,31 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
     // an integer field, so the unquoted literal form answers first.
     propIdFields: ["Prop_ID"],
   },
+  {
+    name: "Burnet",
+    fips: "48053",
+    source: "txgio-store",
+    // ONE DOOR (burnet_publish_without_bake item 5). Burnet is published
+    // through the one-door reader with no bake; its geometry is in prod
+    // `txgio_parcel` (59,785 rows / 49,243 distinct props, every row with
+    // geom). This entry lets the buildable-envelope identity hop
+    // (`parcel-source-absent-in-county` before) fetch a Burnet parcel by
+    // prop id. It is FIPS-ONLY on purpose: measured 2026-10-15, 14,708
+    // Travis and 1,682 Williamson parcels inside Burnet's bbox sit nearer
+    // Burnet's mass centroid than their own, so point routing would hand
+    // those live-county parcels to the Burnet store. Point routing for
+    // Burnet waits for point-in-polygon pre-resolution to cover it.
+    routing: "fips-only",
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48053_lp.zip",
+    // Bbox from prod txgio_parcel (min/max over all Burnet rows:
+    // [-98.4594, 30.4262, -97.8275, 31.0349]), padded. Parcel-MASS centroid
+    // (mean of per-row bbox centers). Neither is used for routing while the
+    // entry is fips-only; they are recorded for when it is not.
+    bbox: { westLng: -98.47, southLat: 30.41, eastLng: -97.82, northLat: 31.05 },
+    centroid: { latitude: 30.6849, longitude: -98.2484 },
+    normalizeProps: (p) => p,
+  },
 ];
 
 function bboxContains(bbox: GisLayerBbox, lat: number, lng: number): boolean {
@@ -504,6 +544,7 @@ export function resolveTxParcelCounty(input: {
   let best: TxParcelCounty | null = null;
   let bestDist = Infinity;
   for (const county of TX_PARCEL_COUNTIES) {
+    if (!pointRouted(county)) continue;
     if (!bboxContains(county.bbox, lat, lng)) continue;
     const dLat = lat - county.centroid.latitude;
     const dLng = lng - county.centroid.longitude;
@@ -785,7 +826,9 @@ export function storeCountiesContainingPoint(
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
   return TX_PARCEL_COUNTIES.filter(
     (c) =>
-      c.source === "txgio-store" && bboxContains(c.bbox, latitude, longitude),
+      c.source === "txgio-store" &&
+      pointRouted(c) &&
+      bboxContains(c.bbox, latitude, longitude),
   );
 }
 
@@ -813,8 +856,8 @@ export function countiesContainingPoint(
   longitude: number,
 ): TxParcelCounty[] {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
-  return TX_PARCEL_COUNTIES.filter((c) =>
-    bboxContains(c.bbox, latitude, longitude),
+  return TX_PARCEL_COUNTIES.filter(
+    (c) => pointRouted(c) && bboxContains(c.bbox, latitude, longitude),
   );
 }
 
@@ -825,7 +868,7 @@ export function countiesContainingPoint(
  * (2 counties today), so a full-store situs query is cheap and correct.
  */
 export function allStoreCounties(): TxParcelCounty[] {
-  return TX_PARCEL_COUNTIES.filter((c) => c.source === "txgio-store");
+  return TX_PARCEL_COUNTIES.filter((c) => c.source === "txgio-store" && pointRouted(c));
 }
 
 export function txCountyProviderLabel(county: TxParcelCounty): string {

@@ -12,9 +12,10 @@
  *     reader's `words` verbatim. No baked base facts, no atom reads, no cortex
  *     store reads, no local absence wording, no LDT slate
  *     (`parcelRecordAllowlist.ts` is not consulted on this path at all — the
- *     reader owns the slate). The only non-reader input is PLACEMENT (the bake
- *     coordinate and boundary-edge geometry), which the spec keeps on the bake
- *     (§1 "the bake stays only for search, tiles and placement").
+ *     reader owns the slate). Placement comes from the reader's
+ *     `parcelGeometry` (point + outline) when it has a value; only when it
+ *     does not do the bake coordinate and boundary-edge geometry serve as the
+ *     fallback (`oneDoorParcelGeometry.ts`).
  *
  *  2. `shadow` comparison. Reduce what an OLD response body showed to
  *     per-rail answers on the reader's vocabulary and diff them against the
@@ -50,8 +51,13 @@ function str(value: unknown): string | null {
 // ---------------------------------------------------------------------------
 
 export type OneDoorPlacement = {
-  /** Bake coordinate (placement only, never a fact). */
+  /**
+   * The parcel's map position (placement only, never a fact): the reader's
+   * `parcelGeometry.placementPoint`, else the bake coordinate.
+   */
   queryPoint: { longitude: number; latitude: number } | null;
+  /** Which of the two the point came from; null when there is no point. */
+  source?: "reader-parcel-geometry" | "bake-latlng-index" | null;
 };
 
 /**
@@ -72,7 +78,12 @@ export function composeOneDoorFacetsBody(args: {
     countyFips: args.record.countyFips,
     readAt: args.record.readAt,
     facts: args.record.facts,
-    placement: { queryPoint: args.placement.queryPoint },
+    placement: {
+      queryPoint: args.placement.queryPoint,
+      ...(args.placement.queryPoint && args.placement.source
+        ? { source: args.placement.source }
+        : {}),
+    },
   };
 }
 

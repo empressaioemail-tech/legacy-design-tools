@@ -11,8 +11,13 @@
 
 import pg from "pg";
 import { parseParcelNodeId, parcelNodeId } from "./parcelNodeId";
+import { oneDoorServesParcel } from "./oneDoor/oneDoorCountyScope";
 
-/** Same six counties as `CONSTRAINT_SEARCH_COUNTIES` (parcelConstraintSearch.ts). */
+/**
+ * The six bake-era counties (same as `CONSTRAINT_SEARCH_COUNTIES`,
+ * parcelConstraintSearch.ts). Every OTHER county is admitted by the one-door
+ * reader, not by editing this list: see {@link NearestCountyAdmission}.
+ */
 export const NEAREST_PARCELS_SERVING_COUNTIES = [
   "48021",
   "48055",
@@ -25,6 +30,15 @@ export const NEAREST_PARCELS_SERVING_COUNTIES = [
 function isNearestParcelsCounty(fips: string): boolean {
   return (NEAREST_PARCELS_SERVING_COUNTIES as readonly string[]).includes(fips);
 }
+
+/**
+ * Admission for a county outside the bake-era six. Default: the one-door
+ * reader serves the subject parcel under the per-county switch (`shadow` or
+ * `on`), i.e. the county is onboarded to the reader (Burnet 48053 first;
+ * Bell and Milam follow with no edit here). A reader that cannot be reached
+ * admits nothing (fail closed: the refusal stands).
+ */
+export type NearestCountyAdmission = (subjectParcelNodeId: string) => Promise<boolean>;
 
 /** Default comparables cap — keeps stub fan-out bounded on MCP round-trips. */
 export const NEAREST_PARCELS_DEFAULT_CAP = 20;
@@ -115,6 +129,8 @@ export async function searchNearestParcels(input: {
   parcelNodeId: string;
   cap?: number;
   db: NearestParcelsQueryable | null;
+  /** Test seam / override; defaults to {@link oneDoorServesParcel}. */
+  admitCounty?: NearestCountyAdmission;
 }): Promise<NearestParcelsResult> {
   const parsed = parseParcelNodeId(input.parcelNodeId.trim());
   if (!parsed) {
@@ -124,7 +140,10 @@ export async function searchNearestParcels(input: {
       reason: "parcelNodeId must be a canonical countyFips:propId node id.",
     };
   }
-  if (!isNearestParcelsCounty(parsed.countyFips)) {
+  if (
+    !isNearestParcelsCounty(parsed.countyFips) &&
+    !(await (input.admitCounty ?? oneDoorServesParcel)(input.parcelNodeId.trim()).catch(() => false))
+  ) {
     return {
       refused: true,
       code: "nearest_county_out_of_scope",

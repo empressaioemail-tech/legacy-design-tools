@@ -303,6 +303,7 @@ import {
   recordHasFailedFact,
   transportFailedRecord,
   type OneDoorRead,
+  type OneDoorRecord,
 } from "../lib/oneDoor/oneDoorReaderClient";
 import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
 import { enterRecordEntitlements } from "../lib/oneDoor/recordEntitlementsContext";
@@ -310,7 +311,9 @@ import {
   composeOneDoorFacetsBody,
   oneDoorShadowDiffRows,
   ONE_DOOR_SURFACE_RAILS,
+  type OneDoorPlacement,
 } from "../lib/oneDoor/oneDoorSurfaces";
+import { oneDoorParcelGeometry } from "../lib/oneDoor/oneDoorParcelGeometry";
 import {
   extractEnvelopeBriefRefusal,
   type EnvelopeBriefRefusal,
@@ -849,9 +852,29 @@ async function placementOrNull(
 }
 
 /**
- * ONE DOOR `on` mode for the facets route: every fact from the reader, the
- * bake only for the placement coordinate. A reader that is unreachable for an
- * `on` county serves every surface fact as `failed` (never cached).
+ * ONE DOOR `on` placement: the reader's `parcelGeometry.placementPoint` first
+ * (`_design/2026-10-15_burnet_publish_without_bake.md` item 3), the bake's
+ * rounded coordinate only when the reader has no geometry value for the
+ * parcel. Placement only, never a fact. The bake is not read at all when the
+ * reader placed the parcel.
+ */
+export async function resolveOneDoorPlacement(
+  parcelNodeId: string,
+  record: OneDoorRecord | null,
+): Promise<OneDoorPlacement> {
+  const geometry = oneDoorParcelGeometry(record);
+  if (geometry) {
+    return { queryPoint: geometry.placementPoint, source: "reader-parcel-geometry" };
+  }
+  const queryPoint = await placementOrNull(parcelNodeId);
+  return { queryPoint, source: queryPoint ? "bake-latlng-index" : null };
+}
+
+/**
+ * ONE DOOR `on` mode for the facets route: every fact from the reader; the
+ * placement coordinate from the reader's geometry, else the bake. A reader
+ * that is unreachable for an `on` county serves every surface fact as
+ * `failed` (never cached).
  */
 async function serveOneDoorFacets(
   res: Response,
@@ -870,9 +893,9 @@ async function serveOneDoorFacets(
     read.kind === "record"
       ? read.record
       : transportFailedRecord(parcelNodeId, ONE_DOOR_SURFACE_RAILS);
-  const queryPoint = await placementOrNull(parcelNodeId);
+  const placement = await resolveOneDoorPlacement(parcelNodeId, record);
   if (recordHasFailedFact(record)) res.setHeader("Cache-Control", "no-store");
-  res.json(composeOneDoorFacetsBody({ parcelNodeId, record, placement: { queryPoint } }));
+  res.json(composeOneDoorFacetsBody({ parcelNodeId, record, placement }));
 }
 
 /** ONE DOOR `shadow` mode: diff what this response showed against the reader, off the response path. */

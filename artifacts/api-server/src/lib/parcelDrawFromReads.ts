@@ -27,6 +27,10 @@ import {
 } from "./twinOnRecordSerialize";
 import { firstPresentSitusLabel } from "./situsCompose";
 import {
+  oneDoorRingInDrawFrame,
+  type OneDoorParcelGeometry,
+} from "./oneDoor/oneDoorParcelGeometry";
+import {
   envelopeDrawRefusalReason,
   type EnvelopeDrawOutcome,
 } from "./buildableEnvelope/envelopeDrawOutcome";
@@ -328,9 +332,10 @@ export function tryAssembleParcelDrawFromReads(args: {
 
 /**
  * ONE DOOR `on` mode (WP-L). The parcel drawing with GEOMETRY ONLY: the ring
- * and edges from the boundary-edge geometry, the frame anchor from the bake
- * coordinate (placement, §1 "the bake stays only for search, tiles and
- * placement"), and the label the caller read from the reader's situs rail.
+ * from the reader's `parcelGeometry` when it has one (no edges then), else the
+ * ring and edges from the boundary-edge geometry; the frame anchor is the
+ * point the caller resolved (the reader's placement point, else the bake
+ * coordinate); and the label the caller read from the reader's situs rail.
  *
  * No fact rides on this draw: `attrs` is empty (no baked zoning / land use /
  * CAD dollars / year built) and `overlays` is empty (every overlay label —
@@ -343,9 +348,20 @@ export function tryAssembleGeometryOnlyParcelDraw(args: {
   parcelNodeId: string;
   label: string | null;
   queryPoint?: { latitude: number; longitude: number } | null;
-  boundary: BoundaryEdgeFactRead;
+  /** Null when the caller did not read the boundary-edge atoms (the reader had geometry). */
+  boundary: BoundaryEdgeFactRead | null;
+  /**
+   * ONE DOOR (burnet_publish_without_bake item 3): the reader's
+   * `parcelGeometry`. When present it IS the ring (projected about the
+   * anchor) and the boundary-edge atoms are not used: there are no edges,
+   * so the per-edge captions simply do not render. Requires an anchor.
+   */
+  readerGeometry?: OneDoorParcelGeometry | null;
 }): ParcelDrawStub | undefined {
   try {
+    const anchor = anchorFromQueryPoint(args.queryPoint);
+    const readerRing =
+      args.readerGeometry && anchor ? oneDoorRingInDrawFrame(args.readerGeometry, anchor) : null;
     const draw = assembleParcelDraw({
       parcelNodeId: args.parcelNodeId,
       label: args.label,
@@ -354,8 +370,12 @@ export function tryAssembleGeometryOnlyParcelDraw(args: {
       zoning: null,
       landUse: null,
       yearBuilt: null,
-      anchor: anchorFromQueryPoint(args.queryPoint),
-      boundary: boundaryInput(args.boundary),
+      anchor,
+      boundary: readerRing
+        ? { state: "refused", code: "reader-geometry" }
+        : args.boundary
+          ? boundaryInput(args.boundary)
+          : { state: "refused", code: "atom-miss" },
       flood: { state: "refused" },
       envelopeRefusalReason: "one-door-geometry-only",
       envelopeModelled: null,
@@ -364,6 +384,10 @@ export function tryAssembleGeometryOnlyParcelDraw(args: {
       specialDistrict: { state: "refused" },
       buildingFootprint: null,
     });
+    if (readerRing) {
+      const { edges: _noEdges, ...rest } = draw;
+      return { ...rest, ring: readerRing, ringOrder: "ccw", attrs: {}, overlays: [] };
+    }
     return { ...draw, attrs: {}, overlays: [] };
   } catch {
     return undefined;
