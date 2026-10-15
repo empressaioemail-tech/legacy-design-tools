@@ -27,6 +27,14 @@ export interface CadPropertyRecord {
   livingAreaSqft: number | null;
   /** Decimal string, 4 fraction digits (numeric(14,4) column). */
   landAcres: string | null;
+  /**
+   * The CAD's STATED legal acreage (decimal string, 4 fraction digits),
+   * distinct from `landAcres`. Only the StratMap land-parcels loader
+   * publishes it today (`LEGAL_AREA` + `LGL_AREA_U`); every other
+   * adapter leaves it undefined, which writes NULL and never blanks a
+   * value already stored (see ingest.ts's merge CASE).
+   */
+  legalAcres?: string | null;
   propertyUseCode: string | null;
   /**
    * The CAD's OTHER two published identifiers for this account, when the

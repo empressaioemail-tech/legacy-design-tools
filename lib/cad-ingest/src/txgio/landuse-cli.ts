@@ -245,16 +245,19 @@ async function main(): Promise<void> {
   );
 
   let coded = 0;
+  let withLegalAcres = 0;
   let rowsUpserted = 0;
   if (dryRun) {
     for await (const rec of records) {
       if (rec.propertyUseCode) coded += 1;
+      if (rec.legalAcres != null) withLegalAcres += 1;
     }
   } else {
     // Count coded rows without buffering: tee through a generator.
     async function* counting(): AsyncGenerator<CadPropertyRecord> {
       for await (const rec of records) {
         if (rec.propertyUseCode) coded += 1;
+        if (rec.legalAcres != null) withLegalAcres += 1;
         yield rec;
       }
     }
@@ -288,6 +291,7 @@ async function main(): Promise<void> {
   log(`rows parsed:      ${counters.rowsParsed}`);
   log(`  with land-use:  ${coded} (STAT_LAND_ present)`);
   log(`  land-use null:  ${counters.rowsParsed - coded} (blank STAT_LAND_ - left null)`);
+  log(`  legal acres:    ${withLegalAcres} (LEGAL_AREA + stated LGL_AREA_U -> cad_property.legal_acres)`);
   log(`rows upserted:    ${dryRun ? "0 (dry-run)" : rowsUpserted}`);
   log(`rows skipped:     ${counters.rowsSkipped} (no Prop_ID / no TAX_YEAR)`);
   log(`duplicate rows:   ${counters.duplicateRows} (same prop+year in file)`);

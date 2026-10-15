@@ -10,6 +10,7 @@ import {
   applyPathAMerge,
   landAcresFromGis,
   landAcresFromLegalDescription,
+  legalAcresFromStratMap,
   parseYearBuilt,
   REFUSE_GIS_AREA_REASON,
 } from "../p78Merge";
@@ -387,5 +388,74 @@ describe("THE P-78 MERGE ROOT (Phase 0 audit section 3/4, P3): authority-aware m
     const newerStratmap = { ...stratmapRow, ownerName: "NEWER STRATMAP OWNER" };
     const merged = applyPathAMerge(olderStratmap, newerStratmap);
     expect(merged.ownerName).toBe("NEWER STRATMAP OWNER");
+  });
+});
+
+describe("cad_property.legal_acres: the CAD's stated LEGAL_AREA off a StratMap row (hauska-factory #295)", () => {
+  // Fixture shape: a Burnet (48053) StratMap land-parcels row whose GIS area
+  // (0.90 ac) disagrees with the CAD's stated legal area (0.57 ac) -- the
+  // 48053:29742 case #295 measured. Synthetic owner/situs, real column names
+  // (TNRIS land-parcel schema, see txgio/parse.ts header).
+  const BURNET_ROW = {
+    Prop_ID: "29742",
+    TAX_YEAR: "2025",
+    STAT_LAND_: "A1",
+    LEGAL_DESC: "S1234 EXAMPLE SUBDIVISION LOT 7",
+    GIS_AREA: 0.9,
+    GIS_AREA_U: "AC",
+    LEGAL_AREA: 0.57,
+    LGL_AREA_U: "AC",
+  };
+
+  it("keeps the CAD's legal acres alongside (not instead of) the GIS land_acres", () => {
+    const rec = normalizeStratMapLandUse("48053", 0, BURNET_ROW, newCounters());
+    expect(rec!.legalAcres).toBe("0.5700");
+    expect(rec!.landAcres).toBe("0.9000");
+  });
+
+  it("accepts the DBF's F-type string form and the long unit spellings", () => {
+    expect(legalAcresFromStratMap("5.70000000000e-01", "AC")).toBe("0.5700");
+    expect(legalAcresFromStratMap(" 12.25 ", "acres")).toBe("12.2500");
+    expect(legalAcresFromStratMap(43560, "SF")).toBe("1.0000");
+    expect(legalAcresFromStratMap(1, "HA")).toBe("2.4711");
+  });
+
+  it("blank / zero / negative / non-numeric LEGAL_AREA -> null", () => {
+    for (const v of ["", "   ", 0, "0", "0.000", -1, "-1", "N/A", "1.5 AC", null, undefined, Number.NaN]) {
+      expect(legalAcresFromStratMap(v, "AC"), String(v)).toBeNull();
+    }
+    const rec = normalizeStratMapLandUse("48053", 0, { ...BURNET_ROW, LEGAL_AREA: "" }, newCounters());
+    expect(rec!.legalAcres).toBeNull();
+    // land_acres is untouched by a blank legal area
+    expect(rec!.landAcres).toBe("0.9000");
+  });
+
+  it("FALSIFIER: never guesses a unit -- blank or unrecognised LGL_AREA_U is null even with a real number", () => {
+    expect(legalAcresFromStratMap(0.57, "")).toBeNull();
+    expect(legalAcresFromStratMap(0.57, null)).toBeNull();
+    expect(legalAcresFromStratMap(0.57, undefined)).toBeNull();
+    expect(legalAcresFromStratMap(0.57, "SQM")).toBeNull();
+    expect(legalAcresFromStratMap(0.57, "LOT")).toBeNull();
+    const rec = normalizeStratMapLandUse("48053", 0, { ...BURNET_ROW, LGL_AREA_U: " " }, newCounters());
+    expect(rec!.legalAcres).toBeNull();
+  });
+
+  it("a row with no LEGAL_AREA columns at all (older/other drops) -> null, row still emitted", () => {
+    const { LEGAL_AREA: _a, LGL_AREA_U: _u, ...bare } = BURNET_ROW;
+    const rec = normalizeStratMapLandUse("48053", 0, bare, newCounters());
+    expect(rec).not.toBeNull();
+    expect(rec!.legalAcres).toBeNull();
+  });
+
+  it("merge: a StratMap reload fills legal_acres on an existing row that lacked it", () => {
+    const existing = { countyFips: "48053", propId: "29742", taxYear: 2025, landAcres: "0.9000", legalAcres: null, sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    const incoming = { countyFips: "48053", propId: "29742", taxYear: 2025, landAcres: "0.9000", legalAcres: "0.5700", sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    expect(applyPathAMerge(existing, incoming).legalAcres).toBe("0.5700");
+  });
+
+  it("merge: a CAD export (which publishes no legal_acres) never blanks a stored value", () => {
+    const existing = { countyFips: "48053", propId: "29742", taxYear: 2025, legalAcres: "0.5700", sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    const incoming = { countyFips: "48053", propId: "29742", taxYear: 2025, legalAcres: null, sourceVintage: "tier:cad-export;adapter:x" };
+    expect(applyPathAMerge(existing, incoming).legalAcres).toBe("0.5700");
   });
 });
