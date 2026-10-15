@@ -5,7 +5,7 @@
  * an ingest for the same export (or a fresher drop of the same roll
  * year) merges per P-78: a CAMA(cad-export)-wins CASE on every
  * appraisal-sourced attribute (ownerName, situs*, legalDescription,
- * exemptionCodes, the four dollar fields, landAcres, propertyUseCode,
+ * exemptionCodes, the four dollar fields, landAcres, legalAcres, propertyUseCode,
  * yearBuilt, livingAreaSqft — see p78Merge.ts's `mergeAuthority` for the
  * full rule), a bare COALESCE on the two identifiers the geometry loader
  * never populates (quickRefId, propertyNumber), and `ingested_at` is
@@ -49,6 +49,7 @@ function toInsertRow(rec: CadPropertyRecord, sourceFile: string, sourceVintage: 
     yearBuilt: parseYearBuilt(rec.yearBuilt),
     livingAreaSqft: rec.livingAreaSqft,
     landAcres: rec.landAcres,
+    legalAcres: rec.legalAcres ?? null,
     propertyUseCode: rec.propertyUseCode,
     quickRefId: rec.quickRefId,
     propertyNumber: rec.propertyNumber,
@@ -184,6 +185,13 @@ export async function upsertCadProperties(
             WHEN excluded.source_vintage LIKE 'tier:cad-export;%' THEN excluded.land_acres
             WHEN ${cadProperty.sourceVintage} LIKE 'tier:cad-export;%' THEN ${cadProperty.landAcres}
             ELSE excluded.land_acres
+          END`,
+          legalAcres: sql`CASE
+            WHEN excluded.legal_acres IS NULL THEN ${cadProperty.legalAcres}
+            WHEN ${cadProperty.legalAcres} IS NULL THEN excluded.legal_acres
+            WHEN excluded.source_vintage LIKE 'tier:cad-export;%' THEN excluded.legal_acres
+            WHEN ${cadProperty.sourceVintage} LIKE 'tier:cad-export;%' THEN ${cadProperty.legalAcres}
+            ELSE excluded.legal_acres
           END`,
           propertyUseCode: sql`CASE
             WHEN excluded.property_use_code IS NULL THEN ${cadProperty.propertyUseCode}
