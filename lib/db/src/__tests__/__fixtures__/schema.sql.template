@@ -1300,6 +1300,45 @@ CREATE TABLE @@SCHEMA@@.pe_account_activations (
 );
 
 
+-- Name: pe_account_merge_rows; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_account_merge_rows (
+    id bigint NOT NULL,
+    merged_user_id text NOT NULL,
+    table_name text NOT NULL,
+    action text NOT NULL,
+    before jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_account_merge_rows_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE @@SCHEMA@@.pe_account_merge_rows_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+-- Name: pe_account_merge_rows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE @@SCHEMA@@.pe_account_merge_rows_id_seq OWNED BY @@SCHEMA@@.pe_account_merge_rows.id;
+
+
+-- Name: pe_account_merges; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_account_merges (
+    merged_user_id text NOT NULL,
+    survivor_user_id text NOT NULL,
+    email text NOT NULL,
+    run_id text NOT NULL,
+    reason text NOT NULL,
+    merged_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
 -- Name: pe_activation_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_activation_events (
@@ -1381,7 +1420,11 @@ CREATE TABLE @@SCHEMA@@.pe_magic_link_tokens (
     token_hash text NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     consumed_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    code_hash text,
+    attempts integer DEFAULT 0 NOT NULL,
+    sent_at timestamp with time zone,
+    return_to text
 );
 
 
@@ -1529,6 +1572,28 @@ CREATE TABLE @@SCHEMA@@.pe_screens (
 );
 
 
+-- Name: pe_session_cutoffs; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_session_cutoffs (
+    user_id text NOT NULL,
+    not_before timestamp with time zone NOT NULL,
+    reason text NOT NULL
+);
+
+
+-- Name: pe_sessions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_sessions (
+    id text NOT NULL,
+    user_id text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone,
+    revoked_reason text
+);
+
+
 -- Name: pe_share_attributions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_share_attributions (
@@ -1640,7 +1705,8 @@ CREATE TABLE @@SCHEMA@@.pe_user_identities (
     subject text NOT NULL,
     email text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    email_verified boolean DEFAULT false NOT NULL
 );
 
 
@@ -2778,6 +2844,11 @@ CREATE SEQUENCE @@SCHEMA@@.zoning_stamp_run_id_seq
 ALTER SEQUENCE @@SCHEMA@@.zoning_stamp_run_id_seq OWNED BY @@SCHEMA@@.zoning_stamp_run.id;
 
 
+-- Name: pe_account_merge_rows id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_merge_rows ALTER COLUMN id SET DEFAULT nextval('@@SCHEMA@@.pe_account_merge_rows_id_seq'::regclass);
+
+
 -- Name: zoning_stamp_run id; Type: DEFAULT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.zoning_stamp_run ALTER COLUMN id SET DEFAULT nextval('@@SCHEMA@@.zoning_stamp_run_id_seq'::regclass);
@@ -3257,6 +3328,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
     ADD CONSTRAINT pe_account_activations_pkey PRIMARY KEY (owner_user_id, milestone);
 
 
+-- Name: pe_account_merge_rows pe_account_merge_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_merge_rows
+    ADD CONSTRAINT pe_account_merge_rows_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_account_merges pe_account_merges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_merges
+    ADD CONSTRAINT pe_account_merges_pkey PRIMARY KEY (merged_user_id);
+
+
 -- Name: pe_activation_events pe_activation_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_activation_events
@@ -3315,6 +3398,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_screen_rows
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_screens
     ADD CONSTRAINT pe_screens_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_session_cutoffs pe_session_cutoffs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_session_cutoffs
+    ADD CONSTRAINT pe_session_cutoffs_pkey PRIMARY KEY (user_id);
+
+
+-- Name: pe_sessions pe_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_sessions
+    ADD CONSTRAINT pe_sessions_pkey PRIMARY KEY (id);
 
 
 -- Name: pe_share_attributions pe_share_attributions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4337,6 +4432,16 @@ CREATE INDEX parcel_briefings_engagement_idx ON @@SCHEMA@@.parcel_briefings USIN
 CREATE INDEX pe_account_activations_milestone_first_at_idx ON @@SCHEMA@@.pe_account_activations USING btree (milestone, first_at);
 
 
+-- Name: pe_account_merge_rows_merged_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_account_merge_rows_merged_idx ON @@SCHEMA@@.pe_account_merge_rows USING btree (merged_user_id);
+
+
+-- Name: pe_account_merges_survivor_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_account_merges_survivor_idx ON @@SCHEMA@@.pe_account_merges USING btree (survivor_user_id);
+
+
 -- Name: pe_activation_events_action_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_activation_events_action_id_created_at_idx ON @@SCHEMA@@.pe_activation_events USING btree (action_id, created_at);
@@ -4430,6 +4535,11 @@ CREATE INDEX pe_screen_rows_screen_ordinal_idx ON @@SCHEMA@@.pe_screen_rows USIN
 -- Name: pe_screens_owner_updated_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_screens_owner_updated_idx ON @@SCHEMA@@.pe_screens USING btree (tenant_id, owner_user_id, updated_at);
+
+
+-- Name: pe_sessions_user_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_sessions_user_idx ON @@SCHEMA@@.pe_sessions USING btree (user_id);
 
 
 -- Name: pe_share_attributions_attributed_at_idx; Type: INDEX; Schema: public; Owner: -
@@ -5224,6 +5334,12 @@ ALTER TABLE ONLY @@SCHEMA@@.parcel_briefings
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_account_activations
     ADD CONSTRAINT pe_account_activations_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_account_merges pe_account_merges_survivor_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_account_merges
+    ADD CONSTRAINT pe_account_merges_survivor_user_id_users_id_fk FOREIGN KEY (survivor_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_activation_events pe_activation_events_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -

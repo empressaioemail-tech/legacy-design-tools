@@ -1,4 +1,5 @@
 import {
+  boolean,
   pgTable,
   text,
   timestamp,
@@ -7,7 +8,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
-export type PeOidcProvider = "google" | "microsoft" | "email";
+/**
+ * "microsoft" stays in the union for existing identities and the MCP
+ * connector login only; the app no longer offers it (T1 ruling 2, 2026-10-22).
+ * A future "apple" provider drops in here without schema changes.
+ */
+export type PeOidcProvider = "google" | "microsoft" | "email" | "apple";
 
 /**
  * Provider subject links for Property Explorer users — OIDC providers
@@ -32,6 +38,14 @@ export const peUserIdentities = pgTable(
     provider: text("provider").notNull().$type<PeOidcProvider>(),
     subject: text("subject").notNull(),
     email: text("email"),
+    /**
+     * T1-A (2026-10-22): true only when the email on this identity is
+     * PROVEN: Google's email_verified claim, or a redeemed email code/link.
+     * Account linking and the duplicate-account merge key on verified
+     * emails only, on BOTH sides, so an unverified address can never pull a
+     * stranger's account into its own.
+     */
+    emailVerified: boolean("email_verified").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

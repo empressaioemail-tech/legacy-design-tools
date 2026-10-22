@@ -9,8 +9,8 @@
  */
 
 import type { Request, Response } from "express";
-import { DEFAULT_TENANT_ID, SESSION_COOKIE } from "../middlewares/session";
-import { mintSessionToken } from "./sessionToken";
+import { SESSION_COOKIE } from "../middlewares/session";
+import { createPeSessionToken } from "./peSessions";
 import { getPeAccessTier, type PeIdentityResult } from "./peIdentity";
 import { installIdFromRequest } from "./brokerageInstallId";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
@@ -20,14 +20,6 @@ import { e6IdempotencyKey } from "./peLifecycleOutbox";
 import { logger } from "./logger";
 import { LIFECYCLE_EVENT_ID_FIELD } from "./peLifecycleTypes";
 import type { AdMatch } from "./peAdMatch";
-
-function applicantSession(userId: string) {
-  return {
-    audience: "user" as const,
-    tenantId: DEFAULT_TENANT_ID,
-    requestor: { kind: "user" as const, id: userId },
-  };
-}
 
 export function setPeSessionCookie(res: Response, token: string): void {
   const secure = process.env["NODE_ENV"] === "production";
@@ -85,7 +77,9 @@ export async function completePeSignIn(
   identity: PeIdentityResult,
   opts: PeSignInOptions = {},
 ): Promise<PeSignInCompletionBody> {
-  const token = mintSessionToken(applicantSession(identity.userId));
+  // T1-A: every PE sign-in is a server-side session (pe_sessions row, `sid`
+  // claim) so it can be revoked at logout and refreshed on activity.
+  const { token } = await createPeSessionToken(identity.userId);
   const tier = await getPeAccessTier(identity.userId);
   setPeSessionCookie(res, token);
 
@@ -94,7 +88,7 @@ export async function completePeSignIn(
   // sign-in). Best-effort, fail-open — see peSignupLifecycle.ts.
   //
   // MEASURED 2026-09-24: a `users` row is created only in
-  // `upsertPeOidcIdentity` (Google/Microsoft session-exchange and magic-link
+  // `upsertPeOidcIdentity` (Google session-exchange, MCP-connector OIDC, and email
   // verify). `saveProperty` and notes require `requirePeAuthenticated`.
   // E1 therefore fires here, including a Google sign-in before any save
   // (A-253 default).

@@ -233,6 +233,9 @@ describe("lib/db schema integration", () => {
         // subject from `pe_activation_events` (which is per ladder-rung
         // impression). Sorts before it: `pe_acc` < `pe_act` (`c` < `t`).
         "pe_account_activations",
+        // T1-A — duplicate-account merge log. Sorts after `pe_account_activations` (`_ac` < `_me`).
+        "pe_account_merge_rows",
+        "pe_account_merges",
         "pe_activation_events",
         // P-87 Claude Sync — MCP clients that have authenticated against
         // this account. Sorts after `pe_activation_events` and before
@@ -257,6 +260,9 @@ describe("lib/db schema integration", () => {
         // P-91 / P-92 Wave B — screens are a different table from saves.
         "pe_screen_rows",
         "pe_screens",
+        // T1-A — server-side sessions and per-user token cutoffs.
+        "pe_session_cutoffs",
+        "pe_sessions",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
         // P-100 item 3 — which sharer a recipient account belongs to, keyed
         // on the grant row. Sorts before `pe_share_grants` (`_a` < `_g`).

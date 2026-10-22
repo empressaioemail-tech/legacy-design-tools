@@ -9,6 +9,7 @@ import express, { Router, type IRouter, type Request, type Response } from "expr
 import { z } from "zod/v4";
 import { DEFAULT_TENANT_ID, SESSION_COOKIE } from "../middlewares/session";
 import { mintSessionToken } from "../lib/sessionToken";
+import { revokePeSessionToken } from "../lib/peSessions";
 import {
   loginWithEmailPassword,
   signupWithEmailPassword,
@@ -182,7 +183,23 @@ router.get("/auth/extension-login", (req: Request, res: Response) => {
   res.type("html").send(renderExtensionLoginPage(mode));
 });
 
-router.post("/auth/logout", (_req: Request, res: Response) => {
+/**
+ * T1-A (2026-10-22): logout revokes the presented session SERVER-SIDE (the
+ * `pe_sessions` row, or a denylist row for a pre-`sid` token), so a copied
+ * token stops working at once instead of at its 7-day `exp`. The BFF calls
+ * this with the `pe_session` token as Bearer, then clears its own cookies.
+ */
+router.post("/auth/logout", async (req: Request, res: Response) => {
+  const token = req.peSessionToken;
+  if (token) {
+    try {
+      await revokePeSessionToken(token, "logout");
+    } catch (err) {
+      logger.error({ err }, "pe logout: server-side revoke failed");
+      res.status(503).json({ error: "logout_failed" });
+      return;
+    }
+  }
   res.clearCookie(SESSION_COOKIE, { path: "/" });
   res.json({ ok: true });
 });

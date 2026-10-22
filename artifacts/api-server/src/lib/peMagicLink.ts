@@ -24,8 +24,9 @@
  * nuisance ceiling an attacker could aim at a stranger's inbox at 12/hour.
  */
 
-import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, gte, isNull } from "drizzle-orm";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { and, desc, eq, gt, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { sanitizeReturnTo } from "./peReturnTo";
 import { db, peMagicLinkTokens, type PeMagicLinkToken } from "@workspace/db";
 
 export const MAGIC_LINK_TTL_MS = 20 * 60 * 1000;
@@ -72,6 +73,8 @@ export async function checkMagicLinkRateLimit(
   now: Date = new Date(),
 ): Promise<MagicLinkRateLimitResult> {
   const windowStart = new Date(now.getTime() - MAGIC_LINK_RATE_LIMIT_WINDOW_MS);
+  // T1-A: only SUCCESSFUL sends count (sent_at is stamped after Resend
+  // accepts the email), so a provider outage never locks a user out.
   const rows = await db
     .select({ createdAt: peMagicLinkTokens.createdAt })
     .from(peMagicLinkTokens)
@@ -79,6 +82,7 @@ export async function checkMagicLinkRateLimit(
       and(
         eq(peMagicLinkTokens.email, email),
         gte(peMagicLinkTokens.createdAt, windowStart),
+        isNotNull(peMagicLinkTokens.sentAt),
       ),
     );
   if (rows.length < MAGIC_LINK_RATE_LIMIT_MAX) {
@@ -97,7 +101,7 @@ export async function checkMagicLinkRateLimit(
 }
 
 export type CreateMagicLinkTokenResult =
-  | { ok: true; rawToken: string; expiresAt: Date }
+  | { ok: true; rawToken: string; expiresAt: Date; rowId: string }
   | { ok: false; error: "rate_limited"; retryAfterSeconds: number }
   | { ok: false; error: "invalid_email" };
 
@@ -124,13 +128,273 @@ export async function createMagicLinkToken(
   }
   const rawToken = generateRawToken();
   const expiresAt = new Date(now.getTime() + MAGIC_LINK_TTL_MS);
+  const rowId = magicLinkTokenRowId();
   await db.insert(peMagicLinkTokens).values({
-    id: magicLinkTokenRowId(),
+    id: rowId,
     email,
     tokenHash: hashMagicLinkToken(rawToken),
     expiresAt,
   });
-  return { ok: true, rawToken, expiresAt };
+  return { ok: true, rawToken, expiresAt, rowId };
+}
+
+/** T1-A: stamp a row as delivered; only stamped rows count toward the rate limit. */
+export async function markMagicLinkSent(
+  rowId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  await db
+    .update(peMagicLinkTokens)
+    .set({ sentAt: now })
+    .where(eq(peMagicLinkTokens.id, rowId));
+}
+
+/** T1-A: a row whose email never left is deleted: it neither counts nor redeems. */
+export async function discardUnsentMagicLinkToken(rowId: string): Promise<void> {
+  await db
+    .delete(peMagicLinkTokens)
+    .where(and(eq(peMagicLinkTokens.id, rowId), isNull(peMagicLinkTokens.sentAt)));
+}
+
+// ---------------------------------------------------------------------------
+// T1-A (2026-10-22): email sign-in with a 6-digit code AND a link, in one
+// email. The link opens a confirm page whose button POSTs; a GET never
+// consumes anything, so mail scanners and link pre-fetchers cannot burn it.
+// ---------------------------------------------------------------------------
+
+/** Code and link share one row and one expiry: 10 minutes. */
+export const EMAIL_CODE_TTL_MS = 10 * 60 * 1000;
+/** Wrong codes allowed per row before it locks. */
+export const EMAIL_CODE_MAX_ATTEMPTS = 5;
+
+function generateEmailCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+/** Salted with the row id so equal codes on two rows never share a hash. */
+export function hashEmailCode(rowId: string, code: string): string {
+  return createHash("sha256").update(`${rowId}:${code}`, "utf8").digest("hex");
+}
+
+function hashesEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+export type StartEmailSignInResult =
+  | {
+      ok: true;
+      rowId: string;
+      email: string;
+      rawToken: string;
+      code: string;
+      expiresAt: Date;
+      createdAt: Date;
+    }
+  | { ok: false; error: "rate_limited"; retryAfterSeconds: number }
+  | { ok: false; error: "invalid_email" };
+
+/**
+ * Mint one row carrying both a link token and a 6-digit code. The caller
+ * sends the email, then calls {@link markMagicLinkSent} (success) or
+ * {@link discardUnsentMagicLinkToken} (failure). The raw token and code are
+ * returned exactly once and never stored or logged.
+ */
+export async function startEmailSignIn(
+  rawEmail: string,
+  opts: { returnTo?: unknown } = {},
+  now: Date = new Date(),
+): Promise<StartEmailSignInResult> {
+  const email = normalizeMagicLinkEmail(rawEmail);
+  if (!email) return { ok: false, error: "invalid_email" };
+  const rate = await checkMagicLinkRateLimit(email, now);
+  if (!rate.ok) {
+    return {
+      ok: false,
+      error: "rate_limited",
+      retryAfterSeconds: rate.retryAfterSeconds,
+    };
+  }
+  const rowId = magicLinkTokenRowId();
+  const rawToken = generateRawToken();
+  const code = generateEmailCode();
+  const expiresAt = new Date(now.getTime() + EMAIL_CODE_TTL_MS);
+  await db.insert(peMagicLinkTokens).values({
+    id: rowId,
+    email,
+    tokenHash: hashMagicLinkToken(rawToken),
+    codeHash: hashEmailCode(rowId, code),
+    expiresAt,
+    returnTo: sanitizeReturnTo(opts.returnTo),
+    createdAt: now,
+  });
+  return { ok: true, rowId, email, rawToken, code, expiresAt, createdAt: now };
+}
+
+/**
+ * After a successful send: expire every OLDER outstanding row for this
+ * address, so only the newest code and link work. An older link then reads
+ * as expired, never as "used".
+ */
+export async function supersedeOlderEmailSignIns(
+  email: string,
+  keep: { rowId: string; createdAt: Date },
+  now: Date = new Date(),
+): Promise<void> {
+  await db
+    .update(peMagicLinkTokens)
+    .set({ expiresAt: now })
+    .where(
+      and(
+        eq(peMagicLinkTokens.email, email),
+        isNull(peMagicLinkTokens.consumedAt),
+        gt(peMagicLinkTokens.expiresAt, now),
+        lt(peMagicLinkTokens.createdAt, keep.createdAt),
+        sql`${peMagicLinkTokens.id} <> ${keep.rowId}`,
+      ),
+    );
+}
+
+export type EmailSignInVerifyResult =
+  | { ok: true; email: string; returnTo: string }
+  | {
+      ok: false;
+      error:
+        | "code_invalid"
+        | "code_expired"
+        | "too_many_attempts"
+        | "link_used"
+        | "link_expired";
+    };
+
+/**
+ * Verify a 6-digit code against the NEWEST delivered row for this address.
+ * Each wrong code burns one of {@link EMAIL_CODE_MAX_ATTEMPTS}, counted by an
+ * atomic conditional UPDATE so parallel guesses cannot exceed the cap. A
+ * right code consumes the row atomically (exactly one sign-in).
+ */
+export async function verifyEmailCode(
+  rawEmail: string,
+  rawCode: string,
+  now: Date = new Date(),
+): Promise<EmailSignInVerifyResult> {
+  const email = normalizeMagicLinkEmail(rawEmail);
+  const code = rawCode.trim();
+  if (!email || !/^[0-9]{6}$/.test(code)) {
+    return { ok: false, error: "code_invalid" };
+  }
+
+  const [row] = await db
+    .select({
+      id: peMagicLinkTokens.id,
+      expiresAt: peMagicLinkTokens.expiresAt,
+      consumedAt: peMagicLinkTokens.consumedAt,
+      attempts: peMagicLinkTokens.attempts,
+      codeHash: peMagicLinkTokens.codeHash,
+      returnTo: peMagicLinkTokens.returnTo,
+    })
+    .from(peMagicLinkTokens)
+    .where(
+      and(
+        eq(peMagicLinkTokens.email, email),
+        isNotNull(peMagicLinkTokens.codeHash),
+        isNotNull(peMagicLinkTokens.sentAt),
+      ),
+    )
+    .orderBy(desc(peMagicLinkTokens.createdAt))
+    .limit(1);
+
+  if (!row || !row.codeHash) return { ok: false, error: "code_expired" };
+  if (row.consumedAt || row.expiresAt.getTime() <= now.getTime()) {
+    return { ok: false, error: "code_expired" };
+  }
+  if (row.attempts >= EMAIL_CODE_MAX_ATTEMPTS) {
+    return { ok: false, error: "too_many_attempts" };
+  }
+
+  if (!hashesEqual(hashEmailCode(row.id, code), row.codeHash)) {
+    const bumped = await db
+      .update(peMagicLinkTokens)
+      .set({ attempts: sql`${peMagicLinkTokens.attempts} + 1` })
+      .where(
+        and(
+          eq(peMagicLinkTokens.id, row.id),
+          lt(peMagicLinkTokens.attempts, EMAIL_CODE_MAX_ATTEMPTS),
+        ),
+      )
+      .returning({ attempts: peMagicLinkTokens.attempts });
+    const attempts = bumped[0]?.attempts ?? EMAIL_CODE_MAX_ATTEMPTS;
+    return {
+      ok: false,
+      error:
+        attempts >= EMAIL_CODE_MAX_ATTEMPTS ? "too_many_attempts" : "code_invalid",
+    };
+  }
+
+  const consumed = await db
+    .update(peMagicLinkTokens)
+    .set({ consumedAt: now })
+    .where(
+      and(
+        eq(peMagicLinkTokens.id, row.id),
+        isNull(peMagicLinkTokens.consumedAt),
+        gt(peMagicLinkTokens.expiresAt, now),
+        lt(peMagicLinkTokens.attempts, EMAIL_CODE_MAX_ATTEMPTS),
+      ),
+    )
+    .returning({ id: peMagicLinkTokens.id });
+  if (consumed.length === 0) return { ok: false, error: "code_expired" };
+  return { ok: true, email, returnTo: sanitizeReturnTo(row.returnTo) };
+}
+
+export type EmailLinkStatus = {
+  status: "valid" | "used" | "expired";
+  returnTo: string;
+};
+
+/** Read-only look at a link token. Never consumes, never counts an attempt. */
+export async function peekEmailLinkToken(
+  rawToken: unknown,
+  now: Date = new Date(),
+): Promise<EmailLinkStatus> {
+  if (typeof rawToken !== "string" || rawToken.length === 0 || rawToken.length > 512) {
+    return { status: "expired", returnTo: "/" };
+  }
+  const [row] = await db
+    .select({
+      expiresAt: peMagicLinkTokens.expiresAt,
+      consumedAt: peMagicLinkTokens.consumedAt,
+      returnTo: peMagicLinkTokens.returnTo,
+    })
+    .from(peMagicLinkTokens)
+    .where(eq(peMagicLinkTokens.tokenHash, hashMagicLinkToken(rawToken)))
+    .limit(1);
+  if (!row) return { status: "expired", returnTo: "/" };
+  const returnTo = sanitizeReturnTo(row.returnTo);
+  if (row.consumedAt) return { status: "used", returnTo };
+  if (row.expiresAt.getTime() <= now.getTime()) return { status: "expired", returnTo };
+  return { status: "valid", returnTo };
+}
+
+/** Redeem a link token (POST only). Same atomic single-use guard as the legacy path. */
+export async function consumeEmailLinkToken(
+  rawToken: unknown,
+  now: Date = new Date(),
+): Promise<EmailSignInVerifyResult> {
+  const consumed = await consumeMagicLinkToken(rawToken, now);
+  if (!consumed.ok) {
+    return {
+      ok: false,
+      error: consumed.error === "already_used" ? "link_used" : "link_expired",
+    };
+  }
+  const [row] = await db
+    .select({ returnTo: peMagicLinkTokens.returnTo })
+    .from(peMagicLinkTokens)
+    .where(eq(peMagicLinkTokens.tokenHash, hashMagicLinkToken(rawToken as string)))
+    .limit(1);
+  return { ok: true, email: consumed.email, returnTo: sanitizeReturnTo(row?.returnTo) };
 }
 
 export type ConsumeMagicLinkTokenResult =

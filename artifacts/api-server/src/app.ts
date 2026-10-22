@@ -13,6 +13,7 @@ import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { userRateLimitMiddleware } from "./middlewares/userRateLimit";
 import { browserProxyEndUserMiddleware } from "./middlewares/browserProxyEndUser";
+import { sessionRevocationMiddleware } from "./middlewares/sessionRevocation";
 import { mountSpaStatic } from "./middlewares/spaStatic";
 import { stripeWebhookHandler } from "./routes/brokerageBilling";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
@@ -98,6 +99,10 @@ app.use(sessionMiddleware);
 // the proxied end user's own verified session, or force anonymous) and BEFORE
 // per-user metering, so a proxied signed-in user is metered as themselves.
 app.use(browserProxyEndUserMiddleware);
+// T1-A: server-side revocation / sliding-expiry check of whichever signed
+// token the two middlewares above accepted. Before metering, so a revoked
+// token is metered (and gated) as the anonymous caller it now is.
+app.use(sessionRevocationMiddleware);
 app.use(userRateLimitMiddleware);
 
 app.use("/api", router);

@@ -77,6 +77,61 @@ export function buildMagicLinkEmail(args: {
   return { subject, html, text };
 }
 
+/**
+ * T1-A (2026-10-22): the link-confirm URL. It opens a PAGE
+ * (`/auth/email?t=…`, "Finish signing in") whose button POSTs the token; a
+ * GET on it never consumes anything, so a mail scanner or link pre-fetcher
+ * cannot burn the sign-in. Campaign parameters ride along exactly as on the
+ * legacy link.
+ */
+export function buildEmailSignInLinkUrl(rawToken: string, campaign?: string): string {
+  const base = `${magicLinkLoginBaseUrl()}/auth/email?t=${encodeURIComponent(rawToken)}`;
+  if (!campaign) return base;
+  const safe = Object.fromEntries(
+    Object.entries(parseCampaignWire(campaign)).filter(([, v]) => /^[A-Za-z0-9 ._~:+-]+$/.test(v)),
+  );
+  const utms = serializeCampaign(safe);
+  return utms ? `${base}&${utms}` : base;
+}
+
+/** T1-A: one email carrying BOTH the 6-digit code and the confirm link. */
+export function buildEmailSignInEmail(args: {
+  code: string;
+  rawToken: string;
+  expiresAt: Date;
+  campaign?: string;
+}): { subject: string; html: string; text: string } {
+  const link = buildEmailSignInLinkUrl(args.rawToken, args.campaign);
+  const minutes = Math.max(
+    1,
+    Math.round((args.expiresAt.getTime() - Date.now()) / (60 * 1000)),
+  );
+  const subject = `${args.code} is your Smart Site sign-in code`;
+  const text = `Your Smart Site sign-in code is ${args.code}\n\nOr finish signing in with this link:\n${link}\n\nThe code and link expire in about ${minutes} minutes and work once. If you didn't request this, you can ignore this email.`;
+  const html = `<p>Your Smart Site sign-in code is</p><p style="font-size:28px;font-weight:600;letter-spacing:6px;margin:8px 0;">${args.code}</p><p>Or <a href="${link}">finish signing in with this link</a>.</p><p style="color:#64748b;font-size:12px;">The code and link expire in about ${minutes} minutes and work once. If you didn't request this, you can ignore this email.</p>`;
+  return { subject, html, text };
+}
+
+/**
+ * T1-A: send the code + link email. Same Resend call, same never-throws
+ * result shape as {@link sendMagicLinkEmail}.
+ */
+export async function sendEmailSignInEmail(args: {
+  to: string;
+  code: string;
+  rawToken: string;
+  expiresAt: Date;
+  campaign?: string;
+}): Promise<SendMagicLinkEmailResult> {
+  const mail = buildEmailSignInEmail({
+    code: args.code,
+    rawToken: args.rawToken,
+    expiresAt: args.expiresAt,
+    ...(args.campaign ? { campaign: args.campaign } : {}),
+  });
+  return sendViaResend(args.to, mail);
+}
+
 export type SendMagicLinkEmailResult =
   | { ok: true; id: string }
   | { ok: false; error: string };
@@ -96,15 +151,23 @@ export async function sendMagicLinkEmail(args: {
   expiresAt: Date;
   campaign?: string;
 }): Promise<SendMagicLinkEmailResult> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) {
-    return { ok: false, error: "RESEND_API_KEY unset" };
-  }
   const mail = buildMagicLinkEmail({
     rawToken: args.rawToken,
     expiresAt: args.expiresAt,
     ...(args.campaign ? { campaign: args.campaign } : {}),
   });
+  return sendViaResend(args.to, mail);
+}
+
+async function sendViaResend(
+  to: string,
+  mail: { subject: string; html: string; text: string },
+): Promise<SendMagicLinkEmailResult> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    return { ok: false, error: "RESEND_API_KEY unset" };
+  }
+  const args = { to };
   try {
     const res = await fetch(RESEND_API_URL, {
       method: "POST",

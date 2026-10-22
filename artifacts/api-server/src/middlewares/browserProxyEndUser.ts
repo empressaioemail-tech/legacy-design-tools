@@ -200,6 +200,8 @@ export const browserProxyEndUserMiddleware: RequestHandler = (
   const verified = claim !== null ? verifyEndUserSession(claim) : null;
   if (verified) {
     req.session = verified.session;
+    // T1-A: the revocation middleware checks this token server-side next.
+    req.peSessionToken = claim!;
     req.brokerageAuth = { tier: "user" };
     req.browserProxyEndUser = {
       kind: "user",
@@ -208,6 +210,7 @@ export const browserProxyEndUserMiddleware: RequestHandler = (
   } else {
     // Anonymous: drop anything that could read as an identified user.
     req.session = anonymousApplicantSession();
+    req.peSessionToken = undefined;
     req.brokerageAuth = undefined;
     req.browserProxyEndUser = {
       kind: "anonymous",

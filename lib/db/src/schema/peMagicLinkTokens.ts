@@ -1,4 +1,11 @@
-import { pgTable, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 /**
  * P-112 email leg — magic-link sign-in tokens for Property Explorer.
@@ -39,6 +46,20 @@ export const peMagicLinkTokens = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    /**
+     * T1-A: SHA-256 of the 6-digit code sent in the same email (salted with
+     * the row id). Null on rows minted by the legacy link-only route.
+     */
+    codeHash: text("code_hash"),
+    /** Wrong-code attempts against this row; 5 locks the code. */
+    attempts: integer("attempts").notNull().default(0),
+    /**
+     * Set once Resend accepted the email. The rate limit counts only rows
+     * with a sent_at, so a failed send never uses up the user's allowance.
+     */
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    /** Validated same-site relative path to land on after sign-in. */
+    returnTo: text("return_to"),
   },
   (t) => [
     uniqueIndex("pe_magic_link_tokens_token_hash_uidx").on(t.tokenHash),
