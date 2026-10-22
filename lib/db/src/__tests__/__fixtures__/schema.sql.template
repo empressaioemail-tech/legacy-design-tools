@@ -1704,9 +1704,9 @@ CREATE TABLE @@SCHEMA@@.pe_user_identities (
     provider text NOT NULL,
     subject text NOT NULL,
     email text,
+    email_verified boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    email_verified boolean DEFAULT false NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
