@@ -101,6 +101,13 @@ declare global {
        * routes never have to null-check.
        */
       session: SessionUser;
+      /**
+       * T1-A: the signed session token `req.session` was derived from, when
+       * it was derived from one (cookie or Bearer here, or the browser
+       * proxy's end-user header). Read only by the revocation middleware
+       * (`sessionRevocation.ts`) and the auth routes. Never log it.
+       */
+      peSessionToken?: string;
     }
   }
 }
@@ -300,19 +307,21 @@ function bearerTokenFromRequest(req: Request): string | null {
  * Resolve a verified session from signed token (cookie or Bearer).
  * Unsigned JSON cookies are accepted only outside production.
  */
-function resolveVerifiedSession(req: Request): SessionUser | null {
+function resolveVerifiedSession(
+  req: Request,
+): { session: SessionUser; token: string } | null {
   const cookies = (req as Request & { cookies?: Record<string, unknown> })
     .cookies;
   const cookieRaw = cookies?.[SESSION_COOKIE];
   try {
     if (typeof cookieRaw === "string" && cookieRaw.includes(".")) {
       const verified = verifySessionToken(cookieRaw);
-      if (verified.ok) return verified.session;
+      if (verified.ok) return { session: verified.session, token: cookieRaw };
     }
     const bearer = bearerTokenFromRequest(req);
     if (bearer?.includes(".")) {
       const verified = verifySessionToken(bearer);
-      if (verified.ok) return verified.session;
+      if (verified.ok) return { session: verified.session, token: bearer };
     }
   } catch (err) {
     logger.warn({ err }, "session token verification failed");
@@ -342,8 +351,14 @@ export const sessionMiddleware: RequestHandler = (
   next: NextFunction,
 ) => {
   const verified = resolveVerifiedSession(req);
+  req.peSessionToken = undefined;
   if (verified) {
-    req.session = verified;
+    req.session = verified.session;
+    // T1-A: a token-derived identity is not trusted for side effects until
+    // the revocation middleware has checked it server-side; that middleware
+    // runs the profile backfill below for it once the token is live, so a
+    // revoked or deleted account's token can never re-create a users row.
+    req.peSessionToken = verified.token;
   } else if (process.env["NODE_ENV"] === "production") {
     req.session = attachEphemeralAnonymousOwner(req, res);
   } else {
@@ -361,6 +376,7 @@ export const sessionMiddleware: RequestHandler = (
   }
 
   if (
+    !req.peSessionToken &&
     req.session.requestor &&
     req.session.requestor.kind === "user" &&
     shouldEnsureUserProfile(req.session.requestor.id)

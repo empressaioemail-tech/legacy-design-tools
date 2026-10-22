@@ -91,6 +91,7 @@ export * from "./reportRun";
 export * from "./permitRecord";
 export * from "./terrainGenerationJobs";
 export * from "./peUserIdentities";
+export * from "./peSessions";
 export * from "./peUserEntitlements";
 export * from "./peTeamMembers";
 export * from "./peTeamInvitations";

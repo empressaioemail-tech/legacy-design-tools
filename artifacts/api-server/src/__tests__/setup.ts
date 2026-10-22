@@ -24,6 +24,7 @@ import {
 } from "@workspace/db/testing";
 import { ctx } from "./test-context";
 import { sessionMiddleware } from "../middlewares/session";
+import { sessionRevocationMiddleware } from "../middlewares/sessionRevocation";
 import { userRateLimitMiddleware } from "../middlewares/userRateLimit";
 import { browserProxyEndUserMiddleware } from "../middlewares/browserProxyEndUser";
 
@@ -325,6 +326,13 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // requested before any account exists — the verify path is also how a
   // brand-new signup is created), so nothing else's CASCADE clears it.
   "pe_magic_link_tokens",
+  // T1-A — server-side sessions, per-user token cutoffs and the duplicate-
+  // account merge log. No FK to `users` on three of them (they must outlive
+  // an account delete), so nothing else's CASCADE clears them.
+  "pe_sessions",
+  "pe_session_cutoffs",
+  "pe_account_merges",
+  "pe_account_merge_rows",
   // P-413 / P-492 lifecycle outbox. FK to users — listed so a leftover
   // pending send cannot leak into the next test's lifecycle assertions.
   "pe_lifecycle_outbox",
@@ -361,6 +369,7 @@ export async function buildTestApp(): Promise<Express> {
   // Mirror app.ts: browser-proxy end-user identity sits between the session
   // and per-user metering.
   app.use(browserProxyEndUserMiddleware);
+  app.use(sessionRevocationMiddleware);
   app.use(userRateLimitMiddleware);
   app.use("/api", router);
   return app;
@@ -379,6 +388,7 @@ export async function buildPlanReviewBffTestApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(sessionMiddleware);
+  app.use(sessionRevocationMiddleware);
   app.use(userRateLimitMiddleware);
   app.use("/api/plan-review", planReviewBffRouter);
   return app;

@@ -69,6 +69,8 @@ import brokerageBriefRouter from "./brokerageBrief";
 import authRouter from "./auth";
 import peAuthRouter from "./peAuth";
 import peMagicLinkRouter from "./peMagicLink";
+import peSessionRouter from "./peSession";
+import peAccountRouter from "./peAccount";
 import propertyExplorerRouter from "./propertyExplorer";
 import affiliatesRouter from "./affiliates";
 import planReviewProxyRouter from "./planReviewProxy";
@@ -80,6 +82,8 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(peAuthRouter);
 router.use(peMagicLinkRouter);
+router.use(peSessionRouter);
+router.use(peAccountRouter);
 router.use(propertyExplorerRouter);
 router.use(affiliatesRouter);
 // P-118 — ungated Help widget chat. Deliberately its OWN router, mounted at

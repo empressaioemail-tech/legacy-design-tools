@@ -78,7 +78,7 @@ Software agents or platforms consuming Smart Site programmatically is a real arc
 
 === NAVIGATION HELP ===
 - The map is the home surface — searching an address drops a pin and opens the inspect card immediately, no sign-in required.
-- Signing in (Google or Microsoft) unlocks saving properties and the free chat allowance; it's free and takes one click.
+- Signing in (Google, or email with a 6-digit code) unlocks saving properties and the free chat allowance; it's free and takes a few seconds.
 - Saved properties, research threads, and generated reports live under the account, reachable from the map's own navigation.
 - Sharing a property produces a link anyone can open; the recipient sees a read-only view of what was shared and is invited to sign up.
 - Upgrading happens from the pricing page or the paywall prompts inside the product; checkout is a standard card-based subscription flow with no negotiated terms to fill out.

@@ -196,15 +196,17 @@ describe("POST /api/auth/email/verify — rejection paths", () => {
     expect(res.status).toBe(400);
   });
 
-  it("a token that never existed is rejected 404 token_not_found", async () => {
+  // T1-A: rejection codes follow the shared auth contract (400 +
+  // link_used | link_expired); a never-existing token reads as expired.
+  it("a token that never existed is rejected 400 link_expired", async () => {
     const res = await exchangeAuth(
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: "not-a-real-token-value-abc123" });
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe("not_found");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("link_expired");
   });
 
-  it("an expired token is rejected 410 token_expired", async () => {
+  it("an expired token is rejected 400 link_expired", async () => {
     // Minted 21 minutes ago against a 20-minute TTL — already expired now.
     const created = await createMagicLinkToken(
       "expired@example.com",
@@ -216,11 +218,11 @@ describe("POST /api/auth/email/verify — rejection paths", () => {
     const res = await exchangeAuth(
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: created.rawToken });
-    expect(res.status).toBe(410);
-    expect(res.body.error).toBe("expired");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("link_expired");
   });
 
-  it("an already-used token is rejected 409 on the second attempt", async () => {
+  it("an already-used token is rejected 400 link_used on the second attempt", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(JSON.stringify({ id: "resend_msg" }), {
         status: 200,
@@ -239,8 +241,8 @@ describe("POST /api/auth/email/verify — rejection paths", () => {
     const second = await exchangeAuth(
       request(getApp()).post("/api/auth/email/verify"),
     ).send({ token: created.rawToken });
-    expect(second.status).toBe(409);
-    expect(second.body.error).toBe("already_used");
+    expect(second.status).toBe(400);
+    expect(second.body.error).toBe("link_used");
   });
 
   it("two concurrent redemptions of the same token: exactly one succeeds", async () => {
@@ -257,7 +259,7 @@ describe("POST /api/auth/email/verify — rejection paths", () => {
       }),
     ]);
     const statuses = [a.status, b.status].sort();
-    expect(statuses).toEqual([201, 409]);
+    expect(statuses).toEqual([201, 400]);
   });
 });
 

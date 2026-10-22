@@ -18,9 +18,23 @@ import { normalizeAdMatch } from "../lib/peAdMatch";
 const router: IRouter = Router();
 
 const ExchangeBodySchema = z.object({
+  /**
+   * "microsoft" is still accepted here ONLY because the MCP connector's
+   * login page (hauska-map api/_lib/mcp-login-page.ts) and existing
+   * Microsoft-created accounts sign in through this exchange. The app no
+   * longer offers Microsoft (T1 ruling 2, 2026-10-22), and a Microsoft
+   * identity is never trusted for email linking (peIdentityEmailVerified).
+   */
   provider: z.enum(["google", "microsoft"]),
   subject: z.string().min(1).max(256),
   email: z.string().email().optional(),
+  /**
+   * T1-A: the IdP's own verified-email claim (Google ID token
+   * `email_verified`), forwarded by the BFF. Only a true value lets this
+   * identity link to an existing account with the same verified email.
+   * Absent (every BFF build before T1-A) means unverified: no linking.
+   */
+  emailVerified: z.boolean().optional(),
   displayName: z.string().max(256).optional(),
   /** Anonymous pre-auth install to claim (WDLL 2026-08-05 item 6). Header takes precedence when both present. */
   installId: z.string().min(8).max(256).optional(),
