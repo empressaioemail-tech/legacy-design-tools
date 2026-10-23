@@ -256,6 +256,7 @@ describe("lib/db schema integration", () => {
         "pe_parcel_constraint_index",
         "pe_parcel_constraint_index_builds",
         "pe_property_unlocks",
+        "pe_push_subscriptions",
         "pe_saved_properties",
         // P-91 / P-92 Wave B — screens are a different table from saves.
         "pe_screen_rows",
@@ -276,6 +277,8 @@ describe("lib/db schema integration", () => {
         "pe_user_entitlement_history",
         "pe_user_entitlements",
         "pe_user_identities",
+        "pe_watch_changes",
+        "pe_watch_snapshots",
         "pe_workbench_state",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",

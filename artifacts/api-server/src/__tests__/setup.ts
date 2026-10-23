@@ -342,6 +342,11 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "ss_contact",
   "affiliate_partner",
   "ss_lifecycle_drain_run",
+  // T2-WATCH — Watching tab snapshots, changes and push subscriptions. All
+  // cascade off users; listed per the "if a route writes to it" invariant.
+  "pe_watch_snapshots",
+  "pe_watch_changes",
+  "pe_push_subscriptions",
 ];
 
 /**

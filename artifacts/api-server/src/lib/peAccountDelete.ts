@@ -15,7 +15,8 @@
  *      (identities, entitlements, saved properties, screens, unlocks,
  *      workbench state, activations, AI connections, share grants and
  *      attributions, lifecycle outbox, the ss_contact record, team rows,
- *      the merge log). Tables keyed by user id WITHOUT a foreign key are
+ *      the merge log, and the T2-WATCH tables pe_watch_snapshots,
+ *      pe_watch_changes and pe_push_subscriptions). Tables keyed by user id WITHOUT a foreign key are
  *      cleaned explicitly; records-request jobs keep their row (a purchase
  *      record) with the email anonymised; magic-link rows for the user's
  *      addresses are deleted. The Stripe customer itself is left in Stripe

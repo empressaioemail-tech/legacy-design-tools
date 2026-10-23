@@ -130,6 +130,12 @@ export const TABLES: ReadonlyArray<TableSpec> = [
   { table: "pe_team_invitations", column: "account_owner_user_id", keys: ["email"] },
   { table: "architect_notification_reads", column: "user_id", keys: [] },
   { table: "user_auth_credentials", column: "user_id", keys: [] },
+  // T2-WATCH: the survivor keeps its own snapshot of a parcel both watch (the
+  // merged one is dropped, logged); changes move as-is; a push endpoint is
+  // unique per device, so subscriptions just move.
+  { table: "pe_watch_snapshots", column: "owner_user_id", keys: ["parcel_node_id"] },
+  { table: "pe_watch_changes", column: "owner_user_id" },
+  { table: "pe_push_subscriptions", column: "owner_user_id", keys: ["endpoint"] },
 ];
 
 /**

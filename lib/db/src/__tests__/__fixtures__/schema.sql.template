@@ -1522,6 +1522,19 @@ CREATE TABLE @@SCHEMA@@.pe_property_unlocks (
 );
 
 
+-- Name: pe_push_subscriptions; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_push_subscriptions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    endpoint text NOT NULL,
+    keys jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_ok_at timestamp with time zone,
+    failures integer DEFAULT 0 NOT NULL
+);
+
+
 -- Name: pe_saved_properties; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE @@SCHEMA@@.pe_saved_properties (
@@ -1707,6 +1720,35 @@ CREATE TABLE @@SCHEMA@@.pe_user_identities (
     email_verified boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+-- Name: pe_watch_changes; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_watch_changes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    kind text NOT NULL,
+    title text NOT NULL,
+    detected_at timestamp with time zone DEFAULT now() NOT NULL,
+    seen_at timestamp with time zone,
+    source_url text,
+    CONSTRAINT pe_watch_changes_kind_chk CHECK ((kind = ANY (ARRAY['flood_map'::text, 'zoning_case'::text, 'appraisal'::text, 'records_request'::text, 'record_update'::text])))
+);
+
+
+-- Name: pe_watch_snapshots; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE @@SCHEMA@@.pe_watch_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_user_id text NOT NULL,
+    parcel_node_id text NOT NULL,
+    facts_hash text,
+    facts jsonb DEFAULT '{}'::jsonb NOT NULL,
+    checked_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_read_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -3382,6 +3424,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_tenant_id_parcel_node_id_pk PRIMARY KEY (owner_user_id, tenant_id, parcel_node_id);
 
 
+-- Name: pe_push_subscriptions pe_push_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_push_subscriptions
+    ADD CONSTRAINT pe_push_subscriptions_pkey PRIMARY KEY (id);
+
+
 -- Name: pe_saved_properties pe_saved_properties_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
@@ -3458,6 +3506,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
     ADD CONSTRAINT pe_user_identities_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_watch_changes pe_watch_changes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_watch_changes
+    ADD CONSTRAINT pe_watch_changes_pkey PRIMARY KEY (id);
+
+
+-- Name: pe_watch_snapshots pe_watch_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_watch_snapshots
+    ADD CONSTRAINT pe_watch_snapshots_pkey PRIMARY KEY (id);
 
 
 -- Name: pe_workbench_state pe_workbench_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -4512,6 +4572,16 @@ CREATE INDEX pe_pci_county_flood_idx ON @@SCHEMA@@.pe_parcel_constraint_index US
 CREATE INDEX pe_pci_county_idx ON @@SCHEMA@@.pe_parcel_constraint_index USING btree (county_fips);
 
 
+-- Name: pe_push_subscriptions_endpoint_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_push_subscriptions_endpoint_uidx ON @@SCHEMA@@.pe_push_subscriptions USING btree (endpoint);
+
+
+-- Name: pe_push_subscriptions_owner_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_push_subscriptions_owner_idx ON @@SCHEMA@@.pe_push_subscriptions USING btree (owner_user_id);
+
+
 -- Name: pe_saved_properties_owner_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_saved_properties_owner_idx ON @@SCHEMA@@.pe_saved_properties USING btree (tenant_id, owner_user_id, updated_at);
@@ -4615,6 +4685,21 @@ CREATE UNIQUE INDEX pe_user_identities_provider_subject_uidx ON @@SCHEMA@@.pe_us
 -- Name: pe_user_identities_user_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX pe_user_identities_user_idx ON @@SCHEMA@@.pe_user_identities USING btree (user_id);
+
+
+-- Name: pe_watch_changes_owner_detected_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_watch_changes_owner_detected_idx ON @@SCHEMA@@.pe_watch_changes USING btree (owner_user_id, detected_at);
+
+
+-- Name: pe_watch_snapshots_checked_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX pe_watch_snapshots_checked_idx ON @@SCHEMA@@.pe_watch_snapshots USING btree (checked_at);
+
+
+-- Name: pe_watch_snapshots_owner_parcel_uidx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX pe_watch_snapshots_owner_parcel_uidx ON @@SCHEMA@@.pe_watch_snapshots USING btree (owner_user_id, parcel_node_id);
 
 
 -- Name: permit_record_metro_address_issued_idx; Type: INDEX; Schema: public; Owner: -
@@ -5378,6 +5463,12 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_property_unlocks
     ADD CONSTRAINT pe_property_unlocks_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
+-- Name: pe_push_subscriptions pe_push_subscriptions_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_push_subscriptions
+    ADD CONSTRAINT pe_push_subscriptions_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
 -- Name: pe_saved_properties pe_saved_properties_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_saved_properties
@@ -5460,6 +5551,18 @@ ALTER TABLE ONLY @@SCHEMA@@.pe_user_entitlements
 
 ALTER TABLE ONLY @@SCHEMA@@.pe_user_identities
     ADD CONSTRAINT pe_user_identities_user_id_users_id_fk FOREIGN KEY (user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_watch_changes pe_watch_changes_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_watch_changes
+    ADD CONSTRAINT pe_watch_changes_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
+
+
+-- Name: pe_watch_snapshots pe_watch_snapshots_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY @@SCHEMA@@.pe_watch_snapshots
+    ADD CONSTRAINT pe_watch_snapshots_owner_user_id_users_id_fk FOREIGN KEY (owner_user_id) REFERENCES @@SCHEMA@@.users(id) ON DELETE CASCADE;
 
 
 -- Name: pe_workbench_state pe_workbench_state_owner_user_id_users_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
