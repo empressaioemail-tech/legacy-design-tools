@@ -676,6 +676,25 @@ export async function generateNarrativeSection(input: {
   };
 }
 
+/**
+ * The exact words an answer opens with when the numbered sources do not hold
+ * what was asked. The Smart Site Ask screen (hauska-map src/v2/ask) keys its
+ * honest "not on record" treatment off this phrase, so keep it stable.
+ */
+export const RESEARCH_CHAT_NOT_ON_RECORD = "Not on record here.";
+
+/**
+ * T2-ASK honesty rules (Smart Site product law, 2026-10-22): an answer comes
+ * only from the numbered sources (source [1] is the parcel's own record when
+ * the caller sends one), never estimates a missing value, and says plainly
+ * when the record lacks something, with the next step.
+ */
+export const RESEARCH_CHAT_RECORD_ONLY_RULES: readonly string[] = [
+  "Answer only from the numbered sources (the parcel record and the code sections retrieved for it). Never estimate, infer or fill in a value the sources do not state.",
+  `When the sources do not contain what was asked, start the answer with exactly "${RESEARCH_CHAT_NOT_ON_RECORD}" and then say in one sentence where that fact is recorded and the next step. Easements, plats and deeds are on the recorded plat or deed at the county clerk, which a records request can pull.`,
+  "Never state sale prices or comparable sales; Texas does not disclose them.",
+];
+
 export async function generateResearchChat(input: {
   address: string;
   jurisdiction: string | null;
@@ -716,6 +735,10 @@ export async function generateResearchChat(input: {
     hasPrivate
       ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."
       : "Use ONLY the numbered code atom sources. Do not invent code.",
+    ...RESEARCH_CHAT_RECORD_ONLY_RULES,
+    presentationMode === "consumer"
+      ? null
+      : "Every sentence that states a fact ends with the [n] marker of the source it comes from.",
     "No compliance guarantees.",
     "Respond with JSON only: {\"answer\": string (plain text)}.",
   ]
