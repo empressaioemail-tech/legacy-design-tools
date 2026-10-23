@@ -21,6 +21,7 @@ import { startFindingRunsSweep } from "./lib/findingRunsSweep";
 import { startTerrainJobsSweep } from "./lib/terrainGenerationJobsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
 import { startLifecycleDrain } from "./lib/peLifecycleDrain";
+import { startWatchDetector } from "./lib/peWatching";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
 // CODE_ATOM_QUEUE_TICK_MS (default 10s) for pending entries.
@@ -57,6 +58,11 @@ startAdapterCacheSweepWorker({ log: logger });
 // FOR UPDATE SKIP LOCKED, so every instance can run it. See
 // `lib/peLifecycleDrain.ts`.
 startLifecycleDrain(logger);
+
+// T2-WATCH: daily change detection for saved properties (Watching tab). Hourly
+// tick; each saved parcel is claimed per row, so every instance can run it.
+// WATCH_DETECT_TICK_MS=0 disables it. See lib/peWatching.ts.
+startWatchDetector(logger);
 
 const app: Express = express();
 

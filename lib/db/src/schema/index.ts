@@ -101,6 +101,7 @@ export * from "./peStripeWebhookEvents";
 export * from "./peUserEntitlementHistory";
 export * from "./peAccountActivations";
 export * from "./peSavedProperties";
+export * from "./peWatching";
 export * from "./peScreens";
 export * from "./peParcelConstraintIndex";
 export * from "./pePropertyUnlocks";

@@ -112,6 +112,20 @@ describe("POST /api/account/delete", () => {
       parcelNodeId: "48021:1",
       snapshot: {},
     });
+    // T2-WATCH tables (cascade off users).
+    const pool = ctx.schema!.pool;
+    await pool.query(
+      "INSERT INTO pe_watch_snapshots (owner_user_id, parcel_node_id, facts_hash) VALUES ($1, '48021:1', 'h')",
+      [userId],
+    );
+    await pool.query(
+      "INSERT INTO pe_watch_changes (owner_user_id, parcel_node_id, kind, title) VALUES ($1, '48021:1', 'flood_map', 'Flood map change')",
+      [userId],
+    );
+    await pool.query(
+      "INSERT INTO pe_push_subscriptions (owner_user_id, endpoint, keys) VALUES ($1, 'https://push.example/del', '{}'::jsonb)",
+      [userId],
+    );
 
     const res = await del(token, { confirm: "DELETE" });
     expect(res.status).toBe(200);
@@ -127,6 +141,10 @@ describe("POST /api/account/delete", () => {
     expect((await db.select().from(users).where(eq(users.id, userId))).length).toBe(0);
     expect((await db.select().from(peUserIdentities).where(eq(peUserIdentities.userId, userId))).length).toBe(0);
     expect((await db.select().from(peSavedProperties).where(eq(peSavedProperties.ownerUserId, userId))).length).toBe(0);
+    for (const t of ["pe_watch_snapshots", "pe_watch_changes", "pe_push_subscriptions"]) {
+      const r = await pool.query(`SELECT count(*)::int AS n FROM ${t} WHERE owner_user_id = $1`, [userId]);
+      expect(r.rows[0].n, t).toBe(0);
+    }
 
     const s = await request(getApp()).get("/api/auth/session").set("Authorization", `Bearer ${token}`);
     expect(s.body).toEqual({ signedIn: false });

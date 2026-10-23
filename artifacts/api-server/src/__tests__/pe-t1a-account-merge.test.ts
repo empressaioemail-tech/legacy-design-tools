@@ -98,6 +98,21 @@ async function seed(): Promise<void> {
     `INSERT INTO pe_chat_message_counts (owner_user_id, parcel_node_id, count) VALUES
       ('free_old', '48021:1', 3), ('paid_new', '48021:1', 4)`,
   );
+  // T2-WATCH tables.
+  await q(
+    `INSERT INTO pe_watch_snapshots (owner_user_id, parcel_node_id, facts_hash) VALUES
+      ('free_old', '48021:1', 'free-only'),
+      ('free_old', '48021:2', 'free-dup'),
+      ('paid_new', '48021:2', 'paid-dup')`,
+  );
+  await q(
+    `INSERT INTO pe_watch_changes (owner_user_id, parcel_node_id, kind, title) VALUES
+      ('free_old', '48021:1', 'flood_map', 'Flood map change')`,
+  );
+  await q(
+    `INSERT INTO pe_push_subscriptions (owner_user_id, endpoint, keys) VALUES
+      ('free_old', 'https://push.example/free-phone', '{}'::jsonb)`,
+  );
 }
 
 beforeEach(async () => {
@@ -196,6 +211,27 @@ describe("T1-A duplicate-account merge", () => {
       "SELECT before FROM pe_account_merge_rows WHERE table_name = 'pe_saved_properties' AND action = 'moved'",
     );
     expect(moved.map((m) => m.before.owner_user_id)).toEqual(["free_old"]);
+
+    // T2-WATCH: snapshots move (the survivor keeps its own on a shared
+    // parcel), changes and push subscriptions move.
+    expect(
+      await q("SELECT owner_user_id, parcel_node_id, facts_hash FROM pe_watch_snapshots ORDER BY parcel_node_id"),
+    ).toEqual([
+      { owner_user_id: "paid_new", parcel_node_id: "48021:1", facts_hash: "free-only" },
+      { owner_user_id: "paid_new", parcel_node_id: "48021:2", facts_hash: "paid-dup" },
+    ]);
+    expect(await q("SELECT owner_user_id FROM pe_watch_changes")).toEqual([{ owner_user_id: "paid_new" }]);
+    expect(await q("SELECT owner_user_id FROM pe_push_subscriptions")).toEqual([{ owner_user_id: "paid_new" }]);
+    expect(
+      await q(
+        "SELECT table_name, action, count(*)::int AS n FROM pe_account_merge_rows WHERE table_name LIKE 'pe_watch%' OR table_name = 'pe_push_subscriptions' GROUP BY 1, 2 ORDER BY 1, 2",
+      ),
+    ).toEqual([
+      { table_name: "pe_push_subscriptions", action: "moved", n: 1 },
+      { table_name: "pe_watch_changes", action: "moved", n: 1 },
+      { table_name: "pe_watch_snapshots", action: "dropped", n: 1 },
+      { table_name: "pe_watch_snapshots", action: "moved", n: 1 },
+    ]);
 
     // Unverified stranger untouched.
     expect((await q("SELECT count(*)::int AS n FROM pe_account_merges WHERE merged_user_id = 'stranger'"))[0]).toEqual({ n: 0 });
