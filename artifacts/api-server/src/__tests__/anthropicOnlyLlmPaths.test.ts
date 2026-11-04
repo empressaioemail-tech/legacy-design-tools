@@ -90,7 +90,7 @@ describe("findings client (findingLlmClient)", () => {
     const bundle = await getFindingLlmClient();
     expect(bundle?.kind).toBe("anthropic");
     expect(createAnthropicClientMock).toHaveBeenCalledTimes(1);
-    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-5-5");
   });
 
   it("findings, briefing and the shared constant are one model id", () => {
@@ -134,7 +134,7 @@ describe("brief / lay summary / research chat generators", () => {
     });
     expect(create).toHaveBeenCalled();
     const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
-    expect(args.model).toBe("claude-opus-4-8");
+    expect(args.model).toBe("claude-opus-5-5");
     expect(args.temperature).toBeUndefined();
     expect(out.method).toBe("anthropic");
   });
@@ -159,7 +159,7 @@ describe("brief / lay summary / research chat generators", () => {
     });
     expect(create).toHaveBeenCalledTimes(1);
     const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
-    expect(args.model).toBe("claude-opus-4-8");
+    expect(args.model).toBe("claude-opus-5-5");
     expect(args.temperature).toBeUndefined();
     expect(out.method).toBe("anthropic");
   });
@@ -178,6 +178,6 @@ describe("brief / lay summary / research chat generators", () => {
     } as never);
     expect(
       (create.mock.calls[0] as unknown as [{ model: string }])[0].model,
-    ).toBe("claude-opus-4-8");
+    ).toBe("claude-opus-5-5");
   });
 });

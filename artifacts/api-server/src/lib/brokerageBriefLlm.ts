@@ -5,6 +5,9 @@
 import {
   BRIEFING_ANTHROPIC_MAX_TOKENS,
   BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_OUTPUT_CONFIG_MEDIUM,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import { logger } from "./logger";
@@ -351,12 +354,19 @@ async function completeBriefingLlm(
   const response = await bundle.client.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
     max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
+    output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
     system,
     messages: [{ role: "user", content: user }],
   });
-  const textBlock = response.content.find((block) => block.type === "text");
-  const text =
-    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
+  if (isAnthropicRefusal(response)) {
+    // Callers fall back to the rules-v1 output when text is null.
+    logger.warn(
+      { stopReason: "refusal" },
+      "brokerage brief: Claude refused; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  const text = textFromAnthropicContent(response.content).trim();
   return { text: text || null, method: "anthropic" };
 }
 

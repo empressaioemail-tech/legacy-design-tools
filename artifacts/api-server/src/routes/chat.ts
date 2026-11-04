@@ -18,6 +18,11 @@ import {
 import type { ContextSummary, Scope } from "@empressaio/atom-contract";
 import { INLINE_ATOM_REGEX } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
+import {
+  CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+} from "@workspace/briefing-engine";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";
 import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
@@ -922,7 +927,8 @@ router.post("/chat", async (req: Request, res: Response) => {
     while (true) {
       iterations += 1;
       const stream = anthropic.messages.stream({
-        model: "claude-sonnet-4-6",
+        model: CODE_CITING_ANTHROPIC_MODEL,
+        output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
         max_tokens: 4096,
         system: augmentedSystemPrompt,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -941,6 +947,16 @@ router.post("/chat", async (req: Request, res: Response) => {
       }
 
       const finalMessage = await stream.finalMessage();
+      if (isAnthropicRefusal(finalMessage)) {
+        logger.warn(
+          { engagementId, stopReason: "refusal" },
+          "chat: Claude refused; sending fixed fallback text",
+        );
+        res.write(
+          `data: ${JSON.stringify({ text: "I can't help with that request." })}\n\n`,
+        );
+        break;
+      }
       if (finalMessage.stop_reason !== "tool_use") break;
 
       // Record the model's tool-calling turn verbatim, then run each tool.
@@ -965,7 +981,8 @@ router.post("/chat", async (req: Request, res: Response) => {
           })),
         });
         const closing = anthropic.messages.stream({
-          model: "claude-sonnet-4-6",
+          model: CODE_CITING_ANTHROPIC_MODEL,
+          output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
           max_tokens: 4096,
           system: augmentedSystemPrompt,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

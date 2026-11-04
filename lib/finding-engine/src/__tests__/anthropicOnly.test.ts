@@ -55,7 +55,7 @@ describe("findings: Anthropic is the only selectable provider", () => {
     expect(create).toHaveBeenCalledTimes(1);
     const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
     expect(args.model).toBe(FINDING_ANTHROPIC_MODEL);
-    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-5-5");
     // Opus 4.8 rejects sampling params (400), so none are sent.
     expect(args.temperature).toBeUndefined();
     expect(args.top_p).toBeUndefined();

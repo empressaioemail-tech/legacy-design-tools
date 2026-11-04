@@ -8,7 +8,11 @@ import { getBriefingLlmClient } from "./briefingLlmClient";
 import {
   BRIEFING_ANTHROPIC_MODEL,
   BRIEFING_ANTHROPIC_MAX_TOKENS,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";
+import { logger } from "./logger";
 
 export type LayVerdictStatus = "yes" | "maybe" | "no" | "unknown";
 
@@ -242,13 +246,19 @@ async function completeAnthropic(
   const response = await bundle.client.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
     max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
+    output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
     system,
     messages: [{ role: "user", content: user }],
   });
-  const textBlock = response.content.find((block) => block.type === "text");
-  const text =
-    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
-  return text || null;
+  if (isAnthropicRefusal(response)) {
+    // null -> caller returns the rules-v1 lay summary.
+    logger.warn(
+      { stopReason: "refusal" },
+      "lay summary: Claude refused; falling back to rules-v1",
+    );
+    return null;
+  }
+  return textFromAnthropicContent(response.content).trim() || null;
 }
 
 export async function generateLaySummary(input: {

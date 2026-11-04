@@ -55,7 +55,7 @@ describe("briefing: Anthropic is the only selectable provider", () => {
     expect(create).toHaveBeenCalledTimes(1);
     const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
     expect(args.model).toBe(BRIEFING_ANTHROPIC_MODEL);
-    expect(BRIEFING_ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+    expect(BRIEFING_ANTHROPIC_MODEL).toBe("claude-opus-5-5");
     expect(args.temperature).toBeUndefined();
   });
 });

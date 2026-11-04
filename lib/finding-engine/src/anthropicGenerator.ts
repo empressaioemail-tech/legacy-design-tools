@@ -32,7 +32,12 @@ import {
   FINDING_CATEGORY_VALUES,
   FINDING_SEVERITY_VALUES,
 } from "./types";
-import { CODE_CITING_ANTHROPIC_MODEL } from "@workspace/briefing-engine";
+import {
+  CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_OUTPUT_CONFIG_MEDIUM,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
+} from "@workspace/briefing-engine";
 import { FINDING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 
 /** Model id pinned by Phase 1A approval (decision: same as briefing-engine). */
@@ -45,6 +50,7 @@ export class FindingGeneratorError extends Error {
   constructor(
     public readonly code:
       | "anthropic_call_failed"
+      | "anthropic_refusal"
       | "anthropic_invalid_response_shape"
       | "anthropic_invalid_json"
       | "anthropic_invalid_finding_shape",
@@ -261,6 +267,7 @@ export async function callAnthropicGenerator(
     response = await client.messages.create({
       model: FINDING_ANTHROPIC_MODEL,
       max_tokens: FINDING_ANTHROPIC_MAX_TOKENS,
+      output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
       system: FINDING_SYSTEM_PROMPT,
       messages: [
         {
@@ -276,22 +283,21 @@ export async function callAnthropicGenerator(
     );
   }
 
-  // Concatenate every text block — defensive in case the model emits
-  // multiple blocks (rare for a JSON response, but the SDK's union
-  // type allows it).
-  const textParts: string[] = [];
-  for (const block of response.content) {
-    if (block.type === "text") {
-      textParts.push(block.text);
-    }
+  if (isAnthropicRefusal(response)) {
+    throw new FindingGeneratorError(
+      "anthropic_refusal",
+      "Claude refused the findings request (stop_reason=refusal)",
+    );
   }
-  if (textParts.length === 0) {
+  // Text blocks only (thinking blocks may precede the text).
+  const text = textFromAnthropicContent(response.content);
+  if (text.length === 0) {
     throw new FindingGeneratorError(
       "anthropic_invalid_response_shape",
       `Claude response had no text content blocks`,
     );
   }
-  return parseAnthropicResponse(textParts.join(""));
+  return parseAnthropicResponse(text);
 }
 
 // Re-export so consumers can construct EngineFinding values without
