@@ -32,10 +32,11 @@ import {
   FINDING_CATEGORY_VALUES,
   FINDING_SEVERITY_VALUES,
 } from "./types";
+import { CODE_CITING_ANTHROPIC_MODEL } from "@workspace/briefing-engine";
 import { FINDING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 
 /** Model id pinned by Phase 1A approval (decision: same as briefing-engine). */
-export const FINDING_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+export const FINDING_ANTHROPIC_MODEL = CODE_CITING_ANTHROPIC_MODEL;
 
 /** Token budget per generation. 6 KB headroom for ~6 findings × 800 tokens. */
 export const FINDING_ANTHROPIC_MAX_TOKENS = 6144;

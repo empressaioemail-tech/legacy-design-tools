@@ -244,7 +244,7 @@ describe("callAnthropicGenerator", () => {
     expect(create).toHaveBeenCalledOnce();
     const firstCall = create.mock.calls[0] as unknown as [Record<string, unknown>];
     const args = firstCall[0];
-    expect(args.model).toBe("claude-sonnet-4-5");
+    expect(args.model).toBe("claude-opus-4-8");
     expect(args.max_tokens).toBe(6144);
     // System prompt + user message are both populated.
     expect(typeof args.system).toBe("string");

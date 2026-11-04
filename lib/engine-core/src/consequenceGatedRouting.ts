@@ -87,13 +87,6 @@ export type ModelRoutingTier = "high" | "low";
 export interface ConsequenceGatedRouteDecision {
   stratum: ConsequenceStratum;
   modelTier: ModelRoutingTier;
-  /**
-   * Anthropic model id for this stratum — asserted routing, not earned.
-   * G-309 A20: Anthropic is the only provider; both tiers currently use
-   * the same id (no XAI_* env can influence this).
-   */
-  anthropicModel: string;
-  ensembleEnabled: boolean;
   routingProvenance: "asserted";
   label: string;
 }
@@ -104,25 +97,9 @@ const HIGH_STRATA = new Set<ConsequenceStratum>([
   "essential",
 ]);
 
-/**
- * Anthropic model id used by the findings Anthropic branch
- * (`FINDING_ANTHROPIC_MODEL` in `@workspace/finding-engine`). Mirrored
- * here because engine-core cannot depend on finding-engine.
- */
-export const CONSEQUENCE_ROUTED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
-
-export function resolveHighConsequenceAnthropicModel(): string {
-  return CONSEQUENCE_ROUTED_ANTHROPIC_MODEL;
-}
-
-export function resolveLowConsequenceAnthropicModel(): string {
-  return CONSEQUENCE_ROUTED_ANTHROPIC_MODEL;
-}
-
-export function resolveConsequenceEnsembleEnabled(): boolean {
-  const raw = (process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE ?? "").toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
-}
+// G-309 A20: the tier no longer selects a model (every code-citing call
+// uses CODE_CITING_ANTHROPIC_MODEL from @workspace/briefing-engine) and
+// there is no ensemble; AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE is ignored.
 
 /**
  * Route finding generation to high or low model tier based on F2
@@ -133,19 +110,13 @@ export function resolveConsequenceGatedRoute(
 ): ConsequenceGatedRouteDecision {
   const stratum = maxConsequenceStratum(sections);
   const high = HIGH_STRATA.has(stratum);
-  const ensembleEnabled = high && resolveConsequenceEnsembleEnabled();
-  const anthropicModel = high
-    ? resolveHighConsequenceAnthropicModel()
-    : resolveLowConsequenceAnthropicModel();
 
   return {
     stratum,
     modelTier: high ? "high" : "low",
-    anthropicModel,
-    ensembleEnabled,
     routingProvenance: "asserted",
     label: high
-      ? `Asserted routing — high-consequence stratum (${stratum})${ensembleEnabled ? ", ensemble" : ""}`
+      ? `Asserted routing — high-consequence stratum (${stratum})`
       : `Asserted routing — routine stratum`,
   };
 }

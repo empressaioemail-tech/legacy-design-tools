@@ -8,7 +8,10 @@
  * No network calls: the Anthropic client is a stub.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BRIEFING_ANTHROPIC_MODEL } from "@workspace/briefing-engine";
+import {
+  BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_ANTHROPIC_MODEL,
+} from "@workspace/briefing-engine";
 import { FINDING_ANTHROPIC_MODEL } from "@workspace/finding-engine";
 
 const createAnthropicClientMock = vi.hoisted(() => vi.fn());
@@ -87,7 +90,12 @@ describe("findings client (findingLlmClient)", () => {
     const bundle = await getFindingLlmClient();
     expect(bundle?.kind).toBe("anthropic");
     expect(createAnthropicClientMock).toHaveBeenCalledTimes(1);
-    expect(FINDING_ANTHROPIC_MODEL).toMatch(/^claude-/);
+    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+  });
+
+  it("findings, briefing and the shared constant are one model id", () => {
+    expect(FINDING_ANTHROPIC_MODEL).toBe(CODE_CITING_ANTHROPIC_MODEL);
+    expect(BRIEFING_ANTHROPIC_MODEL).toBe(CODE_CITING_ANTHROPIC_MODEL);
   });
 });
 
@@ -125,9 +133,9 @@ describe("brief / lay summary / research chat generators", () => {
       finishedAt: new Date().toISOString(),
     });
     expect(create).toHaveBeenCalled();
-    expect(
-      (create.mock.calls[0] as unknown as [{ model: string }])[0].model,
-    ).toBe(BRIEFING_ANTHROPIC_MODEL);
+    const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.model).toBe("claude-opus-4-8");
+    expect(args.temperature).toBeUndefined();
     expect(out.method).toBe("anthropic");
   });
 
@@ -150,9 +158,9 @@ describe("brief / lay summary / research chat generators", () => {
       finishedAt: new Date().toISOString(),
     });
     expect(create).toHaveBeenCalledTimes(1);
-    expect(
-      (create.mock.calls[0] as unknown as [{ model: string }])[0].model,
-    ).toBe(BRIEFING_ANTHROPIC_MODEL);
+    const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.model).toBe("claude-opus-4-8");
+    expect(args.temperature).toBeUndefined();
     expect(out.method).toBe("anthropic");
   });
 
@@ -170,6 +178,6 @@ describe("brief / lay summary / research chat generators", () => {
     } as never);
     expect(
       (create.mock.calls[0] as unknown as [{ model: string }])[0].model,
-    ).toBe(BRIEFING_ANTHROPIC_MODEL);
+    ).toBe("claude-opus-4-8");
   });
 });

@@ -53,9 +53,26 @@ describe("findings: Anthropic is the only selectable provider", () => {
     const client = { messages: { create } } as unknown as Anthropic;
     await generateFindings(input, { mode: resolveFindingLlmMode(), anthropicClient: client });
     expect(create).toHaveBeenCalledTimes(1);
-    expect((create.mock.calls[0] as unknown as [{ model: string }])[0].model).toBe(
-      FINDING_ANTHROPIC_MODEL,
-    );
-    expect(FINDING_ANTHROPIC_MODEL).toMatch(/^claude-/);
+    const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.model).toBe(FINDING_ANTHROPIC_MODEL);
+    expect(FINDING_ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+    // Opus 4.8 rejects sampling params (400), so none are sent.
+    expect(args.temperature).toBeUndefined();
+    expect(args.top_p).toBeUndefined();
+  });
+
+  it("makes exactly one Anthropic call even if the ensemble flag is set", async () => {
+    process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE = "1";
+    const create = vi.fn(async () => ({
+      content: [{ type: "text", text: JSON.stringify({ findings: [] }) }],
+    }));
+    const client = { messages: { create } } as unknown as Anthropic;
+    await generateFindings(input, {
+      mode: "anthropic",
+      anthropicClient: client,
+      ensembleEnabled: true,
+    } as never);
+    delete process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE;
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

@@ -33,11 +33,13 @@ describe("consequenceGatedRouting", () => {
   });
 });
 
-describe("consequenceGatedRouting: Anthropic only (G-309 A20)", () => {
-  it("ignores XAI_* env and routes both tiers to an Anthropic model", () => {
-    const saved = { m: process.env.XAI_MODEL, h: process.env.XAI_FINDING_HIGH_MODEL };
+describe("consequenceGatedRouting: one model, no ensemble (G-309 A20)", () => {
+  it("carries no model id and ignores XAI_* and the ensemble flag", () => {
+    const keys = ["XAI_MODEL", "XAI_FINDING_HIGH_MODEL", "AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE"];
+    const saved = keys.map((k) => process.env[k]);
     process.env.XAI_MODEL = "grok-3-mini";
     process.env.XAI_FINDING_HIGH_MODEL = "grok-3";
+    process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE = "1";
     try {
       for (const sections of [
         [{ consequence: { asce7RiskCategory: "IV" as const } }],
@@ -46,14 +48,16 @@ describe("consequenceGatedRouting: Anthropic only (G-309 A20)", () => {
         const route = resolveConsequenceGatedRoute(
           sections as never,
         ) as unknown as Record<string, unknown>;
-        expect(String(route.anthropicModel)).toMatch(/^claude-/);
         expect("grokModel" in route).toBe(false);
+        expect("anthropicModel" in route).toBe(false);
+        expect("ensembleEnabled" in route).toBe(false);
+        expect(String(route.label)).not.toMatch(/ensemble/i);
       }
     } finally {
-      if (saved.m === undefined) delete process.env.XAI_MODEL;
-      else process.env.XAI_MODEL = saved.m;
-      if (saved.h === undefined) delete process.env.XAI_FINDING_HIGH_MODEL;
-      else process.env.XAI_FINDING_HIGH_MODEL = saved.h;
+      keys.forEach((k, n) => {
+        if (saved[n] === undefined) delete process.env[k];
+        else process.env[k] = saved[n];
+      });
     }
   });
 });

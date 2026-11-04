@@ -71,8 +71,6 @@ export interface GenerateFindingsOptions {
    * touching the production ulid path.
    */
   ulid?: () => string;
-  /** S5 — optional ensemble on high-consequence stratum (asserted weights). */
-  ensembleEnabled?: boolean;
 }
 
 /**
@@ -249,13 +247,6 @@ export async function generateFindings(
       );
     }
     drafts = await callAnthropicGenerator(options.anthropicClient, input);
-    if (options.ensembleEnabled) {
-      const secondary = await callAnthropicGenerator(
-        options.anthropicClient,
-        input,
-      );
-      drafts = [...drafts, ...secondary];
-    }
   } else {
     // Mock branch: the deterministic generator emits engine-finding
     // shapes directly; we strip the engine-stamped fields back out so

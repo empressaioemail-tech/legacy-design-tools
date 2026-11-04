@@ -41,6 +41,7 @@ export {
 
 export {
   BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_ANTHROPIC_MODEL,
   BRIEFING_ANTHROPIC_MAX_TOKENS,
   AnthropicGeneratorError,
   callAnthropicGenerator,

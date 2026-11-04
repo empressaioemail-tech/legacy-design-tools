@@ -20,7 +20,15 @@ import type { BriefingSections, GenerateBriefingInput } from "./types";
 import { BRIEFING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 
 /** Model id pinned by Spec 51 / DA-PI-3 task ledger (locked decision #2). */
-export const BRIEFING_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+/**
+ * Single model id for every code-citing Anthropic call (findings, parcel
+ * briefing, brokerage brief, lay summary). Same id the sheet-vision read
+ * uses. Opus 4.8 rejects temperature/top_p/budget_tokens (400), so no
+ * sampling params are sent on these calls.
+ */
+export const CODE_CITING_ANTHROPIC_MODEL = "claude-opus-4-8";
+
+export const BRIEFING_ANTHROPIC_MODEL = CODE_CITING_ANTHROPIC_MODEL;
 
 /** Token budget per generation. Tuned for ~7×500-token sections plus headroom. */
 export const BRIEFING_ANTHROPIC_MAX_TOKENS = 4096;
