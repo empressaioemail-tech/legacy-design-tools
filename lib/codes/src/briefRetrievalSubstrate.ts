@@ -10,6 +10,18 @@
 import type { OrchestratorLogger } from "./orchestrator";
 import type { RetrievedAtom } from "./retrieval";
 
+/**
+ * G-309 item 6: ICC model-code atoms must only be read through the metered
+ * MCP path (source_obligation_ledger). This client calls retrieval-api
+ * /search directly, which is unmetered, so ICC is excluded from it entirely.
+ */
+export const ICC_MODEL_CODE_TENANT = "icc-model-code";
+
+function isIccModelCode(value: string | undefined | null): boolean {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === ICC_MODEL_CODE_TENANT || v.startsWith(ICC_MODEL_CODE_TENANT + "/");
+}
+
 export interface SubstrateSearchOptions {
   jurisdictionKey: string;
   question: string;
@@ -153,6 +165,14 @@ export async function retrieveAtomsFromSubstrate(
     );
   }
 
+  if (isIccModelCode(opts.jurisdictionKey)) {
+    opts.logger?.info?.(
+      { jurisdictionKey: opts.jurisdictionKey },
+      "substrate retrieval: icc-model-code excluded (unmetered path)",
+    );
+    return [];
+  }
+
   const limit = opts.limit ?? 8;
   const params = new URLSearchParams({
     q: opts.question,
@@ -235,6 +255,12 @@ export async function retrieveAtomsFromSubstrate(
   }
 
   return body.results
+    .filter(
+      (h) =>
+        !isIccModelCode(h.jurisdictionTenant) &&
+        !isIccModelCode(h.entityId) &&
+        !isIccModelCode(h.atomDid),
+    )
     .map((h) => mapSubstrateHit(h, opts.jurisdictionKey))
     .filter((a) => a.id.length > 0);
 }

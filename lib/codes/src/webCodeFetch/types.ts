@@ -4,10 +4,17 @@
 
 export const WEBSEARCH_ATOM_PREFIX = "websearch:";
 
+/**
+ * G-309 item 5: ICC Digital Codes (iccsafe.org and every subdomain) is never
+ * fetched. Content is licensed through Code Connect only; we link, not scrape.
+ */
+export function isIccHost(hostname: string): boolean {
+  return hostname.trim().toLowerCase().includes("iccsafe");
+}
+
 /** Authoritative hosts the fetcher may contact. */
 export const WEB_CODE_ALLOWLIST_HOSTS = [
   "floridabuilding.org",
-  "codes.iccsafe.org",
   "www.nfpa.org",
   "nfpa.org",
   "up.codes",
