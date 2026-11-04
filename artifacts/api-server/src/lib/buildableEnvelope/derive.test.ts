@@ -564,3 +564,60 @@ describe("P-354 (2026-09-18) — a district ROW that carries its own dates", () 
     expect(JSON.stringify(p)).not.toContain("takes effect");
   });
 });
+
+describe("an unstated corner setback is absent on the wire, never 0 ft", () => {
+  // Measured 2026-11-04 on 48021:34105 (Bastrop GC): the city states no corner
+  // setback, the ledger row carries 0 with not_specified, and the served
+  // feature printed side_corner_ft: 0 beside not_specified.side_corner: true.
+  function cornerProps(corner: { ft: number; notSpecified: boolean }) {
+    const table: SetbackTable = {
+      jurisdictionKey: "bastrop-tx",
+      jurisdictionDisplayName: "parcel record",
+      districts: [
+        {
+          district_name: "GC",
+          front_ft: 20,
+          side_ft: 5,
+          rear_ft: 20,
+          side_corner_ft: corner.ft,
+          max_height_ft: 35,
+          max_lot_coverage_pct: 0,
+          max_impervious_pct: 0,
+          citation_url: "",
+          ...(corner.notSpecified
+            ? { provenance: { side_corner_ft: { not_specified: true } } }
+            : {}),
+        },
+      ],
+    };
+    const ring = rectRing();
+    const labeling = labelEdges({ ring, road: roadSouthOf() })!;
+    const res = deriveBuildableEnvelope({
+      ring,
+      table,
+      district: mapDistrict(table, "GC")!,
+      labeling,
+    });
+    return res.geojson.features[0]!.properties;
+  }
+
+  it("FALSIFIER: a not-specified corner carries no side_corner_ft, and says so", () => {
+    const p = cornerProps({ ft: 0, notSpecified: true });
+    expect("side_corner_ft" in p.setbacks).toBe(false);
+    expect(p.setbacks.not_specified?.side_corner).toBe(true);
+    expect(p.setbacks.front_ft).toBe(20);
+    expect(p.setbacks.side_ft).toBe(5);
+    expect(p.setbacks.rear_ft).toBe(20);
+  });
+
+  it("CONTROL: a stated corner is served as its feet", () => {
+    const p = cornerProps({ ft: 15, notSpecified: false });
+    expect(p.setbacks.side_corner_ft).toBe(15);
+    expect(p.setbacks.not_specified?.side_corner).toBeUndefined();
+  });
+
+  it("CONTROL: a corner the code states as 0 ft is still served as 0", () => {
+    const p = cornerProps({ ft: 0, notSpecified: false });
+    expect(p.setbacks.side_corner_ft).toBe(0);
+  });
+});

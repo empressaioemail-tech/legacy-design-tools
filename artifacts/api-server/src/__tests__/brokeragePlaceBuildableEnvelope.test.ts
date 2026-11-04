@@ -1994,3 +1994,50 @@ describe("POST /place/buildable-envelope: zoning is never both empty and on file
     expect(res.body.payload.parcel.zoningCodeSource).toBe("ledger");
   });
 });
+
+// ---------------------------------------------------------------------------
+// An unstated corner setback is absent on the served feature, never 0 ft.
+// Measured live 2026-11-04 on 48021:34105: the city states no corner setback,
+// and features[0].properties.setbacks.side_corner_ft was 0.
+// ---------------------------------------------------------------------------
+describe("POST /place/buildable-envelope: an unstated corner is never served as 0", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  it("FALSIFIER: a ledger corner cell with no value leaves side_corner_ft off the feature", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "902 CHESTNUT ST";
+    ledgerDistrict("GC", "bastrop-tx", { frontFt: 20, sideFt: 5, rearFt: 20, cornerFt: null });
+
+    const res = await postWith({ parcel_node_id: "48021:34105" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toMatch(/ok|no-buildable-area/);
+    const s = res.body.payload.geojson.features[0].properties.setbacks;
+    expect(s.front_ft).toBe(20);
+    expect(s.side_ft).toBe(5);
+    expect(s.rear_ft).toBe(20);
+    expect("side_corner_ft" in s).toBe(false);
+    expect(s.not_specified?.side_corner).toBe(true);
+    expect("side_corner_ft" in res.body.setbacks).toBe(false);
+  });
+
+  it("CONTROL: a stated ledger corner is served as its feet", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "902 CHESTNUT ST";
+    ledgerDistrict("GC", "bastrop-tx", { frontFt: 20, sideFt: 5, rearFt: 20, cornerFt: 15 });
+
+    const res = await postWith({ parcel_node_id: "48021:34105" });
+
+    expect(res.status).toBe(200);
+    const s = res.body.payload.geojson.features[0].properties.setbacks;
+    expect(s.side_corner_ft).toBe(15);
+    expect(res.body.setbacks.side_corner_ft).toBe(15);
+  });
+});
