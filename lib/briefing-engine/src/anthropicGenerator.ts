@@ -29,6 +29,21 @@ import { BRIEFING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
  */
 export const CODE_CITING_ANTHROPIC_MODEL = "claude-opus-5-5";
 
+/**
+ * max_tokens for every claude-opus-5-5 call. Opus 5.5 always thinks and
+ * thinking tokens count against max_tokens, so the old 4096 / 6144 limits
+ * could cut answers off mid-JSON. 16000 is Anthropic's recommended
+ * non-streaming ceiling.
+ */
+export const CODE_CITING_MAX_TOKENS = 16000;
+
+/** True when the answer was cut off; never parse such a response. */
+export function isAnthropicTruncated(response: {
+  stop_reason?: string | null;
+}): boolean {
+  return response.stop_reason === "max_tokens";
+}
+
 /** Effort for findings, parcel briefing and the brokerage brief. */
 export const CODE_CITING_OUTPUT_CONFIG_MEDIUM = { effort: "medium" } as const;
 /** Effort for the lay summary and the Ask chat. */
@@ -57,14 +72,15 @@ export function isAnthropicRefusal(response: {
 
 export const BRIEFING_ANTHROPIC_MODEL = CODE_CITING_ANTHROPIC_MODEL;
 
-/** Token budget per generation. Tuned for ~7×500-token sections plus headroom. */
-export const BRIEFING_ANTHROPIC_MAX_TOKENS = 4096;
+/** Token budget per generation (shared Opus 5.5 limit, thinking included). */
+export const BRIEFING_ANTHROPIC_MAX_TOKENS = CODE_CITING_MAX_TOKENS;
 
 export class AnthropicGeneratorError extends Error {
   constructor(
     public readonly code:
       | "anthropic_call_failed"
       | "anthropic_refusal"
+      | "anthropic_truncated"
       | "anthropic_invalid_response_shape"
       | "anthropic_invalid_json"
       | "anthropic_missing_section",
@@ -158,6 +174,12 @@ export async function callAnthropicGenerator(
     throw new AnthropicGeneratorError(
       "anthropic_refusal",
       "Claude refused the briefing request (stop_reason=refusal)",
+    );
+  }
+  if (isAnthropicTruncated(response)) {
+    throw new AnthropicGeneratorError(
+      "anthropic_truncated",
+      "Claude briefing hit max_tokens (stop_reason=max_tokens); not parsing a partial answer",
     );
   }
   // Text blocks only (thinking blocks may precede the text).

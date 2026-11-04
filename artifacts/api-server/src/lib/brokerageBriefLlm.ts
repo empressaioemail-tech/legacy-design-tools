@@ -3,7 +3,8 @@
  */
 
 import {
-  BRIEFING_ANTHROPIC_MAX_TOKENS,
+  CODE_CITING_MAX_TOKENS,
+  isAnthropicTruncated,
   BRIEFING_ANTHROPIC_MODEL,
   CODE_CITING_OUTPUT_CONFIG_MEDIUM,
   isAnthropicRefusal,
@@ -353,7 +354,7 @@ async function completeBriefingLlm(
 
   const response = await bundle.client.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
-    max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
+    max_tokens: CODE_CITING_MAX_TOKENS,
     output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
     system,
     messages: [{ role: "user", content: user }],
@@ -363,6 +364,13 @@ async function completeBriefingLlm(
     logger.warn(
       { stopReason: "refusal" },
       "brokerage brief: Claude refused; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  if (isAnthropicTruncated(response)) {
+    logger.warn(
+      { stopReason: "max_tokens" },
+      "brokerage brief: Claude hit max_tokens; falling back to rules-v1",
     );
     return { text: null, method: "anthropic" };
   }

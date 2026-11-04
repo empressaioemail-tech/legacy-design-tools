@@ -34,8 +34,10 @@ import {
 } from "./types";
 import {
   CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
   CODE_CITING_OUTPUT_CONFIG_MEDIUM,
   isAnthropicRefusal,
+  isAnthropicTruncated,
   textFromAnthropicContent,
 } from "@workspace/briefing-engine";
 import { FINDING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
@@ -43,14 +45,15 @@ import { FINDING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 /** Model id pinned by Phase 1A approval (decision: same as briefing-engine). */
 export const FINDING_ANTHROPIC_MODEL = CODE_CITING_ANTHROPIC_MODEL;
 
-/** Token budget per generation. 6 KB headroom for ~6 findings × 800 tokens. */
-export const FINDING_ANTHROPIC_MAX_TOKENS = 6144;
+/** Token budget per generation (shared Opus 5.5 limit, thinking included). */
+export const FINDING_ANTHROPIC_MAX_TOKENS = CODE_CITING_MAX_TOKENS;
 
 export class FindingGeneratorError extends Error {
   constructor(
     public readonly code:
       | "anthropic_call_failed"
       | "anthropic_refusal"
+      | "anthropic_truncated"
       | "anthropic_invalid_response_shape"
       | "anthropic_invalid_json"
       | "anthropic_invalid_finding_shape",
@@ -287,6 +290,12 @@ export async function callAnthropicGenerator(
     throw new FindingGeneratorError(
       "anthropic_refusal",
       "Claude refused the findings request (stop_reason=refusal)",
+    );
+  }
+  if (isAnthropicTruncated(response)) {
+    throw new FindingGeneratorError(
+      "anthropic_truncated",
+      "Claude findings hit max_tokens (stop_reason=max_tokens); not parsing a partial answer",
     );
   }
   // Text blocks only (thinking blocks may precede the text).

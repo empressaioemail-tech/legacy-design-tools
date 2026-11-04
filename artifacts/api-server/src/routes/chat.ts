@@ -20,8 +20,10 @@ import { INLINE_ATOM_REGEX } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import {
   CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
+  isAnthropicTruncated,
 } from "../lib/codeCitingModel";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";
@@ -929,7 +931,7 @@ router.post("/chat", async (req: Request, res: Response) => {
       const stream = anthropic.messages.stream({
         model: CODE_CITING_ANTHROPIC_MODEL,
         output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
-        max_tokens: 4096,
+        max_tokens: CODE_CITING_MAX_TOKENS,
         system: augmentedSystemPrompt,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         messages: convo as any,
@@ -954,6 +956,16 @@ router.post("/chat", async (req: Request, res: Response) => {
         );
         res.write(
           `data: ${JSON.stringify({ text: "I can't help with that request." })}\n\n`,
+        );
+        break;
+      }
+      if (isAnthropicTruncated(finalMessage)) {
+        logger.warn(
+          { stopReason: "max_tokens" },
+          "chat: Claude hit max_tokens; sending fixed narrower-question line",
+        );
+        res.write(
+          `data: ${JSON.stringify({ text: "That answer ran long; please ask a narrower question." })}\n\n`,
         );
         break;
       }
@@ -983,7 +995,7 @@ router.post("/chat", async (req: Request, res: Response) => {
         const closing = anthropic.messages.stream({
           model: CODE_CITING_ANTHROPIC_MODEL,
           output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
-          max_tokens: 4096,
+          max_tokens: CODE_CITING_MAX_TOKENS,
           system: augmentedSystemPrompt,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           messages: convo as any,

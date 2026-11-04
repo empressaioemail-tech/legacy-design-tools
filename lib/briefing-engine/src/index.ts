@@ -43,6 +43,8 @@ export {
   BRIEFING_ANTHROPIC_MODEL,
   CODE_CITING_ANTHROPIC_MODEL,
   CODE_CITING_OUTPUT_CONFIG_MEDIUM,
+  CODE_CITING_MAX_TOKENS,
+  isAnthropicTruncated,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   textFromAnthropicContent,
   isAnthropicRefusal,

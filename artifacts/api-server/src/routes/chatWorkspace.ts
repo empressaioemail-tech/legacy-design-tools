@@ -14,8 +14,10 @@ import type { Scope } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import {
   CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
+  isAnthropicTruncated,
 } from "../lib/codeCitingModel";
 import {
   WORKSPACE_CHAT_TOOLS,
@@ -111,7 +113,7 @@ export async function handleWorkspaceChat(
       const stream = anthropic.messages.stream({
         model: CODE_CITING_ANTHROPIC_MODEL,
         output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
-        max_tokens: 4096,
+        max_tokens: CODE_CITING_MAX_TOKENS,
         system: systemPrompt,
         messages: convo,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,6 +137,16 @@ export async function handleWorkspaceChat(
         );
         res.write(
           `data: ${JSON.stringify({ text: "I can't help with that request." })}\n\n`,
+        );
+        break;
+      }
+      if (isAnthropicTruncated(finalMessage)) {
+        logger.warn(
+          { stopReason: "max_tokens" },
+          "chat: Claude hit max_tokens; sending fixed narrower-question line",
+        );
+        res.write(
+          `data: ${JSON.stringify({ text: "That answer ran long; please ask a narrower question." })}\n\n`,
         );
         break;
       }
