@@ -1883,7 +1883,7 @@ describe("POST /place/buildable-envelope — P-382 an unknown is not a 'no'", ()
 // carries no zoning field, so the ring never has a stamp; the district the
 // answer is about is the ledger's zoningDistrict cell.
 // ---------------------------------------------------------------------------
-describe("POST /place/buildable-envelope — zoning is never both empty and on file", () => {
+describe("POST /place/buildable-envelope: zoning is never both empty and on file", () => {
   function postWith(body: Record<string, unknown>) {
     return request(getApp())
       .post("/api/brokerage/v1/place/buildable-envelope")
