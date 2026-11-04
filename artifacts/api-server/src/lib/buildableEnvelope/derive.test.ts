@@ -3,7 +3,7 @@
  * product confidence is null (never labeling×district multiply).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import type { SetbackTable } from "@workspace/adapters";
 import { feetToMeters, insetPerEdge, type Ring } from "./geometry";
 import { labelEdges, insetFeetForLabeling } from "./edgeLabeling";
@@ -462,6 +462,18 @@ describe("deriveBuildableEnvelope — setback-rule citation vintage (P-270, OPS-
 describe("P-354 (2026-09-18) — a district ROW that carries its own dates", () => {
   const GEORGETOWN_ADOPTED = "2026-08-11";
   const GEORGETOWN_EFFECTIVE = "2026-11-01";
+
+  // These tests describe the rule as it stood on 2026-09-18, when Georgetown's
+  // effective date was still ahead. Read against the real clock they flipped
+  // on 2026-11-01, when that date passed. Freeze "today" (todayIso reads
+  // new Date()) so the future-effective case stays in the future.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-18T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   /**
    * Build the envelope with row-level dates on the R-MD district row. This is
