@@ -7,7 +7,7 @@ on:
 jobs:
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,7 +72,7 @@ jobs:
         run: pnpm run typecheck
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg14
@@ -308,7 +308,7 @@ jobs:
         run: pnpm test
   l5-sf30-cotality-grep:
     name: L5 SF-30 Cotality warm grep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -323,7 +323,7 @@ jobs:
           echo "ci-cotality-warm-gate: clean"
   l5-sf24-sf25-score-greps:
     name: L5 SF-24/SF-25 score greps
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -382,7 +382,7 @@ jobs:
           echo "ci-coverage-clamp-shared-engine: clean"
   l5-silent-fallback-greps:
     name: L5 silent-fallback greps
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -404,7 +404,7 @@ jobs:
           echo "ci-mock-allowlist-hauska-engine: clean"
   l5-sf26-hand-hasWriter-grep:
     name: L5 SF-26 hand hasWriter grep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -419,7 +419,7 @@ jobs:
           echo "ci-hand-hasWriter-in-declaration: clean"
   ss-w16-tier2-flood-not-served:
     name: SS-W16 tier2 flood not served
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -604,7 +604,7 @@ jobs:
     # renaming this silently removes the requirement with no error and a green PR.
     # Change it only together with the protection setting.
     name: SS-W18 api-server boots
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -688,7 +688,7 @@ jobs:
 
   l17-ci-vintage-predicate:
     name: L17 ci-vintage-predicate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -745,7 +745,7 @@ jobs:
     # locally if a lane wants that shape, but the repo's own PRs never do.
     name: PR base is main
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: ci-pr-base-is-main
         run: |
@@ -757,7 +757,7 @@ jobs:
 
   cortex-daily-limit-bake:
     name: cortex daily limit bake
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -779,7 +779,7 @@ jobs:
 
   p279-tagged-revision-env-predicate:
     name: P-279 tagged-revision env predicate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -815,7 +815,7 @@ jobs:
 
   p279-tagged-revision-env-divergence:
     name: P-279 canonical divergence
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
