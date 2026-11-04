@@ -69,7 +69,7 @@ async function seedGrandCountyAtoms(): Promise<{ atomIds: string[] }> {
       {
         sourceId: src.id,
         jurisdictionKey: "grand_county_ut",
-        codeBook: "IRC_R301_2_1",
+        codeBook: "LAND_USE_SETBACKS",
         edition: "2021",
         sectionNumber: "R301.2(1)",
         sectionTitle: "Setbacks and Yard Requirements",
@@ -81,7 +81,7 @@ async function seedGrandCountyAtoms(): Promise<{ atomIds: string[] }> {
       {
         sourceId: src.id,
         jurisdictionKey: "grand_county_ut",
-        codeBook: "IWUIC",
+        codeBook: "LAND_USE_CLIMATE",
         edition: "2006",
         sectionNumber: "303.2",
         sectionTitle: "Climatic Criteria",
@@ -213,7 +213,7 @@ describe("POST /api/dev/atoms/retrieve — jurisdiction path", () => {
       atomId: expect.any(String),
       codeRef: expect.any(String),
       bodyPreview: expect.any(String),
-      sourceBook: "IRC_R301_2_1",
+      sourceBook: "LAND_USE_SETBACKS",
       sourceUrl: "https://example.com/r301",
       retrievalMode: "lexical",
     });
