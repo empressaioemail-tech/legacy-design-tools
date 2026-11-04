@@ -57,3 +57,33 @@ describe("decideEnvelopeFromLedger corner sentinel", () => {
     });
   });
 });
+
+describe("decideEnvelopeFromLedger carries the district a setback decline is about", () => {
+  it("names the zoning cell's district when the setback rail refused", async () => {
+    present(15);
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      entityId: "48021:34105",
+      reason: 'district "GC" is on file for this parcel in Bastrop, but no row',
+    });
+    const decision = await decideEnvelopeFromLedger("48021:34105");
+    expect(decision.state).toBe("declined");
+    if (decision.state !== "declined") return;
+    expect(decision.rail).toBe("setbackFrontFt");
+    expect(decision.ledgerDistrict).toBe("R-1");
+  });
+
+  it("carries no district when the zoning rail itself declined", async () => {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      entityId: "48021:34105",
+      absence: { kind: "not-applicable", reason: "unincorporated" },
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue(null);
+    const decision = await decideEnvelopeFromLedger("48021:34105");
+    expect(decision.state).toBe("declined");
+    if (decision.state !== "declined") return;
+    expect(decision.ledgerDistrict).toBeNull();
+  });
+});

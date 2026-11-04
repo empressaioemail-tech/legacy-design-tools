@@ -63,6 +63,7 @@ import {
   type TxParcelCounty,
 } from "../lib/brokerageTxParcels";
 import { parcelNodeId, parseParcelNodeId } from "../lib/parcelNodeId";
+import { parcelZoningCodeWire } from "../lib/buildableEnvelope/parcelZoningCodeWire";
 import { NO_ZONING_STAMP_REASON } from "../lib/buildableEnvelope/absentZoningHonesty";
 import { type PropertyAtomChainWire } from "../lib/buildableEnvelope/fetchPropertyAtomChain";
 import { type AuthoritativeSetbackResolution } from "../lib/buildableEnvelope/authoritativeSetbackSource";
@@ -1437,7 +1438,7 @@ async function respondWithDrawnEnvelope(args: {
             parcel: {
               apn: parcel.apn,
               situsAddress: parcel.situsAddress,
-              zoningCode: parcel.zoningCode,
+              ...parcelZoningCodeWire(parcel.zoningCode, effectiveZoningCode),
               effectiveZoningCode,
               parcel_node_id: parcelNodeId,
               provider: parcelGeo.provider ?? null,
@@ -1551,7 +1552,7 @@ async function deriveAndRespond(args: {
               parcel: {
                 apn: parcel.apn,
                 situsAddress: parcel.situsAddress,
-                zoningCode: parcel.zoningCode,
+                ...parcelZoningCodeWire(parcel.zoningCode, outcome.ledgerDistrict),
                 parcel_node_id: parcelNodeId,
                 provider: parcelGeo.provider ?? null,
                 notSurveyGrade: true,
@@ -1595,7 +1596,7 @@ async function deriveAndRespond(args: {
               parcel: {
                 apn: parcel.apn,
                 situsAddress: parcel.situsAddress,
-                zoningCode: parcel.zoningCode,
+                ...parcelZoningCodeWire(parcel.zoningCode, null),
                 parcel_node_id: parcelNodeId,
                 provider: parcelGeo.provider ?? null,
                 notSurveyGrade: true,
@@ -1679,7 +1680,7 @@ async function deriveAndRespond(args: {
               parcel: {
                 apn: parcel.apn,
                 situsAddress: parcel.situsAddress,
-                zoningCode: parcel.zoningCode,
+                ...parcelZoningCodeWire(parcel.zoningCode, outcome.effectiveZoningCode),
                 effectiveZoningCode: outcome.effectiveZoningCode,
                 parcel_node_id: parcelNodeId,
                 provider: parcelGeo.provider ?? null,

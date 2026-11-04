@@ -43,6 +43,14 @@ export type LedgerEnvelopeDecline = {
   /** The cell's own kind or refusal code. Not a re-worded token. */
   ledgerCode: string;
   rail: "zoningDistrict" | "setbackFrontFt" | "setbackSideFt" | "setbackRearFt";
+  /**
+   * The zoning district the zoningDistrict rail served, when it served one and
+   * a LATER rail (a setback) is what declined. Null when the zoning rail itself
+   * declined or was never read. Carried so the answer can name the district the
+   * decline sentence is about instead of reporting the parcel's zoning as empty
+   * beside a reason that says it is on file. Never derived; only the cell's value.
+   */
+  ledgerDistrict: string | null;
 };
 
 export type LedgerEnvelopeDecision = LedgerEnvelopeValues | LedgerEnvelopeDecline;
@@ -66,9 +74,10 @@ function reasonOf(read: ZoningFactRead | SetbacksFactRead): {
 function decline(
   read: ZoningFactRead | SetbacksFactRead | null,
   rail: LedgerEnvelopeDecline["rail"],
+  ledgerDistrict: string | null,
 ): LedgerEnvelopeDecline {
   if (!read) {
-    return { state: "declined", ledgerReason: UNSERVED, ledgerCode: "unserved", rail };
+    return { state: "declined", ledgerReason: UNSERVED, ledgerCode: "unserved", rail, ledgerDistrict };
   }
   if (read.state === "present") {
     return {
@@ -76,10 +85,11 @@ function decline(
       ledgerReason: UNSERVED,
       ledgerCode: "unserved",
       rail,
+      ledgerDistrict,
     };
   }
   const named = reasonOf(read);
-  return { state: "declined", ...named, rail };
+  return { state: "declined", ...named, rail, ledgerDistrict };
 }
 
 /**
@@ -96,6 +106,7 @@ export async function decideEnvelopeFromLedger(
         "No parcel identity, so the ledger rails were not read. Zoning and setbacks were not re-derived.",
       ledgerCode: "no-parcel-identity",
       rail: "zoningDistrict",
+      ledgerDistrict: null,
     };
   }
 
@@ -105,10 +116,10 @@ export async function decideEnvelopeFromLedger(
   ]);
 
   if (!zoning || zoning.state !== "present") {
-    return decline(zoning, "zoningDistrict");
+    return decline(zoning, "zoningDistrict", null);
   }
   if (!setbacks || setbacks.state !== "present") {
-    return decline(setbacks, "setbackFrontFt");
+    return decline(setbacks, "setbackFrontFt", zoning.district);
   }
   if (setbacks.sideFt == null) {
     return {
@@ -116,6 +127,7 @@ export async function decideEnvelopeFromLedger(
       ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackSideFt is not a readable number. Refusing rather than inventing one.`,
       ledgerCode: "parcel-record-malformed-cell",
       rail: "setbackSideFt",
+      ledgerDistrict: zoning.district,
     };
   }
   if (setbacks.rearFt == null) {
@@ -124,6 +136,7 @@ export async function decideEnvelopeFromLedger(
       ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackRearFt is not a readable number. Refusing rather than inventing one.`,
       ledgerCode: "parcel-record-malformed-cell",
       rail: "setbackRearFt",
+      ledgerDistrict: zoning.district,
     };
   }
 
@@ -134,6 +147,7 @@ export async function decideEnvelopeFromLedger(
       ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackFrontFt is not a readable number. Refusing rather than inventing one.`,
       ledgerCode: "parcel-record-malformed-cell",
       rail: "setbackFrontFt",
+      ledgerDistrict: zoning.district,
     };
   }
   const cornerFt = setbacks.cornerFt;

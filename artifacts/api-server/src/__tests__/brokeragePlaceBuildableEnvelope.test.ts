@@ -1872,3 +1872,125 @@ describe("POST /place/buildable-envelope — P-382 an unknown is not a 'no'", ()
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// One answer must not say the parcel's zoning is both empty and on file.
+//
+// Measured 2026-11-04 on `48021:34105` (902 Chestnut St, Bastrop): the
+// setback cell refused with `district "GC" is on file for this parcel in
+// Bastrop, ...` while `payload.parcel.zoningCode` in the SAME answer was
+// null. Bastrop's ring comes from the county's live ArcGIS layer, which
+// carries no zoning field, so the ring never has a stamp; the district the
+// answer is about is the ledger's zoningDistrict cell.
+// ---------------------------------------------------------------------------
+describe("POST /place/buildable-envelope: zoning is never both empty and on file", () => {
+  function postWith(body: Record<string, unknown>) {
+    return request(getApp())
+      .post("/api/brokerage/v1/place/buildable-envelope")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send(body);
+  }
+
+  const GC_REASON =
+    'district "GC" is on file for this parcel in Bastrop, but Bastrop\'s setback table carries no row for it, so no setback line for this district is on file; verify the district line with the city';
+
+  function ledgerGcWithSetbacksRefused() {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:34105",
+      district: "GC",
+      jurisdictionKey: "bastrop-tx",
+      provenance: "tx_zoning_district_staging",
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-02",
+      evaluatedAt: "2026-09-02",
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      source: "setbacks-fact-parcel-record",
+      entityId: "48021:34105",
+      reason: GC_REASON,
+    });
+  }
+
+  it("FALSIFIER: an empty stamp beside a GC ledger district serves GC, named as the ledger's", async () => {
+    parcelZoning = null; // the live county ring carries no zoning field
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "902 CHESTNUT ST";
+    ledgerGcWithSetbacksRefused();
+
+    const res = await postWith({ parcel_node_id: "48021:34105" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe(GC_REASON);
+    // The consistency the defect broke: the reason names GC on file, so the
+    // parcel's zoning in the same answer is GC, not null.
+    const onFile = /district "([^"]+)" is on file/.exec(res.body.reason)?.[1] ?? null;
+    expect(onFile).toBe("GC");
+    expect(res.body.payload.parcel.zoningCode).toBe(onFile);
+    expect(res.body.payload.parcel.zoningCodeSource).toBe("ledger");
+  });
+
+  it("a ring that carries its own stamp keeps it, named as the stamp's", async () => {
+    parcelZoning = "GC";
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "902 CHESTNUT ST";
+    ledgerGcWithSetbacksRefused();
+
+    const res = await postWith({ parcel_node_id: "48021:34105" });
+
+    expect(res.body.status).toBe("declined");
+    expect(res.body.payload.parcel.zoningCode).toBe("GC");
+    expect(res.body.payload.parcel.zoningCodeSource).toBe("parcel-stamp");
+  });
+
+  it("CONTROL: no stamp and a zoning cell that declined stays null; nothing is invented", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = null;
+    parcelSitusAddress = "902 CHESTNUT ST";
+    const sentence = "unincorporated parcel: the county does not zone land outside city limits";
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:34105",
+      absence: { kind: "not-applicable", reason: sentence },
+      verifiedAbsence: null,
+      sourceTier: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: null,
+    });
+
+    const res = await postWith({ parcel_node_id: "48021:34105" });
+
+    expect(res.body.status).toBe("declined");
+    expect(res.body.reason).toBe(sentence);
+    expect(res.body.payload.parcel.zoningCode).toBeNull();
+    expect(res.body.payload.parcel.zoningCodeSource).toBeNull();
+  });
+
+  it("a drawn envelope with no stamp serves the ledger district it drew from", async () => {
+    parcelZoning = null;
+    parcelNodeIdStamped = "48021:33512";
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: "48021:33512",
+      district: "SF-1",
+      jurisdictionKey: "bastrop-tx",
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2026-09-25",
+      evaluatedAt: "2026-09-25",
+    });
+
+    const res = await postWith({ address: "714 Spring St, Bastrop, TX 78602" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.effectiveZoningCode).toBe("SF-1");
+    expect(res.body.payload.parcel.zoningCode).toBe("SF-1");
+    expect(res.body.payload.parcel.zoningCodeSource).toBe("ledger");
+  });
+});
