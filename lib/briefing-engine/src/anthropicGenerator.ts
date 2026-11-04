@@ -23,7 +23,7 @@ import { BRIEFING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
  * Single model id for every code-citing Anthropic call (findings, parcel
  * briefing, brokerage brief, lay summary, Ask chat). Operator ruling
  * 2026-11-04. Opus 5.5 rules: thinking cannot be disabled (never send
- * `thinking: disabled` / `budget_tokens`), temperature/top_p/top_k return
+ * the disabled thinking mode or a thinking budget; sampling params return
  * 400, forced tool choice (any or tool) returns 400, and a final assistant
  * message (prefill) returns 400. None of those are sent here.
  */
