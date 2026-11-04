@@ -162,6 +162,8 @@ export type EnvelopeDrawDerivation =
       ledgerReason: string;
       ledgerCode: string;
       rail: "zoningDistrict" | "setbackFrontFt" | "setbackSideFt" | "setbackRearFt";
+      /** The zoningDistrict cell's value when a later (setback) rail declined. */
+      ledgerDistrict: string | null;
     }
   /** A district resolved, but no setback source covers it in this jurisdiction. */
   | {
@@ -266,6 +268,7 @@ export async function deriveEnvelopeDraw(
         ledgerReason: ledger.ledgerReason,
         ledgerCode: ledger.ledgerCode,
         rail: ledger.rail,
+        ledgerDistrict: ledger.ledgerDistrict,
       };
     }
 
