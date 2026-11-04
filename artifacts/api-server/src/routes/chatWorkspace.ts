@@ -16,7 +16,7 @@ import {
   CODE_CITING_ANTHROPIC_MODEL,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
-} from "@workspace/briefing-engine";
+} from "../lib/codeCitingModel";
 import {
   WORKSPACE_CHAT_TOOLS,
   executeWorkspaceAgentTool,

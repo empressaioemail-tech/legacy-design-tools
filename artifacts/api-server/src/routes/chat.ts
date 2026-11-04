@@ -22,7 +22,7 @@ import {
   CODE_CITING_ANTHROPIC_MODEL,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
-} from "@workspace/briefing-engine";
+} from "../lib/codeCitingModel";
 import { getAtomRegistry } from "../atoms/registry";
 import type { EngagementTypedPayload } from "../atoms/engagement.atom";
 import { SNAPSHOT_SUPPORTED_MODES } from "../atoms/snapshot.atom";
