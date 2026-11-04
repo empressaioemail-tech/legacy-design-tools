@@ -16,6 +16,7 @@
     "@empressaio/atom-contract": "^1.36.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@workspace/db": "workspace:*",
+    "@workspace/icc-notice": "workspace:*",
     "dotenv": "^16.4.5",
     "drizzle-orm": "catalog:",
     "express": "^4.21.0",

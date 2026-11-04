@@ -10,6 +10,9 @@
   "references": [
     {
       "path": "../../lib/db"
+    },
+    {
+      "path": "../../lib/icc-notice"
     }
   ]
 }

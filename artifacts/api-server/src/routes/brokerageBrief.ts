@@ -121,6 +121,7 @@ import {
   emitPropertyWorkspaceCreatedEvent,
 } from "../lib/brokerageBriefEvents";
 import { brokerageCoverageRouter } from "./brokerageCoverage";
+import { iccNoticeField } from "../lib/iccNoticeField";
 import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageProfileRouter } from "./brokerageProfile";
@@ -920,6 +921,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     siteContext,
     sections,
     citations,
+    // G-309: ICC's notice and disclaimer travel with any ICC citation.
+    ...iccNoticeField([citations, atoms], [sections]),
     atoms,
     reasoningSummary,
     laySummary,

@@ -14,6 +14,8 @@ import {
   listJurisdictions,
 } from "@workspace/codes";
 import { logger } from "../lib/logger";
+import { hasSignedInUser, notIccAtomRowSql } from "../lib/iccAccess";
+import { isIccSource } from "@workspace/icc-notice";
 
 const router: IRouter = Router();
 
@@ -127,6 +129,8 @@ router.get(
     const editionFilter = req.query.edition ? String(req.query.edition) : null;
     try {
       const conditions = [eq(codeAtoms.jurisdictionKey, key)];
+      // G-309: ICC rows are for signed-in users only.
+      if (!hasSignedInUser(req)) conditions.push(notIccAtomRowSql());
       if (codeBookFilter) conditions.push(eq(codeAtoms.codeBook, codeBookFilter));
       if (codeBookFilter && editionFilter)
         conditions.push(eq(codeAtoms.edition, editionFilter));
@@ -226,6 +230,8 @@ router.get(
       // Assemble WHERE clauses. The sourceName filter requires the join
       // (which we'd be doing anyway for the response shape).
       const conditions = [];
+      // G-309: ICC rows are for signed-in users only.
+      if (!hasSignedInUser(req)) conditions.push(notIccAtomRowSql());
       if (jurisdictionFilter)
         conditions.push(eq(codeAtoms.jurisdictionKey, jurisdictionFilter));
       if (codeBookFilter)
@@ -335,7 +341,8 @@ router.get(
         .where(eq(codeAtoms.id, id))
         .limit(1);
       const r = rows[0];
-      if (!r) {
+      // G-309: an ICC atom is not served to a caller who is not signed in.
+      if (!r || (!hasSignedInUser(req) && isIccSource(r))) {
         res.status(404).json({ error: "Atom not found" });
         return;
       }

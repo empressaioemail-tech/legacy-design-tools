@@ -149,6 +149,7 @@ import {
   OPEN_TURN_INSTRUCTION,
   OPEN_TURN_OPENER,
   UPGRADE_TO_OPEN,
+  iccNoticeForCardHtml,
 } from "./panel-lib.js";
 import { answerFirstCarouselHtml, answerFirstSingleHtml, loadingSkeletonHtml } from "./answer-first-html.js";
 import { detailHtml } from "./detail-html.js";
@@ -740,6 +741,8 @@ declare const __SS_CARD_DATA__: {
     } else {
       root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+EMPTY_BOARD_TITLE+"</b>"+EMPTY_BOARD_BODY+"</p>");
     }
+    var iccNotice=iccNoticeForCardHtml(root.innerHTML);
+    if(iccNotice) root.insertAdjacentHTML("beforeend",iccNotice);
     requestAnimationFrame(function(){ fitHost(); });
   }
   function fitHost(){
