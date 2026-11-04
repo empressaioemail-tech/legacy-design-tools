@@ -439,7 +439,14 @@ export function deriveBuildableEnvelope(
       front_ft: d.front_ft,
       side_ft: d.side_ft,
       rear_ft: d.rear_ft,
-      side_corner_ft: d.side_corner_ft,
+      // A corner the code does not state is ABSENT on the wire, not 0 ft. The
+      // district row carries 0 there only so the inset has a number (the
+      // ledger rail and the authoritative source both do this), and
+      // not_specified.side_corner says so. Serving that 0 printed a corner
+      // setback the city never stated (measured 2026-11-04 on 48021:34105).
+      ...(fieldNotSpecified(d, "side_corner_ft") || typeof d.side_corner_ft !== "number"
+        ? {}
+        : { side_corner_ft: d.side_corner_ft }),
       district: d.district_name,
       ...(hasSilent || heightSilent
         ? {
