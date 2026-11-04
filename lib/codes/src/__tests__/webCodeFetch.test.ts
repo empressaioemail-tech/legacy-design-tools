@@ -173,12 +173,13 @@ describe("fetchCodeSection", () => {
       {
         codeRef: "FBC-M601.6",
         edition: "FBC 2023",
+        jurisdictionKey: "miami_beach_fl",
         expectedTitle: "Duct insulation",
       },
-      { http: mockHttp(FBC_2023_HTML) },
+      { http: mockHttp(FBC_2023_HTML, "https://www.floridabuilding.org/fbc/x") },
     );
     expect(result.verified).toBe(true);
-    expect(result.sourceUrl).toContain("codes.iccsafe.org");
+    expect(result.sourceUrl).not.toContain("iccsafe");
     expect(result.retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.text.length).toBeGreaterThan(20);
   });
@@ -262,7 +263,7 @@ describe("reviewWebTargetsForJurisdiction", () => {
     expect(isAllowlistedWebHost("tea.texas.gov")).toBe(true);
     expect(isAllowlistedWebHost("www.bastropisd.org")).toBe(true);
     expect(isAllowlistedWebHost("cityofbastrop.org")).toBe(true);
-    expect(isAllowlistedWebHost("codes.iccsafe.org")).toBe(true);
+    expect(isAllowlistedWebHost("codes.iccsafe.org")).toBe(false);
     expect(isAllowlistedWebHost("random-blog.example")).toBe(false);
     expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);
   });

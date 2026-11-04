@@ -114,3 +114,49 @@ describe("retrieveAtomsFromSubstrate", () => {
     expect(error).toMatchObject({ reason: "http_error", status: 503 });
   });
 });
+
+describe("G-309 item 6: ICC excluded from the unmetered substrate path", () => {
+  const originalFetch = globalThis.fetch;
+  beforeEach(() => {
+    process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.BRIEF_RETRIEVAL_API_URL;
+  });
+
+  it("returns no ICC atoms and makes no request for jurisdictionKey=icc-model-code", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          { entityId: "icc-model-code/ed/1", snippet: "x", jurisdictionTenant: "icc-model-code" },
+        ],
+      }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const hits = await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "icc-model-code",
+      question: "q",
+    });
+    expect(hits).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("filters ICC hits out of any other search", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          { entityId: "icc-model-code/ed/1", snippet: "x", jurisdictionTenant: "icc-model-code" },
+          { entityId: "bastrop/1.1", snippet: "y", jurisdictionTenant: "bastrop_tx" },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+    const hits = await retrieveAtomsFromSubstrate({
+      jurisdictionKey: "bastrop_tx",
+      question: "q",
+    });
+    expect(hits.map((h) => h.id)).toEqual(["bastrop/1.1"]);
+  });
+});

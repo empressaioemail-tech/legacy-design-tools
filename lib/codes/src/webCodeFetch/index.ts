@@ -21,6 +21,7 @@ import type {
 import {
   WEBSEARCH_ATOM_PREFIX,
   WEB_CODE_ALLOWLIST_HOSTS,
+  isIccHost,
 } from "./types";
 
 export {
@@ -37,6 +38,7 @@ export type {
 } from "./types";
 
 export function isAllowlistedWebHost(hostname: string): boolean {
+  if (isIccHost(hostname)) return false;
   const host = hostname.replace(/^www\./, "").toLowerCase();
   return WEB_CODE_ALLOWLIST_HOSTS.some((h) => {
     const norm = h.replace(/^www\./, "").toLowerCase();
@@ -49,12 +51,28 @@ const defaultHttp: HttpFetcher = async (url) => {
   if (!isAllowlistedWebHost(host)) {
     throw new Error(`web_code_fetch: host not on allowlist: ${host}`);
   }
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Hauska-Cortex-WebCodeFetch/1.0" },
-    signal: AbortSignal.timeout(25_000),
-  });
-  const body = await res.text();
-  return { status: res.status, body, finalUrl: res.url };
+  // Follow redirects by hand so a redirect into iccsafe.org is never requested.
+  let current = url;
+  for (let hop = 0; hop < 5; hop++) {
+    const res = await fetch(current, {
+      headers: { "User-Agent": "Hauska-Cortex-WebCodeFetch/1.0" },
+      signal: AbortSignal.timeout(25_000),
+      redirect: "manual",
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers?.get?.("location");
+      if (!loc) return { status: res.status, body: "", finalUrl: current };
+      const next = new URL(loc, current);
+      if (!isAllowlistedWebHost(next.hostname)) {
+        throw new Error(`web_code_fetch: redirect to host not on allowlist: ${next.hostname}`);
+      }
+      current = next.toString();
+      continue;
+    }
+    const body = await res.text();
+    return { status: res.status, body, finalUrl: current };
+  }
+  throw new Error("web_code_fetch: too many redirects");
 };
 
 /** Same allowlist fetch the brief / review path uses. Civic chat reuses this. */
@@ -106,7 +124,10 @@ export async function fetchCodeSection(
       parseTitleFromLabel(target.label),
   };
 
-  const candidates = buildDriverUrls(target);
+  // G-309 item 5: defense in depth — never hand an iccsafe.org URL to any fetcher.
+  const candidates = buildDriverUrls(target).filter(
+    (c) => !isIccHost(new URL(c.url).hostname),
+  );
   const retrievedAt = new Date().toISOString();
   let fallback: WebCodeFetchResult | null = null;
 
