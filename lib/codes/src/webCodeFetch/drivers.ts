@@ -2,7 +2,7 @@
  * Authoritative-source URL builders for the web-code allowlist.
  */
 
-import { isIccHost, type WebCodeReviewTarget } from "./types";
+import { isIccHost, isIccMirrorUrl, type WebCodeReviewTarget } from "./types";
 import {
   bareSectionFromCodeRef,
   driverProfileForJurisdiction,
@@ -32,7 +32,8 @@ export function buildDriverUrls(
   for (const driver of target.drivers) {
     urls.push(...singleDriverUrls(driver, target));
   }
-  return urls;
+  // G-309 (A15): no ICC model-code title URL is ever built for a mirror.
+  return urls.filter((c) => !isIccMirrorUrl(c.url));
 }
 
 function singleDriverUrls(

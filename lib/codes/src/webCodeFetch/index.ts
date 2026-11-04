@@ -22,6 +22,7 @@ import {
   WEBSEARCH_ATOM_PREFIX,
   WEB_CODE_ALLOWLIST_HOSTS,
   isIccHost,
+  isIccMirrorUrl,
 } from "./types";
 
 export {
@@ -42,11 +43,14 @@ export function isAllowlistedWebHost(hostname: string): boolean {
   const host = hostname.replace(/^www\./, "").toLowerCase();
   return WEB_CODE_ALLOWLIST_HOSTS.some((h) => {
     const norm = h.replace(/^www\./, "").toLowerCase();
-    return host === norm || host.endsWith(`.${norm}`) || host.includes(norm);
+    return host === norm || host.endsWith(`.${norm}`);
   });
 }
 
 const defaultHttp: HttpFetcher = async (url) => {
+  if (isIccMirrorUrl(url)) {
+    throw new Error("web_code_fetch: ICC model-code title on a mirror is refused");
+  }
   const host = new URL(url).hostname.replace(/^www\./, "");
   if (!isAllowlistedWebHost(host)) {
     throw new Error(`web_code_fetch: host not on allowlist: ${host}`);
@@ -63,6 +67,9 @@ const defaultHttp: HttpFetcher = async (url) => {
       const loc = res.headers?.get?.("location");
       if (!loc) return { status: res.status, body: "", finalUrl: current };
       const next = new URL(loc, current);
+      if (isIccMirrorUrl(next.toString())) {
+        throw new Error("web_code_fetch: redirect to ICC model-code mirror refused");
+      }
       if (!isAllowlistedWebHost(next.hostname)) {
         throw new Error(`web_code_fetch: redirect to host not on allowlist: ${next.hostname}`);
       }
@@ -83,6 +90,9 @@ export async function fetchAllowlistedUrl(
   const host = new URL(url).hostname;
   if (!isAllowlistedWebHost(host)) {
     throw new Error(`web_code_fetch: host not on allowlist: ${host}`);
+  }
+  if (isIccMirrorUrl(url)) {
+    throw new Error("web_code_fetch: ICC model-code title on a mirror is refused");
   }
   return (http ?? defaultHttp)(url);
 }
@@ -126,7 +136,7 @@ export async function fetchCodeSection(
 
   // G-309 item 5: defense in depth — never hand an iccsafe.org URL to any fetcher.
   const candidates = buildDriverUrls(target).filter(
-    (c) => !isIccHost(new URL(c.url).hostname),
+    (c) => !isIccHost(new URL(c.url).hostname) && !isIccMirrorUrl(c.url),
   );
   const retrievedAt = new Date().toISOString();
   let fallback: WebCodeFetchResult | null = null;
