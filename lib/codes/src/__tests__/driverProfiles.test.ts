@@ -18,14 +18,9 @@ describe("buildDriverUrls national/texas profiles", () => {
           u.url.includes("up.codes/viewer/texas/irc-2021/chapter/3/R301.1"),
       ),
     ).toBe(true);
-    expect(
-      urls.some(
-        (u) =>
-          u.driver === "icc" &&
-          u.granularity === "section" &&
-          u.url.includes("IRC2021P1/chapter-3#R301_1"),
-      ),
-    ).toBe(true);
+    // G-309 item 5: no ICC driver URL is ever built.
+    expect(urls.some((u) => u.driver === "icc")).toBe(false);
+    expect(urls.some((u) => u.url.includes("iccsafe"))).toBe(false);
   });
 
   it("uses municipality slug for IECC (no statewide texas/iecc-2021)", () => {
@@ -61,7 +56,7 @@ describe("buildDriverUrls national/texas profiles", () => {
           u.url.includes("up.codes/viewer/austin/icc-a117.1-2017/chapter/3/302"),
       ),
     ).toBe(true);
-    expect(urls.some((u) => u.url.includes("A11712017"))).toBe(true);
+    expect(urls.some((u) => u.url.includes("iccsafe"))).toBe(false);
   });
 
   it("builds Austin 2024 UpCodes paths for IRC and IECC RE volume", () => {
@@ -100,7 +95,7 @@ describe("buildDriverUrls national/texas profiles", () => {
       jurisdictionKey: "miami_beach_fl",
       drivers: ["icc", "upcodes", "florida"],
     });
-    expect(urls.some((u) => u.url.includes("FLMECH2023P1"))).toBe(true);
+    expect(urls.some((u) => u.url.includes("iccsafe"))).toBe(false);
     expect(urls.some((u) => u.url.includes("florida-building-code-2023"))).toBe(
       true,
     );

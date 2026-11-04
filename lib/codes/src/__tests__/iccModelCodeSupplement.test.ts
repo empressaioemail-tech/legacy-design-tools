@@ -29,7 +29,7 @@ describe("ICC model-code supplement", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("supplements jurisdiction atoms with ICC model-code atoms", async () => {
+  it("G-309: never returns ICC model-code atoms and never calls /search for icc-model-code", async () => {
     process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
     process.env.BRIEF_RETRIEVAL_API_KEY = "test-key";
     process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "true";
@@ -85,17 +85,16 @@ describe("ICC model-code supplement", () => {
       limit: 8,
     });
 
-    // Should have 1 primary + 1 ICC supplement atom
-    expect(atoms).toHaveLength(2);
+    // Only the primary atom; ICC is excluded (unmetered path)
+    expect(atoms).toHaveLength(1);
+    const calledUrls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0]));
+    expect(calledUrls.some((u) => u.includes("jurisdiction=icc-model-code"))).toBe(false);
     
     const jurisdictionAtoms = atoms.filter((a) => a.codeSource === "jurisdiction");
     expect(jurisdictionAtoms).toHaveLength(1);
     expect(jurisdictionAtoms[0]?.id).toBe("did:local:bastrop:section-primary");
     
-    const iccAtoms = atoms.filter((a) => a.codeSource === "icc-model-code");
-    expect(iccAtoms).toHaveLength(1);
-    expect(iccAtoms[0]?.id).toBe("did:icc:ibc2018:section-1234");
-    expect(iccAtoms[0]?.body).toBe("IBC 2018 building height limits");
+    expect(atoms.filter((a) => a.codeSource === "icc-model-code")).toHaveLength(0);
   });
 
   it("tags primary atoms with codeSource='jurisdiction'", async () => {
@@ -260,7 +259,7 @@ describe("ICC model-code supplement", () => {
     expect(fetchCalled).toBe(false);
   });
 
-  it("caps ICC supplement at 6 atoms", async () => {
+  it("drops ICC-tenant hits even if the primary search returns them", async () => {
     process.env.BRIEF_RETRIEVAL_API_URL = "https://retrieval.test";
     process.env.FINDINGS_ICC_MODEL_CODE_SUPPLEMENT = "true";
 
@@ -313,10 +312,9 @@ describe("ICC model-code supplement", () => {
       limit: 8,
     });
 
-    const iccAtoms = atoms.filter((a) => a.codeSource === "icc-model-code");
-    // Check that the request was made with limit=6
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("limit=6"),
+    expect(atoms.filter((a) => a.codeSource === "icc-model-code")).toHaveLength(0);
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("jurisdiction=icc-model-code"),
       expect.anything()
     );
   });
