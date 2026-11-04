@@ -32,3 +32,28 @@ describe("consequenceGatedRouting", () => {
     ).toBe("critical");
   });
 });
+
+describe("consequenceGatedRouting: Anthropic only (G-309 A20)", () => {
+  it("ignores XAI_* env and routes both tiers to an Anthropic model", () => {
+    const saved = { m: process.env.XAI_MODEL, h: process.env.XAI_FINDING_HIGH_MODEL };
+    process.env.XAI_MODEL = "grok-3-mini";
+    process.env.XAI_FINDING_HIGH_MODEL = "grok-3";
+    try {
+      for (const sections of [
+        [{ consequence: { asce7RiskCategory: "IV" as const } }],
+        [{ consequence: null }],
+      ]) {
+        const route = resolveConsequenceGatedRoute(
+          sections as never,
+        ) as unknown as Record<string, unknown>;
+        expect(String(route.anthropicModel)).toMatch(/^claude-/);
+        expect("grokModel" in route).toBe(false);
+      }
+    } finally {
+      if (saved.m === undefined) delete process.env.XAI_MODEL;
+      else process.env.XAI_MODEL = saved.m;
+      if (saved.h === undefined) delete process.env.XAI_FINDING_HIGH_MODEL;
+      else process.env.XAI_FINDING_HIGH_MODEL = saved.h;
+    }
+  });
+});

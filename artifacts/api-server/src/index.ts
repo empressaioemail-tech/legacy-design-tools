@@ -122,8 +122,8 @@ try {
 
 // Fail-fast on misconfigured briefing-engine env: BRIEFING_LLM_MODE
 // is required (unset or unknown values throw — no implicit mock);
-// when grok we require XAI_API_KEY; when anthropic we require the AI
-// Integrations env vars. Mock mode must be requested explicitly with
+// grok is rejected (G-309 A20: Anthropic only); when anthropic we
+// require the AI Integrations env vars. Mock mode must be requested explicitly with
 // BRIEFING_LLM_MODE=mock and then boots clean.
 try {
   validateBriefingEngineEnvAtBoot();

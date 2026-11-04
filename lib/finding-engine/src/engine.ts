@@ -33,8 +33,6 @@ import {
   FindingGeneratorError,
   type RawFindingDraft,
 } from "./anthropicGenerator";
-import { callGrokGenerator } from "./grokGenerator";
-import type { GrokClient } from "@workspace/integrations-xai-grok";
 import {
   validateInlineCitations,
   type CitationResolvers,
@@ -54,17 +52,15 @@ export interface GenerateFindingsOptions {
   /** Force a mode; defaults to {@link resolveFindingLlmMode}. */
   mode?: FindingLlmMode;
   /**
-   * Anthropic SDK client when `mode === "anthropic"` (legacy — prefer
-   * `grok`).
+   * Anthropic SDK client when `mode === "anthropic"`. Anthropic is the
+   * only LLM provider for findings (G-309 A20 ruling).
    */
   anthropicClient?: Anthropic;
   /**
    * Anthropic client for P2 Opus vision read (HR-12 escalation).
-   * Used by the orchestrator before Grok synthesis when sheet images are present.
+   * Used by the orchestrator before finding synthesis when sheet images are present.
    */
   visionAnthropicClient?: Anthropic;
-  /** xAI Grok client when `mode === "grok"`. */
-  grokClient?: GrokClient;
   /** Structured log hook for vision-read observability. */
   visionLog?: (msg: string, meta?: Record<string, unknown>) => void;
   /** Override the engine's clock — test-only. */
@@ -75,8 +71,6 @@ export interface GenerateFindingsOptions {
    * touching the production ulid path.
    */
   ulid?: () => string;
-  /** S5 — override Grok model id for consequence-gated routing. */
-  grokModel?: string;
   /** S5 — optional ensemble on high-consequence stratum (asserted weights). */
   ensembleEnabled?: boolean;
 }
@@ -87,10 +81,23 @@ export interface GenerateFindingsOptions {
  * the route's startup log and the engine's runtime branch.
  */
 export function resolveFindingLlmMode(): FindingLlmMode {
-  const raw = (process.env.AIR_FINDING_LLM_MODE ?? "mock").toLowerCase();
-  if (raw === "grok") return "grok";
+  const raw = (process.env.AIR_FINDING_LLM_MODE ?? "mock").trim().toLowerCase();
+  if (raw === "grok") {
+    throw new FindingLlmModeConfigError(
+      "AIR_FINDING_LLM_MODE=grok is no longer supported: Smart Site code-citing " +
+        "paths use Anthropic only (G-309 A20). Set AIR_FINDING_LLM_MODE=anthropic.",
+    );
+  }
   if (raw === "anthropic") return "anthropic";
   return "mock";
+}
+
+/** Thrown when `AIR_FINDING_LLM_MODE` selects a provider that is not allowed. */
+export class FindingLlmModeConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FindingLlmModeConfigError";
+  }
 }
 
 /** Default ulid-shaped id generator (collision-resistant for tests). */
@@ -228,23 +235,13 @@ export async function generateFindings(
   const precedenceDrafts = buildPrecedenceFindingDrafts(input.codeSections);
 
   let drafts: RawFindingDraft[];
-  if (mode === "grok") {
-    if (!options.grokClient) {
-      throw new FindingGeneratorError(
-        "anthropic_call_failed",
-        "AIR_FINDING_LLM_MODE=grok requires a Grok client to be passed",
-      );
-    }
-    drafts = await callGrokGenerator(
-      options.grokClient,
-      input,
-      options.grokModel,
+  if ((mode as string) === "grok") {
+    // Defensive: a JS caller can bypass the type. Grok is not selectable.
+    throw new FindingLlmModeConfigError(
+      "Grok is not a permitted finding generator (G-309 A20); use anthropic.",
     );
-    if (options.ensembleEnabled && options.grokModel) {
-      const secondary = await callGrokGenerator(options.grokClient, input);
-      drafts = [...drafts, ...secondary];
-    }
-  } else if (mode === "anthropic") {
+  }
+  if (mode === "anthropic") {
     if (!options.anthropicClient) {
       throw new FindingGeneratorError(
         "anthropic_call_failed",
@@ -252,6 +249,13 @@ export async function generateFindings(
       );
     }
     drafts = await callAnthropicGenerator(options.anthropicClient, input);
+    if (options.ensembleEnabled) {
+      const secondary = await callAnthropicGenerator(
+        options.anthropicClient,
+        input,
+      );
+      drafts = [...drafts, ...secondary];
+    }
   } else {
     // Mock branch: the deterministic generator emits engine-finding
     // shapes directly; we strip the engine-stamped fields back out so

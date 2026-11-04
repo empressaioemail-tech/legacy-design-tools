@@ -106,7 +106,8 @@ export {
   maxConsequenceStratum,
   resolveConsequenceEnsembleEnabled,
   resolveConsequenceGatedRoute,
-  resolveHighConsequenceGrokModel,
-  resolveLowConsequenceGrokModel,
+  CONSEQUENCE_ROUTED_ANTHROPIC_MODEL,
+  resolveHighConsequenceAnthropicModel,
+  resolveLowConsequenceAnthropicModel,
   stratumFromAsce7RiskCategory,
 } from "./consequenceGatedRouting";

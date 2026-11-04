@@ -3,7 +3,7 @@
  *
  * HR-12 escalation: operator-approved for Miami Beach whole-review bootstrap.
  * Reads classified plan-set sheet images against retrieved code atoms; output
- * is merged into piece text before Grok finding synthesis.
+ * is merged into piece text before finding synthesis.
  *
  * Opus 4.8: no temperature/top_p/budget_tokens (400 if sent) — adaptive thinking only.
  */
@@ -110,7 +110,7 @@ export interface VisionSheetReadResult {
 
 /**
  * Run Claude Opus vision read for one discipline's classified sheets.
- * Returns observation text appended to specialist input before Grok synthesis.
+ * Returns observation text appended to specialist input before finding synthesis.
  */
 export async function runDisciplineVisionRead(
   client: Anthropic,
@@ -166,7 +166,7 @@ export async function runDisciplineVisionRead(
   };
 }
 
-/** Merge vision observations into plan-set piece text for Grok synthesis. */
+/** Merge vision observations into plan-set piece text for finding synthesis. */
 export function enrichPiecesWithVisionObservations(
   pieces: ReadonlyArray<PlanSetPieceInput>,
   observations: string,

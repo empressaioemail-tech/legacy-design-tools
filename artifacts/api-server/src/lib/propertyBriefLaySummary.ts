@@ -6,8 +6,8 @@ import type { BrokerageSiteContext } from "./brokerageSiteContext";
 import type { BriefAtomInput } from "./brokerageBriefLlm";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import {
-  resolveGrokBriefingModel,
-  BRIEFING_GROK_MAX_TOKENS,
+  BRIEFING_ANTHROPIC_MODEL,
+  BRIEFING_ANTHROPIC_MAX_TOKENS,
 } from "@workspace/briefing-engine";
 
 export type LayVerdictStatus = "yes" | "maybe" | "no" | "unknown";
@@ -26,7 +26,7 @@ export interface LaySummaryResult {
   verdicts: LayVerdict[];
   presentationMode: PresentationMode;
   generatedAt: string;
-  method: "grok" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 function escapeHtml(s: string): string {
@@ -233,15 +233,22 @@ export function buildRulesLaySummary(input: {
   };
 }
 
-async function completeGrok(system: string, user: string): Promise<string | null> {
+async function completeAnthropic(
+  system: string,
+  user: string,
+): Promise<string | null> {
   const bundle = await getBriefingLlmClient();
-  if (bundle?.kind !== "grok") return null;
-  return bundle.client.completeChat({
-    model: resolveGrokBriefingModel(),
-    maxTokens: BRIEFING_GROK_MAX_TOKENS,
+  if (bundle?.kind !== "anthropic") return null;
+  const response = await bundle.client.messages.create({
+    model: BRIEFING_ANTHROPIC_MODEL,
+    max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
     system,
-    user,
+    messages: [{ role: "user", content: user }],
   });
+  const textBlock = response.content.find((block) => block.type === "text");
+  const text =
+    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
+  return text || null;
 }
 
 export async function generateLaySummary(input: {
@@ -287,7 +294,7 @@ export async function generateLaySummary(input: {
       .join("\n"),
   ].join("\n");
 
-  const raw = await completeGrok(system, user);
+  const raw = await completeAnthropic(system, user);
   if (!raw) {
     return buildRulesLaySummary(input);
   }
@@ -326,7 +333,7 @@ export async function generateLaySummary(input: {
       verdicts,
       presentationMode: input.presentationMode,
       generatedAt: input.finishedAt,
-      method: "grok",
+      method: "anthropic",
     };
   } catch {
     return buildRulesLaySummary(input);

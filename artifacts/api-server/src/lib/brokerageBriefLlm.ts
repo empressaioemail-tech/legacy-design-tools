@@ -1,10 +1,9 @@
 /**
- * Grok + rules fallbacks for Hauska Property Brief brokerage API.
+ * Anthropic + rules fallbacks for Hauska Property Brief brokerage API.
  */
 
 import {
-  resolveGrokBriefingModel,
-  BRIEFING_GROK_MAX_TOKENS,
+  BRIEFING_ANTHROPIC_MAX_TOKENS,
   BRIEFING_ANTHROPIC_MODEL,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
@@ -93,7 +92,7 @@ export interface ReasoningSummaryResult {
   citations: NumberedCitation[];
   disclaimer: string;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 export interface SummarizeResult {
@@ -102,7 +101,7 @@ export interface SummarizeResult {
   summary: string;
   citations: NumberedCitation[];
   disclaimer: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 /**
@@ -137,7 +136,7 @@ export interface ResearchChatResult {
   disclaimer: string;
   confidence: number;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
   presentationMode: PresentationMode;
 }
 
@@ -345,23 +344,13 @@ function textToHtmlParagraphs(text: string): string {
 async function completeBriefingLlm(
   system: string,
   user: string,
-): Promise<{ text: string | null; method: "grok" | "anthropic" }> {
+): Promise<{ text: string | null; method: "anthropic" }> {
   const bundle = await getBriefingLlmClient();
-  if (!bundle) return { text: null, method: "grok" };
-
-  if (bundle.kind === "grok") {
-    const text = await bundle.client.completeChat({
-      model: resolveGrokBriefingModel(),
-      maxTokens: BRIEFING_GROK_MAX_TOKENS,
-      system,
-      user,
-    });
-    return { text, method: "grok" };
-  }
+  if (!bundle) return { text: null, method: "anthropic" };
 
   const response = await bundle.client.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
-    max_tokens: BRIEFING_GROK_MAX_TOKENS,
+    max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
     system,
     messages: [{ role: "user", content: user }],
   });
@@ -559,7 +548,7 @@ function finalizeResearchChatAnswer(
   atoms: BriefAtomInput[],
   presentationMode: PresentationMode,
   generatedAt: string,
-  method: "grok" | "anthropic" | "rules-v1",
+  method: "anthropic" | "rules-v1",
 ): ResearchChatResult {
   const sanitizedAnswer = sanitizeResearchChatCustomerText(answer);
   if (/\bHauska\b/i.test(answer)) {
@@ -614,7 +603,7 @@ function unionCitationsByN(
 
 export interface NarrativeSectionResult {
   narrative: string;
-  generatedBy: "grok" | "anthropic" | "rules-v1";
+  generatedBy: "anthropic" | "rules-v1";
   generatedAt: string;
 }
 

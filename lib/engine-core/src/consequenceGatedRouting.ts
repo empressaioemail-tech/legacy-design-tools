@@ -87,8 +87,12 @@ export type ModelRoutingTier = "high" | "low";
 export interface ConsequenceGatedRouteDecision {
   stratum: ConsequenceStratum;
   modelTier: ModelRoutingTier;
-  /** Grok model id for this stratum — asserted routing, not earned. */
-  grokModel: string;
+  /**
+   * Anthropic model id for this stratum — asserted routing, not earned.
+   * G-309 A20: Anthropic is the only provider; both tiers currently use
+   * the same id (no XAI_* env can influence this).
+   */
+  anthropicModel: string;
   ensembleEnabled: boolean;
   routingProvenance: "asserted";
   label: string;
@@ -100,21 +104,19 @@ const HIGH_STRATA = new Set<ConsequenceStratum>([
   "essential",
 ]);
 
-export function resolveHighConsequenceGrokModel(): string {
-  return (
-    process.env.XAI_FINDING_HIGH_MODEL?.trim() ||
-    process.env.XAI_MODEL?.trim() ||
-    "grok-3"
-  );
+/**
+ * Anthropic model id used by the findings Anthropic branch
+ * (`FINDING_ANTHROPIC_MODEL` in `@workspace/finding-engine`). Mirrored
+ * here because engine-core cannot depend on finding-engine.
+ */
+export const CONSEQUENCE_ROUTED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+
+export function resolveHighConsequenceAnthropicModel(): string {
+  return CONSEQUENCE_ROUTED_ANTHROPIC_MODEL;
 }
 
-export function resolveLowConsequenceGrokModel(): string {
-  return (
-    process.env.XAI_FINDING_LOW_MODEL?.trim() ||
-    process.env.XAI_FINDING_MODEL?.trim() ||
-    process.env.XAI_MODEL?.trim() ||
-    "grok-3-mini"
-  );
+export function resolveLowConsequenceAnthropicModel(): string {
+  return CONSEQUENCE_ROUTED_ANTHROPIC_MODEL;
 }
 
 export function resolveConsequenceEnsembleEnabled(): boolean {
@@ -132,14 +134,14 @@ export function resolveConsequenceGatedRoute(
   const stratum = maxConsequenceStratum(sections);
   const high = HIGH_STRATA.has(stratum);
   const ensembleEnabled = high && resolveConsequenceEnsembleEnabled();
-  const grokModel = high
-    ? resolveHighConsequenceGrokModel()
-    : resolveLowConsequenceGrokModel();
+  const anthropicModel = high
+    ? resolveHighConsequenceAnthropicModel()
+    : resolveLowConsequenceAnthropicModel();
 
   return {
     stratum,
     modelTier: high ? "high" : "low",
-    grokModel,
+    anthropicModel,
     ensembleEnabled,
     routingProvenance: "asserted",
     label: high

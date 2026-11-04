@@ -288,11 +288,11 @@ describe("resolveFindingLlmMode", () => {
     }
   });
 
-  it("returns grok when AIR_FINDING_LLM_MODE === 'grok'", () => {
+  it("rejects AIR_FINDING_LLM_MODE === 'grok' (Anthropic only)", () => {
     const original = process.env.AIR_FINDING_LLM_MODE;
     process.env.AIR_FINDING_LLM_MODE = "grok";
     try {
-      expect(resolveFindingLlmMode()).toBe("grok");
+      expect(() => resolveFindingLlmMode()).toThrow(/no longer supported/);
     } finally {
       if (original === undefined) delete process.env.AIR_FINDING_LLM_MODE;
       else process.env.AIR_FINDING_LLM_MODE = original;
@@ -322,10 +322,10 @@ describe("generateFindings: anthropic mode error paths", () => {
   });
 });
 
-describe("generateFindings: grok mode error paths", () => {
-  it("fails fast when no grok client is injected", async () => {
+describe("generateFindings: grok is not selectable", () => {
+  it("rejects a forced grok mode with a config error", async () => {
     await expect(
-      generateFindings(makeInput(), { mode: "grok" }),
-    ).rejects.toMatchObject({ code: "anthropic_call_failed" });
+      generateFindings(makeInput(), { mode: "grok" as never }),
+    ).rejects.toThrow(/not a permitted finding generator/);
   });
 });

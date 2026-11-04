@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request from "supertest";
 import type { Express } from "express";
 import { readFileSync } from "node:fs";
@@ -79,8 +80,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });
@@ -176,8 +177,8 @@ beforeEach(() => {
     }),
   );
   setBriefingLlmClient({
-    kind: "grok",
-    client: { completeChat: completeChatMock },
+    kind: "anthropic",
+    client: anthropicChatShim(completeChatMock),
   });
   mockRoundRockGeocode();
 });

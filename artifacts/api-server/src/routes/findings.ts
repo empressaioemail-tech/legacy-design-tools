@@ -1071,7 +1071,7 @@ async function runFindingGeneration(args: {
         generationId,
         consequenceStratum: consequenceRoute.stratum,
         modelTier: consequenceRoute.modelTier,
-        grokModel: consequenceRoute.grokModel,
+        anthropicModel: consequenceRoute.anthropicModel,
         ensemble: consequenceRoute.ensembleEnabled,
         routingLabel: consequenceRoute.label,
       },
@@ -1081,15 +1081,11 @@ async function runFindingGeneration(args: {
     const visionClient = await getVisionAnthropicClient();
     const engineOptions = {
       mode,
-      ...(llmClient?.kind === "grok"
+      ...(llmClient?.kind === "anthropic"
         ? {
-            grokClient: llmClient.client,
-            grokModel: consequenceRoute.grokModel,
+            anthropicClient: llmClient.client,
             ensembleEnabled: consequenceRoute.ensembleEnabled,
           }
-        : {}),
-      ...(llmClient?.kind === "anthropic"
-        ? { anthropicClient: llmClient.client }
         : {}),
       ...(visionClient
         ? {
