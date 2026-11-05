@@ -123,6 +123,7 @@ import {
 import { brokerageCoverageRouter } from "./brokerageCoverage";
 import { iccNoticeField } from "../lib/iccNoticeField";
 import {
+  iccAuthorizedUser,
   iccCitationFromAtom,
   iccCitationsFromAtoms,
   recordIccUsage,
@@ -968,7 +969,7 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   // A13c: one ledger row set per brief for the ICC citations it shows.
   void recordIccUsage({
     requestId: runId,
-    authorizedUser: authenticatedUser,
+    authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
     surface: "brief",
     citations: iccCitationsFromAtoms(retrievedAtomsForProvenance),
   });
@@ -1564,10 +1565,7 @@ brokerageV1.post(
     // A13c: one ledger row set per research-chat answer for the ICC sources it shows.
     void recordIccUsage({
       requestId: randomUUID(),
-      authorizedUser:
-        req.brokerageAuth?.tier === "user" && req.session?.requestor?.kind === "user"
-          ? req.session.requestor.id
-          : null,
+      authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
       surface: "brief",
       citations: result.sources.flatMap((s) => {
         const c = iccByAtomDid.get(s.atomDid);

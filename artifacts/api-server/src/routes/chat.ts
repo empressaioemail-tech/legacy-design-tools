@@ -43,8 +43,11 @@ import {
 } from "./coverageGuardrail";
 import { handleWorkspaceChat } from "./chatWorkspace";
 import { randomUUID } from "node:crypto";
-import { hasSignedInUser } from "../lib/iccAccess";
-import { iccCitationsCitedInText, recordIccUsage } from "../lib/iccUsage";
+import {
+  iccAuthorizedUser,
+  iccCitationsCitedInText,
+  recordIccUsage,
+} from "../lib/iccUsage";
 
 /**
  * Render-mode token the inline-reference syntax uses to opt a chat
@@ -1097,10 +1100,7 @@ router.post("/chat", async (req: Request, res: Response) => {
     // A13c: one ledger row set per answer for the ICC atoms its citations name.
     void recordIccUsage({
       requestId: randomUUID(),
-      authorizedUser:
-        hasSignedInUser(req) && req.session.requestor
-          ? req.session.requestor.id
-          : null,
+      authorizedUser: iccAuthorizedUser(req),
       surface: "chat",
       citations: iccCitationsCitedInText(answerText, allAtoms),
     });

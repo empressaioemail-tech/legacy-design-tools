@@ -60,8 +60,8 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isIccTitleAtom } from "@workspace/codes/iccTitles";
-import { hasSignedInUser } from "../lib/iccAccess";
 import {
+  iccAuthorizedUser,
   iccCitationFromAtom,
   iccCitationsForFindings,
   recordIccUsage,
@@ -1499,10 +1499,7 @@ router.post(
         reqLog,
         {
           planSetPieceIds: bodyParse.data.planSetPieceIds,
-          authorizedUser:
-            hasSignedInUser(req) && req.session.requestor
-              ? req.session.requestor.id
-              : null,
+          authorizedUser: iccAuthorizedUser(req),
         },
       );
       if (outcome.kind === "already_running") {

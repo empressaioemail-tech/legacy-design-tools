@@ -8,7 +8,9 @@
  * Ids only go out: bookId and sectionId. No ICC text is read or sent.
  */
 import { isIccTitleAtom, isIccTitleIdentifier } from "@workspace/codes/iccTitles";
+import type { Request } from "express";
 import { logger } from "./logger";
+import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 
 export type IccUsageSurface = "findings" | "brief" | "chat" | "connector-card";
 
@@ -23,6 +25,25 @@ export interface RecordIccUsageInput {
   authorizedUser: string | null | undefined;
   surface: IccUsageSurface;
   citations: ReadonlyArray<IccUsageCitation>;
+}
+
+/**
+ * The one place a Smart Site request becomes a ledger Authorized User.
+ *
+ * userId is the Smart Site-local pe_users id, not an IdP subject; the ledger
+ * counts distinct per product until a cross-product identity join exists.
+ * Never join on email.
+ *
+ * The session middleware gives every unauthenticated browser a requestor of
+ * kind "user" with an ephemeral anon_ id, so kind alone is not proof of a
+ * signed-in user. Null means no row is written.
+ */
+export function iccAuthorizedUser(
+  req: Pick<Request, "session">,
+): string | null {
+  const requestor = req.session?.requestor;
+  if (requestor?.kind !== "user" || !requestor.id) return null;
+  return isAnonymousOwnerId(requestor.id) ? null : requestor.id;
 }
 
 const PRODUCT = "smart-site";

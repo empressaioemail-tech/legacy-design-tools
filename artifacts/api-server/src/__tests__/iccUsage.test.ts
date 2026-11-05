@@ -5,6 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const logs = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 
+vi.mock("@workspace/db", () => new Proxy({}, { get: () => ({}) }));
+
 vi.mock("../lib/logger", () => {
   const rec = (...a: unknown[]) => {
     logs.calls.push(a);
@@ -18,7 +20,9 @@ const {
   iccCitationsFromAtoms,
   iccCitationsCitedInText,
   iccCitationsForFindings,
+  iccAuthorizedUser,
 } = await import("../lib/iccUsage");
+const { ANON_TEST_SESSION_OWNER_ID } = await import("../lib/anonymousOwnerCookie");
 
 const fetchMock = vi.fn();
 
@@ -183,5 +187,47 @@ describe("citation helpers", () => {
     expect(iccCitationsForFindings(rows, map)).toEqual([
       { bookId: "IBC2021P1", sectionId: "1612.3" },
     ]);
+  });
+});
+
+describe("authorized user resolution (all four surfaces share iccAuthorizedUser)", () => {
+  const anonSession = {
+    session: { audience: "user", tenantId: "t", requestor: { kind: "user", id: ANON_TEST_SESSION_OWNER_ID } },
+  } as never;
+  const anonRandom = {
+    session: { audience: "user", tenantId: "t", requestor: { kind: "user", id: "anon_0123456789abcdef01234567" } },
+  } as never;
+  const verified = {
+    session: { audience: "user", tenantId: "t", requestor: { kind: "user", id: "u_abc123" } },
+  } as never;
+  const surfaces = ["findings", "brief", "chat"] as const;
+
+  it.each(surfaces)("an anonymous browser session produces no POST on %s", async (surface) => {
+    for (const req of [anonSession, anonRandom]) {
+      await recordIccUsage({
+        requestId: "r",
+        authorizedUser: iccAuthorizedUser(req),
+        surface,
+        citations: [{ bookId: "IBC2021P1", sectionId: "1.1" }],
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(surfaces)("a verified u_ user produces one POST on %s", async (surface) => {
+    await recordIccUsage({
+      requestId: "r",
+      authorizedUser: iccAuthorizedUser(verified),
+      surface,
+      citations: [{ bookId: "IBC2021P1", sectionId: "1.1" }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).authorizedUser).toBe("u_abc123");
+  });
+
+  it("no session, a service requestor, or an empty id resolves to null", () => {
+    expect(iccAuthorizedUser({} as never)).toBeNull();
+    expect(iccAuthorizedUser({ session: { requestor: { kind: "service", id: "svc" } } } as never)).toBeNull();
+    expect(iccAuthorizedUser({ session: { requestor: { kind: "user", id: "" } } } as never)).toBeNull();
   });
 });
