@@ -59,6 +59,7 @@ import {
   type MaterializableElement,
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { isIccTitleAtom } from "@workspace/codes/iccTitles";
 import {
   keyFromEngagementOrSynthesize,
   retrieveAtomsForQuestion,
@@ -538,7 +539,9 @@ function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
   return {
     atomId: canonicalOverlayAtomKey(a.id),
     label,
-    snippet: a.body,
+    // G-309 (Exhibit D): an ICC-title atom goes out as a citation only (label
+    // carries section, title, edition). No body text reaches the generator.
+    snippet: isIccTitleAtom(a) || a.codeSource === "icc-model-code" ? "" : a.body,
   };
 }
 

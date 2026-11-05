@@ -1010,6 +1010,31 @@ router.post("/chat", async (req: Request, res: Response) => {
             );
           }
         }
+        // Same stop_reason checks as the main loop: the closing turn's
+        // final message was never read, so a refusal or truncation went
+        // out silently.
+        const closingFinal = await closing.finalMessage();
+        if (isAnthropicRefusal(closingFinal)) {
+          logger.warn(
+            { engagementId, stopReason: "refusal" },
+            "chat: Claude refused on closing turn; sending fixed fallback text",
+          );
+          res.write(
+            `data: ${JSON.stringify({ text: "I can't help with that request." })}
+
+`,
+          );
+        } else if (isAnthropicTruncated(closingFinal)) {
+          logger.warn(
+            { stopReason: "max_tokens" },
+            "chat: Claude hit max_tokens on closing turn; sending fixed narrower-question line",
+          );
+          res.write(
+            `data: ${JSON.stringify({ text: "That answer ran long; please ask a narrower question." })}
+
+`,
+          );
+        }
         break;
       }
 
