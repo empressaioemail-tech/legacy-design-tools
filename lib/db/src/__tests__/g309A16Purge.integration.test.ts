@@ -105,17 +105,32 @@ describe.skipIf(!HAS_DB)("G-309 A16 ICC text purge scripts", () => {
     // NOT ICC (one with embedding and html, to prove byte-identity)
     await ca("b0000000-0000-4000-8000-000000000001", SRC_MUNI, "austin_tx", "Austin LDC", "25-1", M, `${MARK}-keep-1`, `<p>${MARK}-keep-html</p>`, vec);
     await ca("b0000000-0000-4000-8000-000000000002", SRC_MUNI, "bastrop_tx", "Bastrop UDC", "3.1", M, `${MARK}-keep-2`, null, null);
-    const ra = (id: string, jur: string, ref: string, slug: string, sources: unknown[], snip: string | null, why: string | null) =>
+    const ra = (id: string, jur: string, ref: string, edition: string, slug: string, sources: unknown[], snip: string | null, why: string | null) =>
       p.query(
         `INSERT INTO reasoning_atoms (id, jurisdiction_key, code_ref, edition, edition_slug, sources, reasoning,
-           asserted_confidence, verification_state, snippet) VALUES ($1,$2,$3,'2021',$4,$5::jsonb,$6,0.9,'verified',$7)`,
-        [id, jur, ref, slug, JSON.stringify(sources), why, snip],
+           asserted_confidence, verification_state, snippet) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,0.9,'verified',$8)`,
+        [id, jur, ref, edition, slug, JSON.stringify(sources), why, snip],
       );
     const nonIcc = [{ url: "https://example.test/x", sourceName: "municode", edition: "2021", retrievedAt: "t", verified: true }];
-    await ra("reasoning:ibc-2021:1004", "austin_tx", "IBC 1004", "ibc-2021", nonIcc, `${MARK}-snip-1`, `${MARK}-why-1`);
-    await ra("reasoning:x:5", "austin_tx", "Sec 5", "ldc-2024", [{ ...nonIcc[0], url: "https://codes.iccsafe.org/q", sourceName: "icc" }], `${MARK}-snip-2`, null);
-    await ra("reasoning:keep:1", "austin_tx", "Sec 9", "ldc-2024", nonIcc, `${MARK}-snip-keep`, `${MARK}-why-keep`);
+    const iccLink = [{ ...nonIcc[0], url: "https://codes.iccsafe.org/q", sourceName: "icc" }];
+    // icc-title, snippet + reasoning
+    await ra("reasoning:ibc-2021:1004", "austin_tx", "IBC 1004", "IBC 2021", "ibc-2021", nonIcc, `${MARK}-snip-1`, `${MARK}-why-1`);
+    // icc-source-link (edition is not an ICC title), snippet only
+    await ra("reasoning:x:5", "austin_tx", "Sec 5", "LDC 2024", "ldc-2024", iccLink, `${MARK}-snip-2`, null);
+    await ra("reasoning:keep:1", "austin_tx", "Sec 9", "LDC 2024", "ldc-2024", nonIcc, `${MARK}-snip-keep`, `${MARK}-why-keep`);
+    // NOT ICC: TAS, FBC, FBCEB, A117.1 with no ICC source link
+    await ra("reasoning:tas:1", "bastrop_tx", "TAS-309", "TAS 2012", "tas-2012", nonIcc, `${MARK}-snip-tas`, `${MARK}-why-tas`);
+    await ra("reasoning:fbc:1", "bastrop_tx", "FBC-M601.6", "FBC 2023", "fbc-2023", nonIcc, `${MARK}-snip-fbc`, `${MARK}-why-fbc`);
+    await ra("reasoning:fbceb:1", "bastrop_tx", "FBCEB 601.2", "FBCEB 2023", "fbceb-2023", nonIcc, `${MARK}-snip-fbceb`, `${MARK}-why-fbceb`);
+    await ra("reasoning:a117:1", "bastrop_tx", "A117.1-302", "A117.1 2017", "a1171-2017", nonIcc, `${MARK}-snip-a`, `${MARK}-why-a`);
+    // icc-source-link: a non-ICC edition with an ICC source link
+    await ra("reasoning:tas:2", "bastrop_tx", "TAS-404", "TAS 2012", "tas-2012", iccLink, `${MARK}-snip-tas2`, `${MARK}-why-tas2`);
+    // icc-title, reasoning only
+    await ra("reasoning:irc:1", "bastrop_tx", "IRC-R301", "IRC 2021", "irc-2021", nonIcc, null, `${MARK}-why-irc`);
   }
+
+  const KEEP_IDS = "('reasoning:keep:1','reasoning:tas:1','reasoning:fbc:1','reasoning:fbceb:1','reasoning:a117:1')";
+  const ICC_RA_IDS = "('reasoning:ibc-2021:1004','reasoning:x:5','reasoning:tas:2','reasoning:irc:1')";
 
   /** Row-for-row JSON of NON-ICC rows (byte comparison). */
   async function nonIccSnapshot(): Promise<string> {
@@ -123,7 +138,7 @@ describe.skipIf(!HAS_DB)("G-309 A16 ICC text purge scripts", () => {
       `SELECT row_to_json(t)::text AS j FROM code_atoms t WHERE id::text LIKE 'b%' ORDER BY id`,
     );
     const b = await pool.query(
-      `SELECT row_to_json(t)::text AS j FROM reasoning_atoms t WHERE id = 'reasoning:keep:1'`,
+      `SELECT row_to_json(t)::text AS j FROM reasoning_atoms t WHERE id IN ${KEEP_IDS} ORDER BY id`,
     );
     return [...a.rows, ...b.rows].map((r) => r.j).join("\n");
   }
@@ -132,17 +147,22 @@ describe.skipIf(!HAS_DB)("G-309 A16 ICC text purge scripts", () => {
     const b = await pool.query(`SELECT row_to_json(t)::text AS j FROM reasoning_atoms t ORDER BY id`);
     return [...a.rows, ...b.rows].map((r) => r.j).join("\n");
   }
-  /** ICC rows with their purge columns removed: must be unchanged by apply. */
-  async function iccKeptColumns(): Promise<string> {
+  /** ICC rows with the purged columns removed: must be unchanged by apply. */
+  async function iccKeptColumns(raCols: string[]): Promise<string> {
     const a = await pool.query(
       `SELECT (row_to_json(t)::jsonb - 'body' - 'body_html' - 'embedding' - 'embedding_model' - 'embedded_at')::text AS j
        FROM code_atoms t WHERE id::text LIKE 'a%' ORDER BY id`,
     );
+    const strip = raCols.map((c) => ` - '${c}'`).join("");
     const b = await pool.query(
-      `SELECT (row_to_json(t)::jsonb - 'snippet' - 'reasoning')::text AS j
-       FROM reasoning_atoms t WHERE id IN ('reasoning:ibc-2021:1004','reasoning:x:5') ORDER BY id`,
+      `SELECT (row_to_json(t)::jsonb${strip})::text AS j FROM reasoning_atoms t WHERE id IN ${ICC_RA_IDS} ORDER BY id`,
     );
     return [...a.rows, ...b.rows].map((r) => r.j).join("\n");
+  }
+  /** id -> [has snippet, has reasoning] */
+  async function raState(): Promise<Record<string, [boolean, boolean]>> {
+    const r = await pool.query(`SELECT id, snippet IS NOT NULL AS sn, reasoning IS NOT NULL AS re FROM reasoning_atoms`);
+    return Object.fromEntries(r.rows.map((x) => [x.id, [x.sn, x.re]]));
   }
 
   async function reseed() {
@@ -203,9 +223,33 @@ describe.skipIf(!HAS_DB)("G-309 A16 ICC text purge scripts", () => {
     expect(m.tables.code_atoms.iccTotal).toBe(6);
     expect(m.tables.code_atoms.iccWithText).toBe(5); // #6 is already blank
     expect(m.tables.code_atoms.byCodeBook).toMatchObject({ IWUIC: 1, IRC_R301_2_1: 1, IBC: 1 });
-    expect(m.tables.reasoning_atoms.total).toBe(3);
-    expect(m.tables.reasoning_atoms.iccTotal).toBe(2);
-    expect(m.tables.reasoning_atoms.iccWithText).toBe(2);
+    expect(m.tables.reasoning_atoms.total).toBe(9);
+    expect(m.tables.reasoning_atoms.iccTotal).toBe(4);
+    expect(m.tables.reasoning_atoms.iccWithText).toBe(4);
+    // TAS, FBC, FBCEB and A117.1 rows without an ICC source link are not ICC
+    const iccIds = m.tables.reasoning_atoms.rows.map((x: { id: string }) => x.id);
+    for (const id of ["reasoning:tas:1", "reasoning:fbc:1", "reasoning:fbceb:1", "reasoning:a117:1", "reasoning:keep:1"]) {
+      expect(iccIds).not.toContain(id);
+    }
+    // a non-ICC edition with an ICC source link is its own class
+    const cls = (id: string) => m.tables.reasoning_atoms.rows.find((x: { id: string }) => x.id === id).class;
+    expect(cls("reasoning:tas:2")).toBe("icc-source-link");
+    expect(cls("reasoning:x:5")).toBe("icc-source-link");
+    expect(cls("reasoning:ibc-2021:1004")).toBe("icc-title");
+    expect(cls("reasoning:irc:1")).toBe("icc-title");
+    // blast-radius breakdown: counts only
+    const bd = m.tables.reasoning_atoms.breakdown;
+    expect(bd.byClass).toEqual({ "icc-title": 2, "icc-source-link": 2 });
+    expect(bd.byTextShape).toEqual({ both: 2, "snippet-only": 1, "reasoning-only": 1 });
+    expect(bd.byClassAndShape).toEqual({
+      "icc-title|both": 1,
+      "icc-title|reasoning-only": 1,
+      "icc-source-link|both": 1,
+      "icc-source-link|snippet-only": 1,
+    });
+    expect(bd.byJurisdiction).toEqual({ austin_tx: 2, bastrop_tx: 2 });
+    expect(r.out).toContain("by class");
+    expect(r.out).toContain("by city");
     const row1 = m.tables.code_atoms.rows.find((x: { id: string }) => x.id.endsWith("0001"));
     expect(row1.cols.body.len).toBe(`${MARK}-body-1`.length);
     expect(row1.cols.body.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -272,37 +316,70 @@ describe.skipIf(!HAS_DB)("G-309 A16 ICC text purge scripts", () => {
     expect(await fullSnapshot()).toBe(before);
   });
 
-  it("apply: only ICC rows change, non-ICC byte-identical, certificate has no text, second run refuses", async () => {
+  const certOf = (out: string) => JSON.parse(out.split("CERTIFICATE (no text) =====\n")[1].split("\n===== END")[0]);
+
+  it("apply (default scope snippet): only ICC snippets and code_atoms text change; reasoning and non-ICC untouched; second run refuses", async () => {
     await reseed();
     const f = path.join(tmp, "m5.json");
     dryRunTo(f);
     const m = JSON.parse(readFileSync(f, "utf8"));
     const keep = await nonIccSnapshot();
-    const iccKept = await iccKeptColumns();
+    const iccKept = await iccKeptColumns(["snippet"]);
     const r = run(APPLY, applyArgs(f, m.manifestHash));
     expect(r.code).toBe(0);
     expect(r.out).toContain("G-309-A16 CERTIFICATE");
-    const cert = JSON.parse(r.out.split("CERTIFICATE (no text) =====\n")[1].split("\n===== END")[0]);
+    const cert = certOf(r.out);
     expect(cert.code_atoms).toMatchObject({ total: 8, iccRows: 6, blanked: 5, iccWithTextBefore: 5, iccWithTextAfter: 0 });
-    expect(cert.reasoning_atoms).toMatchObject({ total: 3, iccRows: 2, blanked: 2, iccWithTextAfter: 0 });
+    expect(cert.reasoning_atoms).toMatchObject({ total: 9, iccRows: 4, blanked: 3, inScopeWithTextBefore: 3, inScopeWithTextAfter: 0 });
+    expect(cert.reasoningScope).toEqual({ columns: ["snippet"], classes: ["icc-title", "icc-source-link"] });
     expect(cert.rowsDeleted).toBe(0);
     expect(await nonIccSnapshot()).toBe(keep);
-    expect(await iccKeptColumns()).toBe(iccKept);
+    expect(await iccKeptColumns(["snippet"])).toBe(iccKept); // reasoning text untouched too
     const a = await pool.query(
       `SELECT count(*)::int AS n, count(*) FILTER (WHERE body <> '' OR body_html IS NOT NULL OR embedding IS NOT NULL
          OR embedding_model IS NOT NULL OR embedded_at IS NOT NULL)::int AS withtext FROM code_atoms WHERE id::text LIKE 'a%'`,
     );
     expect(a.rows[0]).toEqual({ n: 6, withtext: 0 });
-    const b = await pool.query(
-      `SELECT count(*) FILTER (WHERE snippet IS NOT NULL OR reasoning IS NOT NULL)::int AS withtext
-       FROM reasoning_atoms WHERE id IN ('reasoning:ibc-2021:1004','reasoning:x:5')`,
-    );
-    expect(b.rows[0].withtext).toBe(0);
+    const st = await raState();
+    expect(st["reasoning:ibc-2021:1004"]).toEqual([false, true]);
+    expect(st["reasoning:x:5"]).toEqual([false, false]);
+    expect(st["reasoning:tas:2"]).toEqual([false, true]);
+    expect(st["reasoning:irc:1"]).toEqual([false, true]);
+    for (const id of ["keep:1", "tas:1", "fbc:1", "fbceb:1", "a117:1"]) expect(st[`reasoning:${id}`]).toEqual([true, true]);
     // the same manifest cannot be replayed
     expect(run(APPLY, applyArgs(f, m.manifestHash)).code).toBe(5);
-    // a fresh dry run now reports none present
-    const f2 = path.join(tmp, "m5b.json");
-    expect(dryRunTo(f2).code).toBe(0);
+  });
+
+  it("apply --scope snippet,reasoning clears both columns; a fresh dry run then reports none present", async () => {
+    await reseed();
+    const f = path.join(tmp, "m5c.json");
+    dryRunTo(f);
+    const m = JSON.parse(readFileSync(f, "utf8"));
+    const keep = await nonIccSnapshot();
+    const iccKept = await iccKeptColumns(["snippet", "reasoning"]);
+    const r = run(APPLY, applyArgs(f, m.manifestHash, ["--scope", "snippet,reasoning"]));
+    expect(r.code).toBe(0);
+    expect(certOf(r.out).reasoning_atoms).toMatchObject({ blanked: 4, inScopeWithTextAfter: 0, iccWithTextAfter: 0 });
+    expect(await nonIccSnapshot()).toBe(keep);
+    expect(await iccKeptColumns(["snippet", "reasoning"])).toBe(iccKept);
+    const st = await raState();
+    for (const id of ["ibc-2021:1004", "x:5", "tas:2", "irc:1"]) expect(st[`reasoning:${id}`]).toEqual([false, false]);
+    expect(dryRunTo(path.join(tmp, "m5d.json")).code).toBe(0);
+  });
+
+  it("apply --classes icc-title leaves icc-source-link rows alone; bad --scope/--classes refuse", async () => {
+    await reseed();
+    const f = path.join(tmp, "m5e.json");
+    dryRunTo(f);
+    const m = JSON.parse(readFileSync(f, "utf8"));
+    expect(run(APPLY, applyArgs(f, m.manifestHash, ["--scope", "reasoning"])).code).toBe(4);
+    expect(run(APPLY, applyArgs(f, m.manifestHash, ["--classes", "nope"])).code).toBe(4);
+    const r = run(APPLY, applyArgs(f, m.manifestHash, ["--classes", "icc-title"]));
+    expect(r.code).toBe(0);
+    const st = await raState();
+    expect(st["reasoning:ibc-2021:1004"]).toEqual([false, true]);
+    expect(st["reasoning:x:5"]).toEqual([true, false]);
+    expect(st["reasoning:tas:2"]).toEqual([true, true]);
   });
 
   it("after-count not zero: rolls back and exits 6", async () => {

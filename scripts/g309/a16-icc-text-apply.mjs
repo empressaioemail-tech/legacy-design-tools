@@ -5,14 +5,19 @@
  *
  *   DATABASE_URL=<unpooled neondb> node scripts/g309/a16-icc-text-apply.mjs \
  *       --manifest <manifest.json> --expect-hash <manifestHash> --confirm G309-A16 [--dry]
- *       [--expect-db neondb] [--env-var DATABASE_URL] [--timeout-ms 300000]
+ *       [--scope snippet|snippet,reasoning] [--classes icc-title,icc-source-link] [--expect-db neondb] [--env-var DATABASE_URL] [--timeout-ms 300000]
  *
  * CHOICE: BLANK, DO NOT DELETE.
  *   code_atoms:      body = '' (column is NOT NULL), body_html = NULL, embedding = NULL,
  *                    embedding_model = NULL, embedded_at = NULL. Row, id, content_hash,
  *                    source_id, source_url, edition, section_number/title, fetched_at,
  *                    metadata are kept.
- *   reasoning_atoms: snippet = NULL, reasoning = NULL. Row, sources[] and calibration kept.
+ *   reasoning_atoms: snippet = NULL by default (--scope snippet); reasoning = NULL only with
+ *                    --scope snippet,reasoning. Row, sources[] and calibration kept.
+ *   reasoning is a template written by our code (snippet.ts reasoningSummaryFromFetch and
+ *   persist.ts overlay/deeplink strings), no model and no source text, so the default
+ *   leaves it. snippet is the first 600 chars of the fetched section text.
+ *   --classes picks icc-title and/or icc-source-link rows (default both).
  *   Why: (1) citations are by atom id and resolve through these rows
  *   (provenanceEnvelope joins code_atoms to code_atom_sources for deeplink/edition/
  *   retrievedAt; engine signals and corpus coverage read them), so deleting would
@@ -41,6 +46,8 @@ import {
   computeManifestHash,
   connect,
   parseArgs,
+  parseScope,
+  reasoningRowInScopeWithText,
   scrub,
   totals,
 } from "./a16-lib.mjs";
@@ -55,7 +62,7 @@ class Refusal extends Error {
 async function main() {
   const args = parseArgs(
     process.argv.slice(2),
-    ["manifest", "expect-hash", "confirm", "expect-db", "env-var", "timeout-ms"],
+    ["manifest", "expect-hash", "confirm", "expect-db", "env-var", "timeout-ms", "scope", "classes"],
     ["dry"],
   );
   if (!args.manifest || !args["expect-hash"] || args.confirm !== CONFIRM_TOKEN) {
@@ -65,6 +72,7 @@ async function main() {
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be a positive integer");
   const expectDb = args["expect-db"] ?? DEFAULT_EXPECT_DB;
   const dry = Boolean(args.dry);
+  const scope = parseScope(args.scope, args.classes);
 
   const manifest = JSON.parse(readFileSync(args.manifest, "utf8"));
   const recomputed = computeManifestHash(manifest);
@@ -92,7 +100,9 @@ async function main() {
     if (tb.rows === 0) throw new Vacuous("zero total rows");
 
     const caIds = before.tables.code_atoms.rows.filter((r) => r.hasText).map((r) => r.id);
-    const raIds = before.tables.reasoning_atoms.rows.filter((r) => r.hasText).map((r) => r.id);
+    const raIds = before.tables.reasoning_atoms.rows
+      .filter((r) => reasoningRowInScopeWithText(r, scope))
+      .map((r) => r.id);
 
     let caChanged = 0;
     let raChanged = 0;
@@ -109,7 +119,7 @@ async function main() {
     if (raIds.length) {
       raChanged = (
         await client.query(
-          `UPDATE reasoning_atoms SET snippet = NULL, reasoning = NULL WHERE id = ANY($1::text[])`,
+          `UPDATE reasoning_atoms SET snippet = NULL${scope.columns.includes("reasoning") ? ", reasoning = NULL" : ""} WHERE id = ANY($1::text[])`,
           [raIds],
         )
       ).rowCount;
@@ -120,15 +130,17 @@ async function main() {
 
     const after = await buildManifest(client, expectDb);
     const ta = totals(after);
+    const raLeft = after.tables.reasoning_atoms.rows.filter((r) => reasoningRowInScopeWithText(r, scope)).length;
     const sameShape =
       after.tables.code_atoms.total === before.tables.code_atoms.total &&
       after.tables.reasoning_atoms.total === before.tables.reasoning_atoms.total &&
       after.tables.code_atoms.iccTotal === before.tables.code_atoms.iccTotal &&
       after.tables.reasoning_atoms.iccTotal === before.tables.reasoning_atoms.iccTotal;
-    if (ta.withText !== 0 || !sameShape) {
+    const caLeft = after.tables.code_atoms.iccWithText;
+    if (caLeft !== 0 || raLeft !== 0 || !sameShape) {
       throw new Refusal(
         EXIT.AFTER_COUNT,
-        `after-counts not clean (icc rows still holding text: ${ta.withText}; row totals unchanged: ${sameShape}); rolled back`,
+        `after-counts not clean (code_atoms ICC rows with text: ${caLeft}; reasoning_atoms in-scope rows with text: ${raLeft}; row totals unchanged: ${sameShape}); rolled back`,
       );
     }
 
@@ -149,8 +161,12 @@ async function main() {
         iccRows: before.tables.reasoning_atoms.iccTotal,
         blanked: raChanged,
         iccWithTextBefore: before.tables.reasoning_atoms.iccWithText,
+        inScopeWithTextBefore: raIds.length,
+        inScopeWithTextAfter: raLeft,
         iccWithTextAfter: after.tables.reasoning_atoms.iccWithText,
+        breakdownBefore: before.tables.reasoning_atoms.breakdown,
       },
+      reasoningScope: { columns: scope.columns, classes: scope.classes },
       rowsDeleted: 0,
     };
     await client.query(dry ? "ROLLBACK" : "COMMIT");

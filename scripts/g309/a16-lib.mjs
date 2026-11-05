@@ -84,26 +84,29 @@ export function classifyCodeAtom(c, r) {
 }
 
 /**
- * reasoning_atoms row -> reasons. Source links are judged as the reader does
- * (reasoningAtomToCodeSection: sources.some(isIccSource)). The row's
- * edition_slug / code_ref go through isIccTitleAtom as codeBook / sectionNumber.
+ * reasoning_atoms row -> class. There is no code-book column; the row's real
+ * code-book field is `edition`, which every writer sets to "<code> <edition>"
+ * (lib/codewarm/src/targets.ts manifestEntryToTarget: `${entry.code} ${entry.edition}`,
+ * e.g. "IBC 2021", "FBC 2023", "TAS 2012"). Two disjoint classes:
+ *   icc-title        edition (as codeBook) or jurisdiction_key is an ICC title (isIccTitleAtom),
+ *                    or the jurisdiction is icc-model-code (isIccSource).
+ *   icc-source-link  edition is NOT an ICC title, but a sources[] link is ICC
+ *                    (isIccSource, as reasoningAtomToCodeSection judges it). TAS, FBC, FBCEB
+ *                    and A117.1 rows that were fetched via an iccsafe.org link land here.
+ * edition_slug and code_ref are NOT used as code-book or section signals; whether
+ * code_ref alone would have matched is returned as `codeRefOnlyTitle` (a diagnostic,
+ * never purged).
  */
 export function classifyReasoningAtom(c, r) {
-  const reasons = [];
   const sources = Array.isArray(r.sources) ? r.sources : [];
-  if (sources.some((s) => c.isIccSource(s)) || c.isIccSource({ jurisdictionKey: r.jurisdiction_key })) {
-    reasons.push("source");
-  }
-  if (
-    c.isIccTitleAtom({
-      codeBook: r.edition_slug,
-      sectionNumber: r.code_ref,
-      jurisdictionKey: r.jurisdiction_key,
-    })
-  ) {
-    reasons.push("title");
-  }
-  return reasons;
+  const title =
+    c.isIccTitleAtom({ codeBook: r.edition, jurisdictionKey: r.jurisdiction_key }) ||
+    c.isIccSource({ jurisdictionKey: r.jurisdiction_key });
+  const link = sources.some((s) => c.isIccSource(s));
+  const cls = title ? "icc-title" : link ? "icc-source-link" : null;
+  const codeRefOnlyTitle =
+    !cls && c.isIccTitleAtom({ sectionNumber: r.code_ref, codeBook: r.edition_slug });
+  return { cls, codeRefOnlyTitle, sourceAlso: title && link };
 }
 
 function leadToken(v) {
@@ -158,7 +161,7 @@ export async function connect(envVar) {
 }
 
 const CODE_COLS = ["body", "body_html", "embedding", "embedding_model", "embedded_at", "source_id", "metadata"];
-const REASONING_COLS = ["snippet", "reasoning", "sources", "code_ref", "edition_slug"];
+const REASONING_COLS = ["snippet", "reasoning", "sources", "code_ref", "edition", "edition_slug"];
 
 /** Throws Vacuous(...) when the schema is not the one this purge is for. */
 export class Vacuous extends Error {}
@@ -264,13 +267,15 @@ export async function buildManifest(client, expectDb) {
   const raTotal = Number((await client.query("SELECT count(*) AS n FROM reasoning_atoms")).rows[0].n);
   const raScan = (
     await client.query(
-      "SELECT id, jurisdiction_key, code_ref, edition_slug, sources FROM reasoning_atoms ORDER BY id",
+      "SELECT id, jurisdiction_key, code_ref, edition, edition_slug, sources FROM reasoning_atoms ORDER BY id",
     )
   ).rows;
   const raIcc = [];
+  let codeRefOnlyTitle = 0;
   for (const r of raScan) {
-    const reasons = classifyReasoningAtom(c, r);
-    if (reasons.length) raIcc.push({ id: r.id, reasons, token: leadToken(r.edition_slug) });
+    const k = classifyReasoningAtom(c, r);
+    if (k.codeRefOnlyTitle) codeRefOnlyTitle++;
+    if (k.cls) raIcc.push({ id: r.id, cls: k.cls, jur: r.jurisdiction_key, token: leadToken(r.edition) });
   }
   const raRows = [];
   for (const batch of chunks(raIcc, 500)) {
@@ -282,7 +287,7 @@ export async function buildManifest(client, expectDb) {
     for (const r of rows) {
       raRows.push({
         id: r.id,
-        reasons: meta.get(r.id).reasons,
+        class: meta.get(r.id).cls,
         hasText: r.snippet_len !== null || r.reasoning_len !== null,
         cols: { snippet: col(r.snippet_len, r.snippet_sha), reasoning: col(r.reasoning_len, r.reasoning_sha) },
       });
@@ -290,7 +295,21 @@ export async function buildManifest(client, expectDb) {
   }
   raRows.sort((a, b) => (a.id < b.id ? -1 : 1));
   const byEditionToken = {};
-  for (const b of raIcc) byEditionToken[b.token] = (byEditionToken[b.token] ?? 0) + 1;
+  const bump = (o, k) => (o[k] = (o[k] ?? 0) + 1);
+  const breakdown = { byClass: {}, byTextShape: {}, byClassAndShape: {}, byJurisdiction: {}, byClassAndEditionToken: {} };
+  const meta = new Map(raIcc.map((b) => [b.id, b]));
+  for (const b of raIcc) bump(byEditionToken, b.token);
+  for (const r of raRows) {
+    const m = meta.get(r.id);
+    const sn = r.cols.snippet.len !== null;
+    const re = r.cols.reasoning.len !== null;
+    const shape = sn && re ? "both" : sn ? "snippet-only" : re ? "reasoning-only" : "none";
+    bump(breakdown.byClass, r.class);
+    bump(breakdown.byTextShape, shape);
+    bump(breakdown.byClassAndShape, `${r.class}|${shape}`);
+    bump(breakdown.byJurisdiction, m.jur);
+    bump(breakdown.byClassAndEditionToken, `${r.class}|${m.token}`);
+  }
 
   const manifest = {
     manifestVersion: 1,
@@ -315,6 +334,8 @@ export async function buildManifest(client, expectDb) {
         iccTotal: raRows.length,
         iccWithText: raRows.filter((r) => r.hasText).length,
         byEditionToken,
+        breakdown,
+        codeRefOnlyTitleNotPurged: codeRefOnlyTitle,
         purgeColumns: ["snippet", "reasoning"],
         rows: raRows,
       },
@@ -332,4 +353,25 @@ export function totals(m) {
     icc: t.code_atoms.iccTotal + t.reasoning_atoms.iccTotal,
     withText: t.code_atoms.iccWithText + t.reasoning_atoms.iccWithText,
   };
+}
+
+/** reasoning_atoms purge scope: which text columns and which ICC classes an apply may touch. */
+export const REASONING_CLASSES = ["icc-title", "icc-source-link"];
+export function parseScope(scopeArg, classesArg) {
+  const cols = (scopeArg ?? "snippet").split(",").map((x) => x.trim());
+  if (!cols.length || cols.some((c) => c !== "snippet" && c !== "reasoning") || !cols.includes("snippet")) {
+    throw new Error('--scope must be "snippet" or "snippet,reasoning"');
+  }
+  const classes = (classesArg ?? REASONING_CLASSES.join(",")).split(",").map((x) => x.trim());
+  if (!classes.length || classes.some((c) => !REASONING_CLASSES.includes(c))) {
+    throw new Error(`--classes must be a list of: ${REASONING_CLASSES.join(", ")}`);
+  }
+  return { columns: [...new Set(cols)], classes: [...new Set(classes)] };
+}
+/** True when a manifest reasoning row holds text in a column this scope would purge. */
+export function reasoningRowInScopeWithText(row, scope) {
+  if (!scope.classes.includes(row.class)) return false;
+  return (
+    row.cols.snippet.len !== null || (scope.columns.includes("reasoning") && row.cols.reasoning.len !== null)
+  );
 }

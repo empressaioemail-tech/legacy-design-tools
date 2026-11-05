@@ -59,6 +59,13 @@ async function main() {
   console.log(`  code_atoms       total=${ca.total} icc=${ca.iccTotal} icc_with_text=${ca.iccWithText}`);
   console.log(`  reasoning_atoms  total=${ra.total} icc=${ra.iccTotal} icc_with_text=${ra.iccWithText}`);
   console.log(`  code_atoms ICC rows by code_book: ${JSON.stringify(ca.byCodeBook)}`);
+  const bd = ra.breakdown;
+  console.log(`  reasoning_atoms ICC rows by class: ${JSON.stringify(bd.byClass)}`);
+  console.log(`  reasoning_atoms ICC rows by text column: ${JSON.stringify(bd.byTextShape)}`);
+  console.log(`  reasoning_atoms class x text column: ${JSON.stringify(bd.byClassAndShape)}`);
+  console.log(`  reasoning_atoms class x edition token: ${JSON.stringify(bd.byClassAndEditionToken)}`);
+  console.log(`  reasoning_atoms ICC rows by city (jurisdiction_key): ${JSON.stringify(bd.byJurisdiction)}`);
+  console.log(`  reasoning_atoms matching only by code_ref (diagnostic, not purged): ${ra.codeRefOnlyTitleNotPurged}`);
   console.log(`  manifest=${args.out}`);
   console.log(`  manifestHash=${manifest.manifestHash}`);
   return t.withText > 0 ? EXIT.PRESENT : EXIT.OK_NONE;
