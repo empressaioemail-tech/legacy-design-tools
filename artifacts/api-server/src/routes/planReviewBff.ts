@@ -212,7 +212,6 @@ router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: R
       const resp = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1024,
-        temperature: 0,
         system:
           "Extract draft intake fields. Return ONLY valid JSON. Mark unverified fields.",
         messages: [

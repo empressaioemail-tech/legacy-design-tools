@@ -85,42 +85,50 @@ export function instrumentAnthropicClient(
   upstream: Anthropic,
 ): InstrumentedAnthropicClient {
   const captured: AnthropicCallRecord[] = [];
-  const originalCreate = upstream.messages.create.bind(upstream.messages);
+  // Wrap a create-style method so each non-streaming response records usage.
+  // Both `messages.create` and `beta.messages.create` are wrapped: the
+  // code-citing engines call the beta endpoint (server-side refusal
+  // fallback, G-309 A23), and spend must still be captured. We mutate the
+  // upstream client deliberately — passing the wrapped object to
+  // `generateFindings` as the `anthropicClient` option leaves all other
+  // SDK surfaces intact via direct delegation on the same object.
+  function wrap<A extends unknown[], R>(
+    target: { create: (...args: A) => R },
+  ): void {
+    const originalCreate = target.create.bind(target);
+    (target.create as unknown) = async function instrumentedCreate(
+      ...args: A
+    ): Promise<Awaited<R>> {
+      const t0 = Date.now();
+      const response = (await originalCreate(...args)) as Awaited<R>;
+      const durationMs = Date.now() - t0;
 
-  // Replace messages.create with an instrumented variant. We mutate
-  // the upstream client deliberately — passing the wrapped object to
-  // `generateFindings` as the `anthropicClient` option leaves all
-  // other SDK surfaces (`batches`, `models`, `beta`, ...) intact via
-  // direct delegation on the same object.
-  (upstream.messages.create as unknown) = async function instrumentedCreate(
-    ...args: Parameters<typeof originalCreate>
-  ): Promise<Awaited<ReturnType<typeof originalCreate>>> {
-    const t0 = Date.now();
-    const response = await originalCreate(...args);
-    const durationMs = Date.now() - t0;
+      // Streaming responses don't expose usage in the same shape — we
+      // only instrument non-streaming calls (which is what both engines
+      // use today). If a streaming path lands later, extend the
+      // instrumentation here rather than silently dropping spend.
+      const r = response as {
+        usage?: { input_tokens?: number; output_tokens?: number } | null;
+        model?: unknown;
+      };
+      if (r && typeof r === "object" && "usage" in r && r.usage) {
+        const model = typeof r.model === "string" ? r.model : "unknown";
+        const inputTokens = r.usage.input_tokens ?? 0;
+        const outputTokens = r.usage.output_tokens ?? 0;
+        captured.push({
+          durationMs,
+          inputTokens,
+          outputTokens,
+          model,
+          costUsd: computeCostUsd(model, inputTokens, outputTokens),
+        });
+      }
 
-    // Streaming responses don't expose usage in the same shape — we
-    // only instrument non-streaming calls (which is what both engines
-    // use today). If a streaming path lands later, extend the
-    // instrumentation here rather than silently dropping spend.
-    if ("usage" in response && response.usage) {
-      const model =
-        "model" in response && typeof response.model === "string"
-          ? response.model
-          : "unknown";
-      const inputTokens = response.usage.input_tokens ?? 0;
-      const outputTokens = response.usage.output_tokens ?? 0;
-      captured.push({
-        durationMs,
-        inputTokens,
-        outputTokens,
-        model,
-        costUsd: computeCostUsd(model, inputTokens, outputTokens),
-      });
-    }
-
-    return response;
-  };
+      return response;
+    };
+  }
+  wrap(upstream.messages);
+  wrap(upstream.beta.messages);
 
   return {
     client: upstream,

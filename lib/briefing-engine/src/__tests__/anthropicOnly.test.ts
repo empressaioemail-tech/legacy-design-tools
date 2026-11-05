@@ -48,7 +48,7 @@ describe("briefing: Anthropic is the only selectable provider", () => {
     const create = vi.fn(async () => ({
       content: [{ type: "text", text: "{}" }],
     }));
-    const client = { messages: { create } } as unknown as Anthropic;
+    const client = { beta: { messages: { create } } } as unknown as Anthropic;
     await generateBriefing(input, { mode: "anthropic", anthropicClient: client }).catch(
       () => undefined,
     );

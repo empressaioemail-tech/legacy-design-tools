@@ -50,7 +50,7 @@ describe("findings: Anthropic is the only selectable provider", () => {
     const create = vi.fn(async () => ({
       content: [{ type: "text", text: JSON.stringify({ findings: [] }) }],
     }));
-    const client = { messages: { create } } as unknown as Anthropic;
+    const client = { beta: { messages: { create } } } as unknown as Anthropic;
     await generateFindings(input, { mode: resolveFindingLlmMode(), anthropicClient: client });
     expect(create).toHaveBeenCalledTimes(1);
     const args = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
@@ -66,7 +66,7 @@ describe("findings: Anthropic is the only selectable provider", () => {
     const create = vi.fn(async () => ({
       content: [{ type: "text", text: JSON.stringify({ findings: [] }) }],
     }));
-    const client = { messages: { create } } as unknown as Anthropic;
+    const client = { beta: { messages: { create } } } as unknown as Anthropic;
     await generateFindings(input, {
       mode: "anthropic",
       anthropicClient: client,

@@ -39,7 +39,7 @@ const briefInput = {
 
 function stub(response: unknown) {
   const create = vi.fn(async () => response);
-  setBriefingLlmClient({ kind: "anthropic", client: { messages: { create } } as never });
+  setBriefingLlmClient({ kind: "anthropic", client: { beta: { messages: { create } } } as never });
   return create;
 }
 

@@ -17,7 +17,7 @@ const ok = JSON.stringify({ findings: [] });
 
 function clientWith(response: unknown) {
   const create = vi.fn(async () => response);
-  return { create, client: { messages: { create } } as unknown as Anthropic };
+  return { create, client: { beta: { messages: { create } } } as unknown as Anthropic };
 }
 
 describe("findings: Opus 5.5 rules", () => {
@@ -58,5 +58,28 @@ describe("findings: Opus 5.5 rules", () => {
     await expect(
       generateFindings(input, { mode: "anthropic", anthropicClient: client }),
     ).rejects.toMatchObject({ code: "anthropic_refusal" });
+  });
+
+  it("sends the server-side fallback beta and fallbacks param (G-309 A23)", async () => {
+    const { create, client } = clientWith({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: ok }],
+    });
+    await generateFindings(input, { mode: "anthropic", anthropicClient: client });
+    const a = (create.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(a.betas).toEqual(["server-side-fallback-2026-07-01"]);
+    expect(a.fallbacks).toBe("default");
+  });
+
+  it("a refusal after the fallback chain still throws the typed refusal error", async () => {
+    const { create, client } = clientWith({
+      model: "claude-fallback-model",
+      stop_reason: "refusal",
+      content: [{ type: "text", text: ok }],
+    });
+    await expect(
+      generateFindings(input, { mode: "anthropic", anthropicClient: client }),
+    ).rejects.toMatchObject({ code: "anthropic_refusal" });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

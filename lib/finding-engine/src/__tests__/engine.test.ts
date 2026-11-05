@@ -130,10 +130,12 @@ describe("generateFindings: validator + discard pipeline", () => {
    */
   function makeStubClient(json: string): Anthropic {
     return {
-      messages: {
-        create: vi.fn(async () => ({
-          content: [{ type: "text", text: json }],
-        })),
+      beta: {
+        messages: {
+          create: vi.fn(async () => ({
+            content: [{ type: "text", text: json }],
+          })),
+        },
       },
     } as unknown as Anthropic;
   }
