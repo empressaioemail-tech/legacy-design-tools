@@ -8,8 +8,6 @@
 import type { Request } from "express";
 import { sql, type SQL } from "drizzle-orm";
 import { codeAtoms, codeAtomSources } from "@workspace/db";
-import { isIccSource } from "@workspace/icc-notice";
-import { isIccTitleAtom } from "@workspace/codes/iccTitles";
 import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 
 export function hasSignedInUser(req: Request): boolean {
@@ -27,31 +25,5 @@ export function notIccAtomRowSql(): SQL {
   return sql`NOT COALESCE(${iccAtomRowSql()}, FALSE)`;
 }
 
-/**
- * G-309 (Exhibit D §6): true when a code_atoms row is an ICC atom, by source
- * (host, jurisdiction key, source name) or by ICC title identifier. ICC text is
- * never returned to anyone, signed-in users included.
- */
-export function isIccRow(r: {
-  sourceUrl?: string | null;
-  jurisdictionKey?: string | null;
-  sourceName?: string | null;
-  codeBook?: string | null;
-  sectionNumber?: string | null;
-  codeSource?: string | null;
-}): boolean {
-  return (
-    isIccSource({
-      sourceUrl: r.sourceUrl ?? undefined,
-      jurisdictionKey: r.jurisdictionKey ?? undefined,
-      sourceName: r.sourceName ?? undefined,
-      codeSource: r.codeSource ?? undefined,
-    }) ||
-    isIccTitleAtom({
-      codeBook: r.codeBook,
-      sectionNumber: r.sectionNumber,
-      jurisdictionKey: r.jurisdictionKey,
-      codeSource: r.codeSource,
-    })
-  );
-}
+/** Shared with the ingest guard: one definition of "is an ICC row". */
+export { isIccRow } from "@workspace/codes/iccTitles";

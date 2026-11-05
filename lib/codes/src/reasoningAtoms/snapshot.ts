@@ -1,8 +1,16 @@
 import { eq } from "drizzle-orm";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
+import {
+  guardReasoningText,
+  logIccTextRefused,
+  type IccGuardLogger,
+} from "../iccIngestGuard";
 
 export interface ReasoningVerificationSnapshotRow {
   id: string;
+  /** Identity for the G-309 ingest guard on restore (absent in old snapshots). */
+  jurisdictionKey?: string;
+  codeRef?: string;
   verificationState: string;
   snippet: string | null;
   reasoning: string | null;
@@ -29,6 +37,8 @@ export async function snapshotReasoningVerification(
     capturedAt: new Date().toISOString(),
     rows: rows.map((row) => ({
       id: row.id,
+      jurisdictionKey: row.jurisdictionKey,
+      codeRef: row.codeRef,
       verificationState: row.verificationState,
       snippet: row.snippet,
       reasoning: row.reasoning,
@@ -40,16 +50,28 @@ export async function snapshotReasoningVerification(
 
 export async function rollbackReasoningVerification(
   snapshot: ReasoningVerificationSnapshot,
+  logger?: IccGuardLogger,
 ): Promise<number> {
   let restored = 0;
+  let refused = 0;
   const now = new Date();
   for (const row of snapshot.rows) {
+    // G-309: a snapshot taken before the ingest guard may carry ICC text.
+    const g = guardReasoningText(
+      { snippet: row.snippet, reasoning: row.reasoning },
+      {
+        jurisdictionKey: row.jurisdictionKey ?? snapshot.jurisdictionKey,
+        codeRef: row.codeRef,
+        sources: row.sources,
+      },
+    );
+    if (g.refused && (row.snippet != null || row.reasoning != null)) refused++;
     const [updated] = await db
       .update(reasoningAtoms)
       .set({
         verificationState: row.verificationState,
-        snippet: row.snippet,
-        reasoning: row.reasoning,
+        snippet: g.values.snippet,
+        reasoning: g.values.reasoning,
         sources: row.sources,
         assertedConfidence: row.assertedConfidence,
         updatedAt: now,
@@ -58,6 +80,7 @@ export async function rollbackReasoningVerification(
       .returning({ id: reasoningAtoms.id });
     if (updated) restored += 1;
   }
+  logIccTextRefused(logger, "snapshot.rollbackReasoningVerification", refused);
   return restored;
 }
 

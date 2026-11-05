@@ -7,6 +7,8 @@
  * apart from quoted ICC text, so the whole ICC-title atom is excluded.
  */
 
+import { isIccSource } from "@workspace/icc-notice";
+
 /** Leading alphabetic token of an ICC-published title (upper-case). */
 const ICC_TITLE_TOKENS = new Set([
   "IBC", "IRC", "IFC", "IPMC", "IECC", "IPC", "IMC", "IFGC", "IEBC",
@@ -37,5 +39,34 @@ export function isIccTitleAtom(a: {
     isIccTitleIdentifier(a.codeBook) ||
     isIccTitleIdentifier(a.sectionNumber) ||
     isIccTitleIdentifier(a.jurisdictionKey)
+  );
+}
+
+/**
+ * G-309 (Exhibit D §6): true when a code_atoms row is an ICC atom, by source
+ * (host, jurisdiction key, source name) or by ICC title identifier. ICC text is
+ * never returned to anyone, and never written, for such a row.
+ */
+export function isIccRow(r: {
+  sourceUrl?: string | null;
+  jurisdictionKey?: string | null;
+  sourceName?: string | null;
+  codeBook?: string | null;
+  sectionNumber?: string | null;
+  codeSource?: string | null;
+}): boolean {
+  return (
+    isIccSource({
+      sourceUrl: r.sourceUrl ?? undefined,
+      jurisdictionKey: r.jurisdictionKey ?? undefined,
+      sourceName: r.sourceName ?? undefined,
+      codeSource: r.codeSource ?? undefined,
+    }) ||
+    isIccTitleAtom({
+      codeBook: r.codeBook,
+      sectionNumber: r.sectionNumber,
+      jurisdictionKey: r.jurisdictionKey,
+      codeSource: r.codeSource,
+    })
   );
 }
