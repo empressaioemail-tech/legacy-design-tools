@@ -17,10 +17,17 @@ describe("SOURCE_REGISTRY (seed data)", () => {
     expect(() => assertValidRegistry()).not.toThrow();
   });
 
-  it("has exactly the two seeded providers (txgio.address-points, txgio.parcels)", () => {
+  it("has the two seeded providers plus one per TxGIO parcel release", () => {
     expect(SOURCE_REGISTRY.map((e) => e.provider).sort()).toEqual([
       "txgio.address-points",
       "txgio.parcels",
+      "txgio.parcels.2019",
+      "txgio.parcels.2021",
+      "txgio.parcels.2022",
+      "txgio.parcels.2023",
+      "txgio.parcels.2024",
+      "txgio.parcels.2025",
+      "txgio.parcels.2026",
     ]);
   });
 
