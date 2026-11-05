@@ -4814,7 +4814,15 @@ export const ListJurisdictionAtomsResponseItem = zod.object({
   sourceUrl: zod.string(),
   embedded: zod.boolean(),
   fetchedAt: zod.coerce.date(),
-  bodyPreview: zod.string(),
+  bodyPreview: zod
+    .string()
+    .optional()
+    .describe("Absent when `citationOnly` is true."),
+  citationOnly: zod
+    .boolean()
+    .describe(
+      "True when the server withholds the section text for this atom (ICC\ntitle atoms: citation only, for every caller). When true, `body`,\n`bodyPreview` and `bodyHtml` are absent. Always sent by the server.\n",
+    ),
 });
 export const ListJurisdictionAtomsResponse = zod.array(
   ListJurisdictionAtomsResponseItem,
@@ -4888,7 +4896,15 @@ export const ListCodeAtomsResponse = zod
         sourceUrl: zod.string(),
         embedded: zod.boolean(),
         fetchedAt: zod.coerce.date(),
-        bodyPreview: zod.string(),
+        bodyPreview: zod
+          .string()
+          .optional()
+          .describe("Absent when `citationOnly` is true."),
+        citationOnly: zod
+          .boolean()
+          .describe(
+            "True when the server withholds the section text for this atom (ICC\ntitle atoms: citation only, for every caller). When true, `body`,\n`bodyPreview` and `bodyHtml` are absent. Always sent by the server.\n",
+          ),
       }),
     ),
   })
@@ -4915,12 +4931,26 @@ export const GetCodeAtomResponse = zod
     sourceUrl: zod.string(),
     embedded: zod.boolean(),
     fetchedAt: zod.coerce.date(),
-    bodyPreview: zod.string(),
+    bodyPreview: zod
+      .string()
+      .optional()
+      .describe("Absent when `citationOnly` is true."),
+    citationOnly: zod
+      .boolean()
+      .describe(
+        "True when the server withholds the section text for this atom (ICC\ntitle atoms: citation only, for every caller). When true, `body`,\n`bodyPreview` and `bodyHtml` are absent. Always sent by the server.\n",
+      ),
   })
   .and(
     zod.object({
-      body: zod.string(),
-      bodyHtml: zod.string().nullable(),
+      body: zod
+        .string()
+        .optional()
+        .describe("Absent when `citationOnly` is true."),
+      bodyHtml: zod
+        .string()
+        .nullish()
+        .describe("Absent when `citationOnly` is true."),
       parentSection: zod.string().nullable(),
       embeddingModel: zod.string().nullable(),
       metadata: zod.record(zod.string(), zod.unknown()).nullable(),
@@ -5119,7 +5149,15 @@ export const RetrieveAtomsProbeResponse = zod.object({
         sectionTitle: zod.string().nullable(),
         bodyPreview: zod
           .string()
-          .describe("Server-truncated body, ~120 chars at word boundary."),
+          .optional()
+          .describe(
+            "Server-truncated body, ~120 chars at word boundary. Absent when\n`citationOnly` is true.\n",
+          ),
+        citationOnly: zod
+          .boolean()
+          .describe(
+            "True when the server withholds the section text for this atom (ICC\ntitle atoms: citation only, for every caller). When true, `body`,\n`bodyPreview` and `bodyHtml` are absent. Always sent by the server.\n",
+          ),
         similarity: zod
           .number()
           .describe(

@@ -74,6 +74,7 @@ import peAccountRouter from "./peAccount";
 import peWatchingRouter from "./peWatching";
 import propertyExplorerRouter from "./propertyExplorer";
 import affiliatesRouter from "./affiliates";
+import liveEasementGisCheckRouter from "./liveEasementGisCheck";
 import planReviewProxyRouter from "./planReviewProxy";
 import { internalQaRunStateRouter } from "./operatorRunState";
 import peHelpRouter from "./peHelp";
@@ -88,6 +89,8 @@ router.use(peAccountRouter);
 router.use(peWatchingRouter);
 router.use(propertyExplorerRouter);
 router.use(affiliatesRouter);
+// Read-only, service-token: confirms the live easement reader returns features (no write).
+router.use(liveEasementGisCheckRouter);
 // P-118 — ungated Help widget chat. Deliberately its OWN router, mounted at
 // the top level (never under brokerageV1), so it can never inherit that
 // surface's session/entitlement/install-id gating by accident.

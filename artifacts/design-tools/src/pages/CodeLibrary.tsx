@@ -616,9 +616,15 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
                     <div className="sc-meta opacity-60 mt-1">
                       {a.codeBook} · {a.edition} · {a.sourceName}
                     </div>
-                    <div className="sc-meta opacity-50 mt-1 line-clamp-2">
-                      {a.bodyPreview}
-                    </div>
+                    {a.bodyPreview ? (
+                      <div className="sc-meta opacity-50 mt-1 line-clamp-2">
+                        {a.bodyPreview}
+                      </div>
+                    ) : a.citationOnly ? (
+                      <div className="sc-meta opacity-50 mt-1">
+                        Citation only
+                      </div>
+                    ) : null}
                   </button>
                 );
               })}
@@ -665,6 +671,7 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
                     Open source <ExternalLink size={11} />
                   </a>
                 </div>
+                {atomDetailQuery.data.body ? (
                 <pre
                   data-testid="atom-body"
                   className="sc-scroll"
@@ -683,6 +690,23 @@ export function CodeLibrary({ embedded = false }: { embedded?: boolean }) {
                 >
                   {atomDetailQuery.data.body}
                 </pre>
+                ) : atomDetailQuery.data.citationOnly ? (
+                  <div
+                    data-testid="atom-citation-only"
+                    className="flex flex-col gap-1"
+                  >
+                    <div className="sc-medium">Citation only</div>
+                    <a
+                      href={atomDetailQuery.data.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="sc-meta inline-flex items-center gap-1"
+                      style={{ color: "var(--cyan)" }}
+                    >
+                      ICC Digital Codes <ExternalLink size={11} />
+                    </a>
+                  </div>
+                ) : null}
                 <div className="sc-meta opacity-50">
                   atom id: {atomDetailQuery.data.id}
                 </div>

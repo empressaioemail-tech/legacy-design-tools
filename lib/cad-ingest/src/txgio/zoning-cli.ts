@@ -15,8 +15,14 @@
  * Usage:
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- \
  *     --city=georgetown-tx \
- *     [--limit=N] [--dry-run] [--prop-ids-file=<path>]
+ *     [--limit=N] [--dry-run] [--prop-ids-file=<path>] [--clear-stale]
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- --list
+ *
+ * `--clear-stale` (whole-county runs only; refused with --limit or
+ * --prop-ids-file): after the stamp, rows still carrying this city's key that
+ * the current layer did not stamp go back to NULL. Without it a re-stamp only
+ * ever adds, and a parcel the city's layer has since left out keeps its old
+ * code. With --dry-run it prints the count and a sample and writes nothing.
  *
  * DATABASE_URL must point at the target Postgres unless --dry-run. The
  * `zoning_district` column (migration 0059) and `zoning_district_interim`
@@ -344,6 +350,7 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       "prop-ids-file": { type: "string" },
+      "clear-stale": { type: "boolean", default: false },
     },
   });
 
@@ -366,7 +373,7 @@ async function main(): Promise<void> {
   if (!values.city) {
     fail(
       "usage: zoning-stamp --city=<key|name|countyFips> [--limit=N] " +
-        "[--dry-run] [--prop-ids-file=<path>] | zoning-stamp --list",
+        "[--dry-run] [--prop-ids-file=<path>] [--clear-stale] | zoning-stamp --list",
     );
   }
   const cfg = resolveZoningLayer(values.city);
@@ -501,6 +508,7 @@ async function main(): Promise<void> {
       // Layers with a geographic sub-area field (Horseshoe Bay SUBDIVISION) also write
       // txgio_parcel.zoning_subarea -- migration 0113 must be applied before a non-dry run.
       writeSubarea: Boolean(cfg.subareaField),
+      clearStale: values["clear-stale"] ?? false,
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
@@ -595,6 +603,15 @@ async function main(): Promise<void> {
       "unrecognised / null / no-district-on-layer / skipped-no-account)",
   );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
+  if (summary.staleFeatures !== undefined) {
+    log(
+      `stale stamps:     ${summary.staleFeatures} features still carry ${cfg.cityKey} but no current polygon holds them; ` +
+        `${dryRun ? "would clear (dry-run)" : `cleared ${summary.staleRowsCleared ?? 0} rows`}`,
+    );
+    if ((summary.staleSample ?? []).length > 0) {
+      log(`  sample (prop_id=old code): ${(summary.staleSample ?? []).join(", ")}`);
+    }
+  }
   log(
     `run record:       ${
       runRecordId !== undefined

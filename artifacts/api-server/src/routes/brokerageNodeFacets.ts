@@ -294,6 +294,7 @@ import { enrichFacetsResponseWithRegistry } from "@workspace/instrument-registry
 import {
   authenticatedBrokerageUserId,
   extractBrokerageApiKey,
+  isIdentifiedUserSession,
 } from "../middlewares/brokerageAuth";
 import { verifySessionToken } from "../lib/sessionToken";
 import {
@@ -355,7 +356,7 @@ function applyExistingIdentifiedBrokerageSession(req: Request): void {
   } catch {
     return;
   }
-  if (verified.ok && verified.session.requestor?.kind === "user") {
+  if (verified.ok && isIdentifiedUserSession(verified.session)) {
     req.session = verified.session;
     req.brokerageAuth = { tier: "user" };
   }

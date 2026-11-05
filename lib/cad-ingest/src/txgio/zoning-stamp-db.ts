@@ -280,6 +280,14 @@ export interface ZoningStampSummary {
    */
   rowsUpdated: number;
   /**
+   * Only with `clearStale`: distinct features still carrying this cityKey
+   * that this run did not stamp, a sample of them as `prop_id=old code`, and
+   * the rows cleared (0 on a dry run).
+   */
+  staleFeatures?: number;
+  staleSample?: string[];
+  staleRowsCleared?: number;
+  /**
    * Only when the run writes a sub-area (`writeSubarea`, a layer with `subareaField`): stamped
    * rows by the sub-area value written to `txgio_parcel.zoning_subarea` ("(blank)" for none).
    */
@@ -502,6 +510,43 @@ async function flushNoDistrictBatch(
   return res?.rowCount ?? 0;
 }
 
+/** How many stale rows `clearStale` lists in the summary. */
+export const STALE_SAMPLE_SIZE = 50;
+
+/**
+ * Clear one batch of stale stamps (`clearStale`): the zoning columns go
+ * back to NULL (zoning_subarea only for a layer that writes it), which is
+ * what an unstamped row holds. The cityKey guard is
+ * repeated in the WHERE so a row another city stamped since the read is left
+ * alone. Returns rows updated.
+ */
+async function clearStaleBatch(
+  db: ZoningStampDb,
+  countyFips: string,
+  cityKey: string,
+  featureIndexes: number[],
+  clearSubarea: boolean,
+): Promise<number> {
+  if (featureIndexes.length === 0) return 0;
+  // zoning_subarea (migration 0113) is named only for a layer that writes it,
+  // the same rule flushBatch follows, so no other city's run names the column.
+  const subarea = clearSubarea ? sql`, zoning_subarea = NULL` : sql``;
+  const stmt = sql`
+    UPDATE ${txgioParcel}
+       SET zoning_district = NULL,
+           zoning_jurisdiction = NULL,
+           zoning_district_interim = NULL${subarea}
+     WHERE county_fips = ${countyFips}
+       AND zoning_jurisdiction = ${cityKey}
+       AND feature_index IN (${sql.join(
+         featureIndexes.map((i) => sql`${i}::integer`),
+         sql`, `,
+       )})
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+  return res?.rowCount ?? 0;
+}
+
 /**
  * Stamp one county's parcels from the zoning index. When `dryRun`, does the
  * PIP + histogram but writes nothing (still exit-bounded). `onProgress`
@@ -555,6 +600,15 @@ export async function stampCountyZoning(opts: {
    * byte-identical to before and never names the column.
    */
   writeSubarea?: boolean;
+  /**
+   * Opt-in (default false, so every existing run is unchanged). After the
+   * stamp, clear the zoning columns on rows still carrying THIS cityKey that
+   * the run did not stamp: the city's current layer no longer puts them in a
+   * district. Whole-county runs only (refused with `limit` or `propIds`, which
+   * read a subset and would clear everything outside it). With `dryRun` it
+   * counts and samples what it would clear and writes nothing.
+   */
+  clearStale?: boolean;
   onProgress?: (done: number, matched: number) => void;
   progressEvery?: number;
 }): Promise<ZoningStampSummary> {
@@ -566,6 +620,14 @@ export async function stampCountyZoning(opts: {
   }
 
   const scoped = propIds !== undefined && propIds.size > 0;
+  if (opts.clearStale && (scoped || limit !== undefined)) {
+    throw new Error(
+      "clearStale needs a whole-county run: a --limit or --prop-ids-file run reads a subset and would clear every stamp outside it",
+    );
+  }
+  if (opts.clearStale && index.length === 0) {
+    throw new Error("clearStale refused: the zoning index is empty, so every stamp for this city would be cleared");
+  }
 
   // Distinct features for the county (geometry identical across a feature's
   // per-cell duplicate rows), keyed by feature_index. `prop_id` is selected on
@@ -632,6 +694,9 @@ export async function stampCountyZoning(opts: {
   // entire stamp if the process dies after PIP but before a single end-of-
   // run write. dryRun collects for the histogram only and writes nothing.
   const matches: StampPair[] = [];
+  // Every feature this run wrote a code to (matches is flushed and emptied in
+  // batches, so it cannot answer this at the end). Read by `clearStale`.
+  const stampedFeatures = new Set<number>();
   let rowsUpdated = 0;
   for (const p of parcels) {
     if (limit !== undefined && summary.parcelsRead >= limit) break;
@@ -771,6 +836,7 @@ export async function stampCountyZoning(opts: {
       // row. Counted apart so a base-district count is never inflated.
       summary.parcelsUnrecognised += 1;
       bump(summary.unrecognisedHistogram, hit.code);
+      stampedFeatures.add(p.featureIndex);
       matches.push({
         featureIndex: p.featureIndex,
         code: hit.code,
@@ -824,6 +890,7 @@ export async function stampCountyZoning(opts: {
           bump(summary.overlayHistogram, overlay);
         }
       }
+      stampedFeatures.add(p.featureIndex);
       matches.push({
         featureIndex: p.featureIndex,
         code: hit.code,
@@ -857,6 +924,33 @@ export async function stampCountyZoning(opts: {
   }
   if (!dryRun && noDistrictFeatureIndexes.length > 0) {
     rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
+  }
+  if (opts.clearStale) {
+    // Rows a PRIOR run stamped for THIS city that this run's layer no longer
+    // places in any district. Without this a re-stamp only ever adds: a
+    // parcel the city's current layer leaves out keeps an old code forever
+    // (measured 2026-11-05: 48021 prop 28413 still stamped IND, 61247 and
+    // 65702 still stamped PDD, none of them inside a current polygon).
+    // Scoped to zoning_jurisdiction = cityKey, so another city's stamp in a
+    // multi-city county is never touched.
+    const res = (await db.execute(sql`
+      SELECT DISTINCT feature_index, prop_id, zoning_district
+        FROM ${txgioParcel}
+       WHERE county_fips = ${countyFips}
+         AND zoning_jurisdiction = ${cityKey}
+    `)) as unknown as { rows: { feature_index: number; prop_id: string | null; zoning_district: string | null }[] };
+    const stale = (res?.rows ?? []).filter((r) => !stampedFeatures.has(Number(r.feature_index)));
+    const staleFeatures = [...new Set(stale.map((r) => Number(r.feature_index)))];
+    summary.staleFeatures = staleFeatures.length;
+    summary.staleSample = stale
+      .slice(0, STALE_SAMPLE_SIZE)
+      .map((r) => `${r.prop_id ?? "(no prop_id)"}=${r.zoning_district ?? "(null)"}`);
+    summary.staleRowsCleared = 0;
+    if (!dryRun) {
+      for (const chunk of chunkPairs(staleFeatures, ZONING_STAMP_BATCH_SIZE)) {
+        summary.staleRowsCleared += await clearStaleBatch(db, countyFips, cityKey, chunk, writeSubarea);
+      }
+    }
   }
   summary.rowsUpdated = rowsUpdated;
   summary.accountsRead = accounts.size;

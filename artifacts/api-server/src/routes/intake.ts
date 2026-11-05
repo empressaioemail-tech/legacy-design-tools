@@ -7,6 +7,16 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { requireServiceTokenOrSession } from "../middlewares/serviceAuth";
 import { logger } from "../lib/logger";
+import {
+  CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+  isAnthropicTruncated,
+  textFromAnthropicContent,
+} from "../lib/codeCitingModel";
 
 const router: IRouter = Router();
 
@@ -52,9 +62,12 @@ router.post("/intake/parse", async (req: Request, res: Response) => {
     "(no content)";
 
   try {
-    const resp = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+    const resp = await anthropic.beta.messages.create({
+      model: CODE_CITING_ANTHROPIC_MODEL,
+      betas: CODE_CITING_FALLBACK_BETAS,
+      fallbacks: CODE_CITING_FALLBACKS,
+      max_tokens: CODE_CITING_MAX_TOKENS,
+      output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
       system: [
         "You extract draft project intake fields from architect client material.",
         "Return ONLY valid JSON matching the schema.",
@@ -89,9 +102,13 @@ router.post("/intake/parse", async (req: Request, res: Response) => {
       ],
     });
 
-    const textBlock = resp.content.find((b) => b.type === "text");
-    const text =
-      textBlock && textBlock.type === "text" ? textBlock.text.trim() : "";
+    // Refusal and max_tokens are failures: never parse partial output.
+    if (isAnthropicRefusal(resp) || isAnthropicTruncated(resp)) {
+      logger.warn({ stopReason: resp.stop_reason, mode }, "intake parse: model did not finish");
+      res.status(502).json({ error: "intake_parse_invalid_response" });
+      return;
+    }
+    const text = textFromAnthropicContent(resp.content).trim();
     const jsonStart = text.indexOf("{");
     const jsonEnd = text.lastIndexOf("}");
     if (jsonStart < 0 || jsonEnd <= jsonStart) {

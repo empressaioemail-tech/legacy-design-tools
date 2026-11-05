@@ -17,10 +17,7 @@ import {
   readParcelAnchor,
   readParcelAnchorsForBatch,
 } from "./parcel-anchor.js";
-import {
-  mapGetSmartSiteNonOk,
-  normalizeGetSmartSiteResponseText,
-} from "./tool-honesty.js";
+import { normalizeGetSmartSiteResponseText } from "./tool-honesty.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -50,12 +47,41 @@ function parcelIdsFromMatched(matched: unknown): string[] {
   return out;
 }
 
-function withMapNote(body: Record<string, unknown>, reason: string): Record<string, unknown> {
+function withMapNote(
+  body: Record<string, unknown>,
+  reason: string,
+  httpStatus?: number,
+): Record<string, unknown> {
   return {
     ...body,
     mapPanelNote: mapGroundReasonWords(reason),
     mapPanelReason: reason,
+    ...(httpStatus !== undefined ? { mapPanelHttpStatus: httpStatus } : {}),
   };
+}
+
+type BriefWire =
+  | { ok: true; text: string }
+  | { ok: false; reason: string; httpStatus?: number };
+
+/**
+ * The brief route is gated (requirePePaidOrPropertyUnlocked). Its 402
+ * upgrade_required is a declared plan refusal, not a load failure, and the
+ * panel must say so instead of "could not be loaded".
+ */
+function isUpgradeRequired(status: number, bodyText: string): boolean {
+  if (status !== 402) return false;
+  try {
+    const parsed = JSON.parse(bodyText) as { error?: unknown } | null;
+    return parsed !== null && typeof parsed === "object" && parsed.error === "upgrade_required";
+  } catch {
+    return false;
+  }
+}
+
+/** mapWiring for a failed wire: "refused" for a declared plan refusal, "failed" otherwise. */
+function wiringState(reason: string): "refused" | "failed" {
+  return reason === "map_upgrade_required" ? "refused" : "failed";
 }
 
 async function fetchNodeBriefWire(
@@ -63,7 +89,7 @@ async function fetchNodeBriefWire(
   userId: string,
   ids: string[],
   canSeeOwner: boolean,
-): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
+): Promise<BriefWire> {
   if (ids.length === 0) return { ok: false, reason: "map_no_parcel_hits" };
   const capIds = ids.slice(0, LIST_NODE_DEPTH_CAP);
   // Multi-hit find_parcel (street/radius) map wiring reads stub depth so the
@@ -80,9 +106,8 @@ async function fetchNodeBriefWire(
   });
   const body = await res.text();
   if (!res.ok) {
-    const declared = mapGetSmartSiteNonOk(res.status, body, capIds);
-    if (declared) return { ok: false, reason: "map_wiring_failed" };
-    return { ok: false, reason: "map_wiring_failed" };
+    if (isUpgradeRequired(res.status, body)) return { ok: false, reason: "map_upgrade_required" };
+    return { ok: false, reason: "map_wiring_failed", httpStatus: res.status };
   }
   const normalized = normalizeGetSmartSiteResponseText(
     body,
@@ -129,7 +154,7 @@ export async function wireFindParcelForMap(
 
   const wired = await fetchNodeBriefWire(config, userId, ids, canSeeOwner);
   if (!wired.ok) {
-    const merged = withMapNote({ ...rec, mapWiring: "failed" }, wired.reason);
+    const merged = withMapNote({ ...rec, mapWiring: wiringState(wired.reason) }, wired.reason, wired.httpStatus);
     const view = cardViewFromToolPayload("find_parcel", merged);
     return injectCardContract(JSON.stringify(merged), view).text;
   }
@@ -172,7 +197,7 @@ export async function wireFindParcelsForMap(
 
   const wired = await fetchNodeBriefWire(config, userId, ids, canSeeOwner);
   if (!wired.ok) {
-    const merged = withMapNote({ ...rec, mapWiring: "failed" }, wired.reason);
+    const merged = withMapNote({ ...rec, mapWiring: wiringState(wired.reason) }, wired.reason, wired.httpStatus);
     const view = cardViewFromToolPayload("find_parcels", merged);
     return injectCardContract(JSON.stringify(merged), view).text;
   }
@@ -259,11 +284,12 @@ export async function wireFindNearestParcelsForMap(
       withMapNote(
         {
           ...rec,
-          mapWiring: "failed",
+          mapWiring: wiringState(wired.reason),
           nearestNeighbors: rec.parcels,
           nearestSubjectParcelNodeId: rec.subjectParcelNodeId,
         },
         wired.reason,
+        wired.httpStatus,
       ),
     ) as Record<string, unknown>;
     const view = cardViewFromToolPayload("find_nearest_parcels", merged);
