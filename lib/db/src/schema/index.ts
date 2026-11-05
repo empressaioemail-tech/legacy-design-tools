@@ -77,6 +77,7 @@ export * from "./cadPropertyVintageCrosswalk";
 export * from "./cadPropertyVintageFallback";
 export * from "./countyFacetCoverage";
 export * from "./txgioParcel";
+export * from "./txgioParcelVintage";
 export * from "./txgioAddress";
 export * from "./txCityBoundary";
 export * from "./txEtjBoundary";
