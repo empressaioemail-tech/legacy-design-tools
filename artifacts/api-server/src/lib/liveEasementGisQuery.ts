@@ -162,15 +162,21 @@ export function esriPolygonFromGeojson(
   return rings.length > 0 ? { rings, spatialReference: { wkid: 4326 } } : null;
 }
 
-function arcgisIntersectQueryUrl(
+/**
+ * The intersect query is POSTed as a form (fixed 2026-11-05). By GET, services7.arcgis.com answered
+ * 404 for an ordinary Bastrop parcel (60 vertices, a 2,299-character URL even with coordinates
+ * rounded) while the same query by POST returned its 6 easements. ArcGIS REST accepts every query
+ * parameter by POST, and the body has no URL length ceiling.
+ */
+function arcgisIntersectQuery(
   layerUrl: string,
   esriGeometry: { rings: Ring[]; spatialReference: { wkid: 4326 } },
   resultOffset = 0,
-): string {
+): { url: string; body: URLSearchParams } {
   const base = layerUrl.replace(/\/$/, "");
-  return (
-    `${base}/query?` +
-    new URLSearchParams({
+  return {
+    url: `${base}/query`,
+    body: new URLSearchParams({
       // URLSearchParams encodes once; a second encodeURIComponent made ArcGIS refuse the query.
       geometry: JSON.stringify(esriGeometry),
       geometryType: "esriGeometryPolygon",
@@ -181,8 +187,8 @@ function arcgisIntersectQueryUrl(
       outFields: "*",
       resultOffset: String(resultOffset),
       f: "geojson",
-    })
-  );
+    }),
+  };
 }
 
 function pickField(
@@ -293,9 +299,14 @@ export async function queryLiveEasementGisForParcel(args: {
     let pages = 0;
     let failure: string | null = null;
     for (let offset = 0; ; ) {
-      const queryUrl = arcgisIntersectQueryUrl(spec.layerUrl, esriGeometry, offset);
-      if (!firstQueryUrl) firstQueryUrl = queryUrl;
-      const res = await fetch(queryUrl);
+      const query = arcgisIntersectQuery(spec.layerUrl, esriGeometry, offset);
+      // The audit keeps a readable record of the request: the endpoint, then the form body.
+      if (!firstQueryUrl) firstQueryUrl = `POST ${query.url} ${query.body.toString()}`;
+      const res = await fetch(query.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: query.body,
+      });
       if (!res.ok) {
         failure = `http_${res.status}`;
         break;
