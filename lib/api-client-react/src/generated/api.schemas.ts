@@ -3647,8 +3647,15 @@ export interface RetrievalProbeResultItem {
   /** Display ref — sectionNumber ?? sectionTitle ?? codeBook. */
   codeRef: string;
   sectionTitle: string | null;
-  /** Server-truncated body, ~120 chars at word boundary. */
-  bodyPreview: string;
+  /** Server-truncated body, ~120 chars at word boundary. Absent when
+`citationOnly` is true.
+ */
+  bodyPreview?: string;
+  /** True when the server withholds the section text for this atom (ICC
+title atoms: citation only, for every caller). When true, `body`,
+`bodyPreview` and `bodyHtml` are absent. Always sent by the server.
+ */
+  citationOnly: boolean;
   /** Cosine similarity (vector path) or bag-of-words score (lexical
 fallback). Vector scores are in [0, 1]; lexical scores are raw
 integer match counts. The probe rounds vector scores to 4 decimal
@@ -3730,7 +3737,13 @@ export interface CodeAtomSummary {
   sourceUrl: string;
   embedded: boolean;
   fetchedAt: string;
-  bodyPreview: string;
+  /** Absent when `citationOnly` is true. */
+  bodyPreview?: string;
+  /** True when the server withholds the section text for this atom (ICC
+title atoms: citation only, for every caller). When true, `body`,
+`bodyPreview` and `bodyHtml` are absent. Always sent by the server.
+ */
+  citationOnly: boolean;
 }
 
 /**
@@ -3751,8 +3764,10 @@ export interface CodeAtomListResponse {
 export type CodeAtomDetailMetadata = { [key: string]: unknown } | null;
 
 export type CodeAtomDetail = CodeAtomSummary & {
-  body: string;
-  bodyHtml: string | null;
+  /** Absent when `citationOnly` is true. */
+  body?: string;
+  /** Absent when `citationOnly` is true. */
+  bodyHtml?: string | null;
   parentSection: string | null;
   embeddingModel: string | null;
   metadata: CodeAtomDetailMetadata;

@@ -70,7 +70,8 @@ function makeResults(
   atomId: string;
   codeRef: string;
   sectionTitle: string | null;
-  bodyPreview: string;
+  bodyPreview?: string;
+  citationOnly?: boolean;
   similarity: number;
   sourceBook: string;
   sourceUrl: string | null;
@@ -254,5 +255,40 @@ describe("DevAtomsProbe", () => {
     // Run button is enabled — proves the hydrated state actually feeds
     // the gating logic, not just the inputs visually.
     expect(screen.getByTestId("probe-run-button")).not.toBeDisabled();
+  });
+
+  it("renders a citation-only ICC result as 'Citation only', never an empty cell", async () => {
+    const rows = makeResults([0.55, 0.42]);
+    const icc = rows[0]!;
+    delete icc.bodyPreview;
+    icc.citationOnly = true;
+    icc.sourceUrl = "https://codes.iccsafe.org/content/IRC2021P1/chapter-3";
+    retrieveAtomsProbeMock.mockResolvedValueOnce({
+      resolvedJurisdiction: "grand_county_ut",
+      resolvedFromEngagement: true,
+      query: "setbacks",
+      queryEmbedding: { model: "m", dimension: 3, available: true },
+      inclusionThreshold: 0.35,
+      results: rows,
+      assembledPromptBlock: "",
+    });
+    renderWithClient(<DevAtomsProbe />);
+    fireEvent.change(screen.getByTestId("probe-engagement-select"), {
+      target: { value: "eng-1" },
+    });
+    fireEvent.change(screen.getByTestId("probe-query-textarea"), {
+      target: { value: "setbacks" },
+    });
+    fireEvent.click(screen.getByTestId("probe-run-button"));
+    await waitFor(() => {
+      expect(screen.getAllByTestId("probe-result-row").length).toBe(2);
+    });
+    const [iccRow, cityRow] = screen.getAllByTestId("probe-result-row");
+    expect(iccRow).toHaveTextContent("R300");
+    expect(iccRow).toHaveTextContent("Section 1");
+    expect(iccRow).toHaveTextContent("Citation only");
+    expect(iccRow!.querySelector('a[href*="iccsafe.org"]')).not.toBeNull();
+    expect(cityRow).toHaveTextContent("Body of section 2.");
+    expect(cityRow).not.toHaveTextContent("Citation only");
   });
 });
