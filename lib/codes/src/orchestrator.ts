@@ -45,6 +45,7 @@ import {
 } from "./jurisdictions";
 import { embedTexts, EMBEDDING_MODEL } from "./embeddings";
 import { contentHash } from "./contentHash";
+import { guardCodeAtomText, logIccTextRefused } from "./iccIngestGuard";
 
 export interface OrchestratorLogger {
   info: (obj: unknown, msg: string) => void;
@@ -368,6 +369,55 @@ export async function drainQueue(
   return { picked: rows.length, completed, failed, atomsWritten };
 }
 
+/**
+ * Build the code_atoms row for one fetched candidate. content_hash is taken
+ * over the fetched text (so a re-fetch dedupes), then, for an ICC-title atom,
+ * the text fields are blanked by the G-309 ingest guard. Citation fields stay.
+ */
+export function buildCodeAtomRow(
+  queueRow: Pick<
+    QueueRow,
+    "sourceId" | "jurisdictionKey" | "codeBook" | "edition" | "sourceName"
+  >,
+  c: AtomCandidate,
+  vec: number[] | null,
+  now: Date,
+): { row: NewCodeAtom; refused: boolean } {
+  const hash = contentHash([
+    queueRow.jurisdictionKey,
+    queueRow.codeBook,
+    queueRow.edition,
+    c.sectionRef ?? "",
+    c.body,
+  ]);
+  const row: NewCodeAtom = {
+    sourceId: queueRow.sourceId,
+    jurisdictionKey: queueRow.jurisdictionKey,
+    codeBook: queueRow.codeBook,
+    edition: queueRow.edition,
+    sectionNumber: c.sectionRef,
+    sectionTitle: c.sectionTitle,
+    parentSection: c.parentSection ?? null,
+    body: c.body,
+    bodyHtml: c.bodyHtml ?? null,
+    embedding: vec ?? null,
+    embeddingModel: vec ? EMBEDDING_MODEL : null,
+    embeddedAt: vec ? now : null,
+    contentHash: hash,
+    sourceUrl: c.sourceUrl,
+    fetchedAt: now,
+    metadata: c.metadata ?? null,
+  };
+  const guarded = guardCodeAtomText(row, {
+    sourceUrl: c.sourceUrl,
+    jurisdictionKey: queueRow.jurisdictionKey,
+    sourceName: queueRow.sourceName,
+    codeBook: queueRow.codeBook,
+    sectionNumber: c.sectionRef,
+  });
+  return { row: guarded.row, refused: guarded.refused };
+}
+
 async function processQueueRow(
   adapter: CodeSource,
   queueRow: QueueRow,
@@ -385,38 +435,24 @@ async function processQueueRow(
   const candidates = await adapter.fetchSection(queueRow.sectionUrl, ctx);
   if (candidates.length === 0) return 0;
 
-  const embedRes = await embedTexts(candidates.map((c) => c.body), { logger: log });
   const now = new Date();
   let written = 0;
 
+  // G-309: ICC-title atoms are blanked before the write, so their text is
+  // never embedded (never sent to the embeddings API) either.
+  const built = candidates.map((c) => buildCodeAtomRow(queueRow, c, null, now));
+  const toEmbed = candidates
+    .map((c, i) => ({ c, i }))
+    .filter(({ i }) => !built[i].refused);
+  const embedRes = await embedTexts(toEmbed.map(({ c }) => c.body), { logger: log });
+  const vecByIndex = new Map<number, number[] | null>();
+  toEmbed.forEach(({ i }, k) => vecByIndex.set(i, embedRes.vectors[k] ?? null));
+  let refusedCount = 0;
+
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
-    const vec = embedRes.vectors[i];
-    const hash = contentHash([
-      queueRow.jurisdictionKey,
-      queueRow.codeBook,
-      queueRow.edition,
-      c.sectionRef ?? "",
-      c.body,
-    ]);
-    const row: NewCodeAtom = {
-      sourceId: queueRow.sourceId,
-      jurisdictionKey: queueRow.jurisdictionKey,
-      codeBook: queueRow.codeBook,
-      edition: queueRow.edition,
-      sectionNumber: c.sectionRef,
-      sectionTitle: c.sectionTitle,
-      parentSection: c.parentSection ?? null,
-      body: c.body,
-      bodyHtml: c.bodyHtml ?? null,
-      embedding: vec ?? null,
-      embeddingModel: vec ? EMBEDDING_MODEL : null,
-      embeddedAt: vec ? now : null,
-      contentHash: hash,
-      sourceUrl: c.sourceUrl,
-      fetchedAt: now,
-      metadata: c.metadata ?? null,
-    };
+    const { row, refused } = buildCodeAtomRow(queueRow, c, vecByIndex.get(i) ?? null, now);
+    if (refused) refusedCount++;
     try {
       const ins = await db
         .insert(codeAtoms)
@@ -431,6 +467,7 @@ async function processQueueRow(
       );
     }
   }
+  logIccTextRefused(log, "orchestrator.processQueueRow", refusedCount);
   log.info(
     {
       sourceName: queueRow.sourceName,
