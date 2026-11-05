@@ -19,6 +19,7 @@
   "dependencies": {
     "@workspace/codes-sources": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/icc-notice": "workspace:*",
     "drizzle-orm": "catalog:"
   },
   "devDependencies": {

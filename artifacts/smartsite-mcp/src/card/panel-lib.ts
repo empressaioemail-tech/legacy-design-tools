@@ -6,6 +6,7 @@
 import type { PrecheckData } from "./precheck-html.js";
 import type { AnchorReadStatus, ParcelAnchor } from "../parcel-anchor.js";
 import { requireMapboxCardToken } from "../mapbox-card-token.js";
+import { iccNoticeHtml } from "@workspace/icc-notice";
 
 export const CITATION_DEGRADED = "citation degraded";
 /** Customer sentence. The wire token stays CITATION_DEGRADED and is not printed. */
@@ -2318,6 +2319,20 @@ export function citationHtml(citations: string[], degraded: boolean): string {
         `<button type="button" class="cite" data-act="cite" data-url="${escapeHtml(u)}" onclick="window.__ss&&window.__ss.cite(this)">citation${safe.length > 1 ? ` ${i + 1}` : ""}</button>`,
     )
     .join(" ");
+}
+
+/**
+ * G-309 (ICC Exhibit B): the ICC notice and disclaimer, once per rendered card,
+ * and only when the card carries an ICC citation: a citation control whose link
+ * is on iccsafe.org, or a precheck citation line naming an ICC code title.
+ */
+export function iccNoticeForCardHtml(html: string): string {
+  const unesc = (v: string) =>
+    v.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const cites: string[] = [];
+  for (const m of html.matchAll(/data-url="([^"]*)"/g)) cites.push(unesc(m[1]));
+  for (const m of html.matchAll(/<div class="pc-cite">([^<]*)<\/div>/g)) cites.push(unesc(m[1]));
+  return iccNoticeHtml(cites);
 }
 
 /** P1: a control only on unknown, refused or unread; the draft is built on click from the model, never stored in the DOM. */

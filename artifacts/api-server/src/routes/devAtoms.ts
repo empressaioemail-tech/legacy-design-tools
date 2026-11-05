@@ -37,6 +37,8 @@ import {
 } from "@workspace/api-zod";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { logger } from "../lib/logger";
+import { hasSignedInUser } from "../lib/iccAccess";
+import { isIccSource } from "@workspace/icc-notice";
 
 const router: IRouter = Router();
 const snapshotSecret = getSnapshotSecret();
@@ -159,7 +161,15 @@ router.post(
         limit: topN,
         logger,
         applyMinScore: false,
+        // G-309: ICC results need a signed-in user; this probe is secret-gated,
+        // which is not a user, so it never asks for the ICC supplement.
+        ...(hasSignedInUser(req) ? {} : { includeIccModelCodeSupplement: false }),
       });
+      if (!hasSignedInUser(req)) {
+        atoms = atoms.filter(
+          (a) => !isIccSource({ codeSource: a.codeSource, jurisdictionKey: jurisdictionKey, sourceUrl: a.sourceUrl }),
+        );
+      }
     } catch (err) {
       logger.error(
         { err, jurisdictionKey, query },

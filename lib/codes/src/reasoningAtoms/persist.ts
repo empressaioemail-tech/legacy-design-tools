@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { isIccSource } from "@workspace/icc-notice";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
 import type { WebCodeFetchResult } from "../webCodeFetch/types";
 import type { WebCodeReviewTarget } from "../webCodeFetch/types";
@@ -331,7 +332,21 @@ export async function countReasoningAtomsForJurisdiction(
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * G-309: ICC content comes only through Code Connect. A reasoning_atoms row
+ * whose source is ICC (iccsafe.org host or an ICC-named source) was scraped
+ * before that rule; it keeps its citation (code ref + source link) but never
+ * returns its stored snippet or reasoning text.
+ */
+export function reasoningRowIsIcc(row: {
+  sources?: unknown;
+}): boolean {
+  const sources = Array.isArray(row.sources) ? row.sources : [];
+  return sources.some((s) => isIccSource(s as { url?: unknown; sourceName?: unknown }));
+}
+
 function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {
+  const icc = reasoningRowIsIcc(row);
   return {
     id: row.id,
     jurisdictionKey: row.jurisdictionKey,
@@ -339,10 +354,10 @@ function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {
     edition: row.edition,
     editionSlug: row.editionSlug,
     sources: (row.sources as ReasoningSourceLink[]) ?? [],
-    reasoning: row.reasoning,
+    reasoning: icc ? null : row.reasoning,
     assertedConfidence: Number(row.assertedConfidence),
     verificationState: row.verificationState as ReasoningVerificationState,
-    snippet: row.snippet,
+    snippet: icc ? null : row.snippet,
     displayMode: row.displayMode as ReasoningAtomRecord["displayMode"],
     calibratedConfidence:
       row.calibratedConfidence != null

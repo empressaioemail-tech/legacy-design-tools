@@ -234,6 +234,9 @@ importers:
       '@workspace/finding-engine':
         specifier: workspace:*
         version: link:../../lib/finding-engine
+      '@workspace/icc-notice':
+        specifier: workspace:*
+        version: link:../../lib/icc-notice
       '@workspace/instrument-registry':
         specifier: workspace:*
         version: link:../../lib/instrument-registry
@@ -1408,6 +1411,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/icc-notice':
+        specifier: workspace:*
+        version: link:../../lib/icc-notice
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
@@ -1690,6 +1696,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../db
+      '@workspace/icc-notice':
+        specifier: workspace:*
+        version: link:../icc-notice
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@types/pg@8.18.0)(pg@8.20.0)
@@ -1929,6 +1938,21 @@ importers:
       '@workspace/integrations-xai-grok':
         specifier: workspace:*
         version: link:../integrations-xai-grok
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.3.5
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@16.8.1)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2))
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.3.5)(happy-dom@16.8.1)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  lib/icc-notice:
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

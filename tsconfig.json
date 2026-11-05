@@ -40,6 +40,9 @@
       "path": "./lib/briefing-pdf-tokens"
     },
     {
+      "path": "./lib/icc-notice"
+    },
+    {
       "path": "./lib/briefing-prior-snapshot"
     },
     {

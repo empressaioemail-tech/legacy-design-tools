@@ -41,6 +41,9 @@
       "path": "../../lib/briefing-pdf-tokens"
     },
     {
+      "path": "../../lib/icc-notice"
+    },
+    {
       "path": "../../lib/comment-letter"
     },
     {
