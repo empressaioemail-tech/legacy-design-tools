@@ -450,8 +450,6 @@ describe("lib/db schema integration", () => {
         // parcel geometry store for counties without a live county GIS
         // (Hays/Comal); keyed (county_fips, tile_key, feature_index).
         "txgio_parcel",
-        // Migration 0117: parcel history from the TxGIO annual releases (append-only).
-        "txgio_parcel_vintage",
         // Task #29 — hosted login credentials + per-user metering.
         "user_auth_credentials",
         "user_usage_metering",
