@@ -106,19 +106,19 @@ describe("generateBriefing (mock mode)", () => {
     ).rejects.toThrow(/requires an Anthropic client/);
   });
 
-  it("rejects grok mode without an injected client", async () => {
+  it("rejects a forced grok mode with a config error", async () => {
     await expect(
-      generateBriefing(input(), { mode: "grok" }),
-    ).rejects.toThrow(/requires a Grok client/);
+      generateBriefing(input(), { mode: "grok" as never }),
+    ).rejects.toThrow(/not a permitted briefing generator/);
   });
 });
 
 describe("resolveBriefingLlmMode", () => {
-  it("returns grok when BRIEFING_LLM_MODE === 'grok'", () => {
+  it("rejects BRIEFING_LLM_MODE === 'grok' (Anthropic only)", () => {
     const original = process.env.BRIEFING_LLM_MODE;
     process.env.BRIEFING_LLM_MODE = "grok";
     try {
-      expect(resolveBriefingLlmMode()).toBe("grok");
+      expect(() => resolveBriefingLlmMode()).toThrow(BriefingLlmModeConfigError);
     } finally {
       if (original === undefined) delete process.env.BRIEFING_LLM_MODE;
       else process.env.BRIEFING_LLM_MODE = original;

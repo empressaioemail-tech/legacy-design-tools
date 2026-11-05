@@ -59,7 +59,7 @@ export const FINDING_STATUS_VALUES = [
 export type FindingStatus = (typeof FINDING_STATUS_VALUES)[number];
 
 /** LLM provider modes selected by `AIR_FINDING_LLM_MODE`. */
-export type FindingLlmMode = "mock" | "grok" | "anthropic";
+export type FindingLlmMode = "mock" | "anthropic";
 
 /**
  * Discriminated citation union mirroring `findingsMock.ts:65-74`. The

@@ -84,6 +84,7 @@ import {
   RejectFindingParams,
 } from "@workspace/api-zod";
 import {
+  FINDING_ANTHROPIC_MODEL,
   resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
@@ -1071,8 +1072,7 @@ async function runFindingGeneration(args: {
         generationId,
         consequenceStratum: consequenceRoute.stratum,
         modelTier: consequenceRoute.modelTier,
-        grokModel: consequenceRoute.grokModel,
-        ensemble: consequenceRoute.ensembleEnabled,
+        anthropicModel: FINDING_ANTHROPIC_MODEL,
         routingLabel: consequenceRoute.label,
       },
       "finding generation: S5 consequence-gated routing",
@@ -1081,13 +1081,6 @@ async function runFindingGeneration(args: {
     const visionClient = await getVisionAnthropicClient();
     const engineOptions = {
       mode,
-      ...(llmClient?.kind === "grok"
-        ? {
-            grokClient: llmClient.client,
-            grokModel: consequenceRoute.grokModel,
-            ensembleEnabled: consequenceRoute.ensembleEnabled,
-          }
-        : {}),
       ...(llmClient?.kind === "anthropic"
         ? { anthropicClient: llmClient.client }
         : {}),

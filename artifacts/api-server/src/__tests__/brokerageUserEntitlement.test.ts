@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request from "supertest";
 import type { Express } from "express";
 import { readFileSync } from "node:fs";
@@ -101,8 +102,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });
@@ -168,7 +169,7 @@ const mockAtom = {
   retrievalMode: "vector",
 };
 
-function mockGrokResponses() {
+function mockLlmResponses() {
   completeChatMock.mockImplementation(async (opts: { system?: string }) => {
     const system = opts.system ?? "";
     if (system.includes("lay-friendly") || system.includes("verdicts")) {
@@ -249,10 +250,10 @@ beforeEach(async () => {
   completeChatMock.mockResolvedValue(
     JSON.stringify({ answer: "The brief supports an ADU subject to zoning." }),
   );
-  mockGrokResponses();
+  mockLlmResponses();
   setBriefingLlmClient({
-    kind: "grok",
-    client: { completeChat: completeChatMock },
+    kind: "anthropic",
+    client: anthropicChatShim(completeChatMock),
   });
   geocodeAddressMock.mockResolvedValue({
     latitude: 30.2672,

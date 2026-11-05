@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -70,8 +71,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });

@@ -1,11 +1,14 @@
 /**
- * Grok + rules fallbacks for Hauska Property Brief brokerage API.
+ * Anthropic + rules fallbacks for Hauska Property Brief brokerage API.
  */
 
 import {
-  resolveGrokBriefingModel,
-  BRIEFING_GROK_MAX_TOKENS,
+  CODE_CITING_MAX_TOKENS,
+  isAnthropicTruncated,
   BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_OUTPUT_CONFIG_MEDIUM,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import { logger } from "./logger";
@@ -93,7 +96,7 @@ export interface ReasoningSummaryResult {
   citations: NumberedCitation[];
   disclaimer: string;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 export interface SummarizeResult {
@@ -102,7 +105,7 @@ export interface SummarizeResult {
   summary: string;
   citations: NumberedCitation[];
   disclaimer: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 /**
@@ -137,7 +140,7 @@ export interface ResearchChatResult {
   disclaimer: string;
   confidence: number;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
   presentationMode: PresentationMode;
 }
 
@@ -345,29 +348,33 @@ function textToHtmlParagraphs(text: string): string {
 async function completeBriefingLlm(
   system: string,
   user: string,
-): Promise<{ text: string | null; method: "grok" | "anthropic" }> {
+): Promise<{ text: string | null; method: "anthropic" }> {
   const bundle = await getBriefingLlmClient();
-  if (!bundle) return { text: null, method: "grok" };
-
-  if (bundle.kind === "grok") {
-    const text = await bundle.client.completeChat({
-      model: resolveGrokBriefingModel(),
-      maxTokens: BRIEFING_GROK_MAX_TOKENS,
-      system,
-      user,
-    });
-    return { text, method: "grok" };
-  }
+  if (!bundle) return { text: null, method: "anthropic" };
 
   const response = await bundle.client.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
-    max_tokens: BRIEFING_GROK_MAX_TOKENS,
+    max_tokens: CODE_CITING_MAX_TOKENS,
+    output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
     system,
     messages: [{ role: "user", content: user }],
   });
-  const textBlock = response.content.find((block) => block.type === "text");
-  const text =
-    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
+  if (isAnthropicRefusal(response)) {
+    // Callers fall back to the rules-v1 output when text is null.
+    logger.warn(
+      { stopReason: "refusal" },
+      "brokerage brief: Claude refused; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  if (isAnthropicTruncated(response)) {
+    logger.warn(
+      { stopReason: "max_tokens" },
+      "brokerage brief: Claude hit max_tokens; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  const text = textFromAnthropicContent(response.content).trim();
   return { text: text || null, method: "anthropic" };
 }
 
@@ -559,7 +566,7 @@ function finalizeResearchChatAnswer(
   atoms: BriefAtomInput[],
   presentationMode: PresentationMode,
   generatedAt: string,
-  method: "grok" | "anthropic" | "rules-v1",
+  method: "anthropic" | "rules-v1",
 ): ResearchChatResult {
   const sanitizedAnswer = sanitizeResearchChatCustomerText(answer);
   if (/\bHauska\b/i.test(answer)) {
@@ -614,7 +621,7 @@ function unionCitationsByN(
 
 export interface NarrativeSectionResult {
   narrative: string;
-  generatedBy: "grok" | "anthropic" | "rules-v1";
+  generatedBy: "anthropic" | "rules-v1";
   generatedAt: string;
 }
 

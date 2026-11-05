@@ -566,7 +566,7 @@ function layerDetailLines(layer: BrokerageSiteContextLayer): string[] {
   return summary ? [summary] : [];
 }
 
-/** Plain-text block for Grok prompts (ok layers with Cotality/federal summaries). */
+/** Plain-text block for LLM prompts (ok layers with Cotality/federal summaries). */
 export function formatSiteContextForLlm(ctx: BrokerageSiteContext): string {
   const lines: string[] = [];
   for (const layer of ctx.layers) {

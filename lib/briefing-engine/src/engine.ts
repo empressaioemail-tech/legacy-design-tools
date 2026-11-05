@@ -13,12 +13,10 @@
  */
 
 import type Anthropic from "@anthropic-ai/sdk";
-import type { GrokClient } from "@workspace/integrations-xai-grok";
 import {
   callAnthropicGenerator,
   AnthropicGeneratorError,
 } from "./anthropicGenerator";
-import { callGrokGenerator } from "./grokGenerator";
 import {
   validateSectionCitations,
   type CitationResolvers,
@@ -45,11 +43,6 @@ export interface GenerateBriefingOptions {
    * import time).
    */
   anthropicClient?: Anthropic;
-  /**
-   * xAI Grok client to use when `mode === "grok"`. Required for the
-   * grok branch (same injection pattern as findings).
-   */
-  grokClient?: GrokClient;
   /**
    * When supplied, validation also accepts these code-section atom
    * ids. Anything else is treated as invalid and stripped.
@@ -79,25 +72,31 @@ export class BriefingLlmModeConfigError extends Error {
  * Fails loud when `BRIEFING_LLM_MODE` is unset or unrecognized — mock
  * mode must be requested explicitly (`BRIEFING_LLM_MODE=mock`). This
  * matches the api-server client posture (`briefingLlmClient.ts` hard
- * fails when grok / anthropic modes lack their API keys).
+ * fails when anthropic mode lacks its API keys). `grok` is rejected
+ * (G-309 A20: Anthropic is the only provider).
  */
 export function resolveBriefingLlmMode(): BriefingLlmMode {
   const raw = process.env.BRIEFING_LLM_MODE;
   if (raw === undefined || raw.trim() === "") {
     throw new BriefingLlmModeConfigError(
       "BRIEFING_LLM_MODE is not set. Set it explicitly to one of " +
-        '"grok", "anthropic", or "mock" (mock is never an implicit ' +
+        '"anthropic" or "mock" (mock is never an implicit ' +
         "default — silent mock output in production is the failure " +
         "mode this guard exists to prevent).",
     );
   }
   const mode = raw.trim().toLowerCase();
-  if (mode === "grok") return "grok";
+  if (mode === "grok") {
+    throw new BriefingLlmModeConfigError(
+      "BRIEFING_LLM_MODE=grok is no longer supported: Smart Site code-citing " +
+        "paths use Anthropic only (G-309 A20). Set BRIEFING_LLM_MODE=anthropic.",
+    );
+  }
   if (mode === "anthropic") return "anthropic";
   if (mode === "mock") return "mock";
   throw new BriefingLlmModeConfigError(
     `BRIEFING_LLM_MODE has unrecognized value "${raw}". Expected one ` +
-      'of "grok", "anthropic", or "mock".',
+      'of "anthropic" or "mock".',
   );
 }
 
@@ -128,15 +127,13 @@ export async function generateBriefing(
   const now = options.now ?? (() => new Date());
 
   let raw: BriefingSections;
-  if (mode === "grok") {
-    if (!options.grokClient) {
-      throw new AnthropicGeneratorError(
-        "anthropic_call_failed",
-        "BRIEFING_LLM_MODE=grok requires a Grok client to be passed",
-      );
-    }
-    raw = await callGrokGenerator(options.grokClient, input);
-  } else if (mode === "anthropic") {
+  if ((mode as string) === "grok") {
+    // Defensive: a JS caller can bypass the type. Grok is not selectable.
+    throw new BriefingLlmModeConfigError(
+      "Grok is not a permitted briefing generator (G-309 A20); use anthropic.",
+    );
+  }
+  if (mode === "anthropic") {
     if (!options.anthropicClient) {
       throw new AnthropicGeneratorError(
         "anthropic_call_failed",

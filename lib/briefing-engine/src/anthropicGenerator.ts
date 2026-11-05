@@ -1,7 +1,7 @@
 /**
  * Anthropic branch of the briefing engine.
  *
- * Calls Claude Sonnet 4.5 via the workspace's `createAnthropicClient`
+ * Calls Claude (CODE_CITING_ANTHROPIC_MODEL) via the workspace's `createAnthropicClient`
  * factory (passed in by the caller — keeping the SDK constructor out
  * of this module means tests can hand a stub fetcher in without
  * importing the real SDK).
@@ -19,16 +19,68 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { BriefingSections, GenerateBriefingInput } from "./types";
 import { BRIEFING_SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
 
-/** Model id pinned by Spec 51 / DA-PI-3 task ledger (locked decision #2). */
-export const BRIEFING_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+/**
+ * Single model id for every code-citing Anthropic call (findings, parcel
+ * briefing, brokerage brief, lay summary, Ask chat). Operator ruling
+ * 2026-11-04. Opus 5.5 rules: thinking cannot be disabled (never send
+ * the disabled thinking mode or a thinking budget; sampling params return
+ * 400, forced tool choice (any or tool) returns 400, and a final assistant
+ * message (prefill) returns 400. None of those are sent here.
+ */
+export const CODE_CITING_ANTHROPIC_MODEL = "claude-opus-5-5";
 
-/** Token budget per generation. Tuned for ~7×500-token sections plus headroom. */
-export const BRIEFING_ANTHROPIC_MAX_TOKENS = 4096;
+/**
+ * max_tokens for every claude-opus-5-5 call. Opus 5.5 always thinks and
+ * thinking tokens count against max_tokens, so the old 4096 / 6144 limits
+ * could cut answers off mid-JSON. 16000 is Anthropic's recommended
+ * non-streaming ceiling.
+ */
+export const CODE_CITING_MAX_TOKENS = 16000;
+
+/** True when the answer was cut off; never parse such a response. */
+export function isAnthropicTruncated(response: {
+  stop_reason?: string | null;
+}): boolean {
+  return response.stop_reason === "max_tokens";
+}
+
+/** Effort for findings, parcel briefing and the brokerage brief. */
+export const CODE_CITING_OUTPUT_CONFIG_MEDIUM = { effort: "medium" } as const;
+/** Effort for the lay summary and the Ask chat. */
+export const CODE_CITING_OUTPUT_CONFIG_LOW = { effort: "low" } as const;
+
+/**
+ * Text of a response, taken from `text` blocks only. Opus 5.5 responses
+ * can lead with thinking blocks (possibly empty), so never read
+ * `content[0]`.
+ */
+export function textFromAnthropicContent(
+  content: ReadonlyArray<{ type: string; text?: string }>,
+): string {
+  return content
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("");
+}
+
+/** True when the model refused; check BEFORE reading content. */
+export function isAnthropicRefusal(response: {
+  stop_reason?: string | null;
+}): boolean {
+  return response.stop_reason === "refusal";
+}
+
+export const BRIEFING_ANTHROPIC_MODEL = CODE_CITING_ANTHROPIC_MODEL;
+
+/** Token budget per generation (shared Opus 5.5 limit, thinking included). */
+export const BRIEFING_ANTHROPIC_MAX_TOKENS = CODE_CITING_MAX_TOKENS;
 
 export class AnthropicGeneratorError extends Error {
   constructor(
     public readonly code:
       | "anthropic_call_failed"
+      | "anthropic_refusal"
+      | "anthropic_truncated"
       | "anthropic_invalid_response_shape"
       | "anthropic_invalid_json"
       | "anthropic_missing_section",
@@ -102,6 +154,7 @@ export async function callAnthropicGenerator(
     response = await client.messages.create({
       model: BRIEFING_ANTHROPIC_MODEL,
       max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
+      output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
       system: BRIEFING_SYSTEM_PROMPT,
       messages: [
         {
@@ -117,20 +170,25 @@ export async function callAnthropicGenerator(
     );
   }
 
-  // Concatenate every text block — defensive in case the model emits
-  // multiple blocks (rare for a JSON response, but the SDK's union
-  // type allows it).
-  const textParts: string[] = [];
-  for (const block of response.content) {
-    if (block.type === "text") {
-      textParts.push(block.text);
-    }
+  if (isAnthropicRefusal(response)) {
+    throw new AnthropicGeneratorError(
+      "anthropic_refusal",
+      "Claude refused the briefing request (stop_reason=refusal)",
+    );
   }
-  if (textParts.length === 0) {
+  if (isAnthropicTruncated(response)) {
+    throw new AnthropicGeneratorError(
+      "anthropic_truncated",
+      "Claude briefing hit max_tokens (stop_reason=max_tokens); not parsing a partial answer",
+    );
+  }
+  // Text blocks only (thinking blocks may precede the text).
+  const text = textFromAnthropicContent(response.content);
+  if (text.length === 0) {
     throw new AnthropicGeneratorError(
       "anthropic_invalid_response_shape",
       `Claude response had no text content blocks`,
     );
   }
-  return parseAnthropicResponse(textParts.join(""));
+  return parseAnthropicResponse(text);
 }
