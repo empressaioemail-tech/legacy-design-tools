@@ -27,7 +27,6 @@ import { basename, join } from "node:path";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import shapefile from "shapefile";
-import { swapStagedCounty } from "@workspace/db";
 
 import { newCounters } from "../types";
 import { isClusterJobExecution, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
@@ -133,6 +132,8 @@ async function main(): Promise<void> {
 
   let swap: unknown = null;
   if (db) {
+    // Loaded only on --apply: @workspace/db refuses to load without DATABASE_URL, which a dry run never needs.
+    const { swapStagedCounty } = await import("@workspace/db");
     swap = await swapStagedCounty(db as never, { provider, countyFips: county, loadRunId, expectedCount: keys.size });
   }
   console.log(JSON.stringify({

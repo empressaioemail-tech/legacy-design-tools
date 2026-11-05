@@ -39,6 +39,9 @@ describe("release identity", () => {
     expect(releaseYearFromLabel("stratmap22-landparcels_48021_bastrop_202207")).toBe(2022);
     expect(releaseYearFromLabel("stratmap19-landparcels_48021_lp")).toBe(2019);
     expect(releaseYearFromLabel("stratmap226-x")).toBeNull();
+    // The 2026 release changed its label (measured on the real file, 2026-11-05).
+    expect(releaseYearFromLabel("stratmap-2026-land-parcels-bastrop_48021")).toBe(2026);
+    expect(releaseYearFromLabel("stratmap-20266-x")).toBeNull();
   });
 
   it("the key is content-derived: same feature, same key; another release or geometry, another key", () => {

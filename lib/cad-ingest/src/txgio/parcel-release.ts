@@ -34,10 +34,16 @@ export function parcelReleaseProvider(year: number): string {
   return `txgio.parcels.${year}`;
 }
 
-/** Program year from a release label: "stratmap22-landparcels_48021_..." -> 2022. */
+/**
+ * Program year from a release label. Two forms are published: "stratmap22-landparcels_48021_..."
+ * (2019-2025) and "stratmap-2026-land-parcels-bastrop_48021" (2026, read from the real file
+ * 2026-11-05).
+ */
 export function releaseYearFromLabel(label: string): number | null {
-  const m = /stratmap(\d{2})(?!\d)/i.exec(label);
-  return m ? 2000 + Number(m[1]) : null;
+  const m = /stratmap-?(\d{4}|\d{2})(?!\d)/i.exec(label);
+  if (!m) return null;
+  const y = m[1]!.length === 4 ? Number(m[1]) : 2000 + Number(m[1]);
+  return y >= 2000 && y <= 2100 ? y : null;
 }
 
 function text(v: unknown): string | null {
