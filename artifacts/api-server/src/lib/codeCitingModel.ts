@@ -12,4 +12,5 @@ export {
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
   isAnthropicTruncated,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";

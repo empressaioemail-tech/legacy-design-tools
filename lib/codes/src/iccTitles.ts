@@ -7,6 +7,8 @@
  * apart from quoted ICC text, so the whole ICC-title atom is excluded.
  */
 
+import { isIccSource } from "@workspace/icc-notice";
+
 /** Leading alphabetic token of an ICC-published title (upper-case). */
 const ICC_TITLE_TOKENS = new Set([
   "IBC", "IRC", "IFC", "IPMC", "IECC", "IPC", "IMC", "IFGC", "IEBC",
@@ -37,5 +39,55 @@ export function isIccTitleAtom(a: {
     isIccTitleIdentifier(a.codeBook) ||
     isIccTitleIdentifier(a.sectionNumber) ||
     isIccTitleIdentifier(a.jurisdictionKey)
+  );
+}
+
+/**
+ * G-309 (Exhibit D §6): true when a code_atoms row is an ICC atom, by source
+ * (host, jurisdiction key, source name) or by ICC title identifier. ICC text is
+ * never returned to anyone, and never written, for such a row.
+ */
+export function isIccRow(r: {
+  sourceUrl?: string | null;
+  jurisdictionKey?: string | null;
+  sourceName?: string | null;
+  codeBook?: string | null;
+  sectionNumber?: string | null;
+  codeSource?: string | null;
+}): boolean {
+  return (
+    isIccSource({
+      sourceUrl: r.sourceUrl ?? undefined,
+      jurisdictionKey: r.jurisdictionKey ?? undefined,
+      sourceName: r.sourceName ?? undefined,
+      codeSource: r.codeSource ?? undefined,
+    }) ||
+    isIccTitleAtom({
+      codeBook: r.codeBook,
+      sectionNumber: r.sectionNumber,
+      jurisdictionKey: r.jurisdictionKey,
+      codeSource: r.codeSource,
+    })
+  );
+}
+
+/**
+ * G-309 (A16 revised rule): true when a reasoning_atoms row is an ICC row.
+ * reasoning_atoms has no code-book column; `edition` ("IBC 2021") is its
+ * code-book field. Two classes, both ICC:
+ *   icc-title        edition's leading token is an ICC title, or the
+ *                    jurisdiction is icc-model-code.
+ *   icc-source-link  any sources[] link is on an ICC host / ICC-named source.
+ * edition_slug and code_ref are never used. TAS, FBC, FBCEB, A117.1 rows with
+ * no ICC link are not ICC.
+ */
+export function isIccReasoningRow(r: {
+  edition?: string | null;
+  jurisdictionKey?: string | null;
+  sources?: ReadonlyArray<{ url?: string | null; sourceName?: string | null }> | null;
+}): boolean {
+  if (isIccRow({ codeBook: r.edition, jurisdictionKey: r.jurisdictionKey })) return true;
+  return (r.sources ?? []).some((s) =>
+    isIccRow({ sourceUrl: s?.url, sourceName: s?.sourceName }),
   );
 }

@@ -10,6 +10,7 @@
     "./queue": "./src/queue.ts",
     "./retrieval": "./src/retrieval.ts",
     "./iccTitles": "./src/iccTitles.ts",
+    "./iccIngestGuard": "./src/iccIngestGuard.ts",
     "./embeddings": "./src/embeddings.ts"
   },
   "scripts": {

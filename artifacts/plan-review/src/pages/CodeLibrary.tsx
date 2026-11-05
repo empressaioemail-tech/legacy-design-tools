@@ -909,9 +909,18 @@ function AtomRow({
         <div className="sc-mono-sm sc-meta mt-1">
           {atom.codeBook} · {atom.edition} · {atom.sourceName}
         </div>
-        <div className="sc-body sc-meta mt-1 line-clamp-2">
-          {atom.bodyPreview}
-        </div>
+        {atom.bodyPreview ? (
+          <div className="sc-body sc-meta mt-1 line-clamp-2">
+            {atom.bodyPreview}
+          </div>
+        ) : atom.citationOnly ? (
+          <div
+            className="sc-body sc-meta mt-1"
+            data-testid={`atom-row-${atom.id}-citation-only`}
+          >
+            Citation only
+          </div>
+        ) : null}
       </div>
     </button>
   );
@@ -1049,7 +1058,7 @@ function AtomDetailModal({
               <div className="sc-prose" data-testid="atom-detail-content">
                 {data.bodyHtml ? (
                   <SanitizedHtml html={data.bodyHtml} />
-                ) : (
+                ) : data.body ? (
                   <pre
                     style={{
                       whiteSpace: "pre-wrap",
@@ -1059,7 +1068,22 @@ function AtomDetailModal({
                   >
                     {data.body}
                   </pre>
-                )}
+                ) : data.citationOnly ? (
+                  <div data-testid="atom-detail-citation-only">
+                    <div className="sc-medium">Citation only</div>
+                    {data.sourceUrl ? (
+                      <a
+                        className="sc-link sc-mono-sm"
+                        href={data.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-testid="atom-detail-icc-link"
+                      >
+                        ICC Digital Codes ↗
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           )}

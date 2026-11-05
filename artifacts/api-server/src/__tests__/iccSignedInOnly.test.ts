@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { ANON_TEST_SESSION_OWNER_ID } from "../lib/anonymousOwnerCookie";
+import { hasSignedInUser } from "../lib/iccAccess";
 
 process.env["SNAPSHOT_SECRET"] = "test-snapshot-secret";
 
@@ -150,9 +152,11 @@ describe("POST /api/dev/atoms/retrieve", () => {
     const icc = res.body.results.find((r: { atomId: string }) => r.atomId === "a-icc");
     expect(icc).toBeDefined();
     expect(icc).not.toHaveProperty("bodyPreview");
+    expect(icc.citationOnly).toBe(true);
     expect(JSON.stringify(res.body)).not.toContain("PLANTED-ICC-BODY");
     const city = res.body.results.find((r: { atomId: string }) => r.atomId === "a-city");
     expect(city.bodyPreview).toBe("city text");
+    expect(city.citationOnly).toBe(false);
   });
 });
 
@@ -257,6 +261,7 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     expect(icc.body.sectionNumber).toBe("1612.3");
     expect(icc.body.sourceUrl).toContain("iccsafe.org");
     for (const k of ["body", "bodyPreview", "bodyHtml"]) expect(icc.body).not.toHaveProperty(k);
+    expect(icc.body.citationOnly).toBe(true);
     expect(JSON.stringify(icc.body)).not.toContain("PLANTED");
 
     state.atomRow = cityRow();
@@ -265,6 +270,31 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     expect(city.body.body).toBe("city text");
     expect(city.body.bodyHtml).toBe("<p>city text</p>");
     expect(city.body.bodyPreview).toBe("city text");
+    expect(city.body.citationOnly).toBe(false);
+  });
+
+  it("atom by id: ICC metadata is reduced to structural keys; a city atom keeps its metadata", async () => {
+    const meta = {
+      kind: "icc_section",
+      scrapedAt: "2026-01-01T00:00:00.000Z",
+      partIndex: 2,
+      footnote: "PLANTED-META-TEXT",
+      excerpt: "PLANTED-META-TEXT",
+      nested: { text: "PLANTED-META-TEXT" },
+    };
+    state.atomRow = { ...iccRow(), metadata: meta };
+    const icc = await request(app()).get("/api/codes/atoms/a-icc").set("x-test-user", "u1");
+    expect(icc.status).toBe(200);
+    expect(icc.body.metadata).toEqual({
+      kind: "icc_section",
+      scrapedAt: "2026-01-01T00:00:00.000Z",
+      partIndex: 2,
+    });
+    expect(JSON.stringify(icc.body)).not.toContain("PLANTED");
+
+    state.atomRow = { ...cityRow(), metadata: meta };
+    const city = await request(app()).get("/api/codes/atoms/a-city").set("x-test-user", "u1");
+    expect(city.body.metadata).toEqual(meta);
   });
 
   it("an ICC title from a non-ICC source (by codeBook) is also citation-only", async () => {
@@ -283,8 +313,59 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     for (const rows of [perJurisdiction.body, global.body.items] as Array<Array<Record<string, unknown>>>) {
       expect(rows).toHaveLength(2);
       expect(rows[0]).not.toHaveProperty("bodyPreview");
+      expect(rows[0]!.citationOnly).toBe(true);
       expect(rows[1]!.bodyPreview).toBe("city text");
+      expect(rows[1]!.citationOnly).toBe(false);
     }
     expect(JSON.stringify([perJurisdiction.body, global.body])).not.toContain("PLANTED");
+  });
+});
+
+// The session middleware gives every unauthenticated browser a requestor
+// { kind: "user", id: "anon_<hex>" }. That is not a signed-in user.
+describe("anonymous-owner sessions are not signed in", () => {
+  const RANDOM_ANON = "anon_" + "0123456789abcdef01234567";
+  const anonIds = [ANON_TEST_SESSION_OWNER_ID, RANDOM_ANON];
+  const sessionOf = (id?: string) =>
+    ({ session: id === undefined ? { audience: "user" } : { audience: "user", requestor: { kind: "user", id } } }) as never;
+
+  it("hasSignedInUser: verified user true; anon ids, empty id, no session false", () => {
+    expect(hasSignedInUser(sessionOf("u_verified1"))).toBe(true);
+    for (const id of anonIds) expect(hasSignedInUser(sessionOf(id))).toBe(false);
+    expect(hasSignedInUser(sessionOf(""))).toBe(false);
+    expect(hasSignedInUser(sessionOf())).toBe(false);
+    expect(hasSignedInUser({} as never)).toBe(false);
+  });
+
+  it.each(anonIds)("POST /api/dev/atoms/retrieve gives the signed-out response to %s", async (id) => {
+    const res = await request(app())
+      .post("/api/dev/atoms/retrieve")
+      .set(SECRET)
+      .set("x-test-user", id)
+      .send({ jurisdiction: "bastrop_tx", query: "flood" });
+    expect(res.status).toBe(200);
+    expect(res.body.results.map((r: { atomId: string }) => r.atomId)).toEqual(["a-city"]);
+    expect(state.retrieveCalls[0]!["includeIccModelCodeSupplement"]).toBe(false);
+  });
+
+  it.each(anonIds)("GET /api/codes/atoms/:id is 404 for an ICC atom for %s", async (id) => {
+    state.atomRow = {
+      id: "a-icc", jurisdictionKey: "bastrop_tx", codeBook: "IBC", edition: "2021",
+      sectionNumber: "1612.3", sectionTitle: "Flood", parentSection: null,
+      body: "PLANTED-ICC-BODY", bodyHtml: null,
+      sourceUrl: "https://codes.iccsafe.org/content/IBC2021P1/chapter-16",
+      embedding: null, embeddingModel: null, fetchedAt: new Date(), metadata: null,
+      sourceName: "codes.iccsafe.org",
+    };
+    const res = await request(app()).get("/api/codes/atoms/a-icc").set("x-test-user", id);
+    expect(res.status).toBe(404);
+  });
+
+  it.each(anonIds)("list endpoints exclude ICC rows in SQL for %s", async (id) => {
+    await request(app()).get("/api/codes/atoms").set("x-test-user", id);
+    await request(app()).get("/api/codes/jurisdictions/bastrop_tx/atoms").set("x-test-user", id);
+    const sqls = state.whereArgs.map((w) => new PgDialect().sqlToQuery(w as never).sql);
+    expect(sqls.length).toBeGreaterThanOrEqual(3);
+    expect(sqls.every((q) => /iccsafe/.test(q) && /NOT/.test(q))).toBe(true);
   });
 });
