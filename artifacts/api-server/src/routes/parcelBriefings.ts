@@ -1691,7 +1691,6 @@ async function runBriefingGeneration(args: {
       },
       {
         mode,
-        ...(llmClient?.kind === "grok" ? { grokClient: llmClient.client } : {}),
         ...(llmClient?.kind === "anthropic"
           ? { anthropicClient: llmClient.client }
           : {}),

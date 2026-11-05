@@ -11,13 +11,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/briefingLlmClient", () => ({
   getBriefingLlmClient: vi.fn(async () => ({
-    kind: "grok" as const,
-    client: { completeChat: completeChatMock },
+    kind: "anthropic" as const,
+    client: anthropicChatShim(completeChatMock),
   })),
 }));
 
