@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   retrieveCalls: [] as Record<string, unknown>[],
   whereArgs: [] as unknown[],
   atomRow: null as Record<string, unknown> | null,
+  listRows: [] as Record<string, unknown>[],
 }));
 
 function fakeAtoms() {
@@ -78,7 +79,7 @@ vi.mock("@workspace/db", () => {
     chain.where = (w: unknown) => {
       state.whereArgs.push(w);
       return Object.assign(Promise.resolve([{ n: 0 }]), {
-        orderBy: () => ({ limit: () => Object.assign(Promise.resolve([]), { offset: () => Promise.resolve([]) }) }),
+        orderBy: () => ({ limit: () => Object.assign(Promise.resolve(state.listRows), { offset: () => Promise.resolve(state.listRows) }) }),
         limit: () => Promise.resolve(result()),
       });
     };
@@ -121,6 +122,7 @@ beforeEach(() => {
   state.retrieveCalls = [];
   state.whereArgs = [];
   state.atomRow = null;
+  state.listRows = [];
 });
 
 describe("POST /api/dev/atoms/retrieve", () => {
@@ -144,6 +146,13 @@ describe("POST /api/dev/atoms/retrieve", () => {
     expect(res.status).toBe(200);
     expect(res.body.results.map((r: { atomId: string }) => r.atomId)).toEqual(["a-city", "a-icc"]);
     expect(state.retrieveCalls[0]!["includeIccModelCodeSupplement"]).toBeUndefined();
+    // G-309 Exhibit D §6: a signed-in caller still gets no ICC text.
+    const icc = res.body.results.find((r: { atomId: string }) => r.atomId === "a-icc");
+    expect(icc).toBeDefined();
+    expect(icc).not.toHaveProperty("bodyPreview");
+    expect(JSON.stringify(res.body)).not.toContain("PLANTED-ICC-BODY");
+    const city = res.body.results.find((r: { atomId: string }) => r.atomId === "a-city");
+    expect(city.bodyPreview).toBe("city text");
   });
 });
 
@@ -208,5 +217,74 @@ describe("GET /api/codes/*", () => {
     await request(app()).get("/api/codes/atoms").set("x-test-user", "u1");
     await request(app()).get("/api/codes/jurisdictions/bastrop_tx/atoms").set("x-test-user", "u1");
     expect(state.whereArgs.map(sqlOf).some((s) => /iccsafe/.test(s))).toBe(false);
+  });
+});
+
+describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
+  const iccRow = () => ({
+    id: "a-icc",
+    jurisdictionKey: "bastrop_tx",
+    codeBook: "IBC",
+    edition: "2021",
+    sectionNumber: "1612.3",
+    sectionTitle: "Flood",
+    parentSection: null,
+    body: "PLANTED-ICC-BODY",
+    bodyHtml: "<p>PLANTED-ICC-BODY</p>",
+    sourceUrl: "https://codes.iccsafe.org/content/IBC2021P1/chapter-16",
+    embedding: null,
+    embeddingModel: null,
+    fetchedAt: new Date(),
+    metadata: null,
+    sourceName: "codes.iccsafe.org",
+  });
+  const cityRow = () => ({
+    ...iccRow(),
+    id: "a-city",
+    codeBook: "City Ordinance",
+    sectionNumber: "14-02-008",
+    sectionTitle: "Setbacks",
+    body: "city text",
+    bodyHtml: "<p>city text</p>",
+    sourceUrl: "https://library.municode.com/x",
+    sourceName: "municode",
+  });
+
+  it("atom by id: a signed-in ICC atom has no body, bodyPreview or bodyHtml; a city atom keeps them", async () => {
+    state.atomRow = iccRow();
+    const icc = await request(app()).get("/api/codes/atoms/a-icc").set("x-test-user", "u1");
+    expect(icc.status).toBe(200);
+    expect(icc.body.sectionNumber).toBe("1612.3");
+    expect(icc.body.sourceUrl).toContain("iccsafe.org");
+    for (const k of ["body", "bodyPreview", "bodyHtml"]) expect(icc.body).not.toHaveProperty(k);
+    expect(JSON.stringify(icc.body)).not.toContain("PLANTED");
+
+    state.atomRow = cityRow();
+    const city = await request(app()).get("/api/codes/atoms/a-city").set("x-test-user", "u1");
+    expect(city.status).toBe(200);
+    expect(city.body.body).toBe("city text");
+    expect(city.body.bodyHtml).toBe("<p>city text</p>");
+    expect(city.body.bodyPreview).toBe("city text");
+  });
+
+  it("an ICC title from a non-ICC source (by codeBook) is also citation-only", async () => {
+    state.atomRow = { ...cityRow(), codeBook: "IRC" };
+    const res = await request(app()).get("/api/codes/atoms/a-city").set("x-test-user", "u1");
+    expect(res.status).toBe(200);
+    for (const k of ["body", "bodyPreview", "bodyHtml"]) expect(res.body).not.toHaveProperty(k);
+  });
+
+  it("both list endpoints: signed-in ICC rows have no bodyPreview, city rows keep it", async () => {
+    state.listRows = [iccRow(), cityRow()];
+    const perJurisdiction = await request(app())
+      .get("/api/codes/jurisdictions/bastrop_tx/atoms")
+      .set("x-test-user", "u1");
+    const global = await request(app()).get("/api/codes/atoms").set("x-test-user", "u1");
+    for (const rows of [perJurisdiction.body, global.body.items] as Array<Array<Record<string, unknown>>>) {
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).not.toHaveProperty("bodyPreview");
+      expect(rows[1]!.bodyPreview).toBe("city text");
+    }
+    expect(JSON.stringify([perJurisdiction.body, global.body])).not.toContain("PLANTED");
   });
 });

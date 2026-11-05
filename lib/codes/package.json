@@ -9,6 +9,7 @@
     "./orchestrator": "./src/orchestrator.ts",
     "./queue": "./src/queue.ts",
     "./retrieval": "./src/retrieval.ts",
+    "./iccTitles": "./src/iccTitles.ts",
     "./embeddings": "./src/embeddings.ts"
   },
   "scripts": {

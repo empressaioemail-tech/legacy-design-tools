@@ -1176,6 +1176,49 @@ describe("V1-7 — materializable elements wired into the engine input", () => {
   });
 });
 
+describe("G-309 A22 — ICC-title atoms reach the generator as citations only", () => {
+  it("sends no body for an ICC-title atom (by title or by codeSource); a city atom keeps its body", async () => {
+    if (!ctx.schema) throw new Error("ctx");
+    const { engagement, submission } = await seedEngagementSubmission(
+      "icc-snippet-engagement",
+    );
+    await seedBriefingForEngagement(engagement.id);
+
+    const base = {
+      sourceName: "src",
+      jurisdictionKey: "bastrop_tx",
+      edition: "2021",
+      sectionTitle: "Planted Title",
+      sourceUrl: "https://example.com/x",
+      score: 0.7,
+      retrievalMode: "vector",
+    };
+    retrieveAtomsForQuestionMock.mockResolvedValueOnce([
+      { ...base, id: "33333333-3333-3333-3333-333333333331", codeBook: "IBC", sectionNumber: "1612.3", body: "PLANTED-ICC-PROSE-ONE" },
+      { ...base, id: "33333333-3333-3333-3333-333333333332", codeBook: "Local Amendments", sectionNumber: "9.9", codeSource: "icc-model-code", body: "PLANTED-ICC-PROSE-TWO" },
+      { ...base, id: "33333333-3333-3333-3333-333333333333", codeBook: "MUNI_CODE", sectionNumber: "4.3.2", body: "city ordinance prose" },
+    ]);
+
+    const kickoff = await request(getApp())
+      .post(`/api/submissions/${submission.id}/findings/generate`)
+      .send({})
+      .set(REVIEWER_HEADERS);
+    expect(kickoff.status).toBe(202);
+    await waitForStatus(submission.id, "completed");
+
+    const sections = (
+      supplementCodeSectionsWithReasoningGroundingMock.mock.calls[0]![0] as {
+        existingSections: Array<{ atomId: string; snippet?: string }>;
+      }
+    ).existingSections;
+    expect(sections).toHaveLength(3);
+    expect(JSON.stringify(sections)).not.toContain("PLANTED-ICC-PROSE");
+    expect(sections[0]!.snippet).toBe("");
+    expect(sections[1]!.snippet).toBe("");
+    expect(sections[2]!.snippet).toBe("city ordinance prose");
+  });
+});
+
 describe("V1-7 — retrieval-failure fail-safe", () => {
   it("a retrieval throw does not fail the run; status reaches `completed` with no code citations", async () => {
     if (!ctx.schema) throw new Error("ctx");

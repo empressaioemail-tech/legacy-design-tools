@@ -12,6 +12,9 @@ COPY lib/db/package.json ./lib/db/
 COPY lib/db/tsconfig.json ./lib/db/
 COPY lib/db/src ./lib/db/src
 COPY lib/db/drizzle.config.ts ./lib/db/
+COPY lib/icc-notice/package.json ./lib/icc-notice/
+COPY lib/icc-notice/tsconfig.json ./lib/icc-notice/
+COPY lib/icc-notice/src ./lib/icc-notice/src
 
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate && pnpm install --filter @workspace/smartsite-mcp... --frozen-lockfile || pnpm install --filter @workspace/smartsite-mcp...
 

@@ -14,7 +14,7 @@ import {
   listJurisdictions,
 } from "@workspace/codes";
 import { logger } from "../lib/logger";
-import { hasSignedInUser, notIccAtomRowSql } from "../lib/iccAccess";
+import { hasSignedInUser, isIccRow, notIccAtomRowSql } from "../lib/iccAccess";
 import { isIccSource } from "@workspace/icc-notice";
 
 const router: IRouter = Router();
@@ -165,7 +165,8 @@ router.get(
           sourceUrl: r.sourceUrl,
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
-          bodyPreview: previewBody(r.body),
+          // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       );
     } catch (err) {
@@ -303,7 +304,8 @@ router.get(
           sourceUrl: r.sourceUrl,
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
-          bodyPreview: previewBody(r.body),
+          // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       });
     } catch (err) {
@@ -357,9 +359,10 @@ router.get(
         sourceUrl: r.sourceUrl,
         embedded: r.embedding !== null,
         fetchedAt: r.fetchedAt.toISOString(),
-        bodyPreview: previewBody(r.body),
-        body: r.body,
-        bodyHtml: r.bodyHtml,
+        // G-309 (Exhibit D §6): an ICC atom is a citation only, for every caller.
+        ...(isIccRow(r)
+          ? {}
+          : { bodyPreview: previewBody(r.body), body: r.body, bodyHtml: r.bodyHtml }),
         parentSection: r.parentSection,
         embeddingModel: r.embeddingModel,
         metadata: (r.metadata as Record<string, unknown>) ?? null,
