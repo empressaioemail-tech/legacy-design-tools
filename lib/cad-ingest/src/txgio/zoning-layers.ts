@@ -666,6 +666,14 @@ export const ZONING_LAYERS: Record<string, ZoningLayerConfig> = {
       "C-2": "C-2",
       "C-3": "C-3",
       I: "I",
+      // "S-P" (layer label "Specific Use") is published on this layer but is
+      // not in the Sec. 46-203 roster, so it has no setback row. Unmapped, it
+      // fell to NULL and those parcels were stamped as having no zoning on
+      // record, while the ledger serves S-P from the same layer (measured
+      // 2026-11-05: 48021 props 12830, 14457 and 60891). It is stamped
+      // verbatim, as P-259 does for any published value with no base
+      // district: the router has a decline path for it, NULL does not.
+      "S-P": "S-P",
     },
   },
   // Elgin (Travis, 48453). Same FeatureServer as "elgin-tx" above, layer 1
