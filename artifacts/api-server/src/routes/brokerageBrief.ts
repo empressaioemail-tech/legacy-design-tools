@@ -650,11 +650,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const installId = installIdFromRequest(req);
   const lk = listingKeyFromAddress(address, mls_id);
   const extensionPublic = isExtensionPublicClient(req);
-  const authenticatedUser =
-    req.brokerageAuth?.tier === "user" &&
-    req.session?.requestor?.kind === "user"
-      ? req.session.requestor.id
-      : null;
+  // The same rule as every other brokerage read: a real user, never the anon owner.
+  const authenticatedUser = authenticatedBrokerageUserId(req);
   const serviceCaller = isBrokerageServiceCaller(req);
   const spineViaGate = isBrokerageBriefViaGateEnabled();
 

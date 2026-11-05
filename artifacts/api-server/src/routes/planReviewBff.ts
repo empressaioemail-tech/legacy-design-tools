@@ -32,6 +32,16 @@ import { AdapterRunError } from "@workspace/adapters/types";
 import { requireServiceTokenOrSession } from "../middlewares/serviceAuth";
 import { logger } from "../lib/logger";
 import {
+  CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+  isAnthropicTruncated,
+  textFromAnthropicContent,
+} from "../lib/codeCitingModel";
+import {
   findEngagementInFlightFindingRun,
   loadOpenFindingCountBySubmissionIds,
 } from "../lib/findingRunsEngagement";
@@ -209,9 +219,12 @@ router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: R
   const results = [];
   for (const material of chunks) {
     try {
-      const resp = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
+      const resp = await anthropic.beta.messages.create({
+        model: CODE_CITING_ANTHROPIC_MODEL,
+        betas: CODE_CITING_FALLBACK_BETAS,
+        fallbacks: CODE_CITING_FALLBACKS,
+        max_tokens: CODE_CITING_MAX_TOKENS,
+        output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
         system:
           "Extract draft intake fields. Return ONLY valid JSON. Mark unverified fields.",
         messages: [
@@ -221,8 +234,11 @@ router.post("/intake", requireServiceTokenOrSession, async (req: Request, res: R
           },
         ],
       });
-      const text =
-        resp.content[0]?.type === "text" ? resp.content[0].text : "{}";
+      // Refusal and max_tokens are failures (caught below): no partial output.
+      if (isAnthropicRefusal(resp) || isAnthropicTruncated(resp)) {
+        throw new Error(`intake model stop_reason=${resp.stop_reason}`);
+      }
+      const text = textFromAnthropicContent(resp.content) || "{}";
       const parsed = JSON.parse(text) as Record<string, unknown>;
       results.push({
         projectName: String(parsed.projectName ?? ""),
