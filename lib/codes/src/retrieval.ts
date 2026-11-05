@@ -17,6 +17,7 @@ import { and, eq, sql, isNotNull } from "drizzle-orm";
 import { db, codeAtoms, codeAtomSources } from "@workspace/db";
 import { embedQuery } from "./embeddings";
 import type { OrchestratorLogger } from "./orchestrator";
+import { isIccTitleAtom } from "./iccTitles";
 
 export interface RetrievedAtom {
   id: string;
@@ -115,6 +116,9 @@ export async function retrieveAtomsForQuestion(
     primaryAtoms = await retrieveAtomsFromNeon(opts);
   }
 
+  // G-309 (Exhibit D): no ICC-title atom, whatever its source, reaches a prompt.
+  primaryAtoms = primaryAtoms.filter((a) => !isIccTitleAtom(a));
+
   // Tag primary atoms as jurisdiction-sourced
   primaryAtoms.forEach((atom) => {
     atom.codeSource = "jurisdiction";
@@ -166,7 +170,7 @@ async function retrieveAtomsFromNeon(
         ),
       )
       .orderBy(sql`distance ASC`)
-      .limit(limit);
+      .limit(limit * 4); // over-fetch: ICC-title atoms are dropped after the query
     if (rows.length > 0) {
       // Hydrate first, then optionally apply the soft floor. The fallback
       // to lexical only fires when the *raw* DB query returned 0 rows
@@ -187,9 +191,10 @@ async function retrieveAtomsFromNeon(
         score: 1 - Number(r.distance ?? 1),
         retrievalMode: "vector",
       }));
+      const kept = hydrated.filter((r) => !isIccTitleAtom(r));
       return applyMinScore
-        ? hydrated.filter((r) => r.score >= MIN_VECTOR_SCORE)
-        : hydrated;
+        ? kept.filter((r) => r.score >= MIN_VECTOR_SCORE).slice(0, limit)
+        : kept.slice(0, limit);
     }
   }
 
@@ -219,6 +224,7 @@ async function retrieveAtomsFromNeon(
     .limit(500);
 
   const scored = allRows
+    .filter((r) => !isIccTitleAtom(r))
     .map((r) => {
       const hay = `${r.sectionTitle ?? ""} ${r.sectionNumber ?? ""} ${r.body}`.toLowerCase();
       let score = 0;
@@ -348,7 +354,7 @@ export async function getAtomsByIds(
         sql`${codeAtoms.id} = ANY(${sql.raw(`ARRAY[${ids.map((id) => `'${id.replace(/'/g, "''")}'::uuid`).join(",")}]`)})`,
       ),
     );
-  return rows.map((r) => ({
+  return rows.filter((r) => !isIccTitleAtom(r)).map((r) => ({
     id: r.id,
     sourceName: r.sourceName,
     jurisdictionKey: r.jurisdictionKey,
