@@ -37,7 +37,7 @@ import {
 } from "@workspace/api-zod";
 import { getSnapshotSecret } from "../lib/snapshotSecret";
 import { logger } from "../lib/logger";
-import { hasSignedInUser } from "../lib/iccAccess";
+import { hasSignedInUser, isIccRow } from "../lib/iccAccess";
 import { isIccSource } from "@workspace/icc-notice";
 
 const router: IRouter = Router();
@@ -186,7 +186,8 @@ router.post(
       atomId: a.id,
       codeRef: a.sectionNumber ?? a.sectionTitle ?? a.codeBook,
       sectionTitle: a.sectionTitle,
-      bodyPreview: previewBody(a.body, BODY_PREVIEW_CHARS),
+      // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+      ...(isIccRow(a) ? {} : { bodyPreview: previewBody(a.body, BODY_PREVIEW_CHARS) }),
       similarity: roundSimilarity(a.score, a.retrievalMode),
       sourceBook: a.codeBook,
       sourceUrl: a.sourceUrl ?? null,
@@ -196,7 +197,10 @@ router.post(
     // 7. Assemble the literal <reference_code_atoms> XML using the SAME
     //    helper buildChatPrompt uses internally. Empty string when there
     //    are no atoms (matches chat behavior — no empty tags emitted).
-    const assembledPromptBlock = formatReferenceCodeAtoms(atoms);
+    // G-309: the block is shown to the caller, so ICC atoms appear without text.
+    const assembledPromptBlock = formatReferenceCodeAtoms(
+      atoms.map((a) => (isIccRow(a) ? { ...a, body: "" } : a)),
+    );
 
     // 8. queryEmbedding metadata. `available` is true when the env supports
     //    real embeddings AND the returned atoms came from the vector path

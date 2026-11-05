@@ -316,8 +316,9 @@ describe("GET /api/codes/atoms (global inspector list)", () => {
     // fetchedAt DESC: index 0 had the newest fetchedAt (Date.now() - 1_000).
     expect(res.body.items[0].sectionNumber).toBe("R301.2.1");
     expect(res.body.items[5].sectionNumber).toBe("1605");
-    // bodyPreview is collapsed/truncated, embedded reflects vector presence.
-    expect(typeof res.body.items[0].bodyPreview).toBe("string");
+    // G-309: index 0 is an IRC (ICC-title) atom, so it carries no bodyPreview
+    // even here; embedded reflects vector presence.
+    expect(res.body.items[0]).not.toHaveProperty("bodyPreview");
     expect(res.body.items[0].embedded).toBe(true);
     expect(res.body.items[1].embedded).toBe(false);
   });
@@ -765,7 +766,7 @@ describe("GET /api/codes/jurisdictions/:key/atoms", () => {
     expect(res.body.discoveryErrors[0]).toHaveProperty("error");
   });
 
-  it("returns the atom list (newest first) with body previews trimmed", async () => {
+  it("returns the atom list (newest first); ICC-title rows carry no body preview", async () => {
     if (!ctx.schema) throw new Error("schema not ready");
     await seedGrandCountySources();
     sourceMocks.listTocImpl = async ({ codeBook }) =>
@@ -800,8 +801,7 @@ describe("GET /api/codes/jurisdictions/:key/atoms", () => {
     expect(list.body[0].sectionNumber).toBe("R301.2(1)");
     expect(list.body[0].sourceName).toBe("grand_county_html");
     expect(list.body[0].embedded).toBe(false);
-    // previewBody caps at ~240 chars + "…"
-    expect(list.body[0].bodyPreview.length).toBeLessThanOrEqual(241);
-    expect(list.body[0].bodyPreview.endsWith("…")).toBe(true);
+    // G-309: IRC is an ICC title, so the row is citation-only (no preview).
+    expect(list.body[0]).not.toHaveProperty("bodyPreview");
   });
 });
