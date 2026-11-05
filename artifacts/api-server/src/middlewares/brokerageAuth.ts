@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifySessionToken } from "../lib/sessionToken";
+import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
 /**
  * RETIRED (operator ruling, 2026-09-07: "cut the chrome extension we don't
@@ -69,6 +70,21 @@ export function isExtensionPublicClient(req: Request): boolean {
 }
 
 /** Signed-in brokerage user (session Bearer → tier `user`). */
+/**
+ * A verified session that names a real Smart Site user. The anonymous owner
+ * token (`mintAnonymousOwnerToken`, the pr_anon_owner cookie) is ALSO a
+ * verified session with requestor kind "user", id "anon_<hex>": it is a
+ * browse-only owner, never a signed-in user, so it never earns the user tier.
+ */
+export function isIdentifiedUserSession(
+  session: { requestor?: { kind: string; id: string } } | undefined,
+): boolean {
+  const r = session?.requestor;
+  if (!r || r.kind !== "user") return false;
+  const id = r.id.trim();
+  return id.length > 0 && !isAnonymousOwnerId(id);
+}
+
 export function authenticatedBrokerageUserId(req: Request): string | null {
   if (req.brokerageAuth?.tier !== "user") return null;
   if (req.session?.requestor?.kind !== "user") return null;
@@ -109,7 +125,7 @@ export function brokerageAuth(
   // API-key callers.
   if (provided?.includes(".")) {
     const verified = verifySessionToken(provided);
-    if (verified.ok && verified.session.requestor?.kind === "user") {
+    if (verified.ok && isIdentifiedUserSession(verified.session)) {
       req.session = verified.session;
       req.brokerageAuth = { tier: "user" };
       next();

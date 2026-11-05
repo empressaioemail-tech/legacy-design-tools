@@ -5,8 +5,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, codeAtoms, codeAtomSources, codeAtomFetchQueue } from "@workspace/db";
 import { buildProvenanceFromCodeAtom } from "../lib/provenanceEnvelope";
-import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
+import { logIccTextRefused } from "@workspace/codes/iccIngestGuard";
 import {
   enqueueWarmupForJurisdiction,
   drainQueue,
@@ -591,11 +592,36 @@ router.post(
       1000,
     );
     try {
-      const pending = await db
-        .select({ id: codeAtoms.id, body: codeAtoms.body })
+      const candidates = await db
+        .select({
+          id: codeAtoms.id,
+          body: codeAtoms.body,
+          sourceUrl: codeAtoms.sourceUrl,
+          jurisdictionKey: codeAtoms.jurisdictionKey,
+          codeBook: codeAtoms.codeBook,
+          sectionNumber: codeAtoms.sectionNumber,
+          sourceName: codeAtomSources.sourceName,
+        })
         .from(codeAtoms)
-        .where(isNull(codeAtoms.embedding))
+        .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
+        // G-309: ICC atoms are blanked at ingest (body ""), never embedded.
+        .where(
+          and(
+            isNull(codeAtoms.embedding),
+            ne(codeAtoms.body, ""),
+            notIccAtomRowSql(),
+          ),
+        )
         .limit(limit);
+
+      // Title-based ICC detection (iccAccess.isIccRow) runs in JS: those rows
+      // are skipped here, so their text is never sent to the embeddings API.
+      const pending = candidates.filter((r) => !isIccRow(r));
+      logIccTextRefused(
+        logger,
+        "routes.codes.embeddingsBackfill",
+        candidates.length - pending.length,
+      );
 
       if (pending.length === 0) {
         res.json({ scanned: 0, embedded: 0, failed: 0, remaining: 0 });
@@ -640,7 +666,7 @@ router.post(
       const remainingRows = await db
         .select({ n: sql<number>`count(*)::int` })
         .from(codeAtoms)
-        .where(isNull(codeAtoms.embedding));
+        .where(and(isNull(codeAtoms.embedding), ne(codeAtoms.body, "")));
       res.json({
         scanned: pending.length,
         embedded,
