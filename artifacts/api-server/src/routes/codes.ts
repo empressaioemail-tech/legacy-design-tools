@@ -18,6 +18,40 @@ import { logger } from "../lib/logger";
 import { hasSignedInUser, isIccRow, notIccAtomRowSql } from "../lib/iccAccess";
 import { isIccSource } from "@workspace/icc-notice";
 
+const ICC_SAFE_METADATA_KEYS = new Set([
+  "kind",
+  "scrapedAt",
+  "codeBookEdition",
+  "revision",
+  "articleNumber",
+  "articleRevision",
+  "isSplit",
+  "partIndex",
+  "partTotal",
+  "chunkBytes",
+  "pdfPageCount",
+  "nodeId",
+  "parentNodeId",
+  "docOrderId",
+  "isAmended",
+  "isUpdated",
+  "jobId",
+]);
+
+/** Structural provenance keys only; scalar values only. */
+export function iccSafeMetadata(
+  m: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!m) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(m)) {
+    if (!ICC_SAFE_METADATA_KEYS.has(k)) continue;
+    if (typeof v === "string" && v.length > 64) continue;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
+  }
+  return out;
+}
+
 const router: IRouter = Router();
 
 // ----------------------- helpers ---------------------------------------------
@@ -167,6 +201,7 @@ router.get(
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
           // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          citationOnly: isIccRow(r),
           ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       );
@@ -306,6 +341,7 @@ router.get(
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
           // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          citationOnly: isIccRow(r),
           ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       });
@@ -361,12 +397,17 @@ router.get(
         embedded: r.embedding !== null,
         fetchedAt: r.fetchedAt.toISOString(),
         // G-309 (Exhibit D §6): an ICC atom is a citation only, for every caller.
+        citationOnly: isIccRow(r),
         ...(isIccRow(r)
           ? {}
           : { bodyPreview: previewBody(r.body), body: r.body, bodyHtml: r.bodyHtml }),
         parentSection: r.parentSection,
         embeddingModel: r.embeddingModel,
-        metadata: (r.metadata as Record<string, unknown>) ?? null,
+        // G-309: `metadata` is a free-form source bag; for an ICC atom only
+        // structural keys are served, never anything that could hold text.
+        metadata: isIccRow(r)
+          ? iccSafeMetadata(r.metadata as Record<string, unknown> | null)
+          : ((r.metadata as Record<string, unknown>) ?? null),
         provenance: buildProvenanceFromCodeAtom({
           atomId: r.id,
           sourceUrl: r.sourceUrl,

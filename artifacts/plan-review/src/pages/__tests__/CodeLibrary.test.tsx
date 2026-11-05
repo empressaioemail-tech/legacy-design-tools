@@ -129,6 +129,19 @@ vi.mock("@workspace/api-client-react", async () => {
       fetchedAt: "2026-04-15T12:00:00Z",
       bodyPreview: "Buildings shall be designed for live and dead loads.",
     },
+    {
+      id: "atom-icc",
+      jurisdictionKey: "grand_county_ut",
+      codeBook: "IRC",
+      edition: "2021",
+      sectionNumber: "R301.2",
+      sectionTitle: "Climatic and geographic design criteria",
+      sourceName: "ICC Digital Codes",
+      sourceUrl: "https://codes.iccsafe.org/content/IRC2021P1/chapter-3",
+      embedded: true,
+      fetchedAt: "2026-04-15T12:00:00Z",
+      citationOnly: true,
+    },
   ];
 
   const atomDetailsById: Record<
@@ -144,9 +157,10 @@ vi.mock("@workspace/api-client-react", async () => {
       sourceUrl: string;
       embedded: boolean;
       fetchedAt: string;
-      bodyPreview: string;
-      body: string;
-      bodyHtml: string | null;
+      bodyPreview?: string;
+      citationOnly?: boolean;
+      body?: string;
+      bodyHtml?: string | null;
       parentSection: string | null;
       embeddingModel: string | null;
       metadata: Record<string, unknown> | null;
@@ -168,6 +182,22 @@ vi.mock("@workspace/api-client-react", async () => {
       bodyHtml: null,
       parentSection: "1.2",
       embeddingModel: "text-embedding-3-small",
+      metadata: null,
+    },
+    "atom-icc": {
+      id: "atom-icc",
+      jurisdictionKey: "grand_county_ut",
+      codeBook: "IRC",
+      edition: "2021",
+      sectionNumber: "R301.2",
+      sectionTitle: "Climatic and geographic design criteria",
+      sourceName: "ICC Digital Codes",
+      sourceUrl: "https://codes.iccsafe.org/content/IRC2021P1/chapter-3",
+      embedded: true,
+      fetchedAt: "2026-04-15T12:00:00Z",
+      citationOnly: true,
+      parentSection: null,
+      embeddingModel: null,
       metadata: null,
     },
   };
@@ -363,6 +393,37 @@ describe("CodeLibrary", () => {
     expect(
       within(body).getByTestId("atom-detail-source-link"),
     ).toHaveAttribute("href", "https://example.com/zoning/1.2.3");
+  });
+
+  it("a citation-only ICC row shows 'Citation only' in the list, never an empty preview", async () => {
+    renderPage();
+    const row = await screen.findByTestId("atom-row-atom-icc");
+    expect(within(row).getByText("R301.2")).toBeInTheDocument();
+    expect(within(row).getByText(/Climatic and geographic/)).toBeInTheDocument();
+    expect(within(row).getByTestId("atom-row-atom-icc-citation-only")).toHaveTextContent(
+      "Citation only",
+    );
+    // A city row keeps its preview and has no citation-only marker.
+    const city = screen.getByTestId("atom-row-atom-1");
+    expect(city).toHaveTextContent("Side setback minimum five feet");
+    expect(within(city).queryByText("Citation only")).toBeNull();
+  });
+
+  it("a citation-only ICC atom opens with 'Citation only', the link, and no body block", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByTestId("atom-row-atom-icc"));
+    await screen.findByTestId("atom-detail-content");
+    const body = screen.getByTestId("atom-detail-body");
+    expect(within(body).getByText("Climatic and geographic design criteria")).toBeInTheDocument();
+    expect(within(body).getByTestId("atom-detail-content")).toHaveTextContent("Citation only");
+    expect(within(body).getByTestId("atom-detail-content").querySelector("pre")).toBeNull();
+    expect(
+      within(body).getByTestId("atom-detail-source-link"),
+    ).toHaveAttribute("href", "https://codes.iccsafe.org/content/IRC2021P1/chapter-3");
+    expect(within(body).getByTestId("atom-detail-icc-link")).toHaveAttribute(
+      "href",
+      "https://codes.iccsafe.org/content/IRC2021P1/chapter-3",
+    );
   });
 
   it("polls the warmup status while running and stops on terminal state", async () => {

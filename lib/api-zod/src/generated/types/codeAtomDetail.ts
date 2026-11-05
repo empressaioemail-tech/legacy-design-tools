@@ -9,8 +9,10 @@ import type { CodeAtomDetailMetadata } from "./codeAtomDetailMetadata";
 import type { CodeAtomSummary } from "./codeAtomSummary";
 
 export type CodeAtomDetail = CodeAtomSummary & {
-  body: string;
-  bodyHtml: string | null;
+  /** Absent when `citationOnly` is true. */
+  body?: string;
+  /** Absent when `citationOnly` is true. */
+  bodyHtml?: string | null;
   parentSection: string | null;
   embeddingModel: string | null;
   metadata: CodeAtomDetailMetadata;

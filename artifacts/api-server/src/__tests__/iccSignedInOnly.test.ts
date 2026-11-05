@@ -152,9 +152,11 @@ describe("POST /api/dev/atoms/retrieve", () => {
     const icc = res.body.results.find((r: { atomId: string }) => r.atomId === "a-icc");
     expect(icc).toBeDefined();
     expect(icc).not.toHaveProperty("bodyPreview");
+    expect(icc.citationOnly).toBe(true);
     expect(JSON.stringify(res.body)).not.toContain("PLANTED-ICC-BODY");
     const city = res.body.results.find((r: { atomId: string }) => r.atomId === "a-city");
     expect(city.bodyPreview).toBe("city text");
+    expect(city.citationOnly).toBe(false);
   });
 });
 
@@ -259,6 +261,7 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     expect(icc.body.sectionNumber).toBe("1612.3");
     expect(icc.body.sourceUrl).toContain("iccsafe.org");
     for (const k of ["body", "bodyPreview", "bodyHtml"]) expect(icc.body).not.toHaveProperty(k);
+    expect(icc.body.citationOnly).toBe(true);
     expect(JSON.stringify(icc.body)).not.toContain("PLANTED");
 
     state.atomRow = cityRow();
@@ -267,6 +270,31 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     expect(city.body.body).toBe("city text");
     expect(city.body.bodyHtml).toBe("<p>city text</p>");
     expect(city.body.bodyPreview).toBe("city text");
+    expect(city.body.citationOnly).toBe(false);
+  });
+
+  it("atom by id: ICC metadata is reduced to structural keys; a city atom keeps its metadata", async () => {
+    const meta = {
+      kind: "icc_section",
+      scrapedAt: "2026-01-01T00:00:00.000Z",
+      partIndex: 2,
+      footnote: "PLANTED-META-TEXT",
+      excerpt: "PLANTED-META-TEXT",
+      nested: { text: "PLANTED-META-TEXT" },
+    };
+    state.atomRow = { ...iccRow(), metadata: meta };
+    const icc = await request(app()).get("/api/codes/atoms/a-icc").set("x-test-user", "u1");
+    expect(icc.status).toBe(200);
+    expect(icc.body.metadata).toEqual({
+      kind: "icc_section",
+      scrapedAt: "2026-01-01T00:00:00.000Z",
+      partIndex: 2,
+    });
+    expect(JSON.stringify(icc.body)).not.toContain("PLANTED");
+
+    state.atomRow = { ...cityRow(), metadata: meta };
+    const city = await request(app()).get("/api/codes/atoms/a-city").set("x-test-user", "u1");
+    expect(city.body.metadata).toEqual(meta);
   });
 
   it("an ICC title from a non-ICC source (by codeBook) is also citation-only", async () => {
@@ -285,7 +313,9 @@ describe("G-309 Exhibit D §6: no ICC text for a signed-in user", () => {
     for (const rows of [perJurisdiction.body, global.body.items] as Array<Array<Record<string, unknown>>>) {
       expect(rows).toHaveLength(2);
       expect(rows[0]).not.toHaveProperty("bodyPreview");
+      expect(rows[0]!.citationOnly).toBe(true);
       expect(rows[1]!.bodyPreview).toBe("city text");
+      expect(rows[1]!.citationOnly).toBe(false);
     }
     expect(JSON.stringify([perJurisdiction.body, global.body])).not.toContain("PLANTED");
   });
