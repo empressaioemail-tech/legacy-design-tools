@@ -42,6 +42,9 @@ import {
   type JurisdictionCoverage,
 } from "./coverageGuardrail";
 import { handleWorkspaceChat } from "./chatWorkspace";
+import { randomUUID } from "node:crypto";
+import { hasSignedInUser } from "../lib/iccAccess";
+import { iccCitationsCitedInText, recordIccUsage } from "../lib/iccUsage";
 
 /**
  * Render-mode token the inline-reference syntax uses to opt a chat
@@ -926,6 +929,8 @@ router.post("/chat", async (req: Request, res: Response) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const convo: any[] = [...messages];
 
+  // A13c: the answer as streamed, to find the [[CODE:id]] citations it shows.
+  let answerText = "";
   try {
     let iterations = 0;
     while (true) {
@@ -948,6 +953,7 @@ router.post("/chat", async (req: Request, res: Response) => {
           event.type === "content_block_delta" &&
           event.delta.type === "text_delta"
         ) {
+          answerText += event.delta.text;
           res.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
         }
       }
@@ -1011,6 +1017,7 @@ router.post("/chat", async (req: Request, res: Response) => {
             event.type === "content_block_delta" &&
             event.delta.type === "text_delta"
           ) {
+            answerText += event.delta.text;
             res.write(
               `data: ${JSON.stringify({ text: event.delta.text })}\n\n`,
             );
@@ -1086,6 +1093,17 @@ router.post("/chat", async (req: Request, res: Response) => {
       }
       convo.push({ role: "user", content: toolResults });
     }
+
+    // A13c: one ledger row set per answer for the ICC atoms its citations name.
+    void recordIccUsage({
+      requestId: randomUUID(),
+      authorizedUser:
+        hasSignedInUser(req) && req.session.requestor
+          ? req.session.requestor.id
+          : null,
+      surface: "chat",
+      citations: iccCitationsCitedInText(answerText, allAtoms),
+    });
 
     res.write("data: [DONE]\n\n");
     res.end();

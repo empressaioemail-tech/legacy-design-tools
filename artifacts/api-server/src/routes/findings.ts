@@ -60,6 +60,13 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isIccTitleAtom } from "@workspace/codes/iccTitles";
+import { hasSignedInUser } from "../lib/iccAccess";
+import {
+  iccCitationFromAtom,
+  iccCitationsForFindings,
+  recordIccUsage,
+  type IccUsageCitation,
+} from "../lib/iccUsage";
 import {
   keyFromEngagementOrSynthesize,
   retrieveAtomsForQuestion,
@@ -600,6 +607,8 @@ export async function resolveEngineInputs(
   sources: BriefingSource[];
   codeSections: CodeSectionInput[];
   bimElements: BimElementInput[];
+  /** A13c: ledger ids (book, section) of the ICC atoms retrieved, by engine atom id. */
+  iccCitationsByAtomId: Map<string, IccUsageCitation>;
 }> {
   const subRows = await db
     .select({ engagementId: submissions.engagementId })
@@ -613,6 +622,7 @@ export async function resolveEngineInputs(
       sources: [],
       codeSections: [],
       bimElements: [],
+      iccCitationsByAtomId: new Map(),
     };
   }
 
@@ -687,6 +697,7 @@ export async function resolveEngineInputs(
   // fallback query handles the briefing-not-yet-generated case so a
   // submission can still get code context from the corpus.
   let codeSections: CodeSectionInput[] = [];
+  const iccCitationsByAtomId = new Map<string, IccUsageCitation>();
   if (jurisdictionKey) {
     const fallbackQuery =
       `Compliance review for ${
@@ -705,6 +716,10 @@ export async function resolveEngineInputs(
         logger: log,
       });
       codeSections = atoms.map(toCodeSectionInput);
+      for (const a of atoms) {
+        const c = iccCitationFromAtom(a);
+        if (c) iccCitationsByAtomId.set(canonicalOverlayAtomKey(a.id), c);
+      }
       log.info(
         {
           submissionId,
@@ -794,7 +809,13 @@ export async function resolveEngineInputs(
     }
   }
 
-  return { briefingNarrative, sources, codeSections, bimElements };
+  return {
+    briefingNarrative,
+    sources,
+    codeSections,
+    bimElements,
+    iccCitationsByAtomId,
+  };
 }
 
 /**
@@ -1009,6 +1030,7 @@ async function runFindingGeneration(args: {
   generationId: string;
   reqLog: typeof logger;
   planSetPieceIds?: string[];
+  authorizedUser?: string | null;
 }): Promise<void> {
   const { submissionId, generationId, reqLog, planSetPieceIds } = args;
   try {
@@ -1282,6 +1304,14 @@ async function runFindingGeneration(args: {
       });
     }
 
+    // A13c: one ledger row set per run for the ICC citations the findings show.
+    void recordIccUsage({
+      requestId: generationId,
+      authorizedUser: args.authorizedUser ?? null,
+      surface: "findings",
+      citations: iccCitationsForFindings(persistedRows, inputs.iccCitationsByAtomId),
+    });
+
     if (result.invalidCitations.length > 0) {
       reqLog.warn(
         {
@@ -1374,7 +1404,7 @@ export type FindingKickoffOutcome =
 export async function kickoffFindingGenerationForSubmission(
   submissionId: string,
   reqLog: typeof logger,
-  opts: { planSetPieceIds?: string[] } = {},
+  opts: { planSetPieceIds?: string[]; authorizedUser?: string | null } = {},
 ): Promise<FindingKickoffOutcome> {
   let kickoffRow: FindingRun;
   try {
@@ -1408,6 +1438,7 @@ export async function kickoffFindingGenerationForSubmission(
     generationId,
     reqLog,
     planSetPieceIds: opts.planSetPieceIds,
+    authorizedUser: opts.authorizedUser ?? null,
   });
 
   reqLog.info(
@@ -1468,6 +1499,10 @@ router.post(
         reqLog,
         {
           planSetPieceIds: bodyParse.data.planSetPieceIds,
+          authorizedUser:
+            hasSignedInUser(req) && req.session.requestor
+              ? req.session.requestor.id
+              : null,
         },
       );
       if (outcome.kind === "already_running") {
