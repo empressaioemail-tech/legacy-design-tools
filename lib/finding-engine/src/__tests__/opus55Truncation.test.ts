@@ -15,7 +15,7 @@ const input: GenerateFindingsInput = {
 
 function clientWith(response: unknown) {
   const create = vi.fn(async () => response);
-  return { create, client: { messages: { create } } as unknown as Anthropic };
+  return { create, client: { beta: { messages: { create } } } as unknown as Anthropic };
 }
 
 describe("findings: max_tokens", () => {

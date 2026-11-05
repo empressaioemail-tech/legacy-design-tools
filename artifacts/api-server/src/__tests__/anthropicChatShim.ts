@@ -8,20 +8,19 @@
 type ChatFn = (opts: { system?: string; user: string; model?: string }) => unknown;
 
 export function anthropicChatShim(chat: ChatFn) {
-  return {
-    messages: {
-      create: async (params: {
-        model?: string;
-        system?: string;
-        messages: Array<{ content: string }>;
-      }) => {
-        const text = await chat({
-          system: params.system,
-          user: params.messages[0]?.content ?? "",
-          model: params.model,
-        });
-        return { content: [{ type: "text", text: String(text ?? "") }] };
-      },
-    },
-  } as never;
+  const create = async (params: {
+    model?: string;
+    system?: string;
+    messages: Array<{ content: string }>;
+  }) => {
+    const text = await chat({
+      system: params.system,
+      user: params.messages[0]?.content ?? "",
+      model: params.model,
+    });
+    return { content: [{ type: "text", text: String(text ?? "") }] };
+  };
+  // The code-citing paths call the beta endpoint (server-side refusal
+  // fallback, G-309 A23); `messages` is kept for any non-Opus caller.
+  return { messages: { create }, beta: { messages: { create } } } as never;
 }

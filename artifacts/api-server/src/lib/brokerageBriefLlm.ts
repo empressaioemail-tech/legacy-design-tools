@@ -4,6 +4,8 @@
 
 import {
   CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
   isAnthropicTruncated,
   BRIEFING_ANTHROPIC_MODEL,
   CODE_CITING_OUTPUT_CONFIG_MEDIUM,
@@ -352,8 +354,10 @@ async function completeBriefingLlm(
   const bundle = await getBriefingLlmClient();
   if (!bundle) return { text: null, method: "anthropic" };
 
-  const response = await bundle.client.messages.create({
+  const response = await bundle.client.beta.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
+    betas: CODE_CITING_FALLBACK_BETAS,
+    fallbacks: CODE_CITING_FALLBACKS,
     max_tokens: CODE_CITING_MAX_TOKENS,
     output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
     system,

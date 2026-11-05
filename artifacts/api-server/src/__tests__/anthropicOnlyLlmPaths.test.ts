@@ -52,7 +52,7 @@ const saved: Record<string, string | undefined> = {};
 
 function stubClient(text: string) {
   const create = vi.fn(async () => ({ content: [{ type: "text", text }] }));
-  return { client: { messages: { create } }, create };
+  return { client: { beta: { messages: { create } } }, create };
 }
 
 beforeEach(() => {

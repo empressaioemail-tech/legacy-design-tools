@@ -55,7 +55,6 @@ router.post("/intake/parse", async (req: Request, res: Response) => {
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
-      temperature: 0,
       system: [
         "You extract draft project intake fields from architect client material.",
         "Return ONLY valid JSON matching the schema.",

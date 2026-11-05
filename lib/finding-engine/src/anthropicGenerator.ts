@@ -35,6 +35,8 @@ import {
 import {
   CODE_CITING_ANTHROPIC_MODEL,
   CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
   CODE_CITING_OUTPUT_CONFIG_MEDIUM,
   isAnthropicRefusal,
   isAnthropicTruncated,
@@ -265,10 +267,12 @@ export async function callAnthropicGenerator(
   client: Anthropic,
   input: GenerateFindingsInput,
 ): Promise<RawFindingDraft[]> {
-  let response: Awaited<ReturnType<typeof client.messages.create>>;
+  let response: Awaited<ReturnType<typeof client.beta.messages.create>>;
   try {
-    response = await client.messages.create({
+    response = await client.beta.messages.create({
       model: FINDING_ANTHROPIC_MODEL,
+      betas: CODE_CITING_FALLBACK_BETAS,
+      fallbacks: CODE_CITING_FALLBACKS,
       max_tokens: FINDING_ANTHROPIC_MAX_TOKENS,
       output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
       system: FINDING_SYSTEM_PROMPT,

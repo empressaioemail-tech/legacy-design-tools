@@ -36,7 +36,7 @@ const briefInput = {
 
 function stub(response: unknown) {
   const create = vi.fn(async () => response);
-  setBriefingLlmClient({ kind: "anthropic", client: { messages: { create } } as never });
+  setBriefingLlmClient({ kind: "anthropic", client: { beta: { messages: { create } } } as never });
   return create;
 }
 const argsOf = (create: { mock: { calls: unknown[] } }) =>
@@ -103,5 +103,33 @@ describe("Opus 5.5: brokerage brief and lay summary", () => {
     });
     expect((await generateLaySummary(layInput)).method).toBe("rules-v1");
     expect((await generateReasoningSummary(briefInput)).method).toBe("rules-v1");
+  });
+
+  it("brokerage brief and lay summary send the server-side fallback beta and param (G-309 A23)", async () => {
+    const brief = stub({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ headline: "H.", body: "B [1]." }) }],
+    });
+    await generateReasoningSummary(briefInput);
+    expect(argsOf(brief).betas).toEqual(["server-side-fallback-2026-07-01"]);
+    expect(argsOf(brief).fallbacks).toBe("default");
+    const lay = stub({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ verdicts }) }],
+    });
+    await generateLaySummary(layInput);
+    expect(argsOf(lay).betas).toEqual(["server-side-fallback-2026-07-01"]);
+    expect(argsOf(lay).fallbacks).toBe("default");
+  });
+
+  it("a refusal after the fallback chain still falls back to rules-v1", async () => {
+    const create = stub({
+      model: "claude-fallback-model",
+      stop_reason: "refusal",
+      content: [{ type: "text", text: JSON.stringify({ verdicts }) }],
+    });
+    expect((await generateLaySummary(layInput)).method).toBe("rules-v1");
+    expect((await generateReasoningSummary(briefInput)).method).toBe("rules-v1");
+    expect(argsOf(create).fallbacks).toBe("default");
   });
 });

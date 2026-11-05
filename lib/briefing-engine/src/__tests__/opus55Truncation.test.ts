@@ -10,7 +10,7 @@ const sections = JSON.stringify({ a: "a", b: "b", c: "c", d: "d", e: "e", f: "f"
 
 function clientWith(response: unknown) {
   const create = vi.fn(async () => response);
-  return { create, client: { messages: { create } } as unknown as Anthropic };
+  return { create, client: { beta: { messages: { create } } } as unknown as Anthropic };
 }
 
 describe("briefing: max_tokens", () => {

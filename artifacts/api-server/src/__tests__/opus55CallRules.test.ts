@@ -49,4 +49,33 @@ describe("Opus 5.5 rules at code-citing call sites", () => {
       expect(read(f)).not.toMatch(/model:\s*"claude-/);
     }
   });
+
+  it("every claude-opus-5-5 call uses the beta endpoint with the server-side fallback (G-309 A23)", () => {
+    const expectedCalls: Record<string, number> = {
+      "artifacts/api-server/src/routes/chat.ts": 2,
+      "artifacts/api-server/src/routes/chatWorkspace.ts": 1,
+      "artifacts/api-server/src/lib/brokerageBriefLlm.ts": 1,
+      "artifacts/api-server/src/lib/propertyBriefLaySummary.ts": 1,
+      "lib/finding-engine/src/anthropicGenerator.ts": 1,
+      "lib/briefing-engine/src/anthropicGenerator.ts": 1,
+    };
+    for (const f of FILES) {
+      const src = read(f);
+      const beta = src.match(/\.beta\.messages\.(create|stream)\(/g) ?? [];
+      expect(beta, f).toHaveLength(expectedCalls[f]!);
+      expect(src, f).not.toMatch(/(?<!beta)\.messages\.(create|stream)\(/);
+      expect(src.match(/betas: CODE_CITING_FALLBACK_BETAS/g) ?? [], f).toHaveLength(
+        expectedCalls[f]!,
+      );
+      expect(src.match(/fallbacks: CODE_CITING_FALLBACKS/g) ?? [], f).toHaveLength(
+        expectedCalls[f]!,
+      );
+    }
+  });
+
+  it("fallback constants carry the SDK-documented beta and param", async () => {
+    const m = await import("@workspace/briefing-engine");
+    expect(m.CODE_CITING_FALLBACK_BETAS).toEqual(["server-side-fallback-2026-07-01"]);
+    expect(m.CODE_CITING_FALLBACKS).toBe("default");
+  });
 });

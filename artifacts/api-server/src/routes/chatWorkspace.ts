@@ -15,6 +15,8 @@ import { logger } from "../lib/logger";
 import {
   CODE_CITING_ANTHROPIC_MODEL,
   CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
   CODE_CITING_OUTPUT_CONFIG_LOW,
   isAnthropicRefusal,
   isAnthropicTruncated,
@@ -110,8 +112,10 @@ export async function handleWorkspaceChat(
     let iterations = 0;
     while (iterations < MAX_AGENT_ITERATIONS) {
       iterations++;
-      const stream = anthropic.messages.stream({
+      const stream = anthropic.beta.messages.stream({
         model: CODE_CITING_ANTHROPIC_MODEL,
+        betas: CODE_CITING_FALLBACK_BETAS,
+        fallbacks: CODE_CITING_FALLBACKS,
         output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
         max_tokens: CODE_CITING_MAX_TOKENS,
         system: systemPrompt,

@@ -37,6 +37,18 @@ export const CODE_CITING_ANTHROPIC_MODEL = "claude-opus-5-5";
  */
 export const CODE_CITING_MAX_TOKENS = 16000;
 
+/**
+ * Server-side refusal fallback (G-309 A23). Every claude-opus-5-5 call goes
+ * through `client.beta.messages.create` / `.stream` with this beta header and
+ * `fallbacks: "default"`, so a policy refusal is retried by Anthropic on the
+ * model's server-defined fallback chain. If the whole chain refuses, the final
+ * `stop_reason` is still "refusal" and the existing refusal handling applies.
+ */
+export const CODE_CITING_FALLBACK_BETAS: Anthropic.Beta.AnthropicBeta[] = [
+  "server-side-fallback-2026-07-01",
+];
+export const CODE_CITING_FALLBACKS = "default" as const;
+
 /** True when the answer was cut off; never parse such a response. */
 export function isAnthropicTruncated(response: {
   stop_reason?: string | null;
@@ -149,10 +161,12 @@ export async function callAnthropicGenerator(
   client: Anthropic,
   input: GenerateBriefingInput,
 ): Promise<BriefingSections> {
-  let response: Awaited<ReturnType<typeof client.messages.create>>;
+  let response: Awaited<ReturnType<typeof client.beta.messages.create>>;
   try {
-    response = await client.messages.create({
+    response = await client.beta.messages.create({
       model: BRIEFING_ANTHROPIC_MODEL,
+      betas: CODE_CITING_FALLBACK_BETAS,
+      fallbacks: CODE_CITING_FALLBACKS,
       max_tokens: BRIEFING_ANTHROPIC_MAX_TOKENS,
       output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
       system: BRIEFING_SYSTEM_PROMPT,

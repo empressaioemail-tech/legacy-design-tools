@@ -41,7 +41,7 @@ vi.mock("@workspace/db", async () => {
 
 vi.mock("@workspace/integrations-anthropic-ai", () => ({
   anthropic: {
-    messages: {
+    beta: { messages: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       stream: (args: any) => {
         anthropicMocks.lastArgs = args;
@@ -74,7 +74,7 @@ vi.mock("@workspace/integrations-anthropic-ai", () => ({
           },
         };
       },
-    },
+    } },
   },
 }));
 
