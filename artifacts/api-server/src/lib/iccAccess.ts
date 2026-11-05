@@ -1,16 +1,20 @@
 /**
  * G-309: ICC content is for signed-in users only. A signed-in user is a
  * verified session whose requestor is a user. The anonymous applicant and
- * the dev snapshot-secret holder are not.
+ * the dev snapshot-secret holder are not. The session middleware also gives
+ * every unauthenticated browser a `{ kind: "user", id: "anon_<hex>" }`
+ * requestor; that ephemeral owner is not signed in either.
  */
 import type { Request } from "express";
 import { sql, type SQL } from "drizzle-orm";
 import { codeAtoms, codeAtomSources } from "@workspace/db";
 import { isIccSource } from "@workspace/icc-notice";
 import { isIccTitleAtom } from "@workspace/codes/iccTitles";
+import { isAnonymousOwnerId } from "./anonymousOwnerCookie";
 
 export function hasSignedInUser(req: Request): boolean {
-  return req.session?.requestor?.kind === "user";
+  const r = req.session?.requestor;
+  return r?.kind === "user" && !!r.id && !isAnonymousOwnerId(r.id);
 }
 
 /** SQL predicate that is true for ICC-sourced code_atoms rows (needs the source join). */
