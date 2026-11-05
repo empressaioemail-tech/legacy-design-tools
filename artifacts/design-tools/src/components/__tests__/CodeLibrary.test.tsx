@@ -24,12 +24,13 @@ interface Atom {
   sourceName: string;
   embedded: boolean;
   fetchedAt: string;
-  bodyPreview: string;
+  bodyPreview?: string;
+  citationOnly?: boolean;
 }
 
 interface AtomDetail extends Atom {
-  body: string;
-  bodyHtml: string | null;
+  body?: string;
+  bodyHtml?: string | null;
   parentSection: string | null;
   embeddingModel: string | null;
   metadata: Record<string, unknown> | null;
@@ -557,5 +558,80 @@ describe("CodeLibrary — clickable book rows (P1.4)", () => {
     expect(body).toHaveTextContent(/frost line 36 inches/);
     const link = screen.getByRole("link", { name: /Open source/ });
     expect(link).toHaveAttribute("href", "https://example.com/r301");
+  });
+
+  it("a citation-only ICC row shows 'Citation only' in the list and detail, with no empty body block", async () => {
+    const icc: Atom = {
+      id: "atom-icc",
+      jurisdictionKey: "grand_county_ut",
+      codeBook: "IRC",
+      edition: "2021",
+      sectionNumber: "R301.2",
+      sectionTitle: "Climatic and geographic design criteria",
+      sourceName: "ICC Digital Codes",
+      sourceUrl: "https://codes.iccsafe.org/content/IRC2021P1/chapter-3",
+      embedded: true,
+      fetchedAt: "2026-04-30T10:00:00.000Z",
+      citationOnly: true,
+    };
+    const city: Atom = {
+      ...icc,
+      id: "atom-city",
+      codeBook: "City",
+      sectionNumber: "14-02",
+      sectionTitle: "Setbacks",
+      sourceName: "municode",
+      sourceUrl: "https://example.com/14-02",
+      citationOnly: false,
+      bodyPreview: "Side setback is five feet.",
+    };
+    apiState.atomsByQuery.set("grand_county_ut", [icc, city]);
+    apiState.atomDetails.set("atom-icc", {
+      ...icc,
+      parentSection: null,
+      embeddingModel: null,
+      metadata: null,
+    });
+    apiState.atomDetails.set("atom-city", {
+      ...city,
+      body: "Side setback is five feet from the lot line.",
+      bodyHtml: null,
+      parentSection: null,
+      embeddingModel: null,
+      metadata: null,
+    });
+
+    render(<CodeLibrary />);
+
+    const iccRow = screen.getByTestId("atom-row-atom-icc");
+    expect(iccRow).toHaveTextContent("R301.2");
+    expect(iccRow).toHaveTextContent("Climatic and geographic design criteria");
+    expect(iccRow).toHaveTextContent("Citation only");
+    expect(screen.getByTestId("atom-row-atom-city")).toHaveTextContent(
+      "Side setback is five feet.",
+    );
+    expect(screen.getByTestId("atom-row-atom-city")).not.toHaveTextContent(
+      "Citation only",
+    );
+
+    await act(async () => {
+      fireEvent.click(iccRow);
+    });
+    expect(screen.queryByTestId("atom-body")).toBeNull();
+    expect(screen.getByTestId("atom-citation-only")).toHaveTextContent(
+      "Citation only",
+    );
+    expect(screen.getByRole("link", { name: /ICC Digital Codes/ })).toHaveAttribute(
+      "href",
+      "https://codes.iccsafe.org/content/IRC2021P1/chapter-3",
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("atom-row-atom-city"));
+    });
+    expect(screen.getByTestId("atom-body")).toHaveTextContent(
+      "Side setback is five feet from the lot line.",
+    );
+    expect(screen.queryByTestId("atom-citation-only")).toBeNull();
   });
 });

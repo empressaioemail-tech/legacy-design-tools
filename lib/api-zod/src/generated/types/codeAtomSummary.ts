@@ -17,5 +17,11 @@ export interface CodeAtomSummary {
   sourceUrl: string;
   embedded: boolean;
   fetchedAt: Date;
-  bodyPreview: string;
+  /** Absent when `citationOnly` is true. */
+  bodyPreview?: string;
+  /** True when the server withholds the section text for this atom (ICC
+title atoms: citation only, for every caller). When true, `body`,
+`bodyPreview` and `bodyHtml` are absent. Always sent by the server.
+ */
+  citationOnly: boolean;
 }

@@ -187,6 +187,7 @@ router.post(
       codeRef: a.sectionNumber ?? a.sectionTitle ?? a.codeBook,
       sectionTitle: a.sectionTitle,
       // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+      citationOnly: isIccRow(a),
       ...(isIccRow(a) ? {} : { bodyPreview: previewBody(a.body, BODY_PREVIEW_CHARS) }),
       similarity: roundSimilarity(a.score, a.retrievalMode),
       sourceBook: a.codeBook,
