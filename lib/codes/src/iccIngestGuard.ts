@@ -8,7 +8,7 @@
  * citations resolve; only the text-bearing fields are blanked. Same choice as
  * the read-side blanking in G-309 A16.
  */
-import { isIccRow } from "./iccTitles";
+import { isIccRow, isIccReasoningRow } from "./iccTitles";
 
 export { isIccRow };
 
@@ -74,28 +74,23 @@ export function guardCodeAtomText<T extends CodeAtomTextFields>(
 }
 
 export interface ReasoningAtomIdentity {
+  /** The row's code-book field, e.g. "IBC 2021". */
+  edition?: string | null;
   jurisdictionKey?: string | null;
-  codeRef?: string | null;
   sources?: ReadonlyArray<{ url?: string | null; sourceName?: string | null }> | null;
 }
 
-/** True when a reasoning_atoms row is an ICC atom (by title or any source). */
-export function isIccReasoningAtom(identity: ReasoningAtomIdentity): boolean {
-  if (isIccRow({ sectionNumber: identity.codeRef, jurisdictionKey: identity.jurisdictionKey })) {
-    return true;
-  }
-  return (identity.sources ?? []).some((s) =>
-    isIccRow({ sourceUrl: s?.url, sourceName: s?.sourceName }),
-  );
-}
-
 /**
- * reasoning_atoms: for an ICC atom, snippet and reasoning become null.
- * Callers pass the sources the row will hold after the write.
+ * reasoning_atoms: for an ICC row (icc-title or icc-source-link, see
+ * isIccReasoningRow) only `snippet` (verbatim fetched page text) is nulled.
+ * `reasoning` is built from our own template or a fixed literal and carries no
+ * source text, so it is left exactly as written. Callers pass the sources the
+ * row will hold after the write.
  */
-export function guardReasoningText<
-  T extends { snippet?: string | null; reasoning?: string | null },
->(values: T, identity: ReasoningAtomIdentity): { values: T; refused: boolean } {
-  if (!isIccReasoningAtom(identity)) return { values, refused: false };
-  return { values: { ...values, snippet: null, reasoning: null }, refused: true };
+export function guardReasoningText<T extends { snippet?: string | null }>(
+  values: T,
+  identity: ReasoningAtomIdentity,
+): { values: T; refused: boolean } {
+  if (!isIccReasoningRow(identity)) return { values, refused: false };
+  return { values: { ...values, snippet: null }, refused: true };
 }

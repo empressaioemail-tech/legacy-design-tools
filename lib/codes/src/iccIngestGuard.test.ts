@@ -98,6 +98,7 @@ import {
   upsertReasoningAtomDeeplinkOnly,
 } from "./reasoningAtoms/persist";
 import { rollbackReasoningVerification } from "./reasoningAtoms/snapshot";
+import { reasoningSummaryFromFetch } from "./reasoningAtoms/snippet";
 
 const PLANTED = "PLANTED-ICC-section-text-000";
 const NOW = new Date("2026-01-01T00:00:00Z");
@@ -199,99 +200,126 @@ const webResult = (over: Record<string, unknown> = {}) => ({
   text: PLANTED,
   ...over,
 });
-const target = (codeRef: string) => ({ codeRef, edition: "2021", editionSlug: "2021" });
+// edition is the reasoning_atoms code-book field ("<code> <edition>").
+const target = (codeRef: string, edition = "2021") => ({
+  codeRef,
+  edition,
+  editionSlug: edition.toLowerCase().replace(/\s+/g, "-"),
+});
+const expectedReasoning = (codeRef: string, edition: string, sourceName = "municode") =>
+  reasoningSummaryFromFetch({ codeRef, edition, verified: true, sourceName });
 
-describe("reasoning_atoms write paths", () => {
-  it("web-fetch INSERT: ICC-title atom stores no snippet or reasoning", async () => {
+describe("reasoning_atoms write paths: snippet nulled, reasoning untouched", () => {
+  it("icc-title (edition IBC) INSERT: snippet null, reasoning byte-identical to the template", async () => {
     await upsertReasoningAtomFromWebFetch({
       jurisdictionKey: "bastrop_tx",
-      target: target("IBC 1004.5") as never,
+      target: target("1004.5", "IBC 2021") as never,
       result: webResult() as never,
     });
     const w = mocks.writes[0];
     expect(w.op).toBe("insert");
     expect(w.values.snippet).toBeNull();
-    expect(w.values.reasoning).toBeNull();
+    expect(w.values.reasoning).toBe(expectedReasoning("1004.5", "IBC 2021"));
     expect(JSON.stringify(w.values)).not.toContain("PLANTED-ICC");
   });
 
-  it("web-fetch UPDATE: ICC source on a non-ICC ref stores no snippet or reasoning", async () => {
+  it("icc-source-link (FBC edition, iccsafe link) INSERT: snippet null, reasoning preserved", async () => {
+    await upsertReasoningAtomFromWebFetch({
+      jurisdictionKey: "miami_beach_fl",
+      target: target("M601.6", "FBC 2023") as never,
+      result: webResult({ sourceUrl: "https://codes.iccsafe.org/content/x" }) as never,
+    });
+    const w = mocks.writes[0];
+    expect(w.values.snippet).toBeNull();
+    expect(w.values.reasoning).toBe(expectedReasoning("M601.6", "FBC 2023"));
+  });
+
+  it("icc-source-link UPDATE: snippet null, reasoning preserved", async () => {
     mocks.existing = [
-      { ...baseRow(), snippet: PLANTED, reasoning: PLANTED, sources: [], verificationState: "unverified-web-source" },
+      { ...baseRow(), snippet: PLANTED, reasoning: "prior", sources: [], verificationState: "unverified-web-source" },
     ];
     await upsertReasoningAtomFromWebFetch({
-      jurisdictionKey: "bastrop_tx",
-      target: target("Sec. 4") as never,
+      jurisdictionKey: "miami_beach_fl",
+      target: target("M601.6", "FBC 2023") as never,
       result: webResult({ sourceUrl: "https://codes.iccsafe.org/content/x" }) as never,
     });
     const w = mocks.writes[0];
     expect(w.op).toBe("update");
     expect(w.values.snippet).toBeNull();
-    expect(w.values.reasoning).toBeNull();
+    expect(w.values.reasoning).toBe(expectedReasoning("M601.6", "FBC 2023"));
   });
 
-  it("web-fetch INSERT: non-ICC atom persists snippet and reasoning unchanged", async () => {
+  it("TAS row with no ICC link keeps its snippet and reasoning", async () => {
     await upsertReasoningAtomFromWebFetch({
-      jurisdictionKey: "bastrop_tx",
-      target: target("Sec. 4") as never,
+      jurisdictionKey: "miami_beach_fl",
+      target: target("404.2", "TAS 2012") as never,
       result: webResult({ text: "ordinary city text" }) as never,
     });
     const w = mocks.writes[0];
     expect(w.values.snippet).toBe("ordinary city text");
-    expect(typeof w.values.reasoning).toBe("string");
-    expect((w.values.reasoning as string).length).toBeGreaterThan(0);
+    expect(w.values.reasoning).toBe(expectedReasoning("404.2", "TAS 2012"));
   });
 
-  it("corpus-overlay and deeplink-only paths null reasoning for ICC, keep it otherwise", async () => {
+  it("code_ref and edition_slug never classify: ref IBC-looking, edition TAS, no ICC link", async () => {
+    await upsertReasoningAtomFromWebFetch({
+      jurisdictionKey: "miami_beach_fl",
+      target: { codeRef: "IBC 1004", edition: "TAS 2012", editionSlug: "ibc-2021" } as never,
+      result: webResult({ text: "ordinary city text" }) as never,
+    });
+    expect(mocks.writes[0].values.snippet).toBe("ordinary city text");
+  });
+
+  it("corpus-overlay and deeplink-only: reasoning kept for ICC rows (fixed literal), snippet null", async () => {
     await upsertReasoningAtomCorpusOverlay({
       jurisdictionKey: "bastrop_tx",
-      target: target("IRC R301") as never,
+      target: target("R301", "IRC 2021") as never,
       corpusSourceUrl: "https://example.test/x",
       corpusAtomId: "atom-1",
     });
     await upsertReasoningAtomDeeplinkOnly({
       jurisdictionKey: "bastrop_tx",
-      target: target("IFC 903") as never,
+      target: target("903", "IFC 2021") as never,
       deeplinkUrl: "https://example.test/y",
     });
-    await upsertReasoningAtomCorpusOverlay({
-      jurisdictionKey: "bastrop_tx",
-      target: target("Sec. 4") as never,
-      corpusSourceUrl: "https://example.test/x",
-      corpusAtomId: "atom-1",
-    });
-    expect(mocks.writes[0].values.reasoning).toBeNull();
-    expect(mocks.writes[1].values.reasoning).toBeNull();
+    for (const w of mocks.writes) {
+      expect(typeof w.values.reasoning).toBe("string");
+      expect((w.values.reasoning as string).length).toBeGreaterThan(0);
+    }
     expect(mocks.writes[1].values.snippet).toBeNull();
-    expect(typeof mocks.writes[2].values.reasoning).toBe("string");
   });
 
-  it("rollback from a snapshot cannot restore planted ICC text", async () => {
-    const mkRow = (id: string, codeRef: string) => ({
+  it("rollback from a snapshot cannot restore planted ICC snippets; reasoning restored as written", async () => {
+    const mkRow = (id: string, edition: string, sources: unknown[] = []) => ({
       id,
-      codeRef,
-      jurisdictionKey: "bastrop_tx",
+      edition,
+      jurisdictionKey: "miami_beach_fl",
       verificationState: "verified",
-      snippet: id === "icc" ? PLANTED : "ordinary",
-      reasoning: id === "icc" ? PLANTED : "ordinary reasoning",
-      sources: [],
+      snippet: PLANTED,
+      reasoning: `reasoning-${id}`,
+      sources: sources as never,
       assertedConfidence: "0.5",
     });
     await rollbackReasoningVerification({
-      jurisdictionKey: "bastrop_tx",
+      jurisdictionKey: "miami_beach_fl",
       capturedAt: NOW.toISOString(),
-      rows: [mkRow("icc", "IBC 1004.5"), mkRow("plain", "Sec. 4")],
+      rows: [
+        mkRow("title", "IBC 2021"),
+        mkRow("link", "FBC 2023", [{ url: "https://codes.iccsafe.org/x", verified: true }]),
+        mkRow("tas", "TAS 2012"),
+      ],
     });
     expect(mocks.writes[0].values.snippet).toBeNull();
-    expect(mocks.writes[0].values.reasoning).toBeNull();
-    expect(mocks.writes[1].values.snippet).toBe("ordinary");
-    expect(mocks.writes[1].values.reasoning).toBe("ordinary reasoning");
+    expect(mocks.writes[0].values.reasoning).toBe("reasoning-title");
+    expect(mocks.writes[1].values.snippet).toBeNull();
+    expect(mocks.writes[1].values.reasoning).toBe("reasoning-link");
+    expect(mocks.writes[2].values.snippet).toBe(PLANTED); // TAS row, no ICC link: not ICC
+    expect(mocks.writes[2].values.reasoning).toBe("reasoning-tas");
   });
 
   it("guardReasoningText leaves a plain row alone", () => {
-    const r = guardReasoningText({ snippet: "a", reasoning: "b" }, { codeRef: "Sec. 4", jurisdictionKey: "j" });
+    const r = guardReasoningText({ snippet: "a" }, { edition: "TAS 2012", jurisdictionKey: "j" });
     expect(r.refused).toBe(false);
-    expect(r.values).toEqual({ snippet: "a", reasoning: "b" });
+    expect(r.values).toEqual({ snippet: "a" });
   });
 });
 
@@ -301,7 +329,7 @@ describe("icc_text_refused_at_ingest log event", () => {
     const log = { info: (o: unknown, m: string) => calls.push([o, m]) };
     await upsertReasoningAtomFromWebFetch({
       jurisdictionKey: "bastrop_tx",
-      target: target("IBC 1004.5") as never,
+      target: target("1004.5", "IBC 2021") as never,
       result: webResult() as never,
       logger: log,
     });
@@ -316,7 +344,7 @@ describe("icc_text_refused_at_ingest log event", () => {
     expect(JSON.stringify(calls)).not.toContain("PLANTED-ICC");
   });
 
-  it("is silent for a zero count and for a plain atom", () => {
+  it("is silent for a zero count", () => {
     const calls: unknown[] = [];
     logIccTextRefused({ info: (o) => calls.push(o) }, "x", 0);
     expect(calls).toHaveLength(0);

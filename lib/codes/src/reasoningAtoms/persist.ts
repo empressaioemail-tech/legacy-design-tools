@@ -21,8 +21,9 @@ function guardText(
   logger: IccGuardLogger | undefined,
 ): { snippet: string | null; reasoning: string | null } {
   const { values, refused } = guardReasoningText(text, identity);
-  if (refused) logIccTextRefused(logger, source, 1);
-  return { snippet: values.snippet ?? null, reasoning: values.reasoning ?? null };
+  // Count only rows that actually had a snippet to refuse.
+  if (refused && text.snippet != null) logIccTextRefused(logger, source, 1);
+  return { snippet: values.snippet ?? null, reasoning: text.reasoning };
 }
 
 export function webResultToSourceLink(result: WebCodeFetchResult): ReasoningSourceLink {
@@ -125,7 +126,7 @@ export async function upsertReasoningAtomFromWebFetch(args: {
             ? reasoning
             : existing[0].reasoning,
       },
-      { jurisdictionKey, codeRef: target.codeRef, sources: mergedSources },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
       "persist.upsertReasoningAtomFromWebFetch.update",
       args.logger,
     );
@@ -151,7 +152,7 @@ export async function upsertReasoningAtomFromWebFetch(args: {
 
   const insertText = guardText(
     { snippet, reasoning },
-    { jurisdictionKey, codeRef: target.codeRef, sources: [incomingSource] },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
     "persist.upsertReasoningAtomFromWebFetch.insert",
     args.logger,
   );
@@ -212,7 +213,7 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
     const sourcesDrifted = sourceSetChanged(priorSources, mergedSources);
     const text = guardText(
       { snippet: null, reasoning },
-      { jurisdictionKey, codeRef: target.codeRef, sources: mergedSources },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
       "persist.upsertReasoningAtomCorpusOverlay.update",
       args.logger,
     );
@@ -235,7 +236,7 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
 
   const insertText = guardText(
     { snippet: null, reasoning },
-    { jurisdictionKey, codeRef: target.codeRef, sources: [incomingSource] },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
     "persist.upsertReasoningAtomCorpusOverlay.insert",
     args.logger,
   );
@@ -297,7 +298,7 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
     const sourcesDrifted = sourceSetChanged(priorSources, mergedSources);
     const text = guardText(
       { snippet: null, reasoning },
-      { jurisdictionKey, codeRef: target.codeRef, sources: mergedSources },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
       "persist.upsertReasoningAtomDeeplinkOnly.update",
       args.logger,
     );
@@ -324,7 +325,7 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
 
   const insertText = guardText(
     { snippet: null, reasoning },
-    { jurisdictionKey, codeRef: target.codeRef, sources: [incomingSource] },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
     "persist.upsertReasoningAtomDeeplinkOnly.insert",
     args.logger,
   );

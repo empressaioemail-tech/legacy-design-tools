@@ -10,7 +10,7 @@ export interface ReasoningVerificationSnapshotRow {
   id: string;
   /** Identity for the G-309 ingest guard on restore (absent in old snapshots). */
   jurisdictionKey?: string;
-  codeRef?: string;
+  edition?: string;
   verificationState: string;
   snippet: string | null;
   reasoning: string | null;
@@ -38,7 +38,7 @@ export async function snapshotReasoningVerification(
     rows: rows.map((row) => ({
       id: row.id,
       jurisdictionKey: row.jurisdictionKey,
-      codeRef: row.codeRef,
+      edition: row.edition,
       verificationState: row.verificationState,
       snippet: row.snippet,
       reasoning: row.reasoning,
@@ -61,17 +61,17 @@ export async function rollbackReasoningVerification(
       { snippet: row.snippet, reasoning: row.reasoning },
       {
         jurisdictionKey: row.jurisdictionKey ?? snapshot.jurisdictionKey,
-        codeRef: row.codeRef,
+        edition: row.edition,
         sources: row.sources,
       },
     );
-    if (g.refused && (row.snippet != null || row.reasoning != null)) refused++;
+    if (g.refused && row.snippet != null) refused++;
     const [updated] = await db
       .update(reasoningAtoms)
       .set({
         verificationState: row.verificationState,
         snippet: g.values.snippet,
-        reasoning: g.values.reasoning,
+        reasoning: row.reasoning,
         sources: row.sources,
         assertedConfidence: row.assertedConfidence,
         updatedAt: now,

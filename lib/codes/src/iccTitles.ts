@@ -70,3 +70,24 @@ export function isIccRow(r: {
     })
   );
 }
+
+/**
+ * G-309 (A16 revised rule): true when a reasoning_atoms row is an ICC row.
+ * reasoning_atoms has no code-book column; `edition` ("IBC 2021") is its
+ * code-book field. Two classes, both ICC:
+ *   icc-title        edition's leading token is an ICC title, or the
+ *                    jurisdiction is icc-model-code.
+ *   icc-source-link  any sources[] link is on an ICC host / ICC-named source.
+ * edition_slug and code_ref are never used. TAS, FBC, FBCEB, A117.1 rows with
+ * no ICC link are not ICC.
+ */
+export function isIccReasoningRow(r: {
+  edition?: string | null;
+  jurisdictionKey?: string | null;
+  sources?: ReadonlyArray<{ url?: string | null; sourceName?: string | null }> | null;
+}): boolean {
+  if (isIccRow({ codeBook: r.edition, jurisdictionKey: r.jurisdictionKey })) return true;
+  return (r.sources ?? []).some((s) =>
+    isIccRow({ sourceUrl: s?.url, sourceName: s?.sourceName }),
+  );
+}

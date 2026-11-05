@@ -151,8 +151,7 @@ describe("runCodewarmBatch", () => {
         expect(row.snippet == null || row.snippet.length <= REASONING_SNIPPET_MAX_CHARS).toBe(
           true,
         );
-        // G-309: ICC-title atoms are stored with reasoning null.
-        if (row.reasoning != null) expect(row.reasoning).not.toMatch(/\bfinding\b/i);
+        expect(row.reasoning).not.toMatch(/\bfinding\b/i);
       }
     });
   });
