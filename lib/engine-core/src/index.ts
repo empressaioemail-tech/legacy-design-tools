@@ -104,9 +104,6 @@ export {
   type ModelRoutingTier,
   deriveConsequenceAxisFromMetadata,
   maxConsequenceStratum,
-  resolveConsequenceEnsembleEnabled,
   resolveConsequenceGatedRoute,
-  resolveHighConsequenceGrokModel,
-  resolveLowConsequenceGrokModel,
   stratumFromAsce7RiskCategory,
 } from "./consequenceGatedRouting";

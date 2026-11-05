@@ -49,7 +49,7 @@ describe("G-309 item 5: ICC site is never fetched", () => {
       return { status: 200, body: "<html><body>nothing</body></html>", finalUrl: url };
     };
     await fetchCodeSection(
-      { codeRef: "IRC-R301.1", edition: "IRC 2021", jurisdictionKey: "austin_tx" },
+      { codeRef: "NEC Art. 220", edition: "NEC 2017", jurisdictionKey: "austin_tx" },
       { http },
     );
     expect(seen.length).toBeGreaterThan(0); // non-ICC (up.codes) driver still works

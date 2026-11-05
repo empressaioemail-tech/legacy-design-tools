@@ -34,7 +34,11 @@ const PRICE_TABLE_PER_MTOKEN: Record<
   string,
   { input: number; output: number }
 > = {
-  // Claude Sonnet 4.5 — engine default per Phase 1A pinning.
+  // Anthropic first-party list prices, cached 2026-10-06 (per MTok).
+  // Thinking tokens are billed as output tokens.
+  "claude-opus-5-5": { input: 4.0, output: 20.0 },
+  "claude-opus-4-8": { input: 5.0, output: 25.0 },
+  // Claude Sonnet 4.5 — formerly the engine default (Phase 1A pinning).
   "claude-sonnet-4-5": { input: 3.0, output: 15.0 },
   // Anthropic SDK sometimes returns the full versioned id.
   "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },

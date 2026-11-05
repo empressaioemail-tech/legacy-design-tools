@@ -3,15 +3,14 @@
  * pattern: lazy singleton off `AIR_FINDING_LLM_MODE`.
  *
  *   - `mock` (default): null — deterministic mock generator.
- *   - `grok`: xAI Grok via `@workspace/integrations-xai-grok`.
- *   - `anthropic` (legacy): Anthropic Claude — deprecated for new deploys.
+ *   - `anthropic`: Anthropic Claude (the only LLM provider; G-309 A20).
+ *   - `grok`: rejected — `resolveFindingLlmMode` throws a config error.
  */
 
 import {
   resolveFindingLlmMode,
   type FindingLlmMode,
 } from "@workspace/finding-engine";
-import type { GrokClient } from "@workspace/integrations-xai-grok";
 import { logger } from "./logger";
 
 type AnthropicClient = Awaited<
@@ -21,11 +20,9 @@ type AnthropicClient = Awaited<
 >;
 
 export type FindingLlmClientBundle =
-  | { kind: "grok"; client: GrokClient }
   | { kind: "anthropic"; client: AnthropicClient }
   | null;
 
-let cachedGrok: GrokClient | null = null;
 let cachedAnthropic: AnthropicClient | null = null;
 let cachedFromEnv = true;
 let cachedMode: FindingLlmMode = "mock";
@@ -33,9 +30,6 @@ let cacheInitialized = false;
 
 export async function getFindingLlmClient(): Promise<FindingLlmClientBundle> {
   if (cacheInitialized) {
-    if (cachedMode === "grok" && cachedGrok) {
-      return { kind: "grok", client: cachedGrok };
-    }
     if (cachedMode === "anthropic" && cachedAnthropic) {
       return { kind: "anthropic", client: cachedAnthropic };
     }
@@ -45,26 +39,9 @@ export async function getFindingLlmClient(): Promise<FindingLlmClientBundle> {
   cachedMode = mode;
   cachedFromEnv = true;
 
-  if (mode === "grok") {
-    const { createGrokClient } = await import("@workspace/integrations-xai-grok");
-    cachedGrok = createGrokClient();
-    cachedAnthropic = null;
-    cacheInitialized = true;
-    logger.info(
-      { mode: "grok", model: process.env.XAI_MODEL ?? process.env.XAI_FINDING_MODEL },
-      "finding LLM client wired to xAI Grok",
-    );
-    return { kind: "grok", client: cachedGrok };
-  }
-
   if (mode === "anthropic") {
-    logger.warn(
-      { mode: "anthropic" },
-      "AIR_FINDING_LLM_MODE=anthropic is legacy — prefer grok for plan review",
-    );
     const integrations = await import("@workspace/integrations-anthropic-ai");
     cachedAnthropic = integrations.createAnthropicClient();
-    cachedGrok = null;
     cacheInitialized = true;
     logger.info(
       { mode: "anthropic" },
@@ -73,7 +50,6 @@ export async function getFindingLlmClient(): Promise<FindingLlmClientBundle> {
     return { kind: "anthropic", client: cachedAnthropic };
   }
 
-  cachedGrok = null;
   cachedAnthropic = null;
   cacheInitialized = true;
   logger.info(
@@ -87,7 +63,6 @@ export function setFindingLlmClient(
   bundle: FindingLlmClientBundle | AnthropicClient | null,
 ): void {
   if (bundle === null) {
-    cachedGrok = null;
     cachedAnthropic = null;
     cacheInitialized = false;
     cachedFromEnv = true;
@@ -95,21 +70,13 @@ export function setFindingLlmClient(
     return;
   }
   if ("kind" in bundle) {
-    if (bundle.kind === "grok") {
-      cachedGrok = bundle.client;
-      cachedAnthropic = null;
-      cachedMode = "grok";
-    } else {
-      cachedAnthropic = bundle.client;
-      cachedGrok = null;
-      cachedMode = "anthropic";
-    }
+    cachedAnthropic = bundle.client;
+    cachedMode = "anthropic";
     cacheInitialized = true;
     cachedFromEnv = false;
     return;
   }
   cachedAnthropic = bundle;
-  cachedGrok = null;
   cachedMode = "anthropic";
   cacheInitialized = true;
   cachedFromEnv = false;
@@ -145,15 +112,8 @@ export async function getVisionAnthropicClient(): Promise<AnthropicClient | null
 }
 
 export function validateFindingEngineEnvAtBoot(): void {
+  // resolveFindingLlmMode throws on AIR_FINDING_LLM_MODE=grok (G-309 A20).
   const mode = resolveFindingLlmMode();
-  if (mode === "grok") {
-    if (!process.env.XAI_API_KEY?.trim()) {
-      throw new Error(
-        "AIR_FINDING_LLM_MODE=grok requires XAI_API_KEY to be set",
-      );
-    }
-    return;
-  }
   if (mode !== "anthropic") return;
   const apiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
   const baseUrl = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;

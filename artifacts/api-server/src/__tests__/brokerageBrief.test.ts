@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -98,8 +99,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });
@@ -170,7 +171,7 @@ const layVerdictsJson = JSON.stringify({
   ],
 });
 
-function mockGrokResponses() {
+function mockLlmResponses() {
   completeChatMock.mockImplementation(
     async (opts: { system?: string }) => {
       const system = opts.system ?? "";
@@ -239,10 +240,10 @@ beforeEach(() => {
     ],
   });
   completeChatMock.mockReset();
-  mockGrokResponses();
+  mockLlmResponses();
   setBriefingLlmClient({
-    kind: "grok",
-    client: { completeChat: completeChatMock },
+    kind: "anthropic",
+    client: anthropicChatShim(completeChatMock),
   });
   setResearchChatCivicHttpForTests(async () => {
     throw new Error("civic fetch disabled in brief suite unless a test injects");
@@ -301,7 +302,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     expect(res.body.errorClass).toBe("validation_error");
   });
 
-  it("runs brief with grok reasoning for Bastrop address", async () => {
+  it("runs brief with anthropic reasoning for Bastrop address", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set(authHeaders)
@@ -319,7 +320,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     );
     expect(fetchBrokerageSiteContextMock).toHaveBeenCalled();
     expect(res.body.sections).toHaveLength(5);
-    expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.reasoningSummary.method).toBe("anthropic");
     expect(res.body.laySummary).toBeTruthy();
     expect(res.body.laySummary.verdicts.length).toBeGreaterThanOrEqual(3);
     expect(res.body.laySummary.verdicts[0].status).toMatch(
@@ -392,7 +393,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
       billable: true,
       sku: "property-brief-v1",
     });
-    expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.reasoningSummary.method).toBe("anthropic");
     expect(res.body.laySummary.verdicts.length).toBeGreaterThan(0);
   });
 });
@@ -411,7 +412,7 @@ describe.skipIf(!hasDb)("GET /api/brokerage/v1/brief/:runId", () => {
 
     expect(getRes.status).toBe(200);
     expect(getRes.body.runId).toBe(briefRes.body.runId);
-    expect(getRes.body.reasoningSummary.method).toBe("grok");
+    expect(getRes.body.reasoningSummary.method).toBe("anthropic");
     expect(getRes.body.laySummary).toBeTruthy();
   });
 
@@ -424,7 +425,7 @@ describe.skipIf(!hasDb)("GET /api/brokerage/v1/brief/:runId", () => {
 });
 
 describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
-  it("returns grok summary with citations", async () => {
+  it("returns anthropic summary with citations", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief/summarize")
       .set(authHeaders)
@@ -443,7 +444,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
     expect(res.status).toBe(200);
     expect(res.body.headline).toBeTruthy();
     expect(res.body.html).toContain("<p>");
-    expect(res.body.method).toBe("grok");
+    expect(res.body.method).toBe("anthropic");
     expect(res.body.citations.length).toBeGreaterThan(0);
   });
 });
@@ -483,7 +484,7 @@ describe.skipIf(!hasDb)(
       expect(res.status).toBe(200);
       expect(res.body.narrative).toContain("[zoning]");
       expect(res.body.narrative).toContain("[flood]");
-      expect(res.body.generatedBy).toBe("grok");
+      expect(res.body.generatedBy).toBe("anthropic");
       expect(typeof res.body.generatedAt).toBe("string");
       // Locked contract with hauska-engine: no citedSections field — the
       // caller derives it itself by scanning for its own facts keys.
@@ -553,7 +554,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/research/chat", () => {
 
     expect(chatRes.status).toBe(200);
     expect(chatRes.body.message).toMatch(/ADU/i);
-    expect(chatRes.body.method).toBe("grok");
+    expect(chatRes.body.method).toBe("anthropic");
     expect(chatRes.body.sources).toBeDefined();
     expect(Array.isArray(chatRes.body.sources)).toBe(true);
     expect(chatRes.body.presentationMode).toBe("consumer");

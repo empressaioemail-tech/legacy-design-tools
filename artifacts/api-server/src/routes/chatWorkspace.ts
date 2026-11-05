@@ -13,6 +13,13 @@ import { desc, eq, sql } from "drizzle-orm";
 import type { Scope } from "@empressaio/atom-contract";
 import { logger } from "../lib/logger";
 import {
+  CODE_CITING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+  isAnthropicTruncated,
+} from "../lib/codeCitingModel";
+import {
   WORKSPACE_CHAT_TOOLS,
   executeWorkspaceAgentTool,
   buildWorkspaceAgentToolGuidance,
@@ -104,8 +111,9 @@ export async function handleWorkspaceChat(
     while (iterations < MAX_AGENT_ITERATIONS) {
       iterations++;
       const stream = anthropic.messages.stream({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
+        model: CODE_CITING_ANTHROPIC_MODEL,
+        output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
+        max_tokens: CODE_CITING_MAX_TOKENS,
         system: systemPrompt,
         messages: convo,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +130,26 @@ export async function handleWorkspaceChat(
       }
 
       const finalMessage = await stream.finalMessage();
+      if (isAnthropicRefusal(finalMessage)) {
+        logger.warn(
+          { stopReason: "refusal" },
+          "workspace chat: Claude refused; sending fixed fallback text",
+        );
+        res.write(
+          `data: ${JSON.stringify({ text: "I can't help with that request." })}\n\n`,
+        );
+        break;
+      }
+      if (isAnthropicTruncated(finalMessage)) {
+        logger.warn(
+          { stopReason: "max_tokens" },
+          "chat: Claude hit max_tokens; sending fixed narrower-question line",
+        );
+        res.write(
+          `data: ${JSON.stringify({ text: "That answer ran long; please ask a narrower question." })}\n\n`,
+        );
+        break;
+      }
       if (finalMessage.stop_reason !== "tool_use") break;
 
       convo.push({ role: "assistant", content: finalMessage.content });
