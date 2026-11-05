@@ -21,6 +21,8 @@ const parcelPolygon = {
 
 describe("queryLiveEasementGisForParcel (P-85 item 2)", () => {
   const fetchMock = vi.fn();
+  /** The form body of the nth ArcGIS request (the query is POSTed, not put in the URL). */
+  const formOf = (n: number) => new URLSearchParams(String((fetchMock.mock.calls[n]![1] as RequestInit).body));
 
   beforeEach(() => {
     fetchMock.mockReset();
@@ -125,11 +127,26 @@ describe("queryLiveEasementGisForParcel (P-85 item 2)", () => {
       countyFips: "48021",
       parcelGeometryGeojson: parcelPolygon,
     });
-    const url = new URL(String(fetchMock.mock.calls[0]![0]));
-    const geometry = JSON.parse(url.searchParams.get("geometry")!);
+    const geometry = JSON.parse(formOf(0).get("geometry")!);
     expect(geometry.spatialReference).toEqual({ wkid: 4326 });
     expect(geometry.rings).toHaveLength(1);
     expect(geometry).not.toHaveProperty("type");
+  });
+
+  it("FALSIFIER: the query is POSTed as a form, never put in the URL (by GET services7 answered 404 for a 60-vertex Bastrop parcel)", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ features: [] }) });
+    await queryLiveEasementGisForParcel({
+      parcelKey: "48021:TEST",
+      countyFips: "48021",
+      parcelGeometryGeojson: parcelPolygon,
+    });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://services7.arcgis.com/qOeXJdBtGknaCJC4/arcgis/rest/services/Easements_/FeatureServer/43/query",
+    );
+    expect(init).toMatchObject({ method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+    expect(formOf(0).get("geometryType")).toBe("esriGeometryPolygon");
+    expect(formOf(0).get("f")).toBe("geojson");
   });
 
   it("orients rings the Esri way: outer clockwise, holes counter-clockwise", () => {
@@ -168,7 +185,7 @@ describe("queryLiveEasementGisForParcel (P-85 item 2)", () => {
     });
     const bastrop = audit.layers.find((l) => l.sourceLayerId === "bastrop-city-easements")!;
     expect(bastrop).toMatchObject({ featureCount: 2, featureIds: [1, 2], pages: 2 });
-    expect(new URL(String(fetchMock.mock.calls[1]![0])).searchParams.get("resultOffset")).toBe("1");
+    expect(formOf(1).get("resultOffset")).toBe("1");
   });
 
   it("Bastrop: every feature carries its own recording reference (DocumentNo, Record, RecordedID) and City document link", async () => {
