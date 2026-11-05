@@ -12829,7 +12829,15 @@ components:
           nullable: true
         bodyPreview:
           type: string
-          description: Server-truncated body, ~120 chars at word boundary.
+          description: |
+            Server-truncated body, ~120 chars at word boundary. Absent when
+            `citationOnly` is true.
+        citationOnly:
+          type: boolean
+          description: |
+            True when the server withholds the section text for this atom (ICC
+            title atoms: citation only, for every caller). When true, `body`,
+            `bodyPreview` and `bodyHtml` are absent. Always sent by the server.
         similarity:
           type: number
           description: |
@@ -12851,7 +12859,7 @@ components:
         - atomId
         - codeRef
         - sectionTitle
-        - bodyPreview
+        - citationOnly
         - similarity
         - sourceBook
         - sourceUrl
@@ -12993,6 +13001,13 @@ components:
           format: date-time
         bodyPreview:
           type: string
+          description: Absent when `citationOnly` is true.
+        citationOnly:
+          type: boolean
+          description: |
+            True when the server withholds the section text for this atom (ICC
+            title atoms: citation only, for every caller). When true, `body`,
+            `bodyPreview` and `bodyHtml` are absent. Always sent by the server.
       required:
         - id
         - jurisdictionKey
@@ -13004,7 +13019,7 @@ components:
         - sourceUrl
         - embedded
         - fetchedAt
-        - bodyPreview
+        - citationOnly
 
     CodeAtomListResponse:
       type: object
@@ -13038,9 +13053,11 @@ components:
           properties:
             body:
               type: string
+              description: Absent when `citationOnly` is true.
             bodyHtml:
               type: string
               nullable: true
+              description: Absent when `citationOnly` is true.
             parentSection:
               type: string
               nullable: true
@@ -13052,8 +13069,6 @@ components:
               additionalProperties: true
               nullable: true
           required:
-            - body
-            - bodyHtml
             - parentSection
             - embeddingModel
             - metadata

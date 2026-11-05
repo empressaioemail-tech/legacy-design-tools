@@ -122,6 +122,13 @@ import {
 } from "../lib/brokerageBriefEvents";
 import { brokerageCoverageRouter } from "./brokerageCoverage";
 import { iccNoticeField } from "../lib/iccNoticeField";
+import {
+  iccAuthorizedUser,
+  iccCitationFromAtom,
+  iccCitationsFromAtoms,
+  recordIccUsage,
+  type IccUsageCitation,
+} from "../lib/iccUsage";
 import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageProfileRouter } from "./brokerageProfile";
@@ -956,6 +963,14 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     },
   };
 
+  // A13c: one ledger row set per brief for the ICC citations it shows.
+  void recordIccUsage({
+    requestId: runId,
+    authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
+    surface: "brief",
+    citations: iccCitationsFromAtoms(retrievedAtomsForProvenance),
+  });
+
   await db.insert(brokerageBriefRuns).values({
     id: runId,
     tenantSlug: "default",
@@ -1337,6 +1352,7 @@ brokerageV1.post(
     }
 
     const atomMap = new Map<string, BriefAtomInput>();
+    const iccByAtomDid = new Map<string, IccUsageCitation>();
     const degradedReasons: string[] = [];
 
     for (const c of payload.citations ?? []) {
@@ -1396,6 +1412,8 @@ brokerageV1.post(
           });
           totalAtomsRetrieved += retrieved.length;
           for (const a of retrieved) {
+            const iccCite = iccCitationFromAtom(a);
+            if (iccCite) iccByAtomDid.set(a.id, iccCite);
             const existing = atomMap.get(a.id);
             const snippet = atomSnippet(a);
             if (!existing) {
@@ -1539,6 +1557,17 @@ brokerageV1.post(
       privateRestrictionsBlock,
       areaContextBlock,
       presentationMode,
+    });
+
+    // A13c: one ledger row set per research-chat answer for the ICC sources it shows.
+    void recordIccUsage({
+      requestId: randomUUID(),
+      authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
+      surface: "brief",
+      citations: result.sources.flatMap((s) => {
+        const c = iccByAtomDid.get(s.atomDid);
+        return c ? [c] : [];
+      }),
     });
 
     if (installId) {

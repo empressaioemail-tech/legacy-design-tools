@@ -1626,6 +1626,8 @@ export function multiGroundReasonWords(reason: string): string {
         return "No parcel matched this lookup, so there is no map to draw.";
       case "map_located_unbound":
         return "An address was found but no parcel is bound to it yet, so there is no parcel map.";
+      case "map_upgrade_required":
+        return "The map panel is not included in this plan for this parcel; a plan upgrade or a 30-day unlock on the parcel opens it.";
       case "map_wiring_failed":
         return "The parcel list could not be loaded for the map panel.";
       default:

@@ -68,6 +68,74 @@ export interface SourceRegistryEntry {
   readonly partitionIndexes: readonly PartitionIndexSpec[];
 }
 
+/**
+ * TxGIO Land Parcels annual releases kept as parcel HISTORY: one provider
+ * per release (`txgio.parcels.<year>`), so each release is its own
+ * `source_feature` partition and a re-load of one release, through
+ * `swapStagedCounty`, replaces only that release's rows for the county and
+ * never another year's. `txgio.parcels` (above) stays the current-vintage
+ * provider card D documents.
+ *
+ * Collection ids from api.tnris.org/api/v1/resources (read 2026-11-05).
+ * The county zip is
+ * `https://data.geographic.texas.gov/<collectionId>/resources/stratmap<YY>-landparcels_<fips>_lp.zip`.
+ */
+export const TXGIO_PARCEL_RELEASES: readonly { readonly year: number; readonly collectionId: string }[] = [
+  { year: 2019, collectionId: "2679b514-bb7b-409f-97f3-ee3879f34448" },
+  { year: 2021, collectionId: "a3c04828-1036-481b-b1e0-bb456c3cbcf4" },
+  { year: 2022, collectionId: "a6a703ba-df8b-4d1b-8d4c-ece8ae786505" },
+  { year: 2023, collectionId: "55eb0be8-6d05-4536-bf75-45f1dd31dd94" },
+  { year: 2024, collectionId: "d0f7da13-ab09-4994-a16f-d52589e2476e" },
+  { year: 2025, collectionId: "0fa04328-872e-481c-b453-126a74777593" },
+  { year: 2026, collectionId: "1d33dafb-6e9c-40ac-887d-f4577909ed9b" },
+];
+
+/** Provider key for one release, e.g. `txgio.parcels.2022`. */
+export function parcelReleaseProvider(year: number): ProviderKey {
+  return `txgio.parcels.${year}`;
+}
+
+function parcelReleaseEntry(r: { year: number; collectionId: string }): SourceRegistryEntry {
+  return {
+    provider: parcelReleaseProvider(r.year),
+    description:
+      `TxGIO/StratMap Land Parcels ${r.year} release (collection ${r.collectionId}), kept as parcel ` +
+      "history: what each county's appraisal record said that year (owner, situs, legal " +
+      "description, CAD values, the roll's own TAX_YEAR, year built, polygon). Loaded by " +
+      "lib/cad-ingest txgio-parcel-release.",
+    keyRule: {
+      kind: "declared",
+      name: "county-release-propid-geometry-sha256",
+      rule:
+        "sha256(county_fips || '|' || vintage || '|' || coalesce(payload ->> 'prop_id', '') || '|' || " +
+        "the feature's GeoJSON geometry serialised with sorted keys) -- content-derived, stable " +
+        "across a re-fetch of the SAME release; never the shapefile position.",
+    },
+    expectedCountSource: {
+      description:
+        "Distinct keys among the release shapefile's accepted features, counted by the loader " +
+        "before it writes the stage (exact duplicate features collapse to one key and are " +
+        "reported).",
+      fnSignature: "lib/cad-ingest txgio/parcel-release.ts countReleaseKeys",
+    },
+    partitionIndexes: [
+      {
+        name: `source_feature_txgio_parcels_${r.year}_geom_gist_idx`,
+        kind: "gist",
+        on: "geom",
+        where: "geom IS NOT NULL",
+        note: "Polygon reads on the release, same shape as the current-vintage provider.",
+      },
+      {
+        name: `source_feature_txgio_parcels_${r.year}_prop_idx`,
+        kind: "expression",
+        on: "payload ->> 'prop_id'",
+        note: "As-of reads by parcel account.",
+      },
+    ],
+  };
+}
+
 export const SOURCE_REGISTRY: readonly SourceRegistryEntry[] = [
   {
     provider: "txgio.address-points",
@@ -137,6 +205,7 @@ export const SOURCE_REGISTRY: readonly SourceRegistryEntry[] = [
       },
     ],
   },
+  ...TXGIO_PARCEL_RELEASES.map(parcelReleaseEntry),
 ];
 
 export interface RegistryValidationIssue {
