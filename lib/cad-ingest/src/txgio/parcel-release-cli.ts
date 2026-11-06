@@ -7,6 +7,9 @@
  *   pnpm --filter @workspace/cad-ingest txgio-parcel-release -- \
  *     --county=48021 --file=<local stratmap22-landparcels_48021_lp.zip | dir> \
  *     [--vintage=<label>] [--reproject=3857] [--limit=N] [--apply]
+ *   # cluster Job, a staged release instead of a local file (2026-11-06):
+ *   tsx lib/cad-ingest/src/txgio/parcel-release-cli.ts --county=48021 \
+ *     --url=<https://.../stratmap22-landparcels_48021_lp.zip> --sha256=<64 hex> [--reproject=3857] --apply
  *
  * DRY RUN BY DEFAULT: parses, keys and counts; writes nothing. `--apply`
  * runs only inside a cluster Job (same rule as txgio-ingest) and writes
@@ -31,6 +34,7 @@ import shapefile from "shapefile";
 import { newCounters } from "../types";
 import { isClusterJobExecution, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 import { extractZipEntries } from "../zip";
+import { fetchVerifiedRelease, releaseInputFrom, type ReleaseInput } from "./release-fetch";
 import { assertDeclineCeiling, assertFinalDeclineCeiling, assertWgs84Prj, classifyPrj, TXGIO_ENTRY_FILTER, type TxgioFeature } from "./parse";
 import { selectShapefileLayers } from "./shapefile-discover";
 import {
@@ -50,9 +54,14 @@ function fail(m: string): never {
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
+    // `pnpm --filter ... txgio-parcel-release -- --county=...` (pnpm 10) hands the script a literal
+    // "--", which parseArgs refuses as a positional; drop it (same fix as engine #561).
+    args: process.argv.slice(2).filter((a) => a !== "--"),
     options: {
       county: { type: "string" },
       file: { type: "string" },
+      url: { type: "string" },
+      sha256: { type: "string" },
       vintage: { type: "string" },
       reproject: { type: "string" },
       limit: { type: "string" },
@@ -61,15 +70,29 @@ async function main(): Promise<void> {
   });
   const county = values.county ?? fail("--county=<5-digit fips> is required");
   if (!/^\d{5}$/.test(county)) fail(`--county must be 5 digits, got ${county}`);
-  const file = values.file ?? fail("--file=<local release zip or dir> is required (the TxGIO host refuses non-browser downloads)");
+  let input: ReleaseInput;
+  try {
+    input = releaseInputFrom(values);
+  } catch (e) {
+    fail((e as Error).message);
+  }
   if (values.reproject !== undefined && values.reproject !== "3857") fail("--reproject accepts only 3857");
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
   if (values.apply && limit !== undefined) fail("--apply with --limit would swap a partial release over the full one; refused");
   if (values.apply && !isClusterJobExecution(process.env)) fail(LAPTOP_WRITE_FROZEN_MESSAGE);
 
+  const workDir = await mkdtemp(join(tmpdir(), "txgio-release-"));
+  let file: string;
+  if (input.kind === "url") {
+    // A staged release (cluster Job): fetch into the Job's scratch dir and prove its sha256 first.
+    const got = await fetchVerifiedRelease({ url: input.url, sha256: input.sha256, dir: workDir }).catch((e: Error) => fail(e.message));
+    log(`fetched ${basename(got.path)}: ${got.bytes} bytes, sha256 ${got.sha256} (matches --sha256)`);
+    file = got.path;
+  } else {
+    file = input.file;
+  }
   const st = await stat(file).catch(() => null);
   if (!st) fail(`input not found: ${file}`);
-  const workDir = await mkdtemp(join(tmpdir(), "txgio-release-"));
   const files = st.isDirectory()
     ? (await readdir(file)).map((n) => join(file, n))
     : await extractZipEntries(file, workDir, TXGIO_ENTRY_FILTER, log);
