@@ -49,8 +49,18 @@ export function releaseYearFromLabel(label: string): number | null {
 function text(v: unknown): string | null {
   if (typeof v === "number" && Number.isFinite(v)) return String(v);
   if (typeof v !== "string") return null;
-  const t = v.replace(/\s+/g, " ").trim();
+  // NUL reads as a space, as in parse.ts `str`: Postgres jsonb refuses it (SQLSTATE 22P05).
+  const t = v.replace(/\u0000/g, " ").replace(/\s+/g, " ").trim();
   return t.length > 0 ? t : null;
+}
+
+/** A failed database call's own error, SQLSTATE first. drizzle wraps the pg error as `cause` and prints only the query. */
+export function describeDbError(e: unknown): string {
+  const err = e as { code?: string; message?: string; detail?: string; cause?: { code?: string; message?: string; detail?: string } };
+  const inner = err?.cause ?? err;
+  const code = inner?.code ?? err?.code ?? "unknown";
+  const detail = inner?.detail ? ` (${inner.detail})` : "";
+  return `SQLSTATE ${code}: ${inner?.message ?? err?.message ?? String(e)}${detail}`;
 }
 
 /** A published money value as a number, or null when blank or not a number. */

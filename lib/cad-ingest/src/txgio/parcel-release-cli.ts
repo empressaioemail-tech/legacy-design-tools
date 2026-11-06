@@ -35,13 +35,14 @@ import { newCounters } from "../types";
 import { isClusterJobExecution, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 import { extractZipEntries } from "../zip";
 import { fetchVerifiedRelease, releaseInputFrom, type ReleaseInput } from "./release-fetch";
-import { assertDeclineCeiling, assertFinalDeclineCeiling, assertWgs84Prj, classifyPrj, TXGIO_ENTRY_FILTER, type TxgioFeature } from "./parse";
+import { assertDeclineCeiling, assertFinalDeclineCeiling, assertWgs84Prj, classifyPrj, propIdOf, TXGIO_ENTRY_FILTER, type TxgioFeature } from "./parse";
 import { selectShapefileLayers } from "./shapefile-discover";
 import {
   parcelReleaseProvider,
   releaseRowFromFeature,
   releaseYearFromLabel,
   stageReleaseRows,
+  describeDbError,
   type ReleaseStageRow,
 } from "./parcel-release";
 
@@ -125,6 +126,14 @@ async function main(): Promise<void> {
   let accepted = 0;
   let staged = 0;
   const withValues = { mkt: 0, taxYear: 0, yearBuilt: 0 };
+  let withoutPropId = 0;
+  const stage = async (rows: ReleaseStageRow[]): Promise<number> => {
+    try {
+      return await stageReleaseRows(db!, rows);
+    } catch (e) {
+      fail(`staging insert failed: ${describeDbError(e)}`);
+    }
+  };
   let batch: ReleaseStageRow[] = [];
   for (const layer of layers) {
     const source = await shapefile.open(layer.shpFile, layer.dbfFile, { encoding: "utf8" });
@@ -133,10 +142,20 @@ async function main(): Promise<void> {
       const r = await source.read();
       if (r.done) break;
       counters.rowsRead += 1;
+      // The release must carry an account id field this loader reads (Prop_ID or PROP_ID, parse.ts
+      // propIdOf). A release whose field is named some other way would load with prop_id null on every
+      // row, as 2019 and 2021 did before 2026-11-06; refuse on the first feature, before anything is
+      // staged, dry run or not.
+      if (featureIndex === 0 && propIdOf((r.value as TxgioFeature).properties ?? {}) === undefined) {
+        fail(`PROP_ID_FIELD_MISSING: the release has neither Prop_ID nor PROP_ID; fields are ${Object.keys((r.value as TxgioFeature).properties ?? {}).join(",")}`);
+      }
       const before = counters.declined.length;
       const row = releaseRowFromFeature(county, featureIndex++, r.value as TxgioFeature, counters, ctx);
       if (counters.declined.length !== before) assertDeclineCeiling(counters, county);
       if (!row) continue;
+      // A feature with a blank id is real data the release publishes (StratMap 2026 Bastrop has 8, with
+      // no GEO_ID either and a valid polygon); it loads with prop_id null and is counted, never invented.
+      if (row.payload.prop_id == null) withoutPropId++;
       accepted++;
       counters.rowsParsed += 1;
       keys.add(row.providerObjectId);
@@ -145,12 +164,12 @@ async function main(): Promise<void> {
       if (row.payload.year_built !== null) withValues.yearBuilt++;
       batch.push(row);
       if (batch.length >= BATCH) {
-        if (db) staged += await stageReleaseRows(db, batch);
+        if (db) staged += await stage(batch);
         batch = [];
       }
     }
   }
-  if (db && batch.length > 0) staged += await stageReleaseRows(db, batch);
+  if (db && batch.length > 0) staged += await stage(batch);
   assertFinalDeclineCeiling(counters, county);
 
   let swap: unknown = null;
@@ -164,7 +183,7 @@ async function main(): Promise<void> {
     county, vintage, year, provider, apply: values.apply,
     featuresRead: counters.rowsRead, accepted, distinctKeys: keys.size, duplicateFeatures: accepted - keys.size,
     declined: counters.declined.length,
-    withMarketValue: withValues.mkt, withTaxYear: withValues.taxYear, withYearBuilt: withValues.yearBuilt,
+    withMarketValue: withValues.mkt, withTaxYear: withValues.taxYear, withYearBuilt: withValues.yearBuilt, withoutPropId,
     staged: values.apply ? staged : 0, swap,
   }));
   await pool?.end();

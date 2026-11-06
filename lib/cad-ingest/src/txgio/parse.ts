@@ -456,7 +456,7 @@ export function isNullPlaceholderFeature(
   properties: Record<string, unknown> | null | undefined,
 ): boolean {
   const p = properties ?? {};
-  const propId = (str(p.Prop_ID) ?? "").trim();
+  const propId = (str(propIdOf(p)) ?? "").trim();
   const geoId = (str(p.GEO_ID) ?? "").trim();
   // "0" is the publisher's null Prop_ID; a real parcel never carries it.
   const hasPropId = propId !== "" && propId !== "0";
@@ -464,12 +464,25 @@ export function isNullPlaceholderFeature(
   return !hasPropId && !hasGeoId;
 }
 
+/**
+ * The account id field, whichever casing the release uses (2026-11-06). Read from the Bastrop 48021
+ * DBF headers: StratMap 2019, 2021 and 2026 name it `PROP_ID`; 2022 to 2025 name it `Prop_ID`; every
+ * other field keeps its name. Reading only `Prop_ID` gave every 2019, 2021 and 2026 feature a null
+ * prop_id: the 2019 and 2021 parcel-release loads went in with prop_id null in every payload, and 2026
+ * failed (on its NUL bytes, see `str`).
+ */
+export function propIdOf(p: Record<string, unknown>): unknown {
+  return p.Prop_ID ?? p.PROP_ID;
+}
+
 function str(v: unknown): string | null {
   if (typeof v !== "string") {
     if (typeof v === "number" && Number.isFinite(v)) return String(v);
     return null;
   }
-  const t = v.replace(/\s+/g, " ").trim();
+  // NUL is never data and Postgres text/jsonb refuse it (SQLSTATE 22P05). StratMap 2026 Bastrop carries
+  // it inside 16,326 of 65,281 records (SITUS_ADDR ", ,\0TX"), so it reads as a space like any padding.
+  const t = v.replace(/\u0000/g, " ").replace(/\s+/g, " ").trim();
   return t.length > 0 ? t : null;
 }
 
@@ -520,7 +533,7 @@ export function normalizeTxgioFeature(
   ): DeclinedFeature => ({
     countyFips,
     featureIndex,
-    propId: str(props.Prop_ID),
+    propId: str(propIdOf(props)),
     geoId: str(props.GEO_ID),
     objectId: str(props.OBJECTID_1),
     ownerName: str(props.OWNER_NAME),
@@ -611,7 +624,7 @@ export function normalizeTxgioFeature(
   return {
     countyFips,
     featureIndex,
-    propId: str(p.Prop_ID),
+    propId: str(propIdOf(p)),
     geoId: str(p.GEO_ID),
     ownerName: str(p.OWNER_NAME),
     situsAddress: str(p.SITUS_ADDR),
