@@ -8,17 +8,14 @@
  * the repo's own source files and calls them:
  *   - lib/codes/src/iccTitles.ts      isIccTitleAtom   (PR #832, title identifiers)
  *   - lib/icc-notice/src/index.ts     isIccSource      (ICC host / icc-model-code / ICC-named source)
- * and composes them exactly as the reader does in
- *   - artifacts/api-server/src/lib/iccAccess.ts  isIccRow
- * (isIccSource(url, jurisdictionKey, sourceName) OR isIccTitleAtom(codeBook,
- * sectionNumber, jurisdictionKey)). The .ts files are transpiled in memory with
- * the repo's own `typescript` so this runs on any Node version (CI is Node 20).
+ * and the shared classifier #847 exports from lib/codes/src/iccTitles.ts:
+ *   isIccRow (code_atoms)   isIccReasoningRow (reasoning_atoms)
+ * the same functions the ingest guard and the reader call. They are loaded with
+ * the repo's tsx (tsImport) so their imports resolve; Node 20 compatible.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
 export const LANE = "G-309-A16";
@@ -41,20 +38,29 @@ const REPO = path.resolve(HERE, "../..");
 // pg is a lib/db dependency, not a root one: resolve it from there.
 const pg = createRequire(path.join(REPO, "lib/db/package.json"))("pg");
 
-async function loadTs(rel) {
-  const src = readFileSync(path.join(REPO, rel), "utf8");
-  const js = ts.transpileModule(src, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
-}
+// The repo's own TypeScript loader (tsx, a lib/db devDependency), so
+// lib/codes/src/iccTitles.ts loads WITH its imports (@workspace/icc-notice)
+// resolved by the workspace, one definition shared with the ingest guard and
+// the reader. Works on Node 18+ (CI is Node 20).
+const { tsImport } = createRequire(path.join(REPO, "lib/db/package.json"))("tsx/esm/api");
 
 let classifierPromise;
 export function loadClassifier() {
   classifierPromise ??= (async () => {
-    const titles = await loadTs("lib/codes/src/iccTitles.ts");
-    const notice = await loadTs("lib/icc-notice/src/index.ts");
-    return { isIccTitleAtom: titles.isIccTitleAtom, isIccSource: notice.isIccSource };
+    const titles = await tsImport(
+      pathToFileURL(path.join(REPO, "lib/codes/src/iccTitles.ts")).href,
+      import.meta.url,
+    );
+    const notice = await tsImport(
+      pathToFileURL(path.join(REPO, "lib/icc-notice/src/index.ts")).href,
+      import.meta.url,
+    );
+    return {
+      isIccRow: titles.isIccRow,
+      isIccReasoningRow: titles.isIccReasoningRow,
+      isIccTitleAtom: titles.isIccTitleAtom,
+      isIccSource: notice.isIccSource,
+    };
   })();
   return classifierPromise;
 }
@@ -80,6 +86,15 @@ export function classifyCodeAtom(c, r) {
   ) {
     reasons.push("title");
   }
+  // The shared rule is the verdict; reasons only say which half fired.
+  const shared = c.isIccRow({
+    sourceUrl: r.source_url,
+    jurisdictionKey: r.jurisdiction_key,
+    sourceName: r.source_name,
+    codeBook: r.code_book,
+    sectionNumber: r.section_number,
+  });
+  if (shared !== reasons.length > 0) throw new Error("classifier drift: isIccRow disagrees with its parts");
   return reasons;
 }
 
@@ -99,10 +114,12 @@ export function classifyCodeAtom(c, r) {
  */
 export function classifyReasoningAtom(c, r) {
   const sources = Array.isArray(r.sources) ? r.sources : [];
-  const title =
-    c.isIccTitleAtom({ codeBook: r.edition, jurisdictionKey: r.jurisdiction_key }) ||
-    c.isIccSource({ jurisdictionKey: r.jurisdiction_key });
-  const link = sources.some((s) => c.isIccSource(s));
+  const title = c.isIccRow({ codeBook: r.edition, jurisdictionKey: r.jurisdiction_key });
+  const link = sources.some((s) => c.isIccRow({ sourceUrl: s?.url, sourceName: s?.sourceName }));
+  // The shared rule (isIccReasoningRow) is the verdict; title/link only name the class.
+  if (c.isIccReasoningRow({ edition: r.edition, jurisdictionKey: r.jurisdiction_key, sources }) !== (title || link)) {
+    throw new Error("classifier drift: isIccReasoningRow disagrees with its parts");
+  }
   const cls = title ? "icc-title" : link ? "icc-source-link" : null;
   const codeRefOnlyTitle =
     !cls && c.isIccTitleAtom({ sectionNumber: r.code_ref, codeBook: r.edition_slug });
