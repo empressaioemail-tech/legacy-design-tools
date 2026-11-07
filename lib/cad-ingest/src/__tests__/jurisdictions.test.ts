@@ -62,6 +62,9 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
       // cityKey as the Travis/Williamson entries, so a HALF of Austin inside
       // Hays county stamps as austin-tx, not as a county-less stub.
       "austin-tx",
+      // CTX-A / P-124 Band 1 (Woodcreek, Hays-county), declared after the
+      // Austin Hays entry.
+      "woodcreek-tx",
     ]);
 
     // Setback tables: Dripping Springs, Buda, Kyle have real tables; San
@@ -69,8 +72,13 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     // the identical object getSetbackTable returns for that city.
     const ds = getSetbackTable("dripping-springs-tx");
     expect(ds).not.toBeNull();
+    // Woodcreek (CTX-A Band 1) has no setback table yet: the config carries
+    // only tables that exist, so its absence is omitted, never a null slot.
+    expect(getSetbackTable("woodcreek-tx")).toBeNull();
     expect(j.setbackTables).toEqual(
-      haysCities.map((c) => getSetbackTable(c.cityKey)),
+      haysCities
+        .map((c) => getSetbackTable(c.cityKey))
+        .filter((t) => t !== null),
     );
     expect(j.setbackTables?.[0]).toBe(ds);
   });
@@ -168,8 +176,9 @@ describe("getJurisdictionConfig — composes the same objects the registries hol
     // "elgin-tx" appears here from the "elgin-tx-travis" registry entry
     // (CTX-ELGIN, P-124, 2026-09-08) — same cityKey as the Bastrop-side
     // Elgin entry, so it collapses into one set member, not a fourth city.
+    // "lakeway-tx" is the CTX-A / P-124 Band 1 Travis city.
     expect(new Set(travisCities.map((c) => c.cityKey))).toEqual(
-      new Set(["pflugerville-tx", "austin-tx", "elgin-tx"]),
+      new Set(["pflugerville-tx", "austin-tx", "elgin-tx", "lakeway-tx"]),
     );
     const pflugerville = getSetbackTable("pflugerville-tx");
     const austin = getSetbackTable("austin-tx");
@@ -310,13 +319,14 @@ describe("listJurisdictions / listJurisdictionFips", () => {
 });
 
 describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
-  it("Travis composes the SET {austin-tx, pflugerville-tx, elgin-tx}", () => {
+  it("Travis composes the SET {austin-tx, pflugerville-tx, elgin-tx, lakeway-tx}", () => {
     // elgin-tx added by the "elgin-tx-travis" registry entry (CTX-ELGIN,
     // P-124, 2026-09-08): layer 1 of the Elgin_Zoning FeatureServer, the
     // Travis-county-side sliver, wired to the same cityKey as the
     // Bastrop-side entry so it collapses into the set, not a fourth key.
+    // lakeway-tx: CTX-A / P-124 Band 1.
     expect(wiredZoningCityKeys("48453")).toEqual(
-      new Set(["austin-tx", "pflugerville-tx", "elgin-tx"]),
+      new Set(["austin-tx", "pflugerville-tx", "elgin-tx", "lakeway-tx"]),
     );
   });
 
@@ -329,7 +339,10 @@ describe("wiredZoningCityKeys + resolveZoningJurisdiction (per-parcel)", () => {
     expect(wiredZoningCityKeys("48187")).toEqual(
       new Set(["seguin-tx", "cibolo-tx"]),
     );
-    expect(wiredZoningCityKeys("48309")).toEqual(new Set(["waco-tx"]));
+    // robinson-tx: CTX-A / P-124 Band 1.
+    expect(wiredZoningCityKeys("48309")).toEqual(
+      new Set(["waco-tx", "robinson-tx"]),
+    );
     expect(wiredZoningCityKeys("48027")).toEqual(
       new Set(["killeen-tx", "belton-tx"]),
     );
@@ -579,7 +592,7 @@ describe("canonicalZoningJurisdictionKey — a stamped value resolves through th
       );
     }
     // Cities with no layer at all, and the shapes a situs city can synthesise.
-    for (const key of ["nowhere-tx", "lakeway-tx", "robinson-tx", "elgin_tx"]) {
+    for (const key of ["nowhere-tx", "bee-cave-tx", "hewitt-tx", "elgin_tx"]) {
       expect(canonicalZoningJurisdictionKey(key), key).toBe(key);
     }
   });
