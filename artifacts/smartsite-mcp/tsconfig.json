@@ -6,9 +6,13 @@
     "types": ["node"]
   },
   "include": ["src"],
+  "exclude": ["src/card/app-entry.ts"],
   "references": [
     {
       "path": "../../lib/db"
+    },
+    {
+      "path": "../../lib/icc-notice"
     }
   ]
 }

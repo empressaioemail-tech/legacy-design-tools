@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractSectionBlock,
   titleMatchesExpected,
@@ -173,12 +173,13 @@ describe("fetchCodeSection", () => {
       {
         codeRef: "FBC-M601.6",
         edition: "FBC 2023",
+        jurisdictionKey: "miami_beach_fl",
         expectedTitle: "Duct insulation",
       },
-      { http: mockHttp(FBC_2023_HTML) },
+      { http: mockHttp(FBC_2023_HTML, "https://www.floridabuilding.org/fbc/x") },
     );
     expect(result.verified).toBe(true);
-    expect(result.sourceUrl).toContain("codes.iccsafe.org");
+    expect(result.sourceUrl).not.toContain("iccsafe");
     expect(result.retrievedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.text.length).toBeGreaterThan(20);
   });
@@ -196,37 +197,23 @@ describe("fetchCodeSection", () => {
     expect(result.unverifiedWebSource).toBe(true);
   });
 
-  it("tries next driver when first returns unverified landing HTML", async () => {
-    const result = await fetchCodeSection(
+  it("G-309 A15: never requests an ICC title from a mirror, even when drivers list one", async () => {
+    const http = vi.fn();
+    await fetchCodeSection(
+      { codeRef: "IRC-R301.1", edition: "IRC 2021" },
       {
-        codeRef: "IRC-R301.1",
-        edition: "IRC 2021",
-        expectedTitle: "Application (design criteria)",
-      },
-      {
-        http: mockHttpSequence([
-          {
-            body: IRC_2021_LANDING_HTML,
-            url: "https://codes.iccsafe.org/content/IRC2021P1",
-          },
-          {
-            body: IRC_2021_SECTION_HTML,
-            url: "https://up.codes/viewer/texas/irc-2021/chapter/3/R301.1",
-          },
-        ]),
+        http,
         target: {
           codeRef: "IRC-R301.1",
           edition: "IRC 2021",
           editionSlug: "irc-2021",
           label: "IRC-R301.1 — Application (design criteria)",
-          expectedTitle: "Application (design criteria)",
           jurisdictionKey: "austin_tx",
           drivers: ["upcodes", "icc"],
         },
       },
-    );
-    expect(result.verified).toBe(true);
-    expect(result.sourceUrl).toContain("up.codes");
+    ).catch(() => undefined);
+    expect(http).not.toHaveBeenCalled();
   });
 });
 
@@ -262,7 +249,7 @@ describe("reviewWebTargetsForJurisdiction", () => {
     expect(isAllowlistedWebHost("tea.texas.gov")).toBe(true);
     expect(isAllowlistedWebHost("www.bastropisd.org")).toBe(true);
     expect(isAllowlistedWebHost("cityofbastrop.org")).toBe(true);
-    expect(isAllowlistedWebHost("codes.iccsafe.org")).toBe(true);
+    expect(isAllowlistedWebHost("codes.iccsafe.org")).toBe(false);
     expect(isAllowlistedWebHost("random-blog.example")).toBe(false);
     expect(reviewWebTargetsForJurisdiction("bastrop_tx")).toEqual([]);
   });

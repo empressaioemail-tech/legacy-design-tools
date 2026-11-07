@@ -7,7 +7,7 @@ import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { eq } from "drizzle-orm";
 import { ctx } from "./test-context";
-import { db, peSavedProperties } from "@workspace/db";
+import { db, peSavedProperties, users } from "@workspace/db";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
@@ -46,6 +46,13 @@ function bearerToken(userId: string): string {
 
 describe("PE saved property isolation", () => {
   beforeEach(async () => {
+    // OPS-16 P-111: pe_saved_properties.owner_user_id now FKs to users.id
+    // (previously ungated -- exactly the gap OPS-16 A-075 found), so the
+    // fixture rows below need real parent rows first.
+    await db.insert(users).values([
+      { id: "user-a", displayName: "user-a" },
+      { id: "user-b", displayName: "user-b" },
+    ]);
     await db.insert(peSavedProperties).values([
       {
         tenantId: DEFAULT_TENANT_ID,
@@ -62,6 +69,30 @@ describe("PE saved property isolation", () => {
         snapshot: { source: "test" },
       },
     ]);
+  });
+
+  it("GET saved-properties composes punctuation situs to node id + unknown", async () => {
+    await db.insert(peSavedProperties).values({
+      tenantId: DEFAULT_TENANT_ID,
+      ownerUserId: "user-a",
+      parcelNodeId: "48021:25420",
+      label: ", ,",
+      snapshot: { source: "test" },
+    });
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/saved-properties"),
+      "user-a",
+    );
+    expect(res.status).toBe(200);
+    const junk = res.body.find(
+      (row: { parcelNodeId: string }) => row.parcelNodeId === "48021:25420",
+    );
+    expect(junk).toMatchObject({
+      parcelNodeId: "48021:25420",
+      label: "48021:25420",
+      situs: "unknown",
+    });
+    expect(junk.label).not.toMatch(/^[\s,.\-;:'"`]+$/);
   });
 
   it("GET saved-properties returns only caller's rows", async () => {

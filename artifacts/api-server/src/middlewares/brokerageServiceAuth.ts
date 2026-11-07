@@ -4,9 +4,10 @@
  * Accepts EITHER:
  *   - `Authorization: Bearer <SERVICE_API_KEY>` — MCP service caller
  *     (no install id; wallet paywall skipped; metering signal surfaced)
- *   - Brokerage extension keys (`BROKERAGE_EXTENSION_PUBLIC_KEY`,
- *     `BROKERAGE_API_KEYS`) — Chrome extension / operator path via
- *     {@link brokerageAuth}
+ *   - Brokerage operator keys (`BROKERAGE_OPERATOR_API_KEYS`,
+ *     `BROKERAGE_API_KEYS`) via {@link brokerageAuth}. The chrome-extension
+ *     key (`BROKERAGE_EXTENSION_PUBLIC_KEY`) is retired (2026-09-07) and is
+ *     never a recognized key — see brokerageAuth.ts.
  *
  * cc-agent-M's `legacy-client.ts` sends the same bearer token as the L-surface
  * routes (`SERVICE_API_KEY` / `LEGACY_BACKEND_API_KEY`).
@@ -21,6 +22,7 @@ import {
 } from "./brokerageAuth";
 import { getServiceApiKey } from "../lib/serviceToken";
 import { buildGateServiceAuth } from "../lib/gateFrontSeam";
+import { isBrowserProxyCaller } from "./browserProxyEndUser";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -51,6 +53,16 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
   res: Response,
   next: NextFunction,
 ) => {
+  // Browser proxy (hauska-map api/spine.ts): transport already authenticated
+  // by browserProxyEndUserMiddleware, which ran the request AS its end user
+  // (verified session -> brokerageAuth "user") or as ANONYMOUS. Never a
+  // service caller, never Max by credential — the proxy key was stripped
+  // there, so the SERVICE_API_KEY comparison below cannot see it.
+  if (isBrowserProxyCaller(req)) {
+    next();
+    return;
+  }
+
   const provided = extractBrokerageApiKey(req);
 
   if (provided) {
@@ -62,22 +74,15 @@ export const requireBrokerageAuthOrServiceToken: RequestHandler = (
     }
 
     const keys = loadBrokerageApiKeys();
-    if (keys.size === 0) {
-      res.status(503).json({
-        error: "property_brief_api_unconfigured",
-        message: "Property Brief API key is not configured on this server",
-      });
-      return;
-    }
-
     if (keys.has(provided)) {
       req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
       next();
       return;
     }
 
-    // Session JWT bearer or other brokerageAuth paths (e.g. extension_public
-    // key timing) — do not hard-401 before brokerageAuth can classify.
+    // Session JWT bearer or any other brokerageAuth path — do not hard-401
+    // (or hard-503 on an empty key set) before brokerageAuth can classify;
+    // it checks the session-JWT path before the keys-configured gate.
     brokerageAuth(req, res, next);
     return;
   }

@@ -42,6 +42,7 @@ import { logger } from "../lib/logger";
 import {
   generateReasoningSummary,
   generateSummarize,
+  generateNarrativeSection,
   generateResearchChat,
   type BriefAtomInput,
 } from "../lib/brokerageBriefLlm";
@@ -120,6 +121,14 @@ import {
   emitPropertyWorkspaceCreatedEvent,
 } from "../lib/brokerageBriefEvents";
 import { brokerageCoverageRouter } from "./brokerageCoverage";
+import { iccNoticeField } from "../lib/iccNoticeField";
+import {
+  iccAuthorizedUser,
+  iccCitationFromAtom,
+  iccCitationsFromAtoms,
+  recordIccUsage,
+  type IccUsageCitation,
+} from "../lib/iccUsage";
 import { brokerageCoveragePublicCors } from "../middlewares/brokerageCoverageCors";
 import { brokerageGtmRouter } from "./brokerageGtm";
 import { brokerageProfileRouter } from "./brokerageProfile";
@@ -139,6 +148,10 @@ import {
 import { brokeragePlaceHydrologyRouter } from "./brokeragePlaceHydrology";
 import { brokeragePlaceBuildableEnvelopeRouter } from "./brokeragePlaceBuildableEnvelope";
 import { brokeragePlaceSitusSearchRouter } from "./brokeragePlaceSitusSearch";
+import { brokeragePlaceJurisdictionBoundariesRouter } from "./brokeragePlaceJurisdictionBoundaries";
+import { brokeragePlaceRadiusSearchRouter } from "./brokeragePlaceRadiusSearch";
+import { brokeragePlaceStreetSearchRouter } from "./brokeragePlaceStreetSearch";
+import { brokeragePlaceConstraintSearchRouter } from "./brokeragePlaceConstraintSearch";
 import { brokerageMapDataRouter } from "./brokerageMapData";
 import { brokerageBillingRouter } from "./brokerageBilling";
 import { propertyExplorerBillingRouter } from "./propertyExplorerBilling";
@@ -204,6 +217,27 @@ const SUMMARIZE_BODY = z.object({
       snippet: z.string(),
     }),
   ),
+});
+
+/**
+ * OPS-16 P-120 item 6. Server-to-server only in practice (behind this
+ * router's own requireBrokerageAuthOrServiceToken, same as every other
+ * brokerageV1 route) — hauska-engine's Feasibility narrative composer is
+ * the intended caller. `facts` is intentionally z.unknown()-valued: each
+ * category's own present/absent shape is the caller's contract with the
+ * LLM prompt, not something this route validates field-by-field.
+ */
+const NARRATIVE_SECTION_BODY = z.object({
+  parcelNodeId: z.string().min(1),
+  facts: z.record(z.string(), z.unknown()),
+  courthouseDocuments: z
+    .array(
+      z.object({
+        citation: z.string().min(1),
+        excerpt: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 const RESEARCH_CHAT_BASE = z.object({
@@ -323,6 +357,14 @@ brokerageV1.use("/coverage", brokerageCoverageRouter);
 brokerageV1.use("/place", brokeragePlaceHydrologyRouter);
 brokerageV1.use("/place", brokeragePlaceBuildableEnvelopeRouter);
 brokerageV1.use("/place", brokeragePlaceSitusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceJurisdictionBoundariesRouter);
+brokerageV1.use("/place", brokeragePlaceRadiusSearchRouter);
+brokerageV1.use("/place", brokeragePlaceStreetSearchRouter);
+/**
+ * P-106 constraint search: a question ACROSS parcels, answered as three sets.
+ * Peer of radius-search and street-search, behind the same service gate.
+ */
+brokerageV1.use("/place", brokeragePlaceConstraintSearchRouter);
 brokerageV1.use("/place", brokeragePlaceRouter);
 brokerageV1.use("/map-data", brokerageMapDataRouter);
 brokerageV1.use("/workspaces", brokerageEncumbrancesRouter);
@@ -608,11 +650,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
   const installId = installIdFromRequest(req);
   const lk = listingKeyFromAddress(address, mls_id);
   const extensionPublic = isExtensionPublicClient(req);
-  const authenticatedUser =
-    req.brokerageAuth?.tier === "user" &&
-    req.session?.requestor?.kind === "user"
-      ? req.session.requestor.id
-      : null;
+  // The same rule as every other brokerage read: a real user, never the anon owner.
+  const authenticatedUser = authenticatedBrokerageUserId(req);
   const serviceCaller = isBrokerageServiceCaller(req);
   const spineViaGate = isBrokerageBriefViaGateEnabled();
 
@@ -886,6 +925,8 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
     siteContext,
     sections,
     citations,
+    // G-309: ICC's notice and disclaimer travel with any ICC citation.
+    ...iccNoticeField([citations, atoms], [sections]),
     atoms,
     reasoningSummary,
     laySummary,
@@ -921,6 +962,14 @@ brokerageV1.post("/brief", async (req: Request, res: Response) => {
           }),
     },
   };
+
+  // A13c: one ledger row set per brief for the ICC citations it shows.
+  void recordIccUsage({
+    requestId: runId,
+    authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
+    surface: "brief",
+    citations: iccCitationsFromAtoms(retrievedAtomsForProvenance),
+  });
 
   await db.insert(brokerageBriefRuns).values({
     id: runId,
@@ -1059,6 +1108,36 @@ brokerageV1.post(
       })),
     });
 
+    res.json(result);
+  },
+);
+
+/**
+ * OPS-16 P-120 item 6 — Feasibility narrative-section generator.
+ * Server-to-server: reuses this router's own requireBrokerageAuthOrServiceToken
+ * gate (the same SERVICE_API_KEY bearer path hauska-mcp-server already
+ * authenticates with), never a second auth mechanism. Contract locked
+ * directly with hauska-engine (cente-67, 2026-09-07): request carries
+ * parcelNodeId + a nested per-category facts payload (each category
+ * self-reporting present/absent) + optional courthouseDocuments; response
+ * is the narrative text plus provenance only — no citedSections field,
+ * since the caller derives that itself by scanning the returned text for
+ * its own facts keys as [category] markers.
+ */
+brokerageV1.post(
+  "/research/narrative-section",
+  async (req: Request, res: Response) => {
+    const parse = NARRATIVE_SECTION_BODY.safeParse(req.body);
+    if (!parse.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        message: "Invalid narrative-section body",
+        details: parse.error.flatten(),
+      });
+      return;
+    }
+
+    const result = await generateNarrativeSection(parse.data);
     res.json(result);
   },
 );
@@ -1273,6 +1352,7 @@ brokerageV1.post(
     }
 
     const atomMap = new Map<string, BriefAtomInput>();
+    const iccByAtomDid = new Map<string, IccUsageCitation>();
     const degradedReasons: string[] = [];
 
     for (const c of payload.citations ?? []) {
@@ -1332,6 +1412,8 @@ brokerageV1.post(
           });
           totalAtomsRetrieved += retrieved.length;
           for (const a of retrieved) {
+            const iccCite = iccCitationFromAtom(a);
+            if (iccCite) iccByAtomDid.set(a.id, iccCite);
             const existing = atomMap.get(a.id);
             const snippet = atomSnippet(a);
             if (!existing) {
@@ -1437,7 +1519,7 @@ brokerageV1.post(
         atomDid: parcelNodeId,
         entityId: parcelNodeId,
         snippet: subjectConstraintsText,
-        label: `Parcel record — ${situs} (Hauska property atom chain)`,
+        label: `Parcel record · ${situs}`,
       });
     }
 
@@ -1475,6 +1557,17 @@ brokerageV1.post(
       privateRestrictionsBlock,
       areaContextBlock,
       presentationMode,
+    });
+
+    // A13c: one ledger row set per research-chat answer for the ICC sources it shows.
+    void recordIccUsage({
+      requestId: randomUUID(),
+      authorizedUser: req.brokerageAuth?.tier === "user" ? iccAuthorizedUser(req) : null,
+      surface: "brief",
+      citations: result.sources.flatMap((s) => {
+        const c = iccByAtomDid.get(s.atomDid);
+        return c ? [c] : [];
+      }),
     });
 
     if (installId) {

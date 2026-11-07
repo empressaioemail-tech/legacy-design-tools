@@ -24,10 +24,27 @@ import {
   type EdgeLabelingResult,
 } from "./edgeLabeling";
 import type { DistrictMappingResult } from "./districtMapping";
+import type { RoadClassSetbackDistrictRow } from "./roadClassSetbacks";
+// P-270 (OPS-24 X11): the ONE place that decides whether a served citation's
+// vintage was worth declaring. See that module's doc for the ruling it
+// implements and for why it calls the corpus's own date reader rather than
+// parsing a date itself.
 import {
-  roadClassSetbackTableForJurisdiction,
-  type RoadClassSetbackDistrictRow,
-} from "./roadClassSetbacks";
+  disclosureWithCitationVintage,
+  readSetbackDateFromRowAtSource,
+  readSetbackDateFromTable,
+  setbackCitationVintageRow,
+  todayIso,
+  SETBACK_ADOPTED_DATE_FIELD_KEYS,
+  type SetbackCitationVintageDeclaration,
+} from "./setbackCitationVintage";
+
+/**
+ * P-354 (2026-09-18). The district ROW's own date-bearing fields, in the
+ * source's own spellings. A row MAY state its own effective date, and when it
+ * does, that date is the row's rule and the table's is not.
+ */
+const SETBACK_RULE_ROW_DATE_FIELD_KEYS = ["effectiveDate", "effective_date"] as const;
 
 export interface BuildableEnvelopeProps {
   kind: "buildable-envelope";
@@ -50,6 +67,12 @@ export interface BuildableEnvelopeProps {
       side?: boolean;
       rear?: boolean;
       side_corner?: boolean;
+      /**
+       * True when max_height_ft is a stated absence (provenance flag, or the
+       * canonical 999 sentinel): `maxHeightFt` is null for the same reason and
+       * must not be read as "no limit" or as a real height (P-299).
+       */
+      max_height?: boolean;
     };
   };
   /** How the front edge was inferred. */
@@ -59,15 +82,58 @@ export interface BuildableEnvelopeProps {
   districtNote: string;
   /** Areas (square feet). */
   parcelAreaSqFt: number;
-  buildableAreaSqFt: number;
-  buildableAreaPct: number;
+  /**
+   * P-304 (2026-09-17). The buildable-area figure and percent are OMITTED
+   * whenever no ground-truth VERIFIED buildable-envelope atom backs them
+   * (A-180; `_decisions/2026-09-11_ruling_b_reversed_polygon_only.md`): the
+   * modelled polygon still draws, the figure does not. Optional on purpose, so
+   * a consumer reads the key's ABSENCE as the withheld state and never as a
+   * zero or as "nothing here" — `withholdUnverifiedAreaFigure`
+   * (`reconcileAtomEnvelope.ts`) is the one writer of that absence, and
+   * `isEnvelopeAtomVerified` is the one predicate that decides it.
+   */
+  buildableAreaSqFt?: number;
+  buildableAreaPct?: number;
   /** Dimensional caps that feed downstream ADU/addition sizing. */
   maxLotCoveragePct: number | null;
+  /**
+   * Feet, or null when the code states no feet height for this district.
+   * NEVER the corpus's 999 stated-absence sentinel (P-299): the sentinel means
+   * "read the provenance flag", and a consumer that reads it as a number sizes
+   * a 999-foot building. `setbacks.not_specified.max_height` says the same
+   * thing in the props' own vocabulary.
+   */
   maxHeightFt: number | null;
   /** Max footprint (sqft) = envelope area capped by lot coverage of the PARCEL. */
   maxFootprintSqFt: number | null;
   /** Citation URL (Municode) for the setback district. */
   citationUrl: string;
+  /**
+   * P-270 (OPS-24 X11). The effective date of the instrument the citation
+   * above points at, read AT SOURCE from the codified table's own
+   * `effectiveDate` field. Present ONLY when that field held a readable date
+   * AND a citation is being served — the key's absence means the source's
+   * date could not be read, and `citationVintage` beside it says which of the
+   * three causes applies. Never a placeholder: this lane writes no default
+   * date anywhere.
+   *
+   * P-354 (2026-09-18): a date read from the ROW and LATER THAN TODAY is
+   * deliberately NOT published here either, even though it is readable. This
+   * field means "the citation's date, in force"; a rule adopted but not yet
+   * effective is declared through `citationVintage` instead, which names both
+   * its adoption date and its effective date.
+   */
+  citationEffectiveDate?: string;
+  /**
+   * P-270 (OPS-24 X11). The declaration row, present only when the citation
+   * above must not be printed as a plain in-force citation: its effective date
+   * could not be read, or it WAS read and has not arrived yet (P-354). Its
+   * absence means the vintage is known or nothing is cited — never that the
+   * payload declined to say. Composed by the ONE module
+   * `buildableEnvelope/setbackCitationVintage.ts`, byte-identical to
+   * hauska-map's copy of the same sentence.
+   */
+  citationVintage?: SetbackCitationVintageDeclaration;
   /** Empty-envelope reason, when there is no buildable area. */
   emptyReason?: string;
   /**
@@ -102,7 +168,18 @@ export interface BuildableEnvelopeResult {
   /** Set when empty: distinguishes consume-lot from a validation decline. */
   emptyKind?: InsetEmptyKind;
   citationUrl: string;
+  /** P-270 (OPS-24 X11): the citation's readable, IN-FORCE effective date, or absent. See `BuildableEnvelopeProps`. */
+  citationEffectiveDate?: string;
+  /** P-270 (OPS-24 X11) + P-354: the declaration, present only when the citation is undated or not yet in force. See `BuildableEnvelopeProps`. */
+  citationVintage?: SetbackCitationVintageDeclaration;
   district: string;
+  /**
+   * The per-edge feet the inset applied, in projectRing order. Not a wire
+   * field: the route names setbacks explicitly and does not spread this.
+   * Optional so a caller that rebuilds the result without it leaves the area
+   * check unmeasured rather than failing it.
+   */
+  insetFeetPerEdge?: number[];
 }
 
 export interface DeriveInput {
@@ -135,6 +212,40 @@ function fieldNotSpecified(
   );
 }
 
+/**
+ * The canonical "the code states no feet limit" sentinel for max_height_ft
+ * (hauska-setback-corpus rule G7 / `NOT_SPECIFIED_MAX_HEIGHT_FT`).
+ *
+ * 999 is not a height any of these codes states — it is a placeholder that only
+ * means "read the flag". The flag is the entire payload: the provenance slot
+ * (`not_specified: true`) carries the meaning and the number carries none.
+ */
+export const NOT_SPECIFIED_MAX_HEIGHT_FT = 999;
+
+/**
+ * True when this district's height limit is ABSENT rather than a number.
+ *
+ * Two spellings map to absent, and both must be treated as absent here:
+ *   1. provenance.max_height_ft.not_specified === true — the honest form.
+ *   2. the bare canonical sentinel 999 with no flag — the form that leaked.
+ *      A table may not ship it (corpus rule G8 blocks it), but this reader sits
+ *      downstream of a JSON file, not of that gate, so it fails closed on the
+ *      value too: 999 ft is not a buildable height and G3's own sanity band tops
+ *      max_height_ft out at 300, so no district can mean 999.
+ *
+ * P-299: before this, the envelope props carried max_height_ft straight through,
+ * so a Round Rock stories-only district surfaced "max height 999 ft" to the UI
+ * and to any consumer sizing an ADU or an addition against it.
+ */
+function heightNotSpecified(d: SetbackDistrict): boolean {
+  const p = d.provenance?.["max_height_ft"];
+  const flagged =
+    !!p &&
+    typeof p === "object" &&
+    (p as { not_specified?: boolean }).not_specified === true;
+  return flagged || d.max_height_ft === NOT_SPECIFIED_MAX_HEIGHT_FT;
+}
+
 function composeDisclosure(
   approximate: boolean,
   labeling: EdgeLabelingResult,
@@ -142,6 +253,7 @@ function composeDisclosure(
   empty: boolean,
   emptyReason?: string,
   notSpecifiedNote?: string,
+  heightNotSpecifiedNote?: string,
 ): string {
   if (empty) {
     // Never default to consume-lot wording: an unexplained empty is a
@@ -158,6 +270,7 @@ function composeDisclosure(
     parts.push("Estimated buildable area");
   }
   if (notSpecifiedNote) parts.push(notSpecifiedNote.replace(/\.$/, ""));
+  if (heightNotSpecifiedNote) parts.push(heightNotSpecifiedNote.replace(/\.$/, ""));
   parts.push(labeling.note.replace(/\.$/, ""));
   parts.push(district.note.replace(/\.$/, ""));
   parts.push(
@@ -181,12 +294,10 @@ export function deriveBuildableEnvelope(
   };
   const hasSilent = Object.keys(not_specified).length > 0;
 
-  const roadClassTable =
-    input.roadClassSetbackTable ??
-    roadClassSetbackTableForJurisdiction(
-      table.jurisdictionKey,
-      d.district_name,
-    );
+  // A road class is not a setback (engine-side precedent: commit 293633a,
+  // "refuse road-class setbacks"). Never silently substitute one by default —
+  // only a caller that explicitly opts in gets road-class-aware insets.
+  const roadClassTable = input.roadClassSetbackTable ?? null;
 
   const insetFeet = insetFeetForLabeling(
     labeling,
@@ -220,10 +331,22 @@ export function deriveBuildableEnvelope(
   const buildableAreaPct =
     parcelAreaSqFt > 0 ? round((buildableAreaSqFt / parcelAreaSqFt) * 100, 1) : 0;
 
-  const maxLotCoveragePct =
-    typeof d.max_lot_coverage_pct === "number" ? d.max_lot_coverage_pct : null;
+  const coverageFlag = d.provenance?.["max_lot_coverage_pct"];
+  const coverageSilent =
+    !!coverageFlag &&
+    typeof coverageFlag === "object" &&
+    (coverageFlag as { not_specified?: boolean }).not_specified === true;
+  const maxLotCoveragePct = coverageSilent
+    ? null
+    : typeof d.max_lot_coverage_pct === "number"
+      ? d.max_lot_coverage_pct
+      : null;
+  // P-299: a flagged (or bare-sentinel) height is ABSENT, not 999 feet. The
+  // sentinel is the code's way of saying "no feet scalar here" (Round Rock
+  // states these heights in stories), so it must reach the wire as absence.
+  const heightSilent = heightNotSpecified(d);
   const maxHeightFt =
-    typeof d.max_height_ft === "number" ? d.max_height_ft : null;
+    !heightSilent && typeof d.max_height_ft === "number" ? d.max_height_ft : null;
 
   let maxFootprintSqFt: number | null = null;
   if (!inset.empty && maxLotCoveragePct != null) {
@@ -255,6 +378,12 @@ export function deriveBuildableEnvelope(
   const silentNote = hasSilent
     ? "One or more scalar setbacks are not specified in the code (build-to-line governs); silent axes are not treated as 0 ft entitlements"
     : undefined;
+  // P-299: say the height is absent out loud. Serving null silently would drop
+  // the one fact the reader needs — that the code states no feet height for
+  // this district, rather than that the field is missing from the payload.
+  const heightNotSpecifiedNote = heightSilent
+    ? "The code states no feet-based maximum height for this district (height is stated in stories or not as a feet scalar); no height limit is reported here — check the district's own note and the city before relying on a height"
+    : undefined;
 
   const disclosure = composeDisclosure(
     approximate,
@@ -263,20 +392,70 @@ export function deriveBuildableEnvelope(
     inset.empty,
     emptyReason,
     silentNote,
+    heightNotSpecifiedNote,
   );
+
+  // P-270 (OPS-24 X11). The table's own date, read AT SOURCE, and the one
+  // sentence that says so when it cannot be read. Both are gated on a
+  // citation actually being served: with no citation there is nothing for a
+  // vintage to qualify, and declaring one would be a statement about an
+  // instrument this payload does not name. `never-looked` is NOT reachable
+  // here any more, because this line IS the look.
+  //
+  // P-354 (2026-09-18). The ROW is asked FIRST and the table only when the row
+  // states no date at all — the same precedence the corpus's own
+  // `dateFromRowEffectiveDate` applies, so the surface and the resolver cannot
+  // disagree about which of the two dates is the rule's. A row that states an
+  // UNREADABLE date does not fall back to the table: that would be the silent
+  // pick, and an unreadable value in a good field is a different defect from a
+  // source with no date. A row date LATER THAN TODAY reads as
+  // `future-effective`: the row is in the payload (the operator's A-218 ruling
+  // serves Georgetown from its rewrite ahead of 2026-11-01) and the sentence
+  // names BOTH dates instead of printing it as already in force.
+  const citationUrl = (d.citation_url ?? "").trim();
+  const rowDateRead = readSetbackDateFromRowAtSource(
+    d as unknown as Record<string, unknown>,
+    SETBACK_RULE_ROW_DATE_FIELD_KEYS,
+    { adoptedKeys: SETBACK_ADOPTED_DATE_FIELD_KEYS, asOf: todayIso() },
+  );
+  const citationDateRead =
+    rowDateRead.state === "unreadable-absent-at-source"
+      ? readSetbackDateFromTable(table)
+      : rowDateRead;
+  const citationVintage = setbackCitationVintageRow({
+    date: citationDateRead,
+    citationUrl,
+    sourceLabel: `codified setback table ${table.jurisdictionKey} (${table.jurisdictionDisplayName})`,
+  });
+  const disclosureWithVintage =
+    disclosureWithCitationVintage(disclosure, citationVintage) ?? disclosure;
 
   const props: BuildableEnvelopeProps = {
     kind: "buildable-envelope",
     approximate,
     notSurveyGrade: true,
-    disclosure,
+    disclosure: disclosureWithVintage,
     setbacks: {
       front_ft: d.front_ft,
       side_ft: d.side_ft,
       rear_ft: d.rear_ft,
-      side_corner_ft: d.side_corner_ft,
+      // A corner the code does not state is ABSENT on the wire, not 0 ft. The
+      // district row carries 0 there only so the inset has a number (the
+      // ledger rail and the authoritative source both do this), and
+      // not_specified.side_corner says so. Serving that 0 printed a corner
+      // setback the city never stated (measured 2026-11-04 on 48021:34105).
+      ...(fieldNotSpecified(d, "side_corner_ft") || typeof d.side_corner_ft !== "number"
+        ? {}
+        : { side_corner_ft: d.side_corner_ft }),
       district: d.district_name,
-      ...(hasSilent ? { not_specified } : {}),
+      ...(hasSilent || heightSilent
+        ? {
+            not_specified: {
+              ...not_specified,
+              ...(heightSilent ? { max_height: true } : {}),
+            },
+          }
+        : {}),
     },
     edgeSignal: labeling.signal,
     edgeNote: labeling.note,
@@ -288,6 +467,10 @@ export function deriveBuildableEnvelope(
     maxHeightFt,
     maxFootprintSqFt,
     citationUrl: d.citation_url,
+    ...(citationDateRead.state === "read" && citationUrl
+      ? { citationEffectiveDate: citationDateRead.sourceDate! }
+      : {}),
+    ...(citationVintage ? { citationVintage } : {}),
     ...(inset.empty ? { emptyReason, emptyKind } : {}),
   };
 
@@ -313,7 +496,12 @@ export function deriveBuildableEnvelope(
     empty: inset.empty,
     ...(emptyKind ? { emptyKind } : {}),
     citationUrl: d.citation_url,
+    ...(citationDateRead.state === "read" && citationUrl
+      ? { citationEffectiveDate: citationDateRead.sourceDate! }
+      : {}),
+    ...(citationVintage ? { citationVintage } : {}),
     district: d.district_name,
+    insetFeetPerEdge: insetFeet,
   };
 }
 

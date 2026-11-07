@@ -16,6 +16,11 @@ import {
   localityFromStoredAddress,
   placeSearchLocalityMatches,
   hasPlaceSearchLocality,
+  situsSearchPrefixVariants,
+  situsSearchStreetKeys,
+  isOutOfCoverageStateCode,
+  COVERED_STATE_CODE,
+  US_STATE_AND_TERRITORY_CODES,
 } from "../txgioAddressNormalize";
 
 describe("normalizeStreetLine", () => {
@@ -207,6 +212,30 @@ describe("normalizeStreetLineCandidates (F4f comma-less query key)", () => {
     expect(cands).toContain("100 MAIN ST");
     expect(cands.every((c) => c.split(" ").length >= 2)).toBe(true);
   });
+
+  it("P-475: comma-less city without state/ZIP yields the stored street line", () => {
+    expect(normalizeStreetLineCandidates("1503 Water St Bastrop")).toContain(
+      "1503 WATER ST",
+    );
+    expect(normalizeStreetLineCandidates("1503 Water St, Bastrop, TX 78602")).toContain(
+      "1503 WATER ST",
+    );
+  });
+
+  it("P-475: missing street-type suffix still keys the situs line", () => {
+    expect(normalizeStreetLineCandidates("1201 Water Bastrop")).toContain(
+      "1201 WATER ST",
+    );
+    expect(normalizeStreetLineCandidates("1308 Farm Bastrop")).toContain(
+      "1308 FARM ST",
+    );
+  });
+
+  it("P-475: Austin comma-less city without state/ZIP", () => {
+    expect(
+      normalizeStreetLineCandidates("1600 Congress Ave Austin"),
+    ).toContain("1600 CONGRESS AVE");
+  });
 });
 
 describe("normalizeSitusSearchPrefix", () => {
@@ -234,6 +263,21 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
       city: "BASTROP",
       state: "TX",
       zip: "78602",
+    });
+    expect(parsePlaceSearchLocality("908 Pine St Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
+    });
+    expect(parsePlaceSearchLocality("1201 Water Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
+    });
+    expect(parsePlaceSearchLocality("1308 Farm Bastrop")).toEqual({
+      city: "BASTROP",
+      state: null,
+      zip: null,
     });
   });
 
@@ -267,5 +311,81 @@ describe("place search locality (B1 find_parcel homonym guard)", () => {
         query,
       ),
     ).toBe(true);
+  });
+
+  it("parses the live gold CAD situs (space before the city comma)", () => {
+    const stored = localityFromStoredAddress("908 PINE , BASTROP, TX 78602");
+    const query = parsePlaceSearchLocality("908 Pine St, Bastrop TX 78602");
+    expect(stored).toEqual({
+      city: "BASTROP",
+      state: "TX",
+      zip: "78602",
+    });
+    expect(placeSearchLocalityMatches(stored, query)).toBe(true);
+  });
+
+  it("parses Marble Falls for coverage when state and ZIP sit in their own comma segment (P-486)", () => {
+    expect(parsePlaceSearchLocality("99999 ZZYZX RD MARBLE FALLS, TX 78654")).toEqual({
+      city: "MARBLE FALLS",
+      state: "TX",
+      zip: "78654",
+    });
+    expect(parsePlaceSearchLocality("99999 ZZYZX RD MARBLE FALLS TX 78654")).toEqual({
+      city: "MARBLE FALLS",
+      state: "TX",
+      zip: "78654",
+    });
+  });
+});
+
+describe("isOutOfCoverageStateCode (P-107 / OPS-16 A-072)", () => {
+  it("recognises a real out-of-state code parsed from a full address", () => {
+    const { state } = parsePlaceSearchLocality(
+      "1600 E Camelback Rd, Phoenix, AZ",
+    );
+    expect(state).toBe("AZ");
+    expect(isOutOfCoverageStateCode(state)).toBe(true);
+  });
+
+  it("does not treat the covered state (TX) as out of coverage", () => {
+    expect(COVERED_STATE_CODE).toBe("TX");
+    expect(isOutOfCoverageStateCode("TX")).toBe(false);
+    const { state } = parsePlaceSearchLocality(
+      "147 Kahana Ln, Bastrop, TX",
+    );
+    expect(state).toBe("TX");
+    expect(isOutOfCoverageStateCode(state)).toBe(false);
+  });
+
+  it("does not fire on a query with no parsed state (most typed TX addresses)", () => {
+    const { state } = parsePlaceSearchLocality("147 Kahana Ln, Bastrop");
+    expect(state).toBeNull();
+    expect(isOutOfCoverageStateCode(state)).toBe(false);
+    expect(isOutOfCoverageStateCode(null)).toBe(false);
+  });
+
+  it("does not fire on an unrecognised two-letter token (false-positive guard)", () => {
+    // STATE_RE (the normalizer's own broad match) would accept this; the
+    // out-of-coverage check is deliberately narrower so a garbled query
+    // never reads to a caller as "Smart Site does not cover this place".
+    expect(US_STATE_AND_TERRITORY_CODES.has("ZZ")).toBe(false);
+    expect(isOutOfCoverageStateCode("ZZ")).toBe(false);
+  });
+
+  it("recognises every real state/territory code except the covered one", () => {
+    for (const code of US_STATE_AND_TERRITORY_CODES) {
+      expect(isOutOfCoverageStateCode(code)).toBe(code !== COVERED_STATE_CODE);
+    }
+  });
+});
+
+describe("situsSearchStreetKeys (CAD omits street type)", () => {
+  it("includes the stripped 908 PINE key the store actually holds", () => {
+    expect(
+      situsSearchPrefixVariants("908 Pine St, Bastrop TX 78602"),
+    ).toEqual(["908 PINE ST", "908 PINE"]);
+    const keys = situsSearchStreetKeys("908 Pine St, Bastrop TX 78602");
+    expect(keys).toContain("908 PINE ST");
+    expect(keys).toContain("908 PINE");
   });
 });

@@ -37,6 +37,14 @@ import { syncPropertyExplorerCrm } from "../lib/propertyExplorerGtmCrm";
 import { syncPipedriveLead } from "../lib/brokeragePipedrive";
 import { attemptOutboundSend } from "../lib/gtmOutbound";
 import { GTM_OUTBOUND_ACTIONS, isOutboundEnabled } from "../lib/gtmPolicy";
+import { requireServiceToken } from "../middlewares/serviceAuth";
+import { parseShareAttribution } from "../lib/peShareAttributionValidate";
+import { parseAccountActivation } from "../lib/peAccountActivationValidate";
+import {
+  attributeShareRecipient,
+  recordAccountActivation,
+} from "../lib/peShareAttribution";
+import { computeShareFunnelReadout } from "../lib/gtmShareFunnelReadout";
 
 const CONSENT_BODY = z.object({
   installId: z.string().min(8).max(128),
@@ -675,5 +683,153 @@ brokerageGtmRouter.post(
       pipedriveConfigured: crm.pipedriveConfigured,
       pipedriveMode: crm.pipedrive?.mode ?? null,
     });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// P-100 — share attribution, account activation, and the share-funnel readout
+//
+// WHY THESE ARE MOUNTED ON THE GTM ROUTER AND NOT ON propertyExplorer.ts.
+// They are measurement, which is what this router is for; and at the time
+// they were written another lane held `routes/propertyExplorer.ts`, so
+// putting them there would have meant two lanes editing one file. The
+// placement is deliberate, and this note exists so a successor can tell a
+// deliberate exclusion from an oversight.
+//
+// All three are SERVICE-TOKEN ONLY. The browser never reaches them; the
+// property-explorer BFF does, and the BFF is what resolves the caller's
+// identity from its session cookie. That is the same trust model the share
+// mint route already uses to resolve a grantor.
+// ---------------------------------------------------------------------------
+
+/**
+ * P-100 item 3 — attribute a recipient account to the sharer behind a grant.
+ *
+ * POST /api/brokerage/v1/gtm/share-attribution
+ *   { recipientUserId, grantId, surface? }
+ *
+ * `recipientUserId` is a PATH parameter of trust, not a claim: the BFF read
+ * it from the PE session cookie it verified, exactly as the mint route reads
+ * the grantor. What the route refuses is a body that names the SHARER — see
+ * `peShareAttributionValidate.ts`. The sharer is resolved from the grant row
+ * and from nowhere else.
+ */
+brokerageGtmRouter.post(
+  "/share-attribution",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    // The recipient id is pulled out BEFORE the client-assertion check so the
+    // check can refuse `recipientUserId` in the payload proper. The BFF sends
+    // it under a distinct key that only a service caller can set.
+    const recipientUserId =
+      typeof body.sessionRecipientUserId === "string"
+        ? body.sessionRecipientUserId.trim()
+        : "";
+    if (!recipientUserId || recipientUserId.length > 128) {
+      res.status(400).json({ error: "invalid_recipient" });
+      return;
+    }
+
+    const rest = { ...body };
+    delete rest.sessionRecipientUserId;
+
+    const parsed = parseShareAttribution(rest);
+    if (!parsed.ok) {
+      res.status(400).json({
+        error: parsed.refusal.error,
+        ...("key" in parsed.refusal ? { key: parsed.refusal.key } : {}),
+        message:
+          parsed.refusal.error === "client_asserted_identity"
+            ? "Attribution is resolved from the grant row. A body that names a sharer is refused, never ignored."
+            : undefined,
+      });
+      return;
+    }
+
+    const result = await attributeShareRecipient({
+      grantId: parsed.value.grantId,
+      recipientUserId,
+      surface: parsed.value.surface,
+    });
+
+    if (!result.ok) {
+      res.status(result.refusal === "grant_not_found" ? 404 : 409).json({
+        error: result.refusal,
+      });
+      return;
+    }
+
+    res.status(result.firstTouch ? 201 : 200).json({
+      ok: true,
+      grantId: result.grantId,
+      grantorUserId: result.grantorUserId,
+      attributedAt: result.attributedAt,
+      firstTouch: result.firstTouch,
+    });
+  },
+);
+
+/**
+ * P-100 item 4 — record that an account reached a milestone for the first time.
+ *
+ * POST /api/brokerage/v1/gtm/account-activation
+ *   { sessionOwnerUserId, milestone, surface? }
+ *
+ * A re-fire is not an error: it returns 200 with `firstTime: false` and the
+ * ORIGINAL `firstAt`. Once-per-account is held by the composite primary key,
+ * so a second row cannot be written even under a race.
+ */
+brokerageGtmRouter.post(
+  "/account-activation",
+  requireServiceToken,
+  async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const ownerUserId =
+      typeof body.sessionOwnerUserId === "string"
+        ? body.sessionOwnerUserId.trim()
+        : "";
+    if (!ownerUserId || ownerUserId.length > 128) {
+      res.status(400).json({ error: "invalid_owner" });
+      return;
+    }
+
+    const parsed = parseAccountActivation(body);
+    if (!parsed.ok) {
+      res.status(400).json({
+        error: parsed.refusal.error,
+        allowed: parsed.refusal.allowed,
+      });
+      return;
+    }
+
+    const recorded = await recordAccountActivation({
+      ownerUserId,
+      milestone: parsed.value.milestone,
+      surface: parsed.value.surface,
+    });
+
+    res.status(recorded.firstTime ? 201 : 200).json({ ok: true, ...recorded });
+  },
+);
+
+/**
+ * P-100 item 6 — the readout that can go red.
+ *
+ * GET /api/brokerage/v1/gtm/share-funnel?days=7
+ *
+ * Every number comes back as `{state:'measured', value}` or
+ * `{state:'unmeasured', basis}`. A quiet week returns measured zeros; an
+ * unwired rail returns unmeasured and says what is missing. Affiliate is
+ * reported beside share and is unmeasured today, with the reason in the
+ * basis rather than in a comment nobody reads.
+ */
+brokerageGtmRouter.get(
+  "/share-funnel",
+  requireBrokerageAuthOrServiceToken,
+  async (req: Request, res: Response) => {
+    const windowDays = parseDigestWindowDays(req);
+    res.json(await computeShareFunnelReadout(windowDays));
   },
 );

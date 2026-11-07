@@ -191,6 +191,564 @@ export interface AddressLandUseEntry {
 }
 
 /**
+ * CAD roll keyed by normalized situs address at the DECLARED vintage — the
+ * lookup `resolveAddressLandUse` consumes. DISTINCT ON collapses address
+ * collisions within that year only (deterministic prop_id tie-break). The
+ * owner is used ONLY for the per-match gate and never enters a payload.
+ * READ-ONLY.
+ */
+export async function fetchCountyLandUseByAddress(
+  pool: QueryablePool,
+  fips: string,
+): Promise<Map<string, AddressLandUseEntry>> {
+  const out = new Map<string, AddressLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return out;
+  if (!(await tableExists(pool, "cad_property"))) return out;
+  const r = await pool.query<{
+    naddr: string;
+    property_use_code: string;
+    source_vintage: string;
+    owner_name: string | null;
+  }>(
+    `SELECT DISTINCT ON (upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')))
+            upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')) AS naddr,
+            property_use_code, source_vintage, owner_name
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL
+        AND situs_address IS NOT NULL
+        AND situs_address <> ''
+      ORDER BY upper(regexp_replace(situs_address, '[^A-Za-z0-9]', '', 'g')),
+               prop_id`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    if (!row.naddr) continue;
+    out.set(row.naddr, {
+      code: row.property_use_code,
+      vintage: row.source_vintage,
+      owner: row.owner_name,
+    });
+  }
+  return out;
+}
+
+/**
+ * A CAD roll land-use entry on the normalized prop_id join key. The field
+ * names are the ones the old txgio-keyed bake built its map with, so both
+ * bakes read one shape.
+ */
+export interface PropIdLandUseEntry {
+  landUseCode: string;
+  landUseVintage: string;
+}
+
+/**
+ * The county CAD roll on the prop_id key, PLUS what the read actually did.
+ *
+ * `consulted` is false when the county declares no CAD vintage or
+ * `cad_property` is not present in this database. Absent, zero and unmeasured
+ * are three different states: an empty map is NOT evidence that a parcel has
+ * no land use, and a caller that collapses the two would turn "we could not
+ * look" into "we looked and it is not there". `declaredTaxYear` is the
+ * vintage the read was pinned to, never a max(tax_year) fallback.
+ */
+export interface CountyLandUseRoll {
+  byPropId: Map<string, PropIdLandUseEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+/**
+ * CAD roll keyed by prop_id at the DECLARED vintage. The SAME query the old
+ * Tier-1 bake ran for its land-use join, lifted here so the conformant bake
+ * reads the identical upstream through one function. READ-ONLY.
+ *
+ * This is a CAD-to-CAD join (cad_property.prop_id to the CAD parcel id).
+ * Seed does NOT apply. Seed risk was TxGIO-to-CAD (cross-namespace). One
+ * namespace, both sides CAD. 48209 and 48491 are clear on this join. Do not
+ * re-impose LANDUSE_JOIN_DISABLED_FIPS_SEED here. The join key is prop_id,
+ * never seed.
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`
+ * with an empty map (honest), never a max-year fallback.
+ */
+export async function fetchCountyLandUseRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyLandUseRoll> {
+  const byPropId = new Map<string, PropIdLandUseEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    property_use_code: string;
+    source_vintage: string;
+  }>(
+    `SELECT prop_id, property_use_code, source_vintage
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND property_use_code IS NOT NULL`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      landUseCode: row.property_use_code,
+      landUseVintage: row.source_vintage,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
+ * Full `cad_property` row at the DECLARED vintage, keyed by CAD prop_id.
+ * CAD-to-CAD. Seed does NOT apply. Used for dollar / living / year / legal
+ * / exemption fields. NEVER a cad-parcel-roll atom. ALL parcels at the
+ * declared year (not only those with a property_use_code).
+ *
+ * Undeclared counties and a missing `cad_property` return `consulted: false`.
+ */
+export interface PropIdCadPropertyEntry {
+  propId: string;
+  taxYear: number;
+  sourceVintage: string;
+  /**
+   * The DECLARED-vintage roll's own situs address (P-124 CTX-B6, 2026-09-10).
+   *
+   * This column was already sitting in the row this query loads and was not
+   * selected, which is the whole mechanism behind CTX-B6: the bake took its
+   * dollars from this declared-vintage row and its situs from the atom
+   * CLAIM, so one Travis payload served marketValue at vintage 2026 and
+   * situsAddress from the 2025 StratMap drop. 139,256 Travis parcels had a
+   * real street sitting here the whole time. Adding the column costs no
+   * extra query -- the row is already loaded and already keyed by prop_id.
+   */
+  situsAddress: string | null;
+  /**
+   * The declared-vintage roll's own situs city, ZIP and land acreage
+   * (P-124 CTX-B7, 2026-09-10).
+   *
+   * The same mechanism as `situsAddress` one field up, found by the same
+   * card and deliberately left for this one. `baseFacts.situsCity`,
+   * `baseFacts.situsZip` and the `acreage` claim fallback are all read off
+   * the atom CLAIM while every dollar facet beside them comes from THIS row,
+   * so one payload reports two vintages across five leaves rather than one.
+   * These three columns are in the table (`information_schema.columns`,
+   * staging, 2026-09-10) and were simply never selected. Adding them costs
+   * no extra query: the row is already loaded and already keyed by prop_id.
+   *
+   * `landAcres` is `numeric` in Postgres and arrives as a string through
+   * node-postgres; `numericOrNull` is what makes it a number here, and no
+   * consumer may re-parse it.
+   */
+  situsCity: string | null;
+  situsZip: string | null;
+  landAcres: number | null;
+  /**
+   * The county's OTHER two published identifiers for this account
+   * (P-124 CTX-HAYS-REBIND, 2026-09-10).
+   *
+   * The same pattern CTX-B6 and CTX-B7 each used one field at a time: the row
+   * is already loaded and already keyed by prop_id, so these cost no extra
+   * query and no second pass. `propertyNumber` is the county's Geographic ID
+   * and is the crosswalk join key to `txgio_parcel.geo_id`; `quickRefId` is
+   * the CAD account number and is the SECOND, independently published
+   * identifier that corroborates the bind against `txgio_parcel.prop_id`.
+   *
+   * Both are null for every county whose export does not publish them and for
+   * every row ingested before the parser read them. A null is an honest "not
+   * published / not acquired" and can never produce a bind.
+   */
+  propertyNumber: string | null;
+  quickRefId: string | null;
+  /**
+   * P-178 (2026-09-13): the row's own `roll_membership`/`declared_source_file`.
+   * Same "already loaded, costs no extra query" pattern as every field above.
+   * `null` (the common case) means no disposition -- this row IS present on
+   * its own declared drop. cadRollValue.ts's cadPropertyFactsFromRow is the
+   * one place that reads rollMembership to refuse serving a marked row's
+   * facts as present; this entry only carries the raw value through.
+   */
+  rollMembership: string | null;
+  declaredSourceFile: string | null;
+  marketValue: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+  livingAreaSqft: number | null;
+  yearBuilt: number | null;
+  legalDescription: string | null;
+  exemptionCodes: string[] | null;
+}
+
+export interface CountyCadPropertyRoll {
+  byPropId: Map<string, PropIdCadPropertyEntry>;
+  declaredTaxYear: number | null;
+  consulted: boolean;
+}
+
+/**
+ * P-351 (2026-09-18). THE PRIOR DECLARED VINTAGE'S PUBLISHED ACCOUNT-NUMBER
+ * REGISTER, read for ONE purpose: NAMING the CAD account a node's served key
+ * belongs to when the DECLARED vintage no longer carries that account.
+ *
+ * WHY IT IS NEEDED AT ALL. On a two-keyspace county a node's served key is the
+ * county's published account number (`joinNormalize.ts`: Hays' `prop_id` values
+ * ARE the QuickRefID numbers with the R stripped at the source), and the roll is
+ * keyed by the CAD's own PropertyID. When an account leaves the roll -- split,
+ * merged, renumbered or removed -- the DECLARED roll cannot name it: there is no
+ * row left to read a prop_id off. Without a prior vintage the arm can never
+ * distinguish "the account is gone" from "I cannot name the account", and the
+ * retirement predicate would be silently weakened for exactly these counties.
+ *
+ * WHAT IT MAY BE USED FOR, and what it may NOT. Only the IDENTITY pair comes
+ * back -- the account's own prop_id and its published `property_number`, the
+ * latter used solely as a corroborator against the node's own `geo_id`. No
+ * dollar, area, year, legal or exemption column is selected, so this read
+ * STRUCTURALLY cannot serve a value: a value on the prior vintage is exactly
+ * what the P-178 vintage rule forbids. The declared roll remains the only
+ * presence test and the only source of facts.
+ *
+ * A county that publishes no account numbers at all (Williamson 48491 carries
+ * ZERO non-blank `quick_ref_id` on either vintage, measured 2026-09-18) gets an
+ * empty map and its caller skips the read rather than issuing it.
+ */
+export interface PriorVintageQuickRefRegister {
+  byQuickRefId: Map<string, { propId: string; propertyNumber: string | null }>;
+  taxYear: number | null;
+}
+
+export async function fetchPriorVintageQuickRefRegister(
+  pool: QueryablePool,
+  fips: string,
+): Promise<PriorVintageQuickRefRegister> {
+  const out = new Map<string, { propId: string; propertyNumber: string | null }>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byQuickRefId: out, taxYear: null };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byQuickRefId: out, taxYear: null };
+  }
+  const priorYear = await pool.query<{ tax_year: number | null }>(
+    `SELECT max(tax_year) AS tax_year
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year < $2`,
+    [declared.countyFips, declared.taxYear],
+  );
+  const prior = priorYear.rows[0]?.tax_year ?? null;
+  if (prior == null) return { byQuickRefId: out, taxYear: null };
+  const r = await pool.query<{
+    prop_id: string;
+    quick_ref_id: string | null;
+    property_number: string | null;
+  }>(
+    `SELECT prop_id, quick_ref_id, property_number
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2
+        AND quick_ref_id IS NOT NULL
+        AND btrim(quick_ref_id) <> ''`,
+    [declared.countyFips, prior],
+  );
+  for (const row of r.rows) {
+    const key = row.quick_ref_id?.trim().toUpperCase() ?? "";
+    if (key === "" || out.has(key)) continue;
+    out.set(key, {
+      propId: row.prop_id,
+      propertyNumber:
+        typeof row.property_number === "string" && row.property_number.trim()
+          ? row.property_number.trim()
+          : null,
+    });
+  }
+  return { byQuickRefId: out, taxYear: prior };
+}
+
+/**
+ * P-351 (2026-09-18). THE COUNTY'S PUBLISHED NODE-KEY -> ACCOUNT-KEY PAIR, read
+ * from the county's own published extracts as a pair and never either side
+ * alone.
+ *
+ * WHAT MAKES THIS DIFFERENT FROM EVERY OTHER CROSSWALK IN THIS FILE. The bind
+ * above (`crosswalkBindCorroborated`) is a GEOGRAPHIC identity test and is the
+ * right tool for one-keyspace counties: it reconciles two published identifiers
+ * that both name the same parcel, and it can therefore be contradicted by the
+ * node's own identifiers. Williamson's pair is not geographic at all. Its
+ * served node key is the R-account number and its CAD account is the numeric
+ * PropertyID, and the ONLY thing that relates them is that the county's own
+ * published extract puts them in the same row. There is nothing to corroborate
+ * and nothing to contradict: the pair IS the crosswalk, published by the
+ * county, and reading one side without the other is exactly the keyspace
+ * mismatch this row exists to remove.
+ *
+ * RETURNED AS EXTRACTS, not as a finished map, because aggregating them is a
+ * decision with refusals in it and that decision belongs in
+ * `retirementAccountResolution.ts` beside the other paths -- one place decides
+ * what an account is, and it decides it once.
+ */
+export interface PublishedAccountPairExtract {
+  /** The served node key (e.g. Williamson's R-account number). */
+  propId: string;
+  /** The CAD account key the same published row pairs with it. */
+  accountPropId: string;
+  /** Which published extract said so, for the close artifact's attribution. */
+  source: string;
+}
+
+export interface PublishedAccountPairRead {
+  extracts: PublishedAccountPairExtract[];
+  /** Extract table names that carried a usable pair; for the per-writer counts. */
+  sourcesPresent: string[];
+  /** Extract table names this store does not have at all, named not omitted. */
+  sourcesAbsent: string[];
+}
+
+/** The extracts whose rows ARE a published node-key/account-key pair. */
+const PUBLISHED_ACCOUNT_PAIR_SOURCES: ReadonlyArray<{
+  table: string;
+  propIdColumn: string;
+  accountColumn: string;
+}> = [
+  { table: "tx_wcad_owner", propIdColumn: "prop_id", accountColumn: "wcad_property_id" },
+  { table: "tx_wcad_ag_valuation", propIdColumn: "prop_id", accountColumn: "wcad_property_id" },
+];
+
+/** Keys per statement: keeps a 282k-key county inside sane parameter bounds. */
+const PAIR_READ_CHUNK = 25_000;
+
+/**
+ * Reads the published pair for EXACTLY the node keys the bake is holding, not
+ * the whole extract. The filter is `prop_id = ANY($1)` against the county's own
+ * published node key, so a chunk whose keys the extract does not name returns
+ * nothing rather than forcing a scan -- and the returned rows still carry the
+ * raw `prop_id`, which is what makes an unpaired key OBSERVABLE downstream
+ * instead of silently dropped at the read.
+ */
+export async function fetchPublishedAccountPairExtracts(
+  pool: QueryablePool,
+  nodeKeys: readonly string[],
+): Promise<PublishedAccountPairRead> {
+  const extracts: PublishedAccountPairExtract[] = [];
+  const sourcesPresent: string[] = [];
+  const sourcesAbsent: string[] = [];
+  const keys = nodeKeys.map((k) => k.trim()).filter((k) => k !== "");
+  if (keys.length === 0) return { extracts, sourcesPresent, sourcesAbsent };
+
+  for (const src of PUBLISHED_ACCOUNT_PAIR_SOURCES) {
+    if (!(await tableExists(pool, src.table))) {
+      sourcesAbsent.push(src.table);
+      continue;
+    }
+    let read = 0;
+    for (let i = 0; i < keys.length; i += PAIR_READ_CHUNK) {
+      const chunk = keys.slice(i, i + PAIR_READ_CHUNK);
+      const r = await pool.query<{ prop_id: string; account: string | null }>(
+        `SELECT ${src.propIdColumn} AS prop_id,
+                ${src.accountColumn} AS account
+           FROM ${src.table}
+          WHERE ${src.propIdColumn} = ANY($1::text[])
+            AND ${src.accountColumn} IS NOT NULL
+            AND btrim(${src.accountColumn}) <> ''`,
+        [chunk],
+      );
+      for (const row of r.rows) {
+        const propId = row.prop_id?.trim() ?? "";
+        const accountPropId = row.account?.trim() ?? "";
+        if (propId === "" || accountPropId === "") continue;
+        extracts.push({ propId, accountPropId, source: src.table });
+        read += 1;
+      }
+    }
+    if (read > 0) sourcesPresent.push(src.table);
+  }
+  return { extracts, sourcesPresent, sourcesAbsent };
+}
+
+/**
+ * P-370 (2026-09-19). THE SAME PAIR, READ BY THE ACCOUNT.
+ *
+ * The read above answers "what account does this parcel-index prop_id name".
+ * Writer (b)'s membership test needs the mirror: "does any parcel-index prop_id
+ * this county's extracts publish name THIS account key". Same two tables, same
+ * three fail-closed rules (kept by handing the rows to
+ * `buildPublishedNodeKeyByAccountKey`, which delegates to the one builder), same
+ * chunked `= ANY($1)` shape so a 319,480-key county stays inside sane parameter
+ * bounds.
+ *
+ * NO COUNTY COLUMN, SO THE CALLER SCOPES IT. These extracts carry no
+ * `county_fips`; a numeric account in one county can carry the same number as a
+ * numeric account in another. The row is returned as the extract published it
+ * and the CALLER is what decides whether the named prop_id is a parcel THIS
+ * county publishes -- `isAccountKeyedNodeId`'s second arm tests the named key
+ * against the caller's own parcel-table index, which is the only scoping that
+ * cannot be forgotten here.
+ */
+export async function fetchPublishedAccountPairExtractsByAccount(
+  pool: QueryablePool,
+  accountKeys: readonly string[],
+): Promise<{
+  rows: Array<{ accountKey: string; nodeKey: string; source: string }>;
+  sourcesPresent: string[];
+  sourcesAbsent: string[];
+}> {
+  const rows: Array<{ accountKey: string; nodeKey: string; source: string }> = [];
+  const sourcesPresent: string[] = [];
+  const sourcesAbsent: string[] = [];
+  const keys = accountKeys.map((k) => k.trim()).filter((k) => k !== "");
+  if (keys.length === 0) return { rows, sourcesPresent, sourcesAbsent };
+
+  for (const src of PUBLISHED_ACCOUNT_PAIR_SOURCES) {
+    if (!(await tableExists(pool, src.table))) {
+      sourcesAbsent.push(src.table);
+      continue;
+    }
+    let read = 0;
+    for (let i = 0; i < keys.length; i += PAIR_READ_CHUNK) {
+      const chunk = keys.slice(i, i + PAIR_READ_CHUNK);
+      const r = await pool.query<{ prop_id: string | null; account: string | null }>(
+        `SELECT ${src.propIdColumn} AS prop_id,
+                ${src.accountColumn} AS account
+           FROM ${src.table}
+          WHERE ${src.accountColumn} = ANY($1::text[])
+            AND ${src.propIdColumn} IS NOT NULL
+            AND btrim(${src.propIdColumn}) <> ''`,
+        [chunk],
+      );
+      for (const row of r.rows) {
+        const accountKey = row.account?.trim() ?? "";
+        const nodeKey = row.prop_id?.trim() ?? "";
+        if (accountKey === "" || nodeKey === "") continue;
+        rows.push({ accountKey, nodeKey, source: src.table });
+        read += 1;
+      }
+    }
+    if (read > 0) sourcesPresent.push(src.table);
+  }
+  return { rows, sourcesPresent, sourcesAbsent };
+}
+
+function numericOrNull(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof v === "bigint") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+export async function fetchCountyCadPropertyRoll(
+  pool: QueryablePool,
+  fips: string,
+): Promise<CountyCadPropertyRoll> {
+  const byPropId = new Map<string, PropIdCadPropertyEntry>();
+  const declared = tryResolveDeclaredCadVintage(fips);
+  if (!declared) return { byPropId, declaredTaxYear: null, consulted: false };
+  if (!(await tableExists(pool, "cad_property"))) {
+    return { byPropId, declaredTaxYear: declared.taxYear, consulted: false };
+  }
+  const r = await pool.query<{
+    prop_id: string;
+    tax_year: number;
+    source_vintage: string;
+    market_value: unknown;
+    assessed_value: unknown;
+    land_value: unknown;
+    improvement_value: unknown;
+    living_area_sqft: unknown;
+    year_built: unknown;
+    legal_description: string | null;
+    exemption_codes: string[] | null;
+    situs_address: string | null;
+    situs_city: string | null;
+    situs_zip: string | null;
+    land_acres: unknown;
+    property_number: string | null;
+    quick_ref_id: string | null;
+    roll_membership: string | null;
+    declared_source_file: string | null;
+  }>(
+    `SELECT prop_id, tax_year, source_vintage,
+            market_value, assessed_value, land_value, improvement_value,
+            living_area_sqft, year_built, legal_description, exemption_codes,
+            situs_address, situs_city, situs_zip, land_acres,
+            property_number, quick_ref_id, roll_membership, declared_source_file
+       FROM cad_property
+      WHERE county_fips = $1
+        AND tax_year = $2`,
+    [declared.countyFips, declared.taxYear],
+  );
+  for (const row of r.rows) {
+    byPropId.set(row.prop_id, {
+      propId: row.prop_id,
+      taxYear: row.tax_year,
+      sourceVintage: row.source_vintage,
+      marketValue: numericOrNull(row.market_value),
+      assessedValue: numericOrNull(row.assessed_value),
+      landValue: numericOrNull(row.land_value),
+      improvementValue: numericOrNull(row.improvement_value),
+      livingAreaSqft: numericOrNull(row.living_area_sqft),
+      yearBuilt: numericOrNull(row.year_built),
+      legalDescription:
+        typeof row.legal_description === "string" && row.legal_description.trim()
+          ? row.legal_description.trim()
+          : null,
+      exemptionCodes: Array.isArray(row.exemption_codes)
+        ? row.exemption_codes.filter(
+            (c): c is string => typeof c === "string" && c.trim() !== "",
+          )
+        : null,
+      situsAddress:
+        typeof row.situs_address === "string" && row.situs_address.trim()
+          ? row.situs_address.trim()
+          : null,
+      // CTX-B7. Trimmed-or-null, the same rule as situsAddress above: a
+      // whitespace-only cell in the roll is NOT a value, and admitting one
+      // would let an empty roll cell supersede a real claim.
+      situsCity:
+        typeof row.situs_city === "string" && row.situs_city.trim()
+          ? row.situs_city.trim()
+          : null,
+      situsZip:
+        typeof row.situs_zip === "string" && row.situs_zip.trim()
+          ? row.situs_zip.trim()
+          : null,
+      landAcres: numericOrNull(row.land_acres),
+      // CTX-HAYS-REBIND. Trimmed-or-null, the same rule the situs cells above
+      // use: a whitespace-only identifier is NOT an identifier, and admitting
+      // one would let a blank cell become a join key that matches nothing and
+      // reads as a key that was tried.
+      propertyNumber:
+        typeof row.property_number === "string" && row.property_number.trim()
+          ? row.property_number.trim()
+          : null,
+      quickRefId:
+        typeof row.quick_ref_id === "string" && row.quick_ref_id.trim()
+          ? row.quick_ref_id.trim()
+          : null,
+      // P-178. No trim-to-null: roll_membership is written by the marking
+      // step as the exact literal ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP
+      // string, never free text, so it is either exactly that value or it is
+      // absent -- a whitespace variant is not a real disposition this repo's
+      // writer would ever produce.
+      rollMembership: row.roll_membership,
+      declaredSourceFile: row.declared_source_file,
+    });
+  }
+  return { byPropId, declaredTaxYear: declared.taxYear, consulted: true };
+}
+
+/**
  * Resolve a situs-address-matched land-use through the per-match owner gate.
  *
  * Returns the CAD entry ONLY when an address match exists AND the TxGIO owner
@@ -646,6 +1204,25 @@ export async function gateCountyLandUseJoin(
 }
 
 /**
+ * Ledger facet keys whose `integrity_verdict='block'` gates the land-use bake.
+ *
+ * The coverage scorer upserts the CAD-join measurement under
+ * `landuse-cad-join` (`LANDUSE_JOIN_FACET_KEY`). The retired key `land-use`
+ * still has 19 production rows until operator-authorised retirement SQL
+ * is applied. Reading BOTH is the transition that lets a deploy and the
+ * SQL apply land in either order without starving the bake of ledger
+ * blocks. Drop `land-use` from this list only after that SQL has been
+ * applied and verified n=0.
+ *
+ * `evaluateJoinIntegrity({ facet: "land-use" })` is a GATE LABEL on the
+ * integrity report, not a ledger write key. Do not collapse the two.
+ */
+export const LANDUSE_JOIN_LEDGER_BLOCK_FACETS: readonly string[] = [
+  "landuse-cad-join",
+  "land-use",
+];
+
+/**
  * Load the set of county FIPS the LEDGER records as land-use `block` — the
  * gate's computed fabrication verdicts, the authoritative (not hand-edited)
  * block set the bakes gate on.
@@ -661,15 +1238,17 @@ export async function gateCountyLandUseJoin(
  */
 export async function loadLedgerBlockedFips(
   pool: QueryablePool,
-  facet = "land-use",
+  facetOrFacets: string | readonly string[] = LANDUSE_JOIN_LEDGER_BLOCK_FACETS,
 ): Promise<Set<string>> {
+  const facets =
+    typeof facetOrFacets === "string" ? [facetOrFacets] : [...facetOrFacets];
   const out = new Set<string>();
   if (!(await tableExists(pool, "county_facet_coverage"))) return out;
   const r = await pool.query<{ county_fips: string }>(
     `SELECT county_fips
        FROM county_facet_coverage
-      WHERE facet = $1 AND integrity_verdict = 'block'`,
-    [facet],
+      WHERE facet = ANY($1::text[]) AND integrity_verdict = 'block'`,
+    [facets],
   );
   for (const row of r.rows) out.add(row.county_fips);
   return out;

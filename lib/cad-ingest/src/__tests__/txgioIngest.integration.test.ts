@@ -14,6 +14,13 @@
  *   3. Tile-key composition — a feature lands once per grid cell its
  *      bbox intersects, with the exact keys the reader computes.
  *   4. County isolation — replacing one county never touches another.
+ *   5. TXGIO-GEOM-FIX — `geom` (a PostGIS mirror of `geometry`, added at
+ *      insert AND on ON CONFLICT DO UPDATE) is never left NULL after a
+ *      write, including across `replaceCountyParcels`'s own delete-then-
+ *      insert cycle. PARCEL-TXGIO-REACQ found this column live in
+ *      production with zero code ever writing it — `replaceCountyParcels`
+ *      silently wiped it to NULL on every apply, not only for counties
+ *      that already started that way.
  *
  * Runs against a real Postgres via `withTestSchema` (a fresh
  * `test_<ts>_<rand>` schema, dropped after), the same harness the
@@ -273,6 +280,78 @@ describe.skipIf(!hasDb)("txgio_parcel write path", () => {
       await upsertTxgioParcels(handle, [haysRecord(0)], OPTS);
       expect(await countCountyParcels(handle, "48209")).toBe(1);
       expect(await countCountyParcels(handle, "48269")).toBe(0);
+    });
+  });
+
+  /**
+   * TXGIO-GEOM-FIX geom-state readback: `geom IS NULL` alone would not
+   * distinguish "never derived" from "derived but garbage", so this also
+   * reads validity and geometry type -- the same checks the reacq close's
+   * own manual backfill verification used live (ST_IsValid, non-null).
+   */
+  async function geomState(
+    db: { execute: (q: unknown) => Promise<{ rows: unknown[] }> },
+    countyFips: string,
+    featureIndex: number,
+  ): Promise<{ isNull: boolean; isValid: boolean | null; geomType: string | null }> {
+    const result = await db.execute(sql`
+      SELECT geom IS NULL AS is_null, ST_IsValid(geom) AS is_valid, ST_GeometryType(geom) AS geom_type
+        FROM ${txgioParcel}
+       WHERE county_fips = ${countyFips} AND feature_index = ${featureIndex}
+    `);
+    const row = (result.rows as Array<{ is_null: boolean; is_valid: boolean | null; geom_type: string | null }>)[0];
+    return { isNull: row.is_null, isValid: row.is_valid, geomType: row.geom_type };
+  }
+
+  it("TXGIO-GEOM-FIX: upsertTxgioParcels derives a valid geom on a fresh insert", async () => {
+    await withTestSchema(async ({ db }) => {
+      const handle = db as unknown as TxgioTransactionalDb;
+      await upsertTxgioParcels(handle, [haysRecord(0)], OPTS);
+      const state = await geomState(db, "48209", 0);
+      expect(state.isNull).toBe(false);
+      expect(state.isValid).toBe(true);
+      expect(state.geomType).toBe("ST_Polygon");
+    });
+  });
+
+  it("TXGIO-GEOM-FIX: geom is refreshed (never left stale or NULL) on ON CONFLICT DO UPDATE", async () => {
+    await withTestSchema(async ({ db }) => {
+      const handle = db as unknown as TxgioTransactionalDb;
+      await upsertTxgioParcels(handle, [haysRecord(0)], OPTS);
+      const before = await geomState(db, "48209", 0);
+      expect(before.isNull).toBe(false);
+
+      // Re-insert the same key (the ON CONFLICT path, not a delete+insert).
+      const changed = { ...haysRecord(0), ownerName: "NEW OWNER" };
+      await upsertTxgioParcels(handle, [changed], { ...OPTS, sourceVintage: "resumed" });
+      const after = await geomState(db, "48209", 0);
+      expect(after.isNull).toBe(false);
+      expect(after.isValid).toBe(true);
+    });
+  });
+
+  it("TXGIO-GEOM-FIX THE FALSIFIER: an apply over rows with populated geom leaves geom freshly correct across replaceCountyParcels' own delete-then-insert cycle -- pre-fix this read NULL", async () => {
+    await withTestSchema(async ({ db }) => {
+      const handle = db as unknown as TxgioTransactionalDb;
+
+      // First apply: a county already loaded, geom populated (the "rows
+      // with populated geom" precondition the dispatch's falsifier names).
+      await replaceCountyParcels(handle, "48209", [haysRecord(0)], OPTS);
+      const beforeReplace = await geomState(db, "48209", 0);
+      expect(beforeReplace.isNull).toBe(false);
+      expect(beforeReplace.isValid).toBe(true);
+
+      // Second apply: replaceCountyParcels' own DELETE-then-INSERT, the
+      // exact path PARCEL-TXGIO-REACQ found silently nulling geom in
+      // production for every county it touched, not only Caldwell.
+      await replaceCountyParcels(handle, "48209", [haysRecord(0)], {
+        ...OPTS,
+        sourceVintage: "stratmap25-landparcels_48209_hays_202508",
+      });
+      const afterReplace = await geomState(db, "48209", 0);
+      expect(afterReplace.isNull).toBe(false);
+      expect(afterReplace.isValid).toBe(true);
+      expect(afterReplace.geomType).toBe("ST_Polygon");
     });
   });
 });

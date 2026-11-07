@@ -1,0 +1,299 @@
+/**
+ * P-153 Step A extraction (moved out of `routes/brokeragePlaceBuildableEnvelope.ts`
+ * so the get_smart_site draw-block orchestration, `parcelDrawEnvelopeModel.ts`,
+ * can reuse it without dragging that route file's whole Express/DB-touching
+ * import graph — `resolvePlace`, `txgioAddressResolve`, `brokerageTxParcels`,
+ * `txgioParcelStore` all pull in `@workspace/db` at module load, which several
+ * existing `propertyExplorer.ts` unit tests mock with a minimal offline
+ * surface; importing THOSE transitively broke that mock's minimality with no
+ * behavioral upside for this module's own two pure functions).
+ *
+ * `firstParcelRing` and `composeBuildableEnvelopeDerivation` are BOTH pure —
+ * no I/O, no `Response`, no `@workspace/db`. The route file re-exports them
+ * (its `deriveLabelAndRespond` calls `composeBuildableEnvelopeDerivation`
+ * from here — one copy, two callers, same as before the move) so its own
+ * public surface is unchanged; `parcelDrawEnvelopeModel.ts` imports straight
+ * from here instead, for the lighter import graph.
+ */
+
+import type { SetbackTable } from "@workspace/adapters";
+import {
+  deriveBuildableEnvelope,
+  type BuildableEnvelopeResult,
+} from "./derive";
+import { reconcileWithAtomEnvelope, withholdUnverifiedAreaFigure } from "./reconcileAtomEnvelope";
+import type { DistrictMappingResult } from "./districtMapping";
+import type { EdgeLabelingResult } from "./edgeLabeling";
+import type { Ring } from "./geometry";
+// P-372: the four-way class -> status mapping lives in its own dependency-light
+// module (`envelopeWireStatus.ts`, the same extraction reason this file itself
+// exists), so its four arms can be tested without this module's corpus/resolver
+// import graph, and so the `clip-failed` arm can be proven able to fire even
+// though no parcel fixture reaches it any more.
+import {
+  wireStatusForEmptyKind,
+  type BuildableEnvelopeWireStatus,
+} from "./envelopeWireStatus";
+
+// Re-exported so a consumer that already imports this composition (the route
+// file, `parcelDrawEnvelopeModel.ts`) does not need a second import path for
+// the status it reads off the result. The value and its mapping are owned by
+// `envelopeWireStatus.ts`; this is only the type the signatures here use.
+export type { BuildableEnvelopeWireStatus };
+import type { PropertyAtomChainWire } from "./fetchPropertyAtomChain";
+import type { SetbackSourceKind } from "./authoritativeSetbackSource";
+// P-354 (2026-09-18): the declaration's own `kind`, so the sentence below can
+// tell "we could not read a date" from "we read a date that has not arrived" --
+// both must replace the interpolated date, and only the second is a rule that
+// is already adopted.
+import { SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN } from "./setbackCitationVintage";
+import {
+  spineZoningProvenanceNote,
+  type SpineZoningResolution,
+} from "./spineZoningDistrict";
+// Type-only: the SAME envelope module `brokeragePlaceBuildableEnvelope.ts`
+// itself reads `EngineHonesty` from (`wrapEngineEnvelope`, the value export,
+// is not needed here -- only the honesty shape).
+import type { EngineHonesty } from "../../../../../lib/engine-core/src/envelope";
+
+/** Pull the first Polygon outer ring out of a parcel FeatureCollection, plus
+ *  the parcel's zoningCode/situsAddress properties. Null when no polygon.
+ *
+ *  `parcelNodeId` is the canonical tile-matching parcel identity
+ *  (`{county_fips}:{normalizeCadPropId(prop_id)}`). It is NOT re-derived here:
+ *  both parcel emit paths — the live county-GIS provider
+ *  (`brokerageTxParcels.ts`) and the self-hosted TxGIO store
+ *  (`txgioParcelStore.ts`) — already stamp `parcel_node_id` onto each feature's
+ *  properties via the shared `parcelNodeId()` helper (the same helper the
+ *  PMTiles bake uses), so reading it straight off the feature guarantees the
+ *  value byte-matches the tile `promoteId`. Null when the parcel source did not
+ *  stamp one (e.g. the dormant Cotality fallback, or a county parcel with no
+ *  appraisal prop id) — a mismatching id would glow the wrong parcel or
+ *  nothing, so null is the honest answer. */
+export function firstParcelRing(geojson: unknown): {
+  ring: Ring;
+  zoningCode: string | null;
+  situsAddress: string | null;
+  apn: string | null;
+  parcelNodeId: string | null;
+} | null {
+  const fc = geojson as { features?: unknown[] } | null;
+  if (!fc || !Array.isArray(fc.features)) return null;
+  for (const f of fc.features) {
+    const feat = f as {
+      geometry?: { type?: string; coordinates?: unknown };
+      properties?: Record<string, unknown> | null;
+    };
+    const geom = feat?.geometry;
+    if (!geom) continue;
+    let ring: unknown = null;
+    if (geom.type === "Polygon" && Array.isArray(geom.coordinates)) {
+      ring = geom.coordinates[0];
+    } else if (geom.type === "MultiPolygon" && Array.isArray(geom.coordinates)) {
+      const first = geom.coordinates[0];
+      ring = Array.isArray(first) ? first[0] : null;
+    }
+    if (!Array.isArray(ring) || ring.length < 4) continue;
+    const props = feat.properties ?? {};
+    const str = (v: unknown): string | null =>
+      typeof v === "string" && v.trim() ? v : null;
+    return {
+      ring: ring as Ring,
+      zoningCode: str(props.zoningCode),
+      situsAddress: str(props.situsAddress),
+      apn: str(props.apn),
+      parcelNodeId: str(props.parcel_node_id),
+    };
+  }
+  return null;
+}
+
+/**
+ * P-153 Step A extraction: the PURE tail of `deriveLabelAndRespond` (setback
+ * geometry compose + atom reconciliation + honesty envelope), factored out
+ * so a second caller (the get_smart_site draw-block orchestration,
+ * `parcelDrawEnvelopeModel.ts`) can run the EXACT same composition —
+ * `deriveBuildableEnvelope` then `reconcileWithAtomEnvelope` — that this
+ * route's map/export path runs, rather than a re-implementation.
+ * `deriveLabelAndRespond` (in `routes/brokeragePlaceBuildableEnvelope.ts`)
+ * calls this instead of inlining it: one copy, two callers.
+ *
+ * Still pure: no I/O, no `Response`. Callers own resolving `ring`/`table`/
+ * `district`/`labeling`/`atomChain`/`spineZoning` first (network + DB reads)
+ * and own sending (or otherwise using) the result.
+ */
+/** Leading YYYY-MM-DD of a date string, or null when it does not start with one. */
+function isoDay(value: string | null | undefined): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec((value ?? "").trim());
+  return m ? m[1]! : null;
+}
+
+/**
+ * True when the stored setback-rule atom was SUPERSEDED: its front, side or
+ * rear differs from the district row this read resolved AND that row's source
+ * is dated after the atom. A difference alone is not supersession — a verified
+ * atom and the ledger can carry different figures for the same date (P-249's
+ * reconcile fixture), and an undated atom or source proves nothing either way,
+ * so both keep the atom.
+ */
+export function setbackAtomSuperseded(
+  atom: {
+    front?: number;
+    side?: number;
+    rear?: number;
+    sourceVintage?: string | null;
+    extractedAt?: string | null;
+  } | null,
+  district: DistrictMappingResult,
+  resolvedEffectiveDate: string | null,
+): boolean {
+  if (!atom) return false;
+  const row = district.district as { front_ft?: number; side_ft?: number; rear_ft?: number } | null | undefined;
+  if (!row) return false;
+  const atomDay = isoDay(atom.sourceVintage) ?? isoDay(atom.extractedAt);
+  const sourceDay = isoDay(resolvedEffectiveDate);
+  if (!atomDay || !sourceDay || atomDay >= sourceDay) return false;
+  const pairs: Array<[number | undefined, number | undefined]> = [
+    [atom.front, row.front_ft],
+    [atom.side, row.side_ft],
+    [atom.rear, row.rear_ft],
+  ];
+  return pairs.some(
+    ([a, r]) => typeof a === "number" && typeof r === "number" && Number.isFinite(a) && Number.isFinite(r) && a !== r,
+  );
+}
+
+export function composeBuildableEnvelopeDerivation(args: {
+  ring: Ring;
+  table: SetbackTable;
+  district: DistrictMappingResult;
+  labeling: EdgeLabelingResult;
+  atomChain: PropertyAtomChainWire | null;
+  spineZoning: SpineZoningResolution | null;
+  resolvedSourceKind: SetbackSourceKind;
+  resolvedSourceLabel: string;
+  resolvedEffectiveDate: string;
+}): {
+  derived: BuildableEnvelopeResult;
+  wireStatus: BuildableEnvelopeWireStatus;
+  honesty: EngineHonesty;
+  derivePath: string;
+} {
+  const {
+    ring,
+    table,
+    district,
+    labeling,
+    atomChain,
+    spineZoning,
+    resolvedSourceKind,
+    resolvedSourceLabel,
+    resolvedEffectiveDate,
+  } = args;
+
+  const rawDerived = deriveBuildableEnvelope({ ring, table, district, labeling });
+  // P-249 (2026-09-16): reconciliation is gated on the atom's VERIFICATION
+  // state, so the wire's promotion fields travel with the outcome. Absent
+  // fields read as unverified (see isEnvelopeAtomVerified).
+  // QA 2026-09-29, fix register C7: the PDF refuses an envelope atom whose
+  // setbacks the export no longer follows (engine site-model superseded
+  // check), but the card used to quote its area anyway (1301 Water St: 15,547
+  // sq ft built on 25/5/25 beside a 30/10/30/20 table). One rule for both: a
+  // setback-rule atom that disagrees with the setbacks this read resolved
+  // makes its envelope unverified here, so the figure is withheld — but only
+  // when the source the read followed is dated after the atom (CI on #792: a
+  // verified, current atom must still reconcile).
+  const superseded = setbackAtomSuperseded(
+    atomChain?.setbackRule ?? null,
+    district,
+    resolvedEffectiveDate,
+  );
+  const atomPromotion = superseded
+    ? { depthWarmPromotion: null, sourceCitation: null }
+    : {
+        depthWarmPromotion: atomChain?.buildableEnvelope?.depthWarmPromotion ?? null,
+        sourceCitation: atomChain?.buildableEnvelope?.sourceCitation ?? null,
+      };
+  const reconciled = reconcileWithAtomEnvelope(
+    rawDerived,
+    atomChain?.buildableEnvelope?.outcome ?? null,
+    atomPromotion,
+  );
+  const atomReconciled = reconciled !== rawDerived;
+  // P-304 (2026-09-17): the area FIGURE is a separate entitlement from the
+  // polygon. Without a ground-truth verified atom (A-180) the envelope still
+  // draws but the two area properties are withheld — last, so it holds for
+  // every path that produces a figure, including the reconcile branch above,
+  // and covers the free-standing caller of this composition
+  // (`parcelDrawEnvelopeModel.ts`) as well as the route.
+  const derived = withholdUnverifiedAreaFigure(reconciled, atomPromotion);
+
+  const estimate =
+    atomChain?.buildableEnvelope?.readContract?.axes?.assertedConfidence
+      ?.estimate;
+  const confidenceValue =
+    typeof estimate === "number" && Number.isFinite(estimate) ? estimate : 0;
+
+  const derivePath = atomReconciled ? "labelEdges+derive+atom-reconciled" : "labelEdges+derive";
+  // P-270 (OPS-24 X11). `authoritativeSetbackSource` serves the literal string
+  // "unreadable" as the winner's `effectiveDate` when it could not read a date
+  // at source (never a placeholder date — see its own type doc). Interpolated
+  // raw, that produced "effective unreadable" in a coverage string a customer
+  // or the model reads: machine vocabulary standing where a date should be, and
+  // a SECOND phrasing of the one condition this lane's module owns. The
+  // sentence comes from `derived.citationVintage` — the declaration composed
+  // in `derive.ts` off the SAME table the resolver read — so the condition is
+  // named one way in this repo rather than two. A resolved date is untouched.
+  // P-354 (2026-09-18). The declaration is not only for an unreadable date any
+  // more: a citation whose date was READ and has NOT ARRIVED is served by
+  // ruling A-218 (Georgetown, adopted 2026-08-11, effective 2026-11-01) and
+  // must not be interpolated as `effective 2026-11-01` — that would print a
+  // rule as though it already had its force. `derived.citationVintage` carries
+  // both dates in that case, so the sentence comes from the declaration for
+  // either cause and a resolved, in-force date is untouched.
+  const vintageNote = derived.citationVintage?.note;
+  const vintageSupersedesResolvedDate =
+    resolvedEffectiveDate === "unreadable" ||
+    derived.citationVintage?.kind === SETBACK_CITATION_FUTURE_EFFECTIVE_TOKEN;
+  const parityNote = atomReconciled
+    ? "Buildable area reconciled against the property atom chain (map/export parity)."
+    : "Geometry from labelEdges+derive (map/export parity).";
+  const provenanceNote = spineZoning
+    ? spineZoningProvenanceNote(spineZoning)
+    : vintageSupersedesResolvedDate && vintageNote
+      ? `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}). ${vintageNote} ${parityNote}`
+      : `Setbacks from ${resolvedSourceKind} (${resolvedSourceLabel}, effective ${resolvedEffectiveDate}). ${parityNote}`;
+
+  const honesty: EngineHonesty = {
+    confidence: { value: confidenceValue, kind: "asserted" },
+    dataVintage: new Date().toISOString().slice(0, 10),
+    coverage: {
+      degraded: true,
+      reason: derived.approximate
+        ? `${provenanceNote} Geometry approximate — verify with survey + city.`
+        : provenanceNote,
+    },
+    source: {
+      adapter: spineZoning
+        ? `brokerage:buildable-envelope:derive+${spineZoning.source}`
+        : `brokerage:buildable-envelope:derive+${resolvedSourceKind}`,
+      citationIds: derived.citationUrl ? [derived.citationUrl] : [],
+    },
+  };
+
+  // P60b reason split: "no-buildable-area" is a consume-lot MEASUREMENT and
+  // is only claimed when the boolean clip itself returned empty. A geometry
+  // gate decline is a distinct machine-readable status — silent degradation
+  // (a validation failure masquerading as a measurement) is prohibited.
+  //
+  // P-372 adds a THIRD empty class to the split, and the reason a caller reads
+  // names the stage it belongs to: "clip-failed" means no gate ever ran because
+  // the boolean clip could not be executed, so it must not be served as
+  // "geometry-validation-failed" (that would report a verdict on geometry that
+  // has no defect). The class travels from `derive.ts`'s `emptyKind` unchanged;
+  // an absent/unknown class still lands on the validation names, so an
+  // unclassified empty is never silently promoted to a measurement.
+  const wireStatus = wireStatusForEmptyKind(derived.empty, derived.emptyKind);
+
+  return { derived, wireStatus, honesty, derivePath };
+}

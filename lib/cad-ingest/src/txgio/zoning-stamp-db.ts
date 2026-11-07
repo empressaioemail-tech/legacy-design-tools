@@ -16,6 +16,49 @@
  * `zoning_jurisdiction` is the ZONING_LAYERS cityKey of the layer being
  * stamped (PIP membership is authoritative for multi-city counties).
  *
+ * Every parcel lands in exactly ONE of five buckets (P-259, extended by P-259b),
+ * and the five sum to `parcelsRead` — a parcel cannot be silently dropped, and
+ * no bucket can grow by shrinking another:
+ *   parcelsMatched            a resolved BASE district was written
+ *   parcelsPlannedDevelopment a PUD/PDD/PD/PC value, written RAW so A-164's
+ *                             PUD message fires on it
+ *   parcelsUnrecognised       a published value with no base district in this
+ *                             city's vocabulary, written RAW (the router has a
+ *                             named decline path for a code it cannot resolve;
+ *                             NULL would assert "no zoning on record") and
+ *                             listed in `unrecognisedHistogram`
+ *   parcelsUnmatched          no zoning polygon holds the representative point
+ *                             (outside the city, or an un-zoned pocket)
+ *   parcelsSkippedNoAccount   the feature carries NO CAD ACCOUNT (`prop_id`
+ *                             '0', empty or NULL) so it writes NO ROW and is
+ *                             not PIPed at all (P-259b, operator ruling
+ *                             2026-09-17). Counted by reason in
+ *                             `skippedNoAccountByReason`; never folded into
+ *                             `parcelsUnmatched`, which is a different fact.
+ * The split between the last two is the point: "outside the city" and "in a
+ * district this vocabulary does not carry" are different facts, and only the
+ * second is work owed. "This feature has no account to attribute a district to"
+ * is a third fact again.
+ *
+ * BUG 2 (P-259-adjacent, 2026-10-09/10) adds a SIXTH bucket for a layer
+ * configured with `parcelIdField` (Horseshoe Bay): `parcelsNoDistrictOnLayer`
+ * — the parcel's OWN feature was found by id (on the correct county's side,
+ * and geometrically confirmed, see below) and its code there is blank. The
+ * six buckets still sum to `parcelsRead`. `parcelsIdGeometryMismatch` is NOT
+ * a seventh bucket in that sum — it is a sub-count of however many parcels
+ * landed in `parcelsMatched`/`parcelsUnmatched`/etc. via the ordinary point
+ * lookup specifically BECAUSE an id match was found but rejected on
+ * geometry (a cross-county numeric id collision), so it is reported
+ * alongside the six-way sum rather than inside it.
+ *
+ * FEATURES vs ACCOUNTS (P-259b). `parcelsRead` counts FEATURES (`DISTINCT ON
+ * feature_index`), which is the denominator the predecessor lane's bands were
+ * written in and is kept. It is not an account count: in Travis 423,540 of
+ * 828,773 features carry `prop_id '0'`. So the summary reports, separately and
+ * on every run, `accountBearingFeatures` (features read minus skipped),
+ * `accountsRead` (distinct REAL `prop_id` among them) and
+ * `parcelsSkippedNoAccount`. A figure never travels without its denomination.
+ *
  * Write path: progressive flush every ZONING_STAMP_BATCH_SIZE matches so a
  * long county run cannot lose the stamp if the process dies mid-PIP.
  *
@@ -25,9 +68,74 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { txgioParcel } from "@workspace/db/schema";
-import type { GeoJsonGeometry } from "./geo";
-import { stampParcelZoning, type ZoningPolygon } from "./zoning-stamp";
+import { txgioParcel, zoningStampRun } from "@workspace/db/schema";
+import {
+  normalizeDigitId,
+  pointInGeometry,
+  trueInteriorPoint,
+  type GeoJsonGeometry,
+} from "./geo";
+import type { BaseCodeKind } from "./zoning-base-code";
+import {
+  stampParcelZoning,
+  type ParcelIdZoningEntry,
+  type ZoningPolygon,
+} from "./zoning-stamp";
+
+/**
+ * How a stamped (or declared-blank) parcel's district was decided
+ * (Burnet stage 3 §3 Bug 2). `"parcel-id"`: the layer's own feature for
+ * this exact parcel id published a code, AND its geometry was confirmed to
+ * contain the parcel's interior point, so it was used directly.
+ * `"parcel-id-blank"`: same geometry confirmation, but the feature's code
+ * field is blank/null — a declared "no district on the city's own layer"
+ * outcome, never filled in from a neighbour. `"parcel-id-geometry-mismatch"`
+ * (cross-county fix, 2026-10-10): a feature WAS found for this id, but its
+ * geometry does NOT contain the parcel's interior point — e.g. Horseshoe
+ * Bay's layer also carries Llano CAD parcels under a PROP_ID space that
+ * overlaps Burnet's, so an id match alone is not proof of the same physical
+ * parcel. The id is treated as not found and the point lookup decides
+ * instead, same as `"point"`, but the mismatch is still counted separately
+ * so it is visible rather than indistinguishable from "no id existed at
+ * all". `"point"`: no parcel-id index was configured for this layer, or
+ * this parcel's id was not found on it at all, so the point-in-polygon
+ * lookup decided (the ONLY method before Bug 2, and still the only method
+ * for a district-polygon layer like Marble Falls).
+ */
+export type ZoningMatchMethod =
+  | "parcel-id"
+  | "parcel-id-blank"
+  | "parcel-id-geometry-mismatch"
+  | "point";
+
+/** Why a feature was skipped for carrying no CAD account. */
+export type NoAccountReason = "zero" | "empty" | "null";
+
+/**
+ * Classify a `txgio_parcel.prop_id` as a real CAD account or not (P-259b).
+ * Returns the reason it is NOT an account, or null when it is one.
+ *
+ * The operator's ruling (2026-09-17): a feature whose `prop_id` is `'0'`, empty
+ * or null writes no row. `'0'` is the sentinel the StratMap/TxGIO fabric uses
+ * where no CAD account is attached (measured live in Travis: 423,540 of 828,773
+ * features), so a district stamped on it would be attributed to nobody. The
+ * three reasons are reported separately because they are different upstream
+ * facts — a sentinel, a blank string, and a missing field.
+ *
+ * Whitespace is trimmed before the test: `" 0 "` is the sentinel, not an
+ * account. Nothing else is treated as "no account" — a real `prop_id` is only
+ * ever a non-empty string that is not the sentinel.
+ */
+export function noAccountReason(
+  propId: string | null | undefined,
+): NoAccountReason | null {
+  if (propId === null || propId === undefined) return "null";
+  const t = propId.trim();
+  if (t.length === 0) return "empty";
+  if (t === "0") return "zero";
+  return null;
+}
+
 
 /**
  * Injected db handle. Reads use `selectDistinctOn`; the batched write uses
@@ -41,16 +149,149 @@ export type ZoningStampDb = Pick<
 >;
 
 export interface ZoningStampSummary {
-  /** Distinct parcels (feature_index values) read for the county. */
+  /**
+   * Distinct parcels (feature_index values) read for the county — FEATURES, not
+   * accounts (see the module header). This is the denominator every bucket
+   * below is written in, and the five buckets sum to it.
+   */
   parcelsRead: number;
-  /** Parcels whose centroid matched a zoning polygon. */
+  /**
+   * Features read whose `prop_id` is a REAL CAD account
+   * (`parcelsRead - parcelsSkippedNoAccount`). The count of features that could
+   * carry a district at all; the denomination of every bucket except
+   * `parcelsSkippedNoAccount`.
+   */
+  accountBearingFeatures: number;
+  /**
+   * Distinct REAL `prop_id` values among the features read (P-259b). One
+   * feature per account on the StratMap fabric, so this equals
+   * `accountBearingFeatures` unless that ever stops holding — reported
+   * separately precisely so the two cannot be confused, and so a future
+   * multi-feature-per-account county is visible rather than inferred.
+   */
+  accountsRead: number;
+  /** Parcels whose representative point matched a stampable zoning polygon. */
   parcelsMatched: number;
-  /** Parcels left NULL (centroid in no zoning polygon). */
+  /** Parcels left NULL (representative point in no zoning polygon). */
   parcelsUnmatched: number;
+  /**
+   * Burnet stage 3 §3 Bug 2. Parcels whose layer config carries
+   * `parcelIdField` AND whose OWN feature was found by that id on the
+   * layer AND whose code field on that own feature is blank/null — a
+   * DECLARED "no district on the city's own layer" outcome. Disjoint from
+   * `parcelsUnmatched` (that bucket means no feature at all covered the
+   * point; this one means the parcel's OWN feature was found and said
+   * nothing) and disjoint from `parcelsMatched`/`parcelsPlannedDevelopment`/
+   * `parcelsUnrecognised` (this parcel is never stamped from a neighbour).
+   * Always 0 when the layer carries no `parcelIdField` (Marble Falls).
+   */
+  parcelsNoDistrictOnLayer: number;
+  /**
+   * Cross-county fix (2026-10-10). Parcels whose `prop_id` WAS found on the
+   * layer's parcel-id index, but the joined feature's geometry does NOT
+   * contain the parcel's interior point — a numeric id coincidence, not the
+   * same physical parcel (Horseshoe Bay's layer also carries Llano CAD
+   * parcels under a `PROP_ID` space that overlaps Burnet's). NOT its own
+   * bucket in the five/six-way sum: these parcels fall through to the
+   * ordinary point lookup and land in `parcelsMatched` /
+   * `parcelsUnmatched` / etc. exactly as an id-absent parcel would — this
+   * count exists only so the mismatch is visible rather than
+   * indistinguishable from "no id existed on the layer at all". Always 0
+   * when the layer carries no `parcelIdField`.
+   */
+  parcelsIdGeometryMismatch: number;
+  /**
+   * Features read whose `prop_id` is `'0'`, empty or NULL, so they were NOT
+   * PIPed and wrote NO ROW (P-259b, operator ruling 2026-09-17). Listed by
+   * reason in `skippedNoAccountByReason`. Work owed upstream (an account join),
+   * never a district fact — which is why it is not `parcelsUnmatched`.
+   */
+  parcelsSkippedNoAccount: number;
+  /**
+   * The skip above, by reason: `zero` (`prop_id '0'`), `empty` (blank or
+   * whitespace) or `null` (no value). All three keys are always present, zero
+   * included, so the exclusion set is readable without a null check.
+   */
+  skippedNoAccountByReason: Record<NoAccountReason, number>;
+  /**
+   * Parcels whose polygon published a value with no base district in this
+   * city's vocabulary (P-259). The published value is stamped VERBATIM — never
+   * a truncated prefix — and the parcel is counted here rather than in
+   * `parcelsMatched` so a base-district count is never inflated by it.
+   * `unrecognisedHistogram` lists every such value with its parcel count.
+   */
+  parcelsUnrecognised: number;
+  /**
+   * Parcels stamped with a PLANNED-DEVELOPMENT value (PUD/PDD/PD/PC), stamped
+   * RAW so A-164's "your setbacks come from your PUD ordinance" message fires.
+   * Counted apart from `parcelsMatched` so a base-district count is never
+   * inflated by parcels whose setbacks are not in the table's gift.
+   */
+  parcelsPlannedDevelopment: number;
+  /**
+   * Of `parcelsMatched`, the ones whose stamped district came through an
+   * INTERIM qualifier (P-259b) — Austin's `I-<base>` family, e.g. `I-SF-2` or
+   * `I-SF-2-NP` stamped as SF-2. These are the parcels the pre-P-259b reading
+   * left unstamped, so this is exactly the recovered population. A subset of
+   * `parcelsMatched`, never added to it.
+   */
+  parcelsInterim: number;
+  /**
+   * Of `parcelsPlannedDevelopment`, the ones whose value was interim (`I-PUD`).
+   * A subset of `parcelsPlannedDevelopment`, never added to it.
+   */
+  parcelsInterimPlannedDevelopment: number;
+  /**
+   * The base district each interim value resolved to, with counts (P-259b) —
+   * WHICH district `I-*` was read as, not merely that something was interim.
+   */
+  interimBaseHistogram: Record<string, number>;
+  /**
+   * Interim PUBLISHED values stamped, with counts (P-259b) — the finer grain
+   * that `interimBaseHistogram` collapses (`I-SF-2` and `I-SF-2-NP` are one key
+   * there, two here). Live values that stamp nothing on a leg are absent, which
+   * is why the 14-value coverage is asserted by test, not by this histogram.
+   */
+  interimValueHistogram: Record<string, number>;
   /** Distinct district codes stamped, with counts (for the audit log). */
   codeHistogram: Record<string, number>;
-  /** Total txgio_parcel ROWS updated (>= parcelsMatched; per-cell dupes). */
+  /**
+   * Published values that could not be resolved to a base district, with the
+   * number of parcels in each (P-259). Every value is listed, never sampled —
+   * this is the acquisition worklist the row exists to produce.
+   */
+  unrecognisedHistogram: Record<string, number>;
+  /**
+   * Overlay/combining suffixes seen on stamped parcels, with counts (P-259).
+   * Counted for RESOLVED base districts only: those are the values where the
+   * parser can prove which tokens are the base and which are the suffix. A
+   * planned-development or unrecognised value is stamped raw without its tokens
+   * being classified, so counting those as overlays would report the family
+   * inside "UNZ-NP" as an overlay. An interim value IS classified (the qualifier
+   * is stripped by the same rule), so its overlays count normally: "I-SF-2-NP"
+   * contributes SF-2 to `codeHistogram` and NP here, which is the whole point of
+   * reading it as its base.
+   */
+  overlayHistogram: Record<string, number>;
+  /**
+   * Total txgio_parcel ROWS updated (>= parcelsMatched; per-cell dupes).
+   * Every STAMPED parcel counts here — matched, planned-development and
+   * unrecognised alike — since all three write a code.
+   */
   rowsUpdated: number;
+  /**
+   * Only with `clearStale`: distinct features still carrying this cityKey
+   * that this run did not stamp, a sample of them as `prop_id=old code`, and
+   * the rows cleared (0 on a dry run).
+   */
+  staleFeatures?: number;
+  staleSample?: string[];
+  staleRowsCleared?: number;
+  /**
+   * Only when the run writes a sub-area (`writeSubarea`, a layer with `subareaField`): stamped
+   * rows by the sub-area value written to `txgio_parcel.zoning_subarea` ("(blank)" for none).
+   */
+  subareaHistogram?: Record<string, number>;
   /**
    * Scoped runs only (`propIds` supplied): size of the requested prop-id
    * list (post-dedupe). Undefined on an unscoped (whole-county) run.
@@ -76,30 +317,89 @@ export interface ZoningStampSummary {
    */
   noZoningPolygonHit?: string[];
   /**
-   * Scoped runs only: one row per resolved parcel with its PIP outcome —
-   * the per-parcel would-stamp table (dry-run) or applied table (live).
-   * `district` is null when the centroid matched no zoning polygon.
+   * Scoped runs only: requested prop ids that resolved to a parcel row
+   * carrying NO CAD account, so it was skipped and wrote nothing (P-259b).
+   * Every requested id lands in exactly one of `notFoundInParcelStore` (no row
+   * at all), `skippedNoAccountPropIds`, `noZoningPolygonHit`,
+   * `unrecognisedPropIds`, or the stamped remainder of `perParcel` — never in
+   * two, never in none. These ids ARE counted in `matched`, which keeps its
+   * original meaning ("resolved to at least one txgio_parcel row"); the skip is
+   * the separate fact that none of them produced a district.
    */
-  perParcel?: { propId: string; featureIndex: number; district: string | null }[];
+  skippedNoAccountPropIds?: string[];
+  /**
+   * Scoped runs only: requested prop ids whose parcel landed in a polygon
+   * whose published value carries no base district (P-259). A subset of the
+   * resolved parcels, disjoint from `noZoningPolygonHit` — the parcel IS in a
+   * zoning polygon, the vocabulary just does not carry it.
+   */
+  unrecognisedPropIds?: string[];
+  /**
+   * Scoped runs only (Burnet stage 3 §3 Bug 2): requested prop ids whose
+   * OWN feature was found by id on a `parcelIdField` layer but whose code
+   * there is blank/null — the declared "no district on the city's own
+   * layer" outcome. Always empty when the layer carries no `parcelIdField`.
+   */
+  noDistrictOnLayerPropIds?: string[];
+  /**
+   * Scoped runs only: one row per RESOLVED parcel plus one per skipped
+   * no-account feature, with its outcome — the per-parcel would-stamp table
+   * (dry-run) or applied table (live). `district` is null when nothing is
+   * stamped, and `kind` says why: `none` (no zoning polygon), `unrecognised`
+   * (published value has no base in this city's vocabulary), `base`, or
+   * `planned-development` (stamped raw), `skipped-no-account` (no CAD
+   * account, no row written), or `no-district-on-layer` (Bug 2: the
+   * parcel's OWN feature was found by id and its code is blank — never
+   * stamped from a neighbour). `publishedCode` is the value the layer
+   * published for that polygon. `interim` (P-259b) is set on stamped rows
+   * whose published value carried a declared interim qualifier, and is
+   * `undefined` when nothing was stamped (so it is never read as "stamped,
+   * not interim"). `matchMethod` (Bug 2) says HOW a row's outcome was
+   * decided — `parcel-id` / `parcel-id-blank` / `point` — and is
+   * `undefined` for a `skipped-no-account` row (never reached a match
+   * decision) and for every run on a layer with no `parcelIdField`
+   * configured (method is always the point lookup there, same as always).
+   */
+  perParcel?: {
+    propId: string;
+    featureIndex: number;
+    district: string | null;
+    kind: BaseCodeKind | "none" | "skipped-no-account" | "no-district-on-layer";
+    publishedCode?: string | null;
+    interim?: boolean;
+    matchMethod?: ZoningMatchMethod;
+    /** The sub-area written (or that would be written) with the code; only on a `writeSubarea` run. */
+    subarea?: string | null;
+  }[];
 }
 
 interface DistinctParcelRow {
   featureIndex: number;
   geometry: unknown;
-  /** Only selected in scoped mode (propIds supplied); undefined otherwise. */
+  /** Always selected: the PIP is gated on it carrying a real CAD account. */
   propId?: string | null;
 }
 
-/** One matched parcel's stamp, collected during PIP, flushed in batches. */
+/**
+ * One matched parcel's stamp, collected during PIP, flushed in batches.
+ * `interim` is the P-259b disclosure and is ALWAYS a boolean on a stamped row —
+ * `true` when the published value carried a declared interim qualifier, `false`
+ * otherwise (including every layer that configures none). It is written to
+ * `txgio_parcel.zoning_district_interim` alongside the code so the fact is
+ * recoverable from the store, not only from the run log.
+ */
 interface StampPair {
   featureIndex: number;
   code: string;
+  interim: boolean;
+  /** The matched feature's sub-area (migration 0113); written only when the run's `writeSubarea` is set. */
+  subarea?: string | null;
 }
 
 /**
- * Max `(feature_index, code, jurisdiction)` triples per batched UPDATE.
- * Each triple binds 3 params and the whole statement binds 1 shared county
- * param, so a batch of 5000 binds 15001 params — well under pg's ~65535
+ * Max `(feature_index, code, jurisdiction, interim)` tuples per batched UPDATE.
+ * Each tuple binds 4 params and the whole statement binds 1 shared county
+ * param, so a batch of 5000 binds 20001 params — well under pg's ~65535
  * bound-parameter ceiling. Exported for the test that proves the chunk split.
  */
 export const ZONING_STAMP_BATCH_SIZE = 5000;
@@ -119,29 +419,129 @@ export function chunkPairs<T>(items: T[], size: number): T[][] {
  * parameterized `VALUES` list. Returns the number of ROWS updated (sums all
  * per-cell duplicate rows of every feature in the batch). All values are
  * bound params (never interpolated), so the code strings are injection-safe.
+ *
+ * Writes `zoning_district_interim` from the pair's `interim` flag (P-259b): the
+ * published value carried a declared interim qualifier. The column is NOT NULL
+ * on this path for a stamped row — never left NULL, which would mean "nothing
+ * stamped here" and would silently understate the disclosure.
  */
 async function flushBatch(
   db: ZoningStampDb,
   countyFips: string,
   cityKey: string,
   batch: StampPair[],
+  writeSubarea = false,
 ): Promise<number> {
   if (batch.length === 0) return 0;
-  // (feature_index, code, jurisdiction) tuples as bound params.
+  if (writeSubarea) {
+    // Same statement plus zoning_subarea (migration 0113), for a layer with `subareaField` only, so
+    // no other city's stamp names the column. The sub-area comes from the SAME feature as the code.
+    const values = sql.join(
+      batch.map(
+        (p) =>
+          sql`(${p.featureIndex}::integer, ${p.code}::text, ${cityKey}::text, ${p.interim}::boolean, ${p.subarea ?? null}::text)`,
+      ),
+      sql`, `,
+    );
+    const stmt = sql`
+      UPDATE ${txgioParcel} AS t
+      SET zoning_district = v.code,
+          zoning_jurisdiction = v.jurisdiction,
+          zoning_district_interim = v.interim,
+          zoning_subarea = v.subarea
+      FROM (VALUES ${values}) AS v(feature_index, code, jurisdiction, interim, subarea)
+      WHERE t.county_fips = ${countyFips}
+        AND t.feature_index = v.feature_index
+    `;
+    const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+    return res?.rowCount ?? 0;
+  }
+  // (feature_index, code, jurisdiction, interim) tuples as bound params.
   const values = sql.join(
     batch.map(
       (p) =>
-        sql`(${p.featureIndex}::integer, ${p.code}::text, ${cityKey}::text)`,
+        sql`(${p.featureIndex}::integer, ${p.code}::text, ${cityKey}::text, ${p.interim}::boolean)`,
     ),
     sql`, `,
   );
   const stmt = sql`
     UPDATE ${txgioParcel} AS t
     SET zoning_district = v.code,
-        zoning_jurisdiction = v.jurisdiction
-    FROM (VALUES ${values}) AS v(feature_index, code, jurisdiction)
+        zoning_jurisdiction = v.jurisdiction,
+        zoning_district_interim = v.interim
+    FROM (VALUES ${values}) AS v(feature_index, code, jurisdiction, interim)
     WHERE t.county_fips = ${countyFips}
       AND t.feature_index = v.feature_index
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+  return res?.rowCount ?? 0;
+}
+
+/**
+ * Flush one batch of no-district-on-layer feature indexes (migration 0112):
+ * the city's own parcel-id-matched feature carries a blank code, which this
+ * repo treats as a DECLARED fact, never a neighbour's PIP code. Writes ONLY
+ * `zoning_no_district_layer` — `zoning_district` and `zoning_jurisdiction`
+ * are left exactly as `flushBatch` would leave an untouched row (NULL on a
+ * fresh stamp; whatever a prior run wrote on a re-stamp — this path does not
+ * attempt to clear a stale value from before this fix existed, same as
+ * `flushBatch` never did for its own rows). Returns rows updated, same shape
+ * as `flushBatch`.
+ */
+async function flushNoDistrictBatch(
+  db: ZoningStampDb,
+  countyFips: string,
+  cityKey: string,
+  featureIndexes: number[],
+): Promise<number> {
+  if (featureIndexes.length === 0) return 0;
+  // sql.param(...) (not a bare `${featureIndexes}`) forces this to bind as ONE real array-typed
+  // parameter -- drizzle's default interpolation of a plain JS array instead expands it into a
+  // parenthesized tuple (`ANY(($1, $2, $3))`), which Postgres rejects when cast to `integer[]`
+  // ("cannot cast type record to integer[]", confirmed live against production, read-only). Same
+  // fix `etjDerive.ts`'s own `ANY(${keys}::text[])` already uses (`sql.param([...cityKeys])`).
+  const stmt = sql`
+    UPDATE ${txgioParcel} AS t
+    SET zoning_no_district_layer = ${cityKey}::text
+    WHERE t.county_fips = ${countyFips}
+      AND t.feature_index = ANY(${sql.param(featureIndexes)}::integer[])
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
+  return res?.rowCount ?? 0;
+}
+
+/** How many stale rows `clearStale` lists in the summary. */
+export const STALE_SAMPLE_SIZE = 50;
+
+/**
+ * Clear one batch of stale stamps (`clearStale`): the zoning columns go
+ * back to NULL (zoning_subarea only for a layer that writes it), which is
+ * what an unstamped row holds. The cityKey guard is
+ * repeated in the WHERE so a row another city stamped since the read is left
+ * alone. Returns rows updated.
+ */
+async function clearStaleBatch(
+  db: ZoningStampDb,
+  countyFips: string,
+  cityKey: string,
+  featureIndexes: number[],
+  clearSubarea: boolean,
+): Promise<number> {
+  if (featureIndexes.length === 0) return 0;
+  // zoning_subarea (migration 0113) is named only for a layer that writes it,
+  // the same rule flushBatch follows, so no other city's run names the column.
+  const subarea = clearSubarea ? sql`, zoning_subarea = NULL` : sql``;
+  const stmt = sql`
+    UPDATE ${txgioParcel}
+       SET zoning_district = NULL,
+           zoning_jurisdiction = NULL,
+           zoning_district_interim = NULL${subarea}
+     WHERE county_fips = ${countyFips}
+       AND zoning_jurisdiction = ${cityKey}
+       AND feature_index IN (${sql.join(
+         featureIndexes.map((i) => sql`${i}::integer`),
+         sql`, `,
+       )})
   `;
   const res = (await db.execute(stmt)) as unknown as { rowCount?: number };
   return res?.rowCount ?? 0;
@@ -152,6 +552,10 @@ async function flushBatch(
  * PIP + histogram but writes nothing (still exit-bounded). `onProgress`
  * fires every `progressEvery` parcels. `cityKey` is persisted as
  * `zoning_jurisdiction` on every match (the layer that owned the PIP).
+ *
+ * A feature whose `prop_id` carries NO CAD account is skipped before the PIP
+ * and writes no row (P-259b). It is counted in `parcelsSkippedNoAccount` and by
+ * reason, and it is the only path that does not reach a PIP.
  */
 export async function stampCountyZoning(opts: {
   db: ZoningStampDb;
@@ -174,21 +578,61 @@ export async function stampCountyZoning(opts: {
    * filtered set, in read order).
    */
   propIds?: Set<string>;
+  /**
+   * Burnet stage 3 §3 Bug 2. Set ONLY for a layer whose config carries
+   * `parcelIdField` (built by the CLI via `buildParcelIdIndex` off the SAME
+   * fetched features `index` came from). When present, each parcel's OWN
+   * `prop_id` (normalized the same way, `normalizeDigitId`) is looked up
+   * here FIRST, before any point-in-polygon: a real code stamps directly
+   * (`matchMethod: "parcel-id"`), a blank code is the declared
+   * "no district on the city's own layer" outcome
+   * (`matchMethod: "parcel-id-blank"`, counted in
+   * `parcelsNoDistrictOnLayer`, never PIPed), and an id absent from this
+   * index falls back to the ordinary point lookup (`matchMethod: "point"`).
+   * Undefined (the default) preserves the pre-Bug-2 point-only path
+   * exactly — every existing caller that does not pass this is unaffected.
+   */
+  parcelIdIndex?: Map<string, ParcelIdZoningEntry>;
+  /**
+   * OPS-24 Burnet per-parcel setbacks (2026-10-13). Set by the CLI when the layer config carries
+   * `subareaField` (Horseshoe Bay): every stamped row also gets `zoning_subarea` from the SAME
+   * matched feature (migration 0113 must be applied first). Default false: the UPDATE is
+   * byte-identical to before and never names the column.
+   */
+  writeSubarea?: boolean;
+  /**
+   * Opt-in (default false, so every existing run is unchanged). After the
+   * stamp, clear the zoning columns on rows still carrying THIS cityKey that
+   * the run did not stamp: the city's current layer no longer puts them in a
+   * district. Whole-county runs only (refused with `limit` or `propIds`, which
+   * read a subset and would clear everything outside it). With `dryRun` it
+   * counts and samples what it would clear and writes nothing.
+   */
+  clearStale?: boolean;
   onProgress?: (done: number, matched: number) => void;
   progressEvery?: number;
 }): Promise<ZoningStampSummary> {
-  const { db, countyFips, cityKey, index, dryRun, limit, propIds } = opts;
+  const { db, countyFips, cityKey, index, dryRun, limit, propIds, parcelIdIndex } = opts;
+  const writeSubarea = opts.writeSubarea === true;
   const progressEvery = opts.progressEvery ?? 5000;
   if (!cityKey.trim()) {
     throw new Error("stampCountyZoning requires cityKey (ZONING_LAYERS key)");
   }
 
   const scoped = propIds !== undefined && propIds.size > 0;
+  if (opts.clearStale && (scoped || limit !== undefined)) {
+    throw new Error(
+      "clearStale needs a whole-county run: a --limit or --prop-ids-file run reads a subset and would clear every stamp outside it",
+    );
+  }
+  if (opts.clearStale && index.length === 0) {
+    throw new Error("clearStale refused: the zoning index is empty, so every stamp for this city would be cleared");
+  }
 
   // Distinct features for the county (geometry identical across a feature's
-  // per-cell duplicate rows), keyed by feature_index. Scoped mode adds a
-  // prop_id = ANY(...) filter on the same read and also selects prop_id so
-  // we can report which requested ids resolved to a row.
+  // per-cell duplicate rows), keyed by feature_index. `prop_id` is selected on
+  // BOTH paths: the account gate needs it on every feature, and in scoped mode
+  // it also reports which requested ids resolved to a row.
   const whereClause = scoped
     ? and(
         eq(txgioParcel.countyFips, countyFips),
@@ -208,43 +652,265 @@ export async function stampCountyZoning(opts: {
 
   const summary: ZoningStampSummary = {
     parcelsRead: 0,
+    accountBearingFeatures: 0,
+    accountsRead: 0,
     parcelsMatched: 0,
     parcelsUnmatched: 0,
+    parcelsNoDistrictOnLayer: 0,
+    parcelsIdGeometryMismatch: 0,
+    parcelsSkippedNoAccount: 0,
+    skippedNoAccountByReason: { zero: 0, empty: 0, null: 0 },
+    parcelsUnrecognised: 0,
+    parcelsPlannedDevelopment: 0,
+    parcelsInterim: 0,
+    parcelsInterimPlannedDevelopment: 0,
+    interimBaseHistogram: {},
+    interimValueHistogram: {},
     codeHistogram: {},
+    unrecognisedHistogram: {},
+    overlayHistogram: {},
     rowsUpdated: 0,
+    ...(writeSubarea ? { subareaHistogram: {} } : {}),
   };
 
   const noZoningPolygonHit: string[] = [];
+  const unrecognisedPropIds: string[] = [];
+  const noDistrictOnLayerPropIds: string[] = [];
+  // Attribution for the no-district-on-layer bucket (migration 0112): feature
+  // indexes to flush through `flushNoDistrictBatch`, parallel to `matches` but
+  // carrying no code (zoning_district/zoning_jurisdiction stay NULL on these
+  // rows — only zoning_no_district_layer is written).
+  const noDistrictFeatureIndexes: number[] = [];
+  const skippedNoAccountPropIds: string[] = [];
   const foundPropIds = new Set<string>();
-  const perParcel: { propId: string; featureIndex: number; district: string | null }[] = [];
+  const accounts = new Set<string>();
+  const perParcel: NonNullable<ZoningStampSummary["perParcel"]> = [];
+  const bump = (hist: Record<string, number>, key: string): void => {
+    hist[key] = (hist[key] ?? 0) + 1;
+  };
 
   // PIP loop: collect matched pairs and flush in batches as we go so a
   // long county run (Bexar ~700k parcels / ~400k matches) cannot lose the
   // entire stamp if the process dies after PIP but before a single end-of-
   // run write. dryRun collects for the histogram only and writes nothing.
   const matches: StampPair[] = [];
+  // Every feature this run wrote a code to (matches is flushed and emptied in
+  // batches, so it cannot answer this at the end). Read by `clearStale`.
+  const stampedFeatures = new Set<number>();
   let rowsUpdated = 0;
   for (const p of parcels) {
     if (limit !== undefined && summary.parcelsRead >= limit) break;
     summary.parcelsRead += 1;
+    // `foundPropIds` keeps its original meaning — "this requested id resolved to
+    // at least one txgio_parcel row" — so it is fed BEFORE the account gate and
+    // `matched` still equals `parcelsRead` in scoped mode. A no-account feature
+    // DID resolve to a row; it just writes nothing. Its skip is reported
+    // separately, and `notFoundInParcelStore` stays exactly "no row at all".
     if (scoped && p.propId) foundPropIds.add(p.propId);
-    const hit = stampParcelZoning(index, p.geometry as GeoJsonGeometry);
+
+    // ACCOUNT GATE (P-259b). A feature with no CAD account writes no row: a
+    // district attributed to `prop_id '0'` belongs to nobody, and Travis alone
+    // carries 423,540 such features. Checked BEFORE the PIP so it cannot be
+    // stamped by any bucket, and counted by reason rather than derived by
+    // subtraction. This is the one outcome in which a feature is not PIPed.
+    const skipReason = noAccountReason(p.propId);
+    if (skipReason !== null) {
+      summary.parcelsSkippedNoAccount += 1;
+      summary.skippedNoAccountByReason[skipReason] += 1;
+      if (scoped && p.propId) {
+        skippedNoAccountPropIds.push(p.propId);
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: null,
+          kind: "skipped-no-account",
+        });
+      }
+      continue;
+    }
+
+    // Account-bearing from here on. `accounts` counts DISTINCT REAL prop ids, so
+    // a no-account feature never inflates it.
+    summary.accountBearingFeatures += 1;
+    if (p.propId) accounts.add(p.propId);
+
+    // BUG 2 (Burnet stage 3 §3, parcel-id-first join). Checked BEFORE the
+    // point lookup, for a layer whose config carries `parcelIdField`
+    // (Horseshoe Bay): the parcel's OWN feature, found by id, decides.
+    // A blank code there is a DECLARED fact — never PIPed, never
+    // overwritten by whichever neighbour's polygon a point lookup would
+    // have landed in. An id absent from this index (every parcel, on a
+    // layer with no `parcelIdField` configured) falls through to the
+    // ordinary point lookup exactly as before Bug 2.
+    let idEntry =
+      parcelIdIndex && p.propId
+        ? parcelIdIndex.get(normalizeDigitId(p.propId))
+        : undefined;
+    // CROSS-COUNTY GEOMETRY GATE (2026-10-10). An id match alone is not
+    // proof of the same physical parcel: Horseshoe Bay's layer also
+    // carries Llano CAD parcels under a PROP_ID space that overlaps
+    // Burnet's. Before trusting ANY id match (real code or blank), the
+    // joined feature's geometry must actually contain the parcel's
+    // interior point. `parcelIdDiscriminatorField`/`Values` (zoning-
+    // layers.ts) already narrows the id index to the right county's
+    // features at build time; this is the second, independent check —
+    // belt and suspenders against a wrong or stale discriminator value on
+    // some row. A mismatch is NOT trusted as an id match at all: it falls
+    // through to the ordinary point lookup, same as an absent id, but is
+    // counted separately so the mismatch stays visible.
+    let idGeometryMismatch = false;
+    if (idEntry) {
+      const interior = trueInteriorPoint(p.geometry as GeoJsonGeometry);
+      const agrees =
+        interior !== null &&
+        idEntry.geometry !== null &&
+        pointInGeometry(interior.longitude, interior.latitude, idEntry.geometry);
+      if (!agrees) {
+        idGeometryMismatch = true;
+        idEntry = undefined;
+      }
+    }
+    if (idGeometryMismatch) {
+      summary.parcelsIdGeometryMismatch += 1;
+    }
+    if (idEntry && idEntry.code === null) {
+      summary.parcelsNoDistrictOnLayer += 1;
+      noDistrictFeatureIndexes.push(p.featureIndex);
+      if (scoped && p.propId) {
+        noDistrictOnLayerPropIds.push(p.propId);
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: null,
+          kind: "no-district-on-layer",
+          matchMethod: "parcel-id-blank",
+        });
+      }
+      if (!dryRun && noDistrictFeatureIndexes.length >= ZONING_STAMP_BATCH_SIZE) {
+        rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
+        noDistrictFeatureIndexes.length = 0;
+      }
+      continue;
+    }
+    // `matchMethod` is only meaningful (non-undefined) when this layer
+    // carries a `parcelIdField` at all — a layer with none (Marble Falls)
+    // always used the point lookup, before and after Bug 2, and reports no
+    // method rather than a redundant constant "point" on every row.
+    const matchMethod: ZoningMatchMethod | undefined = parcelIdIndex
+      ? idEntry
+        ? "parcel-id"
+        : idGeometryMismatch
+          ? "parcel-id-geometry-mismatch"
+          : "point"
+      : undefined;
+    const hit = idEntry
+      ? { code: idEntry.code!, description: idEntry.description, parse: idEntry.parse, subarea: idEntry.subarea }
+      : stampParcelZoning(index, p.geometry as GeoJsonGeometry);
+    const subarea = writeSubarea && hit ? (hit.subarea ?? null) : undefined;
+    if (writeSubarea && hit) bump(summary.subareaHistogram!, subarea ?? "(blank)");
     if (!hit) {
+      // No zoning polygon holds the parcel's representative point: outside the
+      // city, or an un-zoned pocket. Honest null, never a guessed district.
       summary.parcelsUnmatched += 1;
       if (scoped && p.propId) {
         noZoningPolygonHit.push(p.propId);
-        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: null });
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: null,
+          kind: "none",
+          matchMethod,
+        });
       }
-    } else {
-      summary.parcelsMatched += 1;
-      summary.codeHistogram[hit.code] =
-        (summary.codeHistogram[hit.code] ?? 0) + 1;
-      matches.push({ featureIndex: p.featureIndex, code: hit.code });
+    } else if (hit.parse?.kind === "unrecognised") {
+      // In a polygon whose published value carries no base district in this
+      // city's vocabulary (Austin: the overlay families TOD/NBG/ERC/TND/UNZ,
+      // SF-4, anything else the table does not name — the interim I-* family
+      // resolved here until P-259b taught the parser to strip its qualifier).
+      // The PUBLISHED value is written verbatim — it is a real fact about the
+      // parcel, and the router has a designed path for a code it cannot resolve
+      // (mapDistrict returns null -> the callers decline with a named reason)
+      // whereas dropping it to NULL would assert "no zoning on record", which is
+      // false. What is never written is a TRUNCATED prefix: for
+      // "CS-1-MU-..." that would be CS, a different district with a different
+      // row. Counted apart so a base-district count is never inflated.
+      summary.parcelsUnrecognised += 1;
+      bump(summary.unrecognisedHistogram, hit.code);
+      stampedFeatures.add(p.featureIndex);
+      matches.push({
+        featureIndex: p.featureIndex,
+        code: hit.code,
+        interim: hit.parse.interim,
+        subarea,
+      });
       if (scoped && p.propId) {
-        perParcel.push({ propId: p.propId, featureIndex: p.featureIndex, district: hit.code });
+        unrecognisedPropIds.push(p.propId);
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: hit.code,
+          kind: "unrecognised",
+          publishedCode: hit.code,
+          interim: hit.parse.interim,
+          matchMethod,
+          ...(writeSubarea ? { subarea } : {}),
+        });
       }
       if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
-        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
+        matches.length = 0;
+      }
+    } else {
+      const kind = hit.parse?.kind ?? "base";
+      // Interim disclosure (P-259b): `hit.parse.interim` is true when the
+      // published value carried a declared qualifier (Austin `I-<base>`). Counted
+      // as a SUBSET of the bucket it landed in, never added to it, so the
+      // five-way invariant is untouched.
+      const interim = hit.parse?.interim === true;
+      if (kind === "planned-development") {
+        summary.parcelsPlannedDevelopment += 1;
+        if (interim) summary.parcelsInterimPlannedDevelopment += 1;
+      } else {
+        summary.parcelsMatched += 1;
+        if (interim) summary.parcelsInterim += 1;
+      }
+      if (interim) {
+        bump(summary.interimValueHistogram, hit.parse!.raw);
+        if (hit.parse!.base !== null) {
+          bump(summary.interimBaseHistogram, hit.parse!.base);
+        }
+      }
+      bump(summary.codeHistogram, hit.code);
+      // Overlays only for a RESOLVED base: with kind "base" the parser has
+      // proven which tokens are the base and which are the suffix. A
+      // planned-development value's tokens are not classified (the stamp
+      // writes it raw), so they are left out rather than reported as overlays.
+      if (kind === "base") {
+        for (const overlay of hit.parse?.overlays ?? []) {
+          bump(summary.overlayHistogram, overlay);
+        }
+      }
+      stampedFeatures.add(p.featureIndex);
+      matches.push({
+        featureIndex: p.featureIndex,
+        code: hit.code,
+        interim,
+        subarea,
+      });
+      if (scoped && p.propId) {
+        perParcel.push({
+          propId: p.propId,
+          featureIndex: p.featureIndex,
+          district: hit.code,
+          kind,
+          publishedCode: hit.parse?.raw ?? hit.code,
+          interim,
+          matchMethod,
+          ...(writeSubarea ? { subarea } : {}),
+        });
+      }
+      if (!dryRun && matches.length >= ZONING_STAMP_BATCH_SIZE) {
+        rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
         matches.length = 0;
       }
     }
@@ -254,9 +920,40 @@ export async function stampCountyZoning(opts: {
   }
 
   if (!dryRun && matches.length > 0) {
-    rowsUpdated += await flushBatch(db, countyFips, cityKey, matches);
+    rowsUpdated += await flushBatch(db, countyFips, cityKey, matches, writeSubarea);
+  }
+  if (!dryRun && noDistrictFeatureIndexes.length > 0) {
+    rowsUpdated += await flushNoDistrictBatch(db, countyFips, cityKey, noDistrictFeatureIndexes);
+  }
+  if (opts.clearStale) {
+    // Rows a PRIOR run stamped for THIS city that this run's layer no longer
+    // places in any district. Without this a re-stamp only ever adds: a
+    // parcel the city's current layer leaves out keeps an old code forever
+    // (measured 2026-11-05: 48021 prop 28413 still stamped IND, 61247 and
+    // 65702 still stamped PDD, none of them inside a current polygon).
+    // Scoped to zoning_jurisdiction = cityKey, so another city's stamp in a
+    // multi-city county is never touched.
+    const res = (await db.execute(sql`
+      SELECT DISTINCT feature_index, prop_id, zoning_district
+        FROM ${txgioParcel}
+       WHERE county_fips = ${countyFips}
+         AND zoning_jurisdiction = ${cityKey}
+    `)) as unknown as { rows: { feature_index: number; prop_id: string | null; zoning_district: string | null }[] };
+    const stale = (res?.rows ?? []).filter((r) => !stampedFeatures.has(Number(r.feature_index)));
+    const staleFeatures = [...new Set(stale.map((r) => Number(r.feature_index)))];
+    summary.staleFeatures = staleFeatures.length;
+    summary.staleSample = stale
+      .slice(0, STALE_SAMPLE_SIZE)
+      .map((r) => `${r.prop_id ?? "(no prop_id)"}=${r.zoning_district ?? "(null)"}`);
+    summary.staleRowsCleared = 0;
+    if (!dryRun) {
+      for (const chunk of chunkPairs(staleFeatures, ZONING_STAMP_BATCH_SIZE)) {
+        summary.staleRowsCleared += await clearStaleBatch(db, countyFips, cityKey, chunk, writeSubarea);
+      }
+    }
   }
   summary.rowsUpdated = rowsUpdated;
+  summary.accountsRead = accounts.size;
 
   if (scoped) {
     summary.listSize = propIds!.size;
@@ -265,10 +962,119 @@ export async function stampCountyZoning(opts: {
       (id) => !foundPropIds.has(id),
     );
     summary.noZoningPolygonHit = noZoningPolygonHit;
+    summary.skippedNoAccountPropIds = skippedNoAccountPropIds;
+    summary.unrecognisedPropIds = unrecognisedPropIds;
+    summary.noDistrictOnLayerPropIds = noDistrictOnLayerPropIds;
     summary.perParcel = perParcel;
   }
 
   return summary;
+}
+
+/** Sum two code->count histograms. Neither input is mutated. */
+function mergeHistograms(
+  a: Record<string, number>,
+  b: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = { ...a };
+  for (const [code, count] of Object.entries(b)) {
+    out[code] = (out[code] ?? 0) + count;
+  }
+  return out;
+}
+
+/** The row {@link writeZoningStampRun} inserts, before `id`/`finishedAt` (DB-assigned). */
+export interface ZoningStampRunRowInput {
+  countyFips: string;
+  cityKey: string;
+  layerUrl: string;
+  layerReadAt: Date;
+  featuresRead: number;
+  matched: number;
+  noDistrictOnLayer: number;
+  parcelsNull: number;
+  idGeometryMismatch: number;
+  codeHistogram: Record<string, number>;
+}
+
+/**
+ * Derive the run-record row (migration 0112) from a completed, non-dry
+ * `ZoningStampSummary`. Pure — no DB — so the mapping from summary fields to
+ * run-record columns can be unit-tested without a database. See the
+ * migration file's own comment for why each field is defined the way it is.
+ *
+ * `matched` folds in `parcelsPlannedDevelopment` and `parcelsUnrecognised`:
+ * every bucket that writes SOME code to `zoning_district`, because gate 1
+ * reconciles against what is actually STORED, and all three store a code.
+ * `codeHistogram` is `summary.codeHistogram` merged with
+ * `summary.unrecognisedHistogram` for the same reason — the vocabulary this
+ * run could have written is the union of both.
+ */
+export function buildZoningStampRunRow(opts: {
+  countyFips: string;
+  cityKey: string;
+  layerUrl: string;
+  layerReadAt: Date;
+  summary: ZoningStampSummary;
+}): ZoningStampRunRowInput {
+  const { countyFips, cityKey, layerUrl, layerReadAt, summary } = opts;
+  return {
+    countyFips,
+    cityKey,
+    layerUrl,
+    layerReadAt,
+    featuresRead: summary.parcelsRead,
+    matched:
+      summary.parcelsMatched +
+      summary.parcelsPlannedDevelopment +
+      summary.parcelsUnrecognised,
+    noDistrictOnLayer: summary.parcelsNoDistrictOnLayer,
+    parcelsNull: summary.parcelsUnmatched,
+    idGeometryMismatch: summary.parcelsIdGeometryMismatch,
+    codeHistogram: mergeHistograms(summary.codeHistogram, summary.unrecognisedHistogram),
+  };
+}
+
+/**
+ * Persist the run record (migration 0112's `zoning_stamp_run`). Called by
+ * `zoning-cli.ts`'s `main()` AFTER `stampCountyZoning`'s batched UPDATEs
+ * complete, for a non-dry run only — never called at all for `--dry-run`
+ * (the CHECK on `dry_run` in the migration makes that invariant visible in
+ * the schema too). Returns the inserted row's `id` for the CLI to log.
+ *
+ * Raw `execute(sql...)`, like `flushBatch`/`flushNoDistrictBatch` — keeps
+ * this on the same narrow `ZoningStampDb` surface (`selectDistinctOn` +
+ * `execute`) the CLI's real pool and the test fake both already satisfy,
+ * rather than widening that type just for one insert.
+ *
+ * NOT inside the same transaction as the stamp's own UPDATEs — see the
+ * migration file's comment for why (the stamp's write path is already a
+ * sequence of independently-committed batches, not one transaction to join)
+ * and how a crash between the two is detected (gate 1 finds stamped rows
+ * with no matching run record and refuses `ZONING_NOT_STAMPED`).
+ */
+export async function writeZoningStampRun(
+  db: ZoningStampDb,
+  row: ZoningStampRunRowInput,
+): Promise<{ id: number }> {
+  const stmt = sql`
+    INSERT INTO ${zoningStampRun} (
+      county_fips, city_key, layer_url, layer_read_at, features_read,
+      matched, no_district_on_layer, parcels_null, id_geometry_mismatch,
+      code_histogram, dry_run
+    ) VALUES (
+      ${row.countyFips}, ${row.cityKey}, ${row.layerUrl}, ${row.layerReadAt},
+      ${row.featuresRead}, ${row.matched}, ${row.noDistrictOnLayer},
+      ${row.parcelsNull}, ${row.idGeometryMismatch},
+      ${JSON.stringify(row.codeHistogram)}::jsonb, false
+    )
+    RETURNING id
+  `;
+  const res = (await db.execute(stmt)) as unknown as { rows: { id: number | string }[] };
+  // `id` is `bigserial`; node-postgres returns a `bigint` column as a STRING by default (avoids
+  // silent precision loss above 2^53) -- coerced here so callers get the `number` the type says,
+  // safe because a run-record id is never anywhere near that magnitude.
+  return { id: Number(res.rows[0].id) };
 }
 
 /** Exposed for the CLI's row-count clarity. */

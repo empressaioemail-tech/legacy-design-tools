@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request, { type Test } from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -22,11 +23,20 @@ import {
   peChatMessageCounts,
   pePropertyUnlocks,
   peUserEntitlements,
+  placeLayerSnapshots,
+  txgioParcel,
   users,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
+import { placeKeyForNode } from "../routes/brokerageNodeFacets";
+import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
+import {
+  memoryParcelRecordStore,
+  resetParcelRecordQueryableForTests,
+  setParcelRecordQueryableForTests,
+} from "../lib/parcelRecordCellRead";
 
 const completeChatMock = vi.hoisted(() => vi.fn());
 const retrieveAtomsForQuestionMock = vi.hoisted(() => vi.fn());
@@ -61,8 +71,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });
@@ -133,6 +143,15 @@ async function chatCountFor(userId: string, parcelNodeId: string) {
 }
 
 beforeEach(async () => {
+  // P-297 (2026-09-16, operator ruling A-193): the serve decision for the
+  // CAD dollar rails no longer reads a county verdict at all, so a suite that
+  // wants to see a VALUE has to hand the route the parcel's own cells. Reset
+  // here so no cell fixture leaks between tests, and seed per test.
+  resetParcelRecordQueryableForTests();
+  // A real recognized key, so brokerageAuth's keys-configured gate passes for
+  // the peSessionHeaders (session-JWT) tests in this file — unrelated to the
+  // one test below that exercises the now-retired extension_public branch.
+  process.env.BROKERAGE_OPERATOR_API_KEYS = "pe-property-entitlement-operator-key";
   process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = EXT_KEY;
   resetBrokerageApiKeysForTests();
   process.env.SERVICE_API_KEY = SERVICE_TOKEN;
@@ -251,6 +270,168 @@ describe("GET /entitlement property block (pinned contract)", () => {
   });
 });
 
+/**
+ * P-98: `parcelNodeId` became OPTIONAL so account-scoped Settings can read
+ * entitlement at all. Before this the route returned early without one and
+ * Settings showed Access as "Not read" for every account, paid included.
+ *
+ * The keys asserted here are `origin/main`'s, in `origin/main`'s order. The
+ * with-parcel response must not move; only the authenticated-no-parcel path
+ * changes.
+ */
+describe("GET /entitlement without a parcel (P-98 account scope)", () => {
+  // P-104 appended `studioGranted` LAST to this base body. The pins below still
+  // assert an EXACT key list and an exact order, so the seven fields ahead of it
+  // and their order remain pinned; only the tail grew. The field is the answer to
+  // "does this account get Studio", computed on the server so no consumer writes a
+  // fourth copy of subscriptionTierGrantsStudio. Adding it here is a deliberate
+  // widening of the R1 contract, not a test loosened to go green: removing any of
+  // the first seven, or reordering them, still fails every assertion below.
+  const MAIN_BASE_KEYS = [
+    "authenticated",
+    "tier",
+    "subscriptionTier",
+    "tenantId",
+    "userId",
+    "devRole",
+    "entitlementSource",
+    "studioGranted",
+  ];
+
+  it("authenticated + no parcel returns the account block with no property key", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({
+        subscriptionTier: "team",
+        seatsPurchased: 5,
+        billingInterval: "month",
+        entitlementSource: "stripe_sub",
+      })
+      .where(eq(peUserEntitlements.ownerUserId, USER_PAID));
+
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([
+      ...MAIN_BASE_KEYS,
+      "seatsPurchased",
+      "billingInterval",
+      // A-062 appends hasBillingAccount to the ACCOUNT body only, so the
+      // with-parcel contract the PE BFF pins does not move. Deliberate
+      // widening of the account shape, not a test loosened to go green:
+      // this still asserts an EXACT list in an EXACT order, so removing or
+      // reordering anything ahead of it still fails.
+      "hasBillingAccount",
+      // P-125, same reasoning as hasBillingAccount immediately above:
+      // account-body-only, deliberate widening, exact-order assertion still
+      // fails on removal or reordering.
+      "email",
+    ]);
+    expect(res.body.tier).toBe("paid");
+    expect(res.body.seatsPurchased).toBe(5);
+    expect(res.body.billingInterval).toBe("month");
+    expect("property" in res.body).toBe(false);
+  });
+
+  it("VIOLATION: a subscriber with no stored interval reads null, not month", async () => {
+    // Every row written before migration 0092, and anyone whose billed price
+    // id matched nothing we configured. Nothing backfills them, on purpose.
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.billingInterval).toBeNull();
+    expect(res.body.seatsPurchased).toBeNull();
+  });
+
+  it("VIOLATION: the WITH-parcel response keys are unchanged by P-98", async () => {
+    await db
+      .update(peUserEntitlements)
+      .set({ billingInterval: "year", seatsPurchased: 3 })
+      .where(eq(peUserEntitlements.ownerUserId, USER_PAID));
+
+    const res = await asUser(
+      request(getApp()).get(
+        `/api/property-explorer/v1/entitlement?parcelNodeId=${encodeURIComponent(PARCEL)}`,
+      ),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS, "property"]);
+    expect(Object.keys(res.body.property)).toEqual([
+      "parcelNodeId",
+      "unlocked",
+      "freeMessagesUsed",
+      "freeMessagesLimit",
+    ]);
+    expect("billingInterval" in res.body).toBe(false);
+    expect("seatsPurchased" in res.body).toBe(false);
+  });
+
+  it("VIOLATION: anonymous + no parcel keeps today's body, no account fields", async () => {
+    const res = await request(getApp()).get(
+      "/api/property-explorer/v1/entitlement",
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS]);
+    expect(res.body.authenticated).toBe(false);
+  });
+
+  it("VIOLATION: an anonymous caller with a MALFORMED parcel still gets 200, not 400", async () => {
+    // Guard precedence. On origin/main the anonymous check and the parcel
+    // check were one compound condition, so an anonymous caller never
+    // reached the validity check. Splitting them must not reorder that.
+    const res = await request(getApp()).get(
+      "/api/property-explorer/v1/entitlement?parcelNodeId=not-a-node-id",
+    );
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toEqual([...MAIN_BASE_KEYS]);
+  });
+
+  it("an AUTHENTICATED caller with a malformed parcel still gets 400", async () => {
+    const res = await asUser(
+      request(getApp()).get(
+        "/api/property-explorer/v1/entitlement?parcelNodeId=not-a-node-id",
+      ),
+      USER_PAID,
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_parcel_node_id");
+  });
+
+  it("an empty parcelNodeId= is treated as absent, not as malformed", async () => {
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement?parcelNodeId="),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    expect("property" in res.body).toBe(false);
+    expect("billingInterval" in res.body).toBe(true);
+  });
+
+  it("VIOLATION: dev role does not synthesise seats or an interval", async () => {
+    // resolvePeEntitlement elevates tier and subscriptionTier for dev role.
+    // It must NOT invent billing facts: an operator account bought nothing.
+    await db
+      .update(peUserEntitlements)
+      .set({ devRole: true })
+      .where(eq(peUserEntitlements.ownerUserId, USER_FREE));
+
+    const res = await asUser(
+      request(getApp()).get("/api/property-explorer/v1/entitlement"),
+      USER_FREE,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.tier).toBe("paid");
+    expect(res.body.subscriptionTier).toBe("team");
+    expect(res.body.billingInterval).toBeNull();
+    expect(res.body.seatsPurchased).toBeNull();
+  });
+});
+
 describe("paid-OR-property-unlocked gate on report routes", () => {
   it("free user still 402s on research/brief", async () => {
     const res = await asUser(
@@ -264,7 +445,37 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     expect(res.body.property).toEqual({ parcelNodeId: PARCEL, unlocked: false });
   });
 
-  it("property-unlocked user clears the brief gate (honest 404, no snapshot seeded)", async () => {
+  it("property-unlocked user clears the brief gate (parcel row exists, no snapshot: honest unbaked 404)", async () => {
+    // State constructed: a txgio_parcel row for PARCEL stored in the raw CAD
+    // form WITH leading zeros ("0010068" for node 48055:10068) and no baked
+    // snapshot. The P-91 miss split must find the row through the
+    // zero-stripped match against real Postgres and answer
+    // baked_snapshot_not_found, never parcel_not_found. txgio_parcel is in the
+    // per-test truncate list, so this row does not reach the other fixtures.
+    await db.insert(txgioParcel).values({
+      countyFips: "48055",
+      tileKey: "g0.02:-97.68000,29.88000",
+      featureIndex: 0,
+      propId: "0010068",
+      situsAddress: "1 TEST LN, LOCKHART, TX 78644",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.68, 29.88],
+            [-97.67, 29.88],
+            [-97.67, 29.89],
+            [-97.68, 29.88],
+          ],
+        ],
+      },
+      westLng: -97.68,
+      southLat: 29.88,
+      eastLng: -97.67,
+      northLat: 29.89,
+      sourceFile: "pe-property-entitlement.test",
+      sourceVintage: "test-fixture",
+    });
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -273,6 +484,7 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     );
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.parcelNodeId).toBe(PARCEL);
   });
 
   it("property-unlocked user is still walled off OTHER parcels", async () => {
@@ -286,7 +498,9 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
     expect(res.body.error).toBe("upgrade_required");
   });
 
-  it("paid user clears the gate unchanged", async () => {
+  it("paid user clears the gate unchanged (no parcel row, no snapshot: honest absent 404)", async () => {
+    // State constructed: nothing seeded for PARCEL. The gate is what this
+    // fixture is about; past it, the P-91 miss split answers parcel_not_found.
     const res = await asUser(
       request(getApp())
         .post("/api/property-explorer/v1/research/brief")
@@ -294,7 +508,7 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
       USER_PAID,
     );
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.error).toBe("parcel_not_found");
   });
 
   it("layer-manifest resolves the parcel from the runId for the unlock check", async () => {
@@ -307,6 +521,9 @@ describe("paid-OR-property-unlocked gate on report routes", () => {
       ),
       USER_UNLOCKED,
     );
+    // State constructed: no snapshot for PARCEL. The layer-manifest route is
+    // NOT on the P-91 miss split (it runs no existence probe), so its 404
+    // stays baked_snapshot_not_found regardless of whether a parcel row exists.
     expect(unlockedRes.status).toBe(404);
     expect(unlockedRes.body.error).toBe("baked_snapshot_not_found");
 
@@ -465,13 +682,13 @@ describe("research/chat PE-session free counter", () => {
     expect(res.body.error).toBe("upgrade_required");
   });
 
-  it("does not touch the extension_public branch (install-id required as before)", async () => {
+  it("the old extension_public key is unauthorized (tier retired 2026-09-07)", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/research/chat")
       .set({ Authorization: `Bearer ${EXT_KEY}` })
       .send(chatBody());
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("install_id_required");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("unauthorized");
   });
 });
 
@@ -523,8 +740,11 @@ describe("internal dev-role route (WDLL 2026-08-05 item 4)", () => {
         .send({ parcelNodeId: OTHER_PARCEL }),
       USER_FREE,
     );
+    // State constructed: dev role granted, no txgio_parcel row and no
+    // snapshot for OTHER_PARCEL. Past the gate, the P-91 miss split answers
+    // the absent-parcel 404.
     expect(brief.status).toBe(404);
-    expect(brief.body.error).toBe("baked_snapshot_not_found");
+    expect(brief.body.error).toBe("parcel_not_found");
   });
 
   it("revoking dev role closes the gate on the very next read", async () => {
@@ -586,5 +806,343 @@ describe("free counter atomicity", () => {
     expect(await chatCountFor(USER_FREE, PARCEL)).toBe(
       PE_FREE_CHAT_MESSAGE_LIMIT,
     );
+  });
+});
+
+/**
+ * CAD tax-assessed dollar rails co-gate with owner info on research/brief
+ * too (OPS-16 A-103 item 5 / A-104; co-gate widened 2026-09-05 to include
+ * Property Unlock). PARCEL is unlocked for USER_UNLOCKED and OTHER_PARCEL
+ * is not (see the top-level beforeEach) — proof that the grant is scoped to
+ * the specific parcel actually unlocked, not to the user account, and that
+ * a batch request cannot leak one parcel's grant onto another.
+ */
+describe("research/brief CAD dollar rails co-gate with owner info via Property Unlock (OPS-16 A-103 item 5 / A-104)", () => {
+  /**
+   * P-297 (2026-09-16, operator ruling A-193): 48055 is slated for the dollar
+   * rails, so what `research/brief` serves under `onRecord.cadRoll` is the
+   * parcel's OWN cell -- never this fixture's baked snapshot, which exists
+   * only to give the route a parcel to assemble. Before the ruling the
+   * snapshot's numbers were the served answer here. Values match the
+   * snapshot's own so the assertions below read the same numbers, but they now
+   * come from the cell and can only have come from the cell: the seeded
+   * numbers (275000/66000) appear nowhere in the baked snapshot. That is the
+   * point of the change, not an incidental detail.
+   */
+  function seedCadRollCells(parcelNodeId: string): void {
+    // The cell store's place key is `${countyFips}:${propId}` -- the node id
+    // itself, NOT `placeKeyForNode`'s `node:`-prefixed snapshot key.
+    const placeKey = parcelNodeId;
+    const dollar = (railKey: string, value: number) => ({
+      placeKey,
+      railKey,
+      cellState: { kind: "value", value, source: "cad_property", vintage: "2025" },
+    });
+    // Deliberately NOT the snapshot's numbers: 275000/66000 exist nowhere in
+    // the baked fixture, so a served 275000 can only have come from the cell.
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          dollar("marketValue", 275000),
+          dollar("assessedValue", 275000),
+          dollar("landValue", 66000),
+          dollar("improvementValue", 209000),
+          dollar("livingAreaSqft", 1800),
+          dollar("yearBuilt", 1994),
+        ],
+      }),
+    );
+  }
+
+  async function seedBriefSnapshot(parcelNodeId: string, contentHash: string) {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(parcelNodeId),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: parcelNodeId.split(":")[1],
+          situsAddress: "1 UNLOCK TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+          cadRoll: {
+            marketValue: { v: 250000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            assessedValue: { v: 250000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            landValue: { v: 60000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            improvementValue: { v: 190000, source: "cad_property", vintage: "2025", valueBasis: "county-assessed" },
+            livingAreaSqft: { v: 1800, source: "cad_property", vintage: "2025" },
+          },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-05T00:00:00.000Z",
+      },
+      contentHash,
+    });
+  }
+
+  it("PARCEL (the unlocked one) GRANTS the CAD dollar fields to USER_UNLOCKED via onRecord", async () => {
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-unlocked-parcel");
+    seedCadRollCells(PARCEL);
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(200);
+    // P-297: these two numbers exist ONLY in the seeded cells, so serving them
+    // proves the parcel's own cell is the answer, not the baked snapshot
+    // (whose fixture says 250000/60000).
+    expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 275000,
+    });
+    expect(res.body.onRecord.cadRoll.landValue).toMatchObject({
+      state: "present",
+      v: 66000,
+    });
+  });
+
+  it("OTHER_PARCEL (never unlocked for this user) is walled off entirely for a Property-Unlock-only user — the outer paywall (requirePePaidOrPropertyUnlocked), not yet even reaching the CAD co-gate", async () => {
+    await seedBriefSnapshot(OTHER_PARCEL, "test-hash-brief-cadroll-other-parcel");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: OTHER_PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(402);
+  });
+
+  it("batch request, same Solo user unlocked on PARCEL only: PARCEL grants via the unlock, OTHER_PARCEL still refuses — per-parcel, not per-user or per-request", async () => {
+    // Solo (paid) tier clears the OUTER paywall for the whole batch (which
+    // degrades to a paid-tier-only check when parcelNodeId isn't a single
+    // string), so this is the one caller shape that can actually reach
+    // assembleNodeBriefBody for BOTH parcels in one request and prove the
+    // CAD co-gate differentiates between them.
+    const soloUser = "user-pp-solo-batch-cadroll";
+    await db.insert(users).values({ id: soloUser, displayName: "Solo Batch User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "solo",
+    });
+    await db.insert(pePropertyUnlocks).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: PARCEL,
+      source: "stripe",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-batch-parcel");
+    await seedBriefSnapshot(OTHER_PARCEL, "test-hash-brief-cadroll-batch-other-parcel");
+    // Only PARCEL has cells; OTHER_PARCEL is gated before its overlay would be
+    // served at all, which is exactly what the two assertions below separate.
+    seedCadRollCells(PARCEL);
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: [PARCEL, OTHER_PARCEL], depth: "node" }),
+      soloUser,
+    );
+    expect(res.status).toBe(200);
+    const forParcel = res.body.parcels.find(
+      (p: { parcelNodeId: string }) => p.parcelNodeId === PARCEL,
+    );
+    const forOtherParcel = res.body.parcels.find(
+      (p: { parcelNodeId: string }) => p.parcelNodeId === OTHER_PARCEL,
+    );
+    expect(forParcel.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 275000,
+    });
+    expect(forOtherParcel.onRecord.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("a Solo (paid, non-Studio, non-unlocked) user on PARCEL still REFUSES the CAD dollar fields — the graduation lever stays intact", async () => {
+    const soloUser = "user-pp-solo-cadroll";
+    await db.insert(users).values({ id: soloUser, displayName: "Solo User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: soloUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "solo",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-solo");
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      soloUser,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.onRecord.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("a Studio user on PARCEL grants the CAD dollar fields (unchanged — tier path still works)", async () => {
+    const studioUser = "user-pp-studio-cadroll";
+    await db.insert(users).values({ id: studioUser, displayName: "Studio User" });
+    await db.insert(peUserEntitlements).values({
+      ownerUserId: studioUser,
+      tenantId: DEFAULT_TENANT_ID,
+      accessTier: "paid",
+      subscriptionTier: "studio",
+    });
+    await seedBriefSnapshot(PARCEL, "test-hash-brief-cadroll-studio");
+    seedCadRollCells(PARCEL);
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      studioUser,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.onRecord.cadRoll.marketValue).toMatchObject({
+      state: "present",
+      v: 275000,
+    });
+  });
+});
+
+/**
+ * PE/MCP-vs-facets parity audit (2026-09-07), D1 + D2 + D3 + D4.
+ * valueHistoryFact was fetched and served by brokerageNodeFacets.ts's
+ * facets route but never fetched by assembleNodeBriefBody at all (D1).
+ * specialDistrictFact, pipelineFact, wellFact, and boundaryEdgeFact were
+ * already being fetched here to feed the optional `draw` block but were
+ * never exposed as their own typed fields the way the facets route exposes
+ * all four directly (D4) -- a caller of research/brief had no way to read
+ * them as structured data, and got nothing at all when `draw` was absent.
+ * landUseFact (D2) was never fetched at all -- the brief's land-use section
+ * read only the retired baked value. ownerFact (D3) was checked before
+ * adding: the SAME grantsCadRollValuation/grantsOwnerCoGatedFields gate the
+ * CAD-roll dollar fields already use also gates this. This proves all
+ * fields genuinely reach the wire on the real route (and that ownerFact is
+ * actually gated, not just present), not just that the assembler function
+ * was edited.
+ */
+describe("research/brief now carries valueHistoryFact/landUseFact/ownerFact/specialDistrictFact/pipelineFact/wellFact/boundaryEdgeFact (PE/MCP-vs-facets parity audit, 2026-09-07, D1/D2/D3/D4)", () => {
+  it("a paid, non-Studio, non-unlocked user's node-depth brief carries all new fields on the wire, and ownerFact is correctly studio-gated (not a leak)", async () => {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(PARCEL),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId: PARCEL,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: PARCEL.split(":")[1],
+          situsAddress: "1 D1 D4 TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-07T00:00:00.000Z",
+      },
+      contentHash: "test-hash-brief-d1-d4",
+    });
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_PAID,
+    );
+    expect(res.status).toBe(200);
+    // D1: the field exists at all -- no atoms seeded, so a typed refusal is
+    // the correct, honest present value, not the absence of the key itself.
+    expect(res.body.valueHistoryFact).not.toBeUndefined();
+    expect(res.body.valueHistoryFact).not.toBeNull();
+    // D4: all four previously-internal-only facts are now their own fields.
+    expect(res.body.specialDistrictFact).not.toBeUndefined();
+    expect(res.body.specialDistrictFact).not.toBeNull();
+    expect(res.body.pipelineFact).not.toBeUndefined();
+    expect(res.body.pipelineFact).not.toBeNull();
+    expect(res.body.wellFact).not.toBeUndefined();
+    expect(res.body.wellFact).not.toBeNull();
+    expect(res.body.boundaryEdgeFact).not.toBeUndefined();
+    expect(res.body.boundaryEdgeFact).not.toBeNull();
+    // D2: the field exists, and now feeds the brief's land-use section too
+    // (proven at the unit level in r1BriefComposeLandUse.test.ts; this only
+    // proves the wiring reaches the real route).
+    expect(res.body.landUseFact).not.toBeUndefined();
+    expect(res.body.landUseFact).not.toBeNull();
+    // D3: USER_PAID is accessTier "paid" with NO subscriptionTier and NO
+    // Property Unlock on PARCEL -- grantsCadRollValuation must be false, so
+    // ownerFact must be the SAME typed studio-gated refusal
+    // brokerageNodeFacets.ts's facets route would return for this caller,
+    // never real owner data. This is the leak-prevention half of D3, not
+    // just presence.
+    expect(res.body.ownerFact).toMatchObject({
+      state: "refused",
+      code: "studio-gated",
+    });
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("an unlocked user (Property Unlock on THIS parcel, same gate as the CAD dollar fields) GRANTS ownerFact -- not just present, actually gated open", async () => {
+    await db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(PARCEL),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "29.88000",
+      lngRounded: "-97.68000",
+      payloadJson: {
+        facetSchemaVersion: "node-facets-tier1-v1",
+        tier: 1,
+        parcelNodeId: PARCEL,
+        countyFips: "48055",
+        countyName: "Caldwell",
+        baseFacts: {
+          apn: PARCEL.split(":")[1],
+          situsAddress: "1 D3 UNLOCK TEST RD",
+          situsState: "TX",
+          acreage: { value: 1, sqft: 43560, method: "shoelace-wgs84" },
+        },
+        zoning: null,
+        envelope: { status: "declined", confidence: 0, provisional: true },
+        facetCoverage: { baseFacts: true, landUse: false, acreage: true, zoning: false, envelope: false },
+        provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+        bakedAt: "2026-09-07T00:00:00.000Z",
+      },
+      contentHash: "test-hash-brief-d3-unlocked",
+    });
+    // USER_UNLOCKED has an active Property Unlock on PARCEL (top-level
+    // beforeEach) but is accessTier "free" -- so a grant here can only come
+    // from the Property Unlock half of grantsOwnerCoGatedFields, exactly
+    // mirroring how the CAD dollar fields already prove this same gate.
+    const res = await asUser(
+      request(getApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send({ parcelNodeId: PARCEL }),
+      USER_UNLOCKED,
+    );
+    expect(res.status).toBe(200);
+    // No owner-fact atom seeded, so the gate is open but the atom read
+    // itself misses -- still proves the gate did NOT refuse with
+    // studio-gated, which is the behavior under test.
+    expect(res.body.ownerFact.code).not.toBe("studio-gated");
   });
 });

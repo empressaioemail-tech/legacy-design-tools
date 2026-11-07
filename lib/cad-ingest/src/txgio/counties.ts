@@ -408,6 +408,11 @@ export const TXGIO_COUNTIES: Record<string, TxgioCounty> = {
   "48187": county("48187", "Guadalupe"),
   "48027": county("48027", "Bell"),
   "48309": county("48309", "McLennan"),
+  // OPS-24 Phase 1 (2026-10-07): Burnet. Store-truth confirms geometry +
+  // StratMap land-use are ALREADY loaded (cad_property has 49,243 Burnet
+  // rows via the stratmap-landuse adapter) — this line is product config
+  // catching up to that store state, not triggering a new load.
+  "48053": county("48053", "Burnet"),
   // DFW fan (2026-08-04)
   "48113": county("48113", "Dallas"),
   "48439": county("48439", "Tarrant"),

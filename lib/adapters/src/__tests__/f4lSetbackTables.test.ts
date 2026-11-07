@@ -66,18 +66,25 @@ describe("F4l setback tables", () => {
     expect(table!.jurisdictionDisplayName).toBe("City of Georgetown, TX");
     assertWellFormed(table!);
     const names = table!.districts.map((d) => d.district_name);
+    // The three original single-family districts (RE/RL/RS) were replaced
+    // 2026-09-07 by the rewrite's four SF districts (RE/RT/RS/RM, effective
+    // 2026-11-01); MF-2/C-3 and the rest of the non-SF districts are
+    // unchanged from the currently-governing code -- see georgetown-tx.json's
+    // own note for the full two-vintage record.
     expect(names).toEqual(
       expect.arrayContaining([
-        "RE Residential Estate",
-        "RS Residential Single-Family",
+        "RE Residential Estate District",
+        "RT Residential Traditional District",
+        "RS Residential Suburban District",
+        "RM Residential Mix District",
         "MF-2 High Density Multifamily",
         "C-3 General Commercial",
       ]),
     );
-    // Spot-check verified values: RS front 20, side 6; MF-2 height 45.
-    const rs = getSetbackDistrict("georgetown_tx", "RS Residential Single-Family");
+    // Spot-check verified values: rewrite RS front 20, side 5; MF-2 height 45 (unchanged, current code).
+    const rs = getSetbackDistrict("georgetown_tx", "RS Residential Suburban District");
     expect(rs?.front_ft).toBe(20);
-    expect(rs?.side_ft).toBe(6);
+    expect(rs?.side_ft).toBe(5);
     const mf2 = getSetbackDistrict("georgetown_tx", "MF-2 High Density Multifamily");
     expect(mf2?.max_height_ft).toBe(45);
   });
@@ -96,11 +103,14 @@ describe("F4l setback tables", () => {
         "MF-1 Multifamily Residential 1",
       ]),
     );
-    // Spot-check: SF-1 front 30, coverage 40; height not_specified -> stand-in 100.
+    // Spot-check: SF-1 front 30, coverage 40; height not_specified -> stand-in
+    // 999 (CTX-B, 2026-09-07: RULING 4 unified the sentinel to 999 across all
+    // districts -- 999 cannot be mistaken for a real building height the way
+    // 100 can).
     const sf1 = getSetbackDistrict("round_rock_tx", "SF-1 Single-Family Residential 1");
     expect(sf1?.front_ft).toBe(30);
     expect(sf1?.max_lot_coverage_pct).toBe(40);
-    expect(sf1?.max_height_ft).toBe(100);
+    expect(sf1?.max_height_ft).toBe(999);
   });
 
   it("resolves Leander under its synthesized key", () => {
@@ -184,7 +194,9 @@ describe("F4l setback tables", () => {
 
   it("populates WDLL 51 cited no-honest-empty tables", () => {
     const expectedCounts = {
-      "austin-tx": 9,
+      // 9 WDLL-51 rows + 28 P-258 lane-a rows added 2026-09-16 (austin row
+      // coverage is asserted in detail by austinSetbacks.test.ts).
+      "austin-tx": 37,
       "liberty-hill-tx": 14,
       "lockhart-tx": 7,
       "san-antonio-tx": 21,

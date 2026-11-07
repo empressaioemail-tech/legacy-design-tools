@@ -59,6 +59,14 @@ import {
   type MaterializableElement,
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { isIccTitleAtom } from "@workspace/codes/iccTitles";
+import {
+  iccAuthorizedUser,
+  iccCitationFromAtom,
+  iccCitationsForFindings,
+  recordIccUsage,
+  type IccUsageCitation,
+} from "../lib/iccUsage";
 import {
   keyFromEngagementOrSynthesize,
   retrieveAtomsForQuestion,
@@ -84,6 +92,7 @@ import {
   RejectFindingParams,
 } from "@workspace/api-zod";
 import {
+  FINDING_ANTHROPIC_MODEL,
   resolveFindingOrchestratedMode,
   type BimElementInput,
   type BriefingSourceInput,
@@ -537,7 +546,9 @@ function toCodeSectionInput(a: RetrievedAtom): CodeSectionInput {
   return {
     atomId: canonicalOverlayAtomKey(a.id),
     label,
-    snippet: a.body,
+    // G-309 (Exhibit D): an ICC-title atom goes out as a citation only (label
+    // carries section, title, edition). No body text reaches the generator.
+    snippet: isIccTitleAtom(a) || a.codeSource === "icc-model-code" ? "" : a.body,
   };
 }
 
@@ -596,6 +607,8 @@ export async function resolveEngineInputs(
   sources: BriefingSource[];
   codeSections: CodeSectionInput[];
   bimElements: BimElementInput[];
+  /** A13c: ledger ids (book, section) of the ICC atoms retrieved, by engine atom id. */
+  iccCitationsByAtomId: Map<string, IccUsageCitation>;
 }> {
   const subRows = await db
     .select({ engagementId: submissions.engagementId })
@@ -609,6 +622,7 @@ export async function resolveEngineInputs(
       sources: [],
       codeSections: [],
       bimElements: [],
+      iccCitationsByAtomId: new Map(),
     };
   }
 
@@ -683,6 +697,7 @@ export async function resolveEngineInputs(
   // fallback query handles the briefing-not-yet-generated case so a
   // submission can still get code context from the corpus.
   let codeSections: CodeSectionInput[] = [];
+  const iccCitationsByAtomId = new Map<string, IccUsageCitation>();
   if (jurisdictionKey) {
     const fallbackQuery =
       `Compliance review for ${
@@ -701,6 +716,10 @@ export async function resolveEngineInputs(
         logger: log,
       });
       codeSections = atoms.map(toCodeSectionInput);
+      for (const a of atoms) {
+        const c = iccCitationFromAtom(a);
+        if (c) iccCitationsByAtomId.set(canonicalOverlayAtomKey(a.id), c);
+      }
       log.info(
         {
           submissionId,
@@ -790,7 +809,13 @@ export async function resolveEngineInputs(
     }
   }
 
-  return { briefingNarrative, sources, codeSections, bimElements };
+  return {
+    briefingNarrative,
+    sources,
+    codeSections,
+    bimElements,
+    iccCitationsByAtomId,
+  };
 }
 
 /**
@@ -1005,6 +1030,7 @@ async function runFindingGeneration(args: {
   generationId: string;
   reqLog: typeof logger;
   planSetPieceIds?: string[];
+  authorizedUser?: string | null;
 }): Promise<void> {
   const { submissionId, generationId, reqLog, planSetPieceIds } = args;
   try {
@@ -1071,8 +1097,7 @@ async function runFindingGeneration(args: {
         generationId,
         consequenceStratum: consequenceRoute.stratum,
         modelTier: consequenceRoute.modelTier,
-        grokModel: consequenceRoute.grokModel,
-        ensemble: consequenceRoute.ensembleEnabled,
+        anthropicModel: FINDING_ANTHROPIC_MODEL,
         routingLabel: consequenceRoute.label,
       },
       "finding generation: S5 consequence-gated routing",
@@ -1081,13 +1106,6 @@ async function runFindingGeneration(args: {
     const visionClient = await getVisionAnthropicClient();
     const engineOptions = {
       mode,
-      ...(llmClient?.kind === "grok"
-        ? {
-            grokClient: llmClient.client,
-            grokModel: consequenceRoute.grokModel,
-            ensembleEnabled: consequenceRoute.ensembleEnabled,
-          }
-        : {}),
       ...(llmClient?.kind === "anthropic"
         ? { anthropicClient: llmClient.client }
         : {}),
@@ -1286,6 +1304,14 @@ async function runFindingGeneration(args: {
       });
     }
 
+    // A13c: one ledger row set per run for the ICC citations the findings show.
+    void recordIccUsage({
+      requestId: generationId,
+      authorizedUser: args.authorizedUser ?? null,
+      surface: "findings",
+      citations: iccCitationsForFindings(persistedRows, inputs.iccCitationsByAtomId),
+    });
+
     if (result.invalidCitations.length > 0) {
       reqLog.warn(
         {
@@ -1378,7 +1404,7 @@ export type FindingKickoffOutcome =
 export async function kickoffFindingGenerationForSubmission(
   submissionId: string,
   reqLog: typeof logger,
-  opts: { planSetPieceIds?: string[] } = {},
+  opts: { planSetPieceIds?: string[]; authorizedUser?: string | null } = {},
 ): Promise<FindingKickoffOutcome> {
   let kickoffRow: FindingRun;
   try {
@@ -1412,6 +1438,7 @@ export async function kickoffFindingGenerationForSubmission(
     generationId,
     reqLog,
     planSetPieceIds: opts.planSetPieceIds,
+    authorizedUser: opts.authorizedUser ?? null,
   });
 
   reqLog.info(
@@ -1472,6 +1499,7 @@ router.post(
         reqLog,
         {
           planSetPieceIds: bodyParse.data.planSetPieceIds,
+          authorizedUser: iccAuthorizedUser(req),
         },
       );
       if (outcome.kind === "already_running") {

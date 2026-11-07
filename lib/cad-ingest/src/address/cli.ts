@@ -21,17 +21,40 @@
  * DATABASE_URL must point at the target Postgres unless --dry-run /
  * --count-only.
  *
- * Replace semantics: the county's existing rows are deleted before the
- * insert pass, so re-runs and fresher vintages are idempotent. The run
- * is EXIT-BOUNDED and county-partitioned: count -> page -> load ->
- * summary, then exit. A statewide crawl is the operator looping this CLI
- * over counties (each resumable at its county boundary); this CLI never
- * pulls the full ~11.7M statewide set in one invocation. Pass --limit
- * for a bounded sample. Exit code 0 on success, 1 on fatal errors or
- * when zero features parsed (non-count/dry-run).
+ * Replace semantics: FETCH-THEN-SWAP (P-499 stage-check-swap, applied to
+ * the existing txgio_address table — 2026-10-12). The whole county is
+ * crawled and buffered in memory FIRST; only a crawl that looks complete
+ * (features read == the service's own count, every read feature
+ * accounted for as parsed or skipped, at least one record survives the
+ * objectid dedupe) ever reaches the database, and then the county's old
+ * rows are deleted and the new ones inserted in ONE transaction. Before
+ * this, the delete and the insert were two separate statements with the
+ * network crawl streaming DURING the insert half — for a live county
+ * that deleted the serving rows the moment the delete ran and rebuilt
+ * them gradually over the whole crawl (Bexar: 721,120 points, on the
+ * order of 10-20 minutes partial or missing), and a crawl that died
+ * midway left the county permanently partly empty. See `./ingest.ts`'s
+ * module comment and `bufferAddressRecords` / `checkAddressFetchComplete`
+ * / `swapCountyAddresses` for the three pieces.
+ *
+ * Re-runs and fresher vintages are idempotent either way: a wholesale
+ * swap replaces the county whole, so object_id churn across vintages
+ * never has to reconcile against stale rows.
+ *
+ * The run is EXIT-BOUNDED and county-partitioned: count -> page -> load
+ * -> summary, then exit. A statewide crawl is the operator looping this
+ * CLI over counties (each resumable at its county boundary); this CLI
+ * never pulls the full ~11.7M statewide set in one invocation. Pass
+ * --limit for a bounded DRY-RUN sample — on a real (non-dry-run) write,
+ * a --limit below the service's own count is a short crawl by
+ * definition and is refused (ADDRESS_FETCH_INCOMPLETE) rather than
+ * swapping a partial sample into a live county. Exit code 0 on success,
+ * 1 on a fatal error or zero features parsed (dry-run/count-only), 2 on
+ * a coded refusal (LAPTOP_WRITE_FROZEN or ADDRESS_FETCH_INCOMPLETE).
  */
 
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { resolveAddressCounty } from "./counties";
@@ -43,12 +66,15 @@ import {
 } from "./service";
 import { normalizeAddressFeature, type AddressFeature } from "./parse";
 import {
-  deleteCountyAddresses,
-  upsertAddresses,
   ADDRESS_DEFAULT_BATCH_SIZE,
+  bufferAddressRecords,
+  checkAddressFetchComplete,
+  swapCountyAddresses,
+  type AddressSwapSummary,
 } from "./ingest";
 import { newCounters, type ParseCounters } from "../types";
 import type { TxgioAddressRecord } from "./parse";
+import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
 
 const { Pool } = pg;
 
@@ -59,6 +85,29 @@ function log(msg: string): void {
 function fail(msg: string): never {
   console.error(`[address-ingest] ERROR: ${msg}`);
   process.exit(1);
+}
+
+export interface WriteGateRefusal {
+  code: typeof LAPTOP_WRITE_FROZEN;
+  message: string;
+}
+
+/**
+ * Cluster-job write gate (2026-10-07 stage-3 ruling; jobPlane.ts, reused —
+ * not copied — from cad-ingest's cli.ts gate in #793). `isWriteRun` is the
+ * caller's own determination of whether this invocation will write (here:
+ * neither --dry-run nor --count-only). Returns a refusal descriptor for a
+ * write run outside a cluster Job; null when the run may proceed. Exported
+ * so the gate is testable directly, independent of argv parsing / network /
+ * DB.
+ */
+export function addressIngestWriteGate(
+  isWriteRun: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): WriteGateRefusal | null {
+  if (!isWriteRun) return null;
+  if (isClusterJobExecution(env)) return null;
+  return { code: LAPTOP_WRITE_FROZEN, message: LAPTOP_WRITE_FROZEN_MESSAGE };
 }
 
 async function main(): Promise<void> {
@@ -116,6 +165,19 @@ async function main(): Promise<void> {
     fail("DATABASE_URL must be set (or pass --dry-run / --count-only)");
   }
 
+  // 2026-10-07 stage-3 ruling (jobPlane.ts): a write (not --dry-run /
+  // --count-only) runs only inside a cluster Job on the DigitalOcean job
+  // plane -- no break-glass laptop run (carries the 2026-09-12
+  // no-break-glass ruling to this loader, which previously checked
+  // nothing). Refuses before any network call.
+  const addressGateRefusal = addressIngestWriteGate(!countOnly && !dryRun);
+  if (addressGateRefusal) {
+    console.error(
+      JSON.stringify({ event: "address-ingest.refused", ...addressGateRefusal }),
+    );
+    process.exit(2);
+  }
+
   const rateMs =
     values["rate-ms"] !== undefined
       ? Number(values["rate-ms"])
@@ -158,38 +220,55 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. Load (or drain when --dry-run).
-  let rowsInserted = 0;
-  if (dryRun) {
-    for await (const _rec of records()) {
-      // parse-only
+  // 3. FETCH EVERYTHING FIRST, for every mode (P-499 stage-check-swap):
+  // the whole crawl is buffered in memory, deduped by objectid, BEFORE
+  // any DB connection is opened. --dry-run stops here; --count-only
+  // already returned above and never reaches this line.
+  const { records: buffered, duplicateObjectIds } = await bufferAddressRecords(
+    records(),
+  );
+
+  // 4. CHECK, then SWAP (real writes only — dry-run writes nothing
+  // regardless, so it is never refused).
+  let swapSummary: AddressSwapSummary | null = null;
+  if (!dryRun) {
+    const refusal = checkAddressFetchComplete({
+      countyFips: fips as string,
+      countyName: countyName as string,
+      serviceCount: count,
+      rowsRead: counters.rowsRead,
+      rowsParsed: counters.rowsParsed,
+      rowsSkipped: counters.rowsSkipped,
+      bufferedAfterDedupe: buffered.length,
+    });
+    if (refusal) {
+      console.error(JSON.stringify({ event: "address-ingest.refused", ...refusal }));
+      process.exit(2);
     }
-  } else {
+
     const pool = new Pool({ connectionString: databaseUrl });
     try {
       const db = drizzle(pool);
-      log(`replacing existing ${fips} rows`);
-      await deleteCountyAddresses(db, fips as string);
-      const summary = await upsertAddresses(db, records(), {
+      log(`swapping ${fips}: lock -> delete -> insert ${buffered.length} row(s) -> commit`);
+      swapSummary = await swapCountyAddresses(db, fips as string, buffered, {
         sourceFile,
         sourceVintage: vintage,
         batchSize:
           values["batch-size"] !== undefined
             ? Number(values["batch-size"])
             : ADDRESS_DEFAULT_BATCH_SIZE,
-        onBatch: (total) => {
+        onBatchInserted: (total) => {
           if (total % 25_000 < ADDRESS_DEFAULT_BATCH_SIZE) {
             log(`inserted ${total} rows...`);
           }
         },
       });
-      rowsInserted = summary.rowsInserted;
     } finally {
       await pool.end();
     }
   }
 
-  // 4. Summary.
+  // 5. Summary.
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   log("---- ingest summary ----");
   log(`county:            ${fips} (${countyName})`);
@@ -197,8 +276,22 @@ async function main(): Promise<void> {
   log(`vintage:           ${vintage}`);
   log(`features read:     ${counters.rowsRead}`);
   log(`features parsed:   ${counters.rowsParsed}`);
-  log(`rows inserted:     ${dryRun ? "0 (dry-run)" : rowsInserted}`);
-  log(`features skipped:  ${counters.rowsSkipped} (no addr / no geometry)`);
+  log(`fetch complete: read ${counters.rowsRead} = service ${count}`);
+  log(`rows inserted:     ${dryRun ? "0 (dry-run)" : swapSummary?.rowsInserted ?? 0}`);
+  log(
+    dryRun
+      ? "swap: skipped (dry-run)"
+      : `swap: deleted ${swapSummary?.rowsDeleted ?? 0} in ${(
+          (swapSummary?.deleteMs ?? 0) / 1000
+        ).toFixed(1)}s, inserted ${swapSummary?.rowsInserted ?? 0} in ${(
+          (swapSummary?.insertMs ?? 0) / 1000
+        ).toFixed(1)}s (one transaction)`,
+  );
+  log(`features skipped:  ${counters.rowsSkipped} (no addr / no objectid / no geometry)`);
+  log(
+    `duplicate objectids dropped: ${duplicateObjectIds}` +
+      " (same objectid seen twice in this load -- should be 0; a reconciliation gap means it was not)",
+  );
   if (limit !== undefined) log(`limit:             ${limit} (bounded sample)`);
   log(`duration:          ${seconds}s`);
   if (counters.skipSamples.length > 0) {
@@ -209,7 +302,17 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error("[address-ingest] FATAL:", err);
-  process.exit(1);
-});
+// Direct-execution guard: only run when this file is the entrypoint (`tsx
+// src/address/cli.ts`), not when it is imported for its exported
+// `addressIngestWriteGate` by a test. Mirrors ../txgio/zoning-cli.ts's own
+// guard. `pathToFileURL` normalizes Windows drive-letter/slash-style
+// differences between `import.meta.url` and `process.argv[1]`.
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error("[address-ingest] FATAL:", err);
+    process.exit(1);
+  });
+}

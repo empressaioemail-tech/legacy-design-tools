@@ -31,6 +31,12 @@ export const ADDRESS_COUNTIES: Record<string, AddressCounty> = {
   "48021": { fips: "48021", name: "Bastrop" },
   "48055": { fips: "48055", name: "Caldwell" },
   "48029": { fips: "48029", name: "Bexar" },
+  // OPS-24 Phase 1: lets the address-point ingest reach Burnet's 35,857
+  // TxGIO address points (StratMap Address Points service, county='Burnet')
+  // by `--county=48053`. NOT loaded by this PR — the WDLL (P-287) records
+  // address points as still 0 of 35,857 for Burnet; this is the registry
+  // entry only.
+  "48053": { fips: "48053", name: "Burnet" },
 };
 
 export function resolveAddressCounty(input: string): AddressCounty | undefined {

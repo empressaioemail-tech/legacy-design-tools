@@ -94,6 +94,7 @@ describe("GET /score/registry", () => {
     const payload = body() as {
       scoreable: string[];
       unspecified: Array<{ railKey: string; unspecifiedReason: string; specOwner: string }>;
+      retiredDenominator: Array<{ railKey: string; denominatorKind: string; basis: string }>;
     };
 
     // P-59 mud scorer (2026-08-23): all 14 rails scoreable; none unspecified.
@@ -118,5 +119,10 @@ describe("GET /score/registry", () => {
     for (const key of payload.scoreable) {
       expect(unspecifiedKeys).not.toContain(key);
     }
+    // Geometry's live rows are retired (S-22): not scoreable, not unspecified.
+    const retiredKeys = (payload.retiredDenominator ?? []).map((r) => r.railKey);
+    expect(retiredKeys).toContain("geometry");
+    expect(payload.scoreable).not.toContain("geometry");
+    expect(unspecifiedKeys).not.toContain("geometry");
   });
 });

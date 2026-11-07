@@ -46,6 +46,7 @@ import {
   SECTION_LABELS,
   type BriefingSections,
 } from "@workspace/briefing-engine";
+import { iccNoticeHtml } from "@workspace/icc-notice";
 import {
   BRIEFING_PDF_FOOTER_TOKENS,
   BRIEFING_PDF_HEADER_TOKENS,
@@ -344,6 +345,21 @@ function isImageMime(contentType: string | null | undefined): boolean {
   return contentType.toLowerCase().startsWith("image/");
 }
 
+/**
+ * G-309 (ICC Exhibit B): the ICC notice and disclaimer, only when the briefing
+ * cites ICC: a [[CODE:<atomId>]] token naming an ICC atom, or a source whose
+ * provider is ICC.
+ */
+function renderIccNotice(input: RenderBriefingHtmlInput): string {
+  const cites: string[] = input.sources.map((s) => s.provider ?? "");
+  const sections = input.narrative.sections as unknown as Record<string, unknown>;
+  for (const body of Object.values(sections)) {
+    const text = typeof body === "string" ? body : JSON.stringify(body ?? "");
+    for (const m of text.matchAll(CODE_TOKEN)) cites.push(m[1]!);
+  }
+  return iccNoticeHtml(cites);
+}
+
 /** Render the full briefing as a single HTML document. */
 export function renderBriefingHtml(input: RenderBriefingHtmlInput): string {
   const header =
@@ -369,6 +385,7 @@ export function renderBriefingHtml(input: RenderBriefingHtmlInput): string {
     renderAppendix(input.sources),
     renderMap(input.engagement),
     renderThumbnailGrid(input.sources),
+    renderIccNotice(input),
     "</body>",
     "</html>",
   ].join("\n");

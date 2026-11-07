@@ -1,4 +1,5 @@
 import type { WebCodeSectionInput } from "../webCodeFetch/index";
+import { isIccSource } from "@workspace/icc-notice";
 import type { ReasoningAtomRecord } from "./types";
 
 /** Map a persisted reasoning atom to engine CodeSectionInput (deeplink citation UX). */
@@ -8,14 +9,18 @@ export function reasoningAtomToCodeSection(
 ): WebCodeSectionInput {
   const primary = atom.sources[0];
   const verified = atom.verificationState === "verified";
+  // G-309: ICC rows are citation-only. Never carry stored text into a section.
+  const icc = atom.sources.some((s) => isIccSource(s));
   return {
     atomId: atom.id,
     label:
       label ??
       `${atom.codeRef} [${verified ? "verified" : "unverified"} web ${atom.edition}]`,
-    snippet: atom.snippet
-      ? atom.snippet
-      : atom.reasoning ?? undefined,
+    snippet: icc
+      ? undefined
+      : atom.snippet
+        ? atom.snippet
+        : atom.reasoning ?? undefined,
     webProvenance: {
       sourceUrl: primary?.url ?? "",
       sources: atom.sources,

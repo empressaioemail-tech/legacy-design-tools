@@ -1,0 +1,1018 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "cottonwood-shores-tx",
+  "jurisdictionDisplayName": "City of Cottonwood Shores, TX",
+  "effectiveDate": "2026-04-19",
+  "note": "City of Cottonwood Shores, TX. INSTRUMENT: Zoning Ordinance (Ord. 14000, Exhibit 9B) §§ 2.01(j) Chart 1 (yards/height), 2.01(k) Chart 2 (lot coverage/accessory standards) and Chart 3 (F.A.R.); current through Ord. No. 12001 (2026-04-19). SOURCE: ecode360.com, pack C (2026-10-07), cross-matched against the register (LDT #800). SCOPE: all 18 of Cottonwood Shores' districts serve -- pack C found no conditional or no-dimensional-standards district in this city's chart. READING RULES: (1) Chart 1's R-1/R-2/R-3/M-1/M-2 rows state lot coverage and impervious cover as a SCHEDULE keyed to lot size (per Chart 2: <=5,000 sf = 50%/60%; 5,001-10,000 = 40%/45%; 10,001-43,560 = 40%/45%; >43,560 = 35%/30%), not one scalar per district -- coding any single tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8, zero wrong values), so max_lot_coverage_pct and max_impervious_pct are not_specified for these five districts and the full tiered schedule is quoted in each one's provenance. (2) C-1/C-2/C-3/GUI/I-1/I-2 and the PUD family (PUD, PUD-R, PUD-M, PUD-C, CUD) instead state a flat building-coverage percentage AND a flat, separately-stated impervious-cover percentage (e.g. \"60% buildings / 70% impervious\") -- both are coded, into max_lot_coverage_pct and max_impervious_pct respectively. (3) OS and A are not listed in Chart 2 at all, so both coverage fields are not_specified for those two (never read as a permissive zero). (4) The PUD family's height cell is \"****\", a footnote marker used TWICE in the ordinance's own footnote key for two different zones (\"within 100 ft North of Cottonwood Drive: not to exceed 25 ft\" vs. \"within 200 ft South of Cottonwood Drive: defined within the development agreement\") -- since the district-wide height depends on which zone a parcel sits in, and the southern zone has no number at all, max_height_ft is not_specified (999) for all five PUD-family rows rather than picking the one zone's 25-ft cap. (5) R-1's front yard (\"25 feet*\") and M-1's front/rear (\"18 feet*\" / \"4 feet*\") carry a footnote (* = \"for 100-foot-deep lots\") that qualifies the stated figure rather than offering an alternative number; the stated figure is coded and the qualifier is quoted. SENTINELS: not_specified = 100, except max_height_ft's canonical 999. No code-section atom corpus exists yet for cottonwood_shores_tx; every value is primary-source-verified.",
+  "districts": [
+    {
+      "district_name": "R-1 Single Family Residential (R-1)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"R-1\", Single Family Residential): \"25 feet*\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"R-1\", Single Family Residential): \"5 feet***\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"R-1\", Single Family Residential): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-1\", Single Family Residential): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"R-1\", Single Family Residential): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-1\", Single Family Residential): \"40 to 50% by lot size (Chart 2)\". NOT a single scalar: Chart 2 sets a DIFFERENT lot-coverage percentage per lot-size tier (per the row's own notes: 5,000 sf or less = 50%; 5,001-10,000 = 40%; 10,001-43,560 = 40%; 43,560+ = 35%). Coding any one tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8), so this field is not_specified and the full tiered schedule is quoted. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-1\", Single Family Residential): \"40 to 50% by lot size (Chart 2)\". Same tiered-by-lot-size schedule governs the impervious figure (60%/45%/45%/30% by the same tiers) -- not_specified for the same reason as lot coverage. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-2 Single Family Residential (R-2)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"R-2\", Single Family Residential): \"25 feet*\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"R-2\", Single Family Residential): \"5 feet***\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"R-2\", Single Family Residential): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-2\", Single Family Residential): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"R-2\", Single Family Residential): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-2\", Single Family Residential): \"40 to 50% by lot size (Chart 2)\". NOT a single scalar: Chart 2 sets a DIFFERENT lot-coverage percentage per lot-size tier (per the row's own notes: 5,000 sf or less = 50%; 5,001-10,000 = 40%; 10,001-43,560 = 40%; 43,560+ = 35%). Coding any one tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8), so this field is not_specified and the full tiered schedule is quoted. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-2\", Single Family Residential): \"40 to 50% by lot size (Chart 2)\". Same tiered-by-lot-size schedule governs the impervious figure (60%/45%/45%/30% by the same tiers) -- not_specified for the same reason as lot coverage. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "R-3 Multi-Family Residential (R-3)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"R-3\", Multi-Family Residential): \"25 feet*\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"R-3\", Multi-Family Residential): \"5 feet***\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"R-3\", Multi-Family Residential): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"R-3\", Multi-Family Residential): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"R-3\", Multi-Family Residential): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"R-3\", Multi-Family Residential): \"40 to 50% by lot size (Chart 2)\". NOT a single scalar: Chart 2 sets a DIFFERENT lot-coverage percentage per lot-size tier (per the row's own notes: 5,000 sf or less = 50%; 5,001-10,000 = 40%; 10,001-43,560 = 40%; 43,560+ = 35%). Coding any one tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8), so this field is not_specified and the full tiered schedule is quoted. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"R-3\", Multi-Family Residential): \"40 to 50% by lot size (Chart 2)\". Same tiered-by-lot-size schedule governs the impervious figure (60%/45%/45%/30% by the same tiers) -- not_specified for the same reason as lot coverage. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-1 Manufactured/Mobile Housing (M-1)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"M-1\", Manufactured/Mobile Housing): \"18 feet*\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"M-1\", Manufactured/Mobile Housing): \"4 feet*\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"M-1\", Manufactured/Mobile Housing): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"M-1\", Manufactured/Mobile Housing): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"M-1\", Manufactured/Mobile Housing): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"M-1\", Manufactured/Mobile Housing): \"40 to 50% by lot size (Chart 2)\". NOT a single scalar: Chart 2 sets a DIFFERENT lot-coverage percentage per lot-size tier (per the row's own notes: 5,000 sf or less = 50%; 5,001-10,000 = 40%; 10,001-43,560 = 40%; 43,560+ = 35%). Coding any one tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8), so this field is not_specified and the full tiered schedule is quoted. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"M-1\", Manufactured/Mobile Housing): \"40 to 50% by lot size (Chart 2)\". Same tiered-by-lot-size schedule governs the impervious figure (60%/45%/45%/30% by the same tiers) -- not_specified for the same reason as lot coverage. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 18,
+      "rear_ft": 4,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "M-2 Manufactured/Mobile Housing Park (M-2)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"M-2\", Manufactured/Mobile Housing Park): \"20 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"M-2\", Manufactured/Mobile Housing Park): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"M-2\", Manufactured/Mobile Housing Park): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"M-2\", Manufactured/Mobile Housing Park): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"M-2\", Manufactured/Mobile Housing Park): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"M-2\", Manufactured/Mobile Housing Park): \"40 to 50% by lot size (Chart 2, listed as M2*)\". NOT a single scalar: Chart 2 sets a DIFFERENT lot-coverage percentage per lot-size tier (per the row's own notes: 5,000 sf or less = 50%; 5,001-10,000 = 40%; 10,001-43,560 = 40%; 43,560+ = 35%). Coding any one tier's number as THE district value would be wrong for parcels in the other tiers (WDLL check 8), so this field is not_specified and the full tiered schedule is quoted. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"M-2\", Manufactured/Mobile Housing Park): \"40 to 50% by lot size (Chart 2, listed as M2*)\". Same tiered-by-lot-size schedule governs the impervious figure (60%/45%/45%/30% by the same tiers) -- not_specified for the same reason as lot coverage. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 20,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "OS Open Space (OS)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"OS\", Open Space): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"OS\", Open Space): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"OS\", Open Space): \"10 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"OS\", Open Space): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"OS\", Open Space): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"OS\", Open Space): \"NOT SPECIFIED (not in Chart 2)\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"OS\", Open Space): \"NOT SPECIFIED (not in Chart 2)\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 10,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "A Agricultural (A)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"A\", Agricultural): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"A\", Agricultural): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"A\", Agricultural): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"A\", Agricultural): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"A\", Agricultural): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"A\", Agricultural): \"NOT SPECIFIED (not in Chart 2)\". The district's own dimensional chart carries no lot-coverage number at all. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"A\", Agricultural): \"NOT SPECIFIED (not in Chart 2)\". No impervious-surface standard distinct from lot coverage is stated for this district. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 100,
+      "max_impervious_pct": 100
+    },
+    {
+      "district_name": "GUI Government Utility Institutional (GUI)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"GUI\", Government Utility Institutional): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"GUI\", Government Utility Institutional): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"GUI\", Government Utility Institutional): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"GUI\", Government Utility Institutional): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"GUI\", Government Utility Institutional): \"35 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"GUI\", Government Utility Institutional): \"60% buildings / 70% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"GUI\", Government Utility Institutional): \"60% buildings / 70% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 15,
+      "side_corner_ft": 15,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 70
+    },
+    {
+      "district_name": "C-1 Light Commercial (C-1)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"C-1\", Light Commercial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"C-1\", Light Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"C-1\", Light Commercial): \"7 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"C-1\", Light Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"C-1\", Light Commercial): \"60 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"C-1\", Light Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"C-1\", Light Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 70
+    },
+    {
+      "district_name": "C-2 Medium Commercial (C-2)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"C-2\", Medium Commercial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"C-2\", Medium Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"C-2\", Medium Commercial): \"7 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"C-2\", Medium Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"C-2\", Medium Commercial): \"60 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"C-2\", Medium Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"C-2\", Medium Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 70
+    },
+    {
+      "district_name": "C-3 Heavy Commercial (C-3)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"C-3\", Heavy Commercial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"C-3\", Heavy Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"C-3\", Heavy Commercial): \"7 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"C-3\", Heavy Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"C-3\", Heavy Commercial): \"60 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"C-3\", Heavy Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"C-3\", Heavy Commercial): \"60% buildings / 70% impervious (Chart 2); F.A.R. 1.8 (Chart 3)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 60,
+      "max_impervious_pct": 70
+    },
+    {
+      "district_name": "I-1 Industrial (I-1)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"I-1\", Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"I-1\", Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"I-1\", Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"I-1\", Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"I-1\", Industrial): \"60 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"I-1\", Industrial): \"50% buildings / 60% impervious (Chart 2); F.A.R. 1.5 (Chart 3)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"I-1\", Industrial): \"50% buildings / 60% impervious (Chart 2); F.A.R. 1.5 (Chart 3)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 60
+    },
+    {
+      "district_name": "I-2 Heavy Industrial (I-2)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"I-2\", Heavy Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"I-2\", Heavy Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"I-2\", Heavy Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"I-2\", Heavy Industrial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"I-2\", Heavy Industrial): \"60 feet**\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"I-2\", Heavy Industrial): \"50% buildings / 60% impervious (Chart 2); F.A.R. 1.5 (Chart 3)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"I-2\", Heavy Industrial): \"50% buildings / 60% impervious (Chart 2); F.A.R. 1.5 (Chart 3)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 25,
+      "side_corner_ft": 25,
+      "max_height_ft": 60,
+      "max_lot_coverage_pct": 50,
+      "max_impervious_pct": 60
+    },
+    {
+      "district_name": "PUD Planned Unit Development (PUD)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"PUD\", Planned Unit Development): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"PUD\", Planned Unit Development): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"PUD\", Planned Unit Development): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"PUD\", Planned Unit Development): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"PUD\", Planned Unit Development): \"****\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"PUD\", Planned Unit Development): \"40% buildings / 50% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"PUD\", Planned Unit Development): \"40% buildings / 50% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "PUD-R Planned Unit Development - Residential (PUD - R)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"PUD - R\", Planned Unit Development - Residential): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"PUD - R\", Planned Unit Development - Residential): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"PUD - R\", Planned Unit Development - Residential): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"PUD - R\", Planned Unit Development - Residential): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"PUD - R\", Planned Unit Development - Residential): \"****\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"PUD - R\", Planned Unit Development - Residential): \"40% buildings / 50% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"PUD - R\", Planned Unit Development - Residential): \"40% buildings / 50% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 5,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "PUD-M Planned Unit Development - Mixed Use (PUD - M)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"PUD - M\", Planned Unit Development - Mixed Use): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"PUD - M\", Planned Unit Development - Mixed Use): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"PUD - M\", Planned Unit Development - Mixed Use): \"5 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"PUD - M\", Planned Unit Development - Mixed Use): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"PUD - M\", Planned Unit Development - Mixed Use): \"****\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"PUD - M\", Planned Unit Development - Mixed Use): \"40% buildings / 50% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"PUD - M\", Planned Unit Development - Mixed Use): \"40% buildings / 50% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 15,
+      "side_ft": 5,
+      "side_corner_ft": 15,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "PUD-C Planned Unit Development - Commercial (PUD - C)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"PUD - C\", Planned Unit Development - Commercial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"PUD - C\", Planned Unit Development - Commercial): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"PUD - C\", Planned Unit Development - Commercial): \"7 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"PUD - C\", Planned Unit Development - Commercial): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"PUD - C\", Planned Unit Development - Commercial): \"****\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"PUD - C\", Planned Unit Development - Commercial): \"40% buildings / 50% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"PUD - C\", Planned Unit Development - Commercial): \"40% buildings / 50% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50
+    },
+    {
+      "district_name": "CUD Conditional Use Development / Conditional Use District (CUD)",
+      "citation_url": "https://ecode360.com/39380170",
+      "provenance": {
+        "front_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- front yard setback (district \"CUD\", Conditional Use Development / Conditional Use District): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "rear_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- rear yard setback (district \"CUD\", Conditional Use Development / Conditional Use District): \"25 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.9,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- side yard setback (district \"CUD\", Conditional Use Development / Conditional Use District): \"7 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "side_corner_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- corner / street-side yard setback (district \"CUD\", Conditional Use Development / Conditional Use District): \"15 feet\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_height_ft": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "not_specified": true,
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum height (district \"CUD\", Conditional Use Development / Conditional Use District): \"****\". Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.85,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum lot coverage (district \"CUD\", Conditional Use Development / Conditional Use District): \"40% buildings / 50% impervious (Chart 2)\". This is the \"buildings\" (building-footprint) figure of the chart's building/impervious pair. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        },
+        "max_impervious_pct": {
+          "section_number": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3",
+          "confidence": 0.8,
+          "verification_state": "primary-source-verified",
+          "quote": "Zoning Ordinance (Ord. 14000, Exhibit 9B) § 2.01(j) Chart 1; § 2.01(k) Chart 2; Chart 3 -- maximum impervious cover (district \"CUD\", Conditional Use Development / Conditional Use District): \"40% buildings / 50% impervious (Chart 2)\". This is the \"impervious\" figure of the chart's building/impervious pair -- a distinct, wider measure (includes paving) than the building-coverage figure. Footnotes on this row: * For 100-foot-deep lots / ** As measured from highest adjacent grade / *** Designated within the development / **** Within 100 feet North of Cottonwood Drive - Not to exceed 25 feet in height / **** Within 200 feet South of Cottonwood Drive - defined within development agreement / PUD — Planned Unit Development — \"R1\" Zoning unless predetermined within development agreement. / PUD - R — Planned Unit Development — Residential Use Only as defined in development agreement / PUD - M — Planned Unit Development — Mixed Use (Residential/Multifamily) only as defined within the development agreement / PUD - C — Planned Unit Development — Commercial Use Only as defined in development agreement / TBD-Development Agreement — Size shall be set in development agreement / CUD — Conditional Use District — As defined within the development agreement"
+        }
+      },
+      "front_ft": 25,
+      "rear_ft": 25,
+      "side_ft": 7,
+      "side_corner_ft": 15,
+      "max_height_ft": 999,
+      "max_lot_coverage_pct": 40,
+      "max_impervious_pct": 50
+    }
+  ]
+}

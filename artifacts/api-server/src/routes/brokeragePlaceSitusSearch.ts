@@ -52,10 +52,33 @@ brokeragePlaceSitusSearchRouter.get(
       return;
     }
 
-    const hits = await searchPlaceByPrefix({
+    const result = await searchPlaceByPrefix({
       query,
       limit: parsed.data.limit,
     });
-    res.json({ hits });
+    res.json(
+      result.missClass
+        ? {
+            hits: result.hits,
+            missClass: result.missClass,
+            // P-107 / OPS-16 A-072: carried only on out_of_coverage.
+            ...(result.outOfCoverageState
+              ? { outOfCoverageState: result.outOfCoverageState }
+              : {}),
+            // P-205 / P-210: carried only on county_out_of_coverage.
+            ...(result.outOfCoverageCounty
+              ? { outOfCoverageCounty: result.outOfCoverageCounty }
+              : {}),
+            // P-205 / P-210: carried only on coverage_check_unavailable.
+            ...(result.coverageCheckUnavailableReason
+              ? { coverageCheckUnavailableReason: result.coverageCheckUnavailableReason }
+              : {}),
+            // P-483 / A-340: carried on county_unconfirmed. Never the outage sentence.
+            ...(result.missClassDisplayText
+              ? { missClassDisplayText: result.missClassDisplayText }
+              : {}),
+          }
+        : { hits: result.hits },
+    );
   },
 );

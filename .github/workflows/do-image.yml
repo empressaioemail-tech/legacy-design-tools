@@ -1,0 +1,215 @@
+name: DO Image
+
+# D-21 (OPS-25). One image workflow per repo, into the DigitalOcean registry
+# `hauska`, DIGEST recorded.
+#
+# WHY THIS EXISTS. Cloud Build died with the Google account on 2026-09-22, and
+# the two Cloud Run deploy workflows in this repo are disabled. Nothing built an
+# image for this repo any more, and App Platform services deploy from registry
+# IMAGES rather than from a source build -- because promote-by-digest needs a
+# digest, and a rebuild from the same SHA is a different artifact. This workflow
+# builds the two Dockerfiles that already exist here (root `Dockerfile` for
+# cortex-api/api-server, `artifacts/smartsite-mcp/Dockerfile` for smartsite-mcp),
+# pushes them, and reports the digest the specs deploy by.
+#
+# THREE THINGS THIS WORKFLOW REFUSES TO DO, deliberately:
+#
+#   1. It never tags `latest`. A mutable tag is how a deploy reports SUCCESS and
+#      serves an older build; the register names that failure (section 7 item 4)
+#      and grades every DigitalOcean deploy by `source_commit_hash` read back
+#      from the spec, never by the deployment record. The only tag pushed is the
+#      full 40-character commit SHA, which is also what the image is graded on.
+#   2. It never runs without `DIGITALOCEAN_ACCESS_TOKEN`. The guard is the first
+#      step and it fails BY NAME, so a fork PR or a missing secret reads as "no
+#      credential" rather than as an auth error from docker login.
+#   3. It never builds a ref it was not asked for. `workflow_dispatch` only, with
+#      an explicit `ref`; there is no push trigger, so this cannot race a merge.
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Which image to build"
+        required: true
+        type: choice
+        options:
+          - api-server
+          - smartsite-mcp
+      ref:
+        description: "Git ref to build (branch, tag, or full SHA)"
+        required: true
+        type: string
+
+# One run per service+ref: a second identical dispatch must not race the first
+# into the registry with a different digest for the same SHA.
+concurrency:
+  group: do-image-${{ inputs.service }}-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: ${{ inputs.service }} -> registry.digitalocean.com/hauska
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      REGISTRY: registry.digitalocean.com/hauska
+      SERVICE: ${{ inputs.service }}
+      # Passed through the environment, never spliced into a shell line: a
+      # dispatch input is caller-supplied text, and `${{ }}` interpolation inside
+      # a `run:` block is the documented script-injection path.
+      INPUT_REF: ${{ inputs.ref }}
+    steps:
+      - name: Require the registry credential, by name
+        env:
+          DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGITALOCEAN_ACCESS_TOKEN}" ]; then
+            echo "::error title=DIGITALOCEAN_ACCESS_TOKEN absent::This job cannot read or write registry.digitalocean.com/hauska without DIGITALOCEAN_ACCESS_TOKEN (D-21). No image was built. Set the secret on this repository, then re-dispatch."
+            exit 1
+          fi
+          echo "Credential present (value never printed)."
+
+      - name: Checkout the requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The image tag is the full commit SHA of what was actually checked out,
+      # NOT the input string: `ref` may be a branch, and a branch moves. A digest
+      # is only meaningful against the commit it was built from.
+      - name: Resolve the full commit SHA
+        id: sha
+        run: |
+          set -euo pipefail
+          FULL_SHA="$(git rev-parse HEAD)"
+          if [ "${#FULL_SHA}" -ne 40 ]; then
+            echo "::error title=BAD_SHA::git rev-parse HEAD returned '${FULL_SHA}', which is not a full 40-character SHA. Refusing to tag an image with it."
+            exit 1
+          fi
+          echo "full_sha=${FULL_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Building ${SERVICE} from ${FULL_SHA}"
+
+      - name: Select the Dockerfile (the two that exist, and nothing else)
+        id: dockerfile
+        run: |
+          set -euo pipefail
+          case "${SERVICE}" in
+            api-server)
+              echo "path=Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "context=." >> "$GITHUB_OUTPUT"
+              ;;
+            smartsite-mcp)
+              echo "path=artifacts/smartsite-mcp/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "context=." >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error title=UNKNOWN_SERVICE::Unknown service '${SERVICE}'. Known: api-server, smartsite-mcp."
+              exit 1
+              ;;
+          esac
+          # The build context is the monorepo root for BOTH: the pnpm workspace
+          # needs the root package.json + pnpm-lock.yaml + pnpm-workspace.yaml at
+          # install time, so a per-artifact context cannot work. Both Dockerfiles
+          # say so in their own headers.
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          # Passed as the action's input rather than on one of our own command
+          # lines. `docker login registry.digitalocean.com` requires the token as
+          # BOTH the username and the password, which puts it in a process argv;
+          # `doctl registry login` reads it from the environment instead.
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to the registry
+        env:
+          DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+        run: doctl registry login
+
+      - name: Build
+        env:
+          FULL_SHA: ${{ steps.sha.outputs.full_sha }}
+          DOCKERFILE: ${{ steps.dockerfile.outputs.path }}
+          CONTEXT: ${{ steps.dockerfile.outputs.context }}
+        run: |
+          set -euo pipefail
+          # No `--pull` shortcut and no buildx cache push: the point is a digest
+          # this repo can cite, not the fastest possible build.
+          docker build \
+            --file "${DOCKERFILE}" \
+            --tag "${REGISTRY}/${SERVICE}:${FULL_SHA}" \
+            --label "org.opencontainers.image.revision=${FULL_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            "${CONTEXT}"
+
+      - name: Push the SHA tag and read the DIGEST off the pushed manifest
+        id: push
+        env:
+          FULL_SHA: ${{ steps.sha.outputs.full_sha }}
+        run: |
+          set -euo pipefail
+          docker push "${REGISTRY}/${SERVICE}:${FULL_SHA}"
+
+          # Read the digest from the REGISTRY's manifest, not from a local
+          # `docker inspect`: a local image that was never accepted by the
+          # registry would otherwise report a digest that resolves to nothing.
+          # `docker buildx imagetools inspect` reads the pushed manifest.
+          DIGEST="$(docker buildx imagetools inspect "${REGISTRY}/${SERVICE}:${FULL_SHA}" --format '{{json .Manifest}}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);if(!m.digest){console.error("no digest in manifest JSON");process.exit(1);}process.stdout.write(m.digest);})')"
+          if [ -z "${DIGEST}" ]; then
+            echo "::error title=NO_DIGEST::The pushed manifest reported no digest. Nothing may deploy from this run."
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${SERVICE} image pushed"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| image | \`${REGISTRY}/${SERVICE}\` |"
+            echo "| tag | \`${FULL_SHA}\` (full commit SHA; \`latest\` is never pushed) |"
+            echo "| digest | \`${REGISTRY}/${SERVICE}@${DIGEST}\` |"
+            echo "| commit | \`${FULL_SHA}\` |"
+            echo "| requested ref | \`${INPUT_REF}\` |"
+            echo ""
+            echo "Paste the digest into the App Platform spec that deploys this service (D-21/D-6), or pass it to \`doctl apps update --spec\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "DIGEST=${DIGEST}"
+
+      # The digest is the artifact this workflow produces, so it must outlive the
+      # run log: the specs and the close cite it, and App Platform deploys by it.
+      # Written BEFORE the upload, because the upload fails loudly on a missing
+      # file rather than quietly shipping an empty artifact.
+      - name: Write the digest file the artifact uploads
+        env:
+          FULL_SHA: ${{ steps.sha.outputs.full_sha }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "service=${SERVICE}"
+            echo "image=${REGISTRY}/${SERVICE}"
+            echo "tag=${FULL_SHA}"
+            echo "digest=${DIGEST}"
+            echo "ref=${REGISTRY}/${SERVICE}@${DIGEST}"
+            echo "commit=${FULL_SHA}"
+            echo "requested_ref=${INPUT_REF}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "${{ runner.temp }}/do-image-digest.txt"
+          cat "${{ runner.temp }}/do-image-digest.txt"
+
+      - name: Upload the digest as the run's artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: do-image-digest-${{ inputs.service }}-${{ steps.sha.outputs.full_sha }}
+          path: ${{ runner.temp }}/do-image-digest.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Log out of the registry
+        if: always()
+        run: docker logout registry.digitalocean.com || true

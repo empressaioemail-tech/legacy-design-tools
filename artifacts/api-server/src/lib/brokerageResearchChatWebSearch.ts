@@ -25,7 +25,7 @@ import type { BriefAtomInput } from "./brokerageBriefLlm";
 import { logger } from "./logger";
 
 export const RESEARCH_CHAT_WEBSEARCH_DISCLOSURE =
-  "Web-search backup — not a Hauska atom. Official civic page, unverified.";
+  "Web-search backup — City website · not yet verified. Official civic page, unverified.";
 
 export const RESEARCH_CHAT_WEBSEARCH_ASSERTED_CONFIDENCE = 0.35;
 
@@ -65,8 +65,8 @@ const CIVIC_TARGETS_BY_JURISDICTION: Record<string, CivicTarget[]> = {
     },
     {
       topic: "adu_subdivision",
-      url: "https://www.cityofbastrop.org/",
-      label: "City of Bastrop",
+      url: "https://www.cityofbastrop.org/page/open/18744/0/ORDINANCE%20NO.%202026-06%20B3%20Code%20Repeal%20and%20Bastrop%20Development%20Code%20Adoption.pdf",
+      label: "City of Bastrop Development Code",
       codeRef: "bastrop-city-adu",
     },
   ],
@@ -181,7 +181,7 @@ function webSectionToBriefAtom(section: WebCodeSectionInput): BriefAtomInput {
       0,
       600,
     ),
-    label: `${section.label} — web-search backup, not a Hauska atom`,
+    label: `${section.label} — City website · not yet verified`,
     sourceUrl: section.webProvenance.sourceUrl,
     webSearchBackup: {
       disclosure: RESEARCH_CHAT_WEBSEARCH_DISCLOSURE,
@@ -204,7 +204,7 @@ function civicHitToBriefAtom(input: {
   return {
     atomDid,
     snippet,
-    label: `${input.target.label} — web-search backup, not a Hauska atom`,
+    label: `${input.target.label} — City website · not yet verified`,
     sourceUrl: input.sourceUrl,
     webSearchBackup: {
       disclosure: RESEARCH_CHAT_WEBSEARCH_DISCLOSURE,

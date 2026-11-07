@@ -13,6 +13,7 @@ import { brokerageCors } from "../middlewares/brokerageCors";
 import { brokerageAuth } from "../middlewares/brokerageAuth";
 import { requireInstallId } from "../lib/brokerageInstallId";
 import {
+  BrokerageCheckoutConfigError,
   completeSimulatedCheckout,
   createBillingPortalSession,
   createSubscriptionCheckoutSession,
@@ -23,6 +24,7 @@ import {
 import { recordGtmEvent } from "../lib/recordGtmEvent";
 import { syncPipedriveDeal } from "../lib/brokeragePipedrive";
 import {
+  BillingPublicBaseUrlUnsetError,
   defaultCheckoutCancelUrl,
   defaultCheckoutSuccessUrl,
 } from "../lib/brokerageBillingUrls";
@@ -61,8 +63,26 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
   }
 
   const tier: SubscriptionCheckoutTier = parse.data.tier;
-  const successUrl = parse.data.successUrl ?? defaultCheckoutSuccessUrl();
-  const cancelUrl = parse.data.cancelUrl ?? defaultCheckoutCancelUrl();
+  let successUrl: string;
+  let cancelUrl: string;
+  try {
+    successUrl = parse.data.successUrl ?? defaultCheckoutSuccessUrl();
+    cancelUrl = parse.data.cancelUrl ?? defaultCheckoutCancelUrl();
+  } catch (err) {
+    if (err instanceof BillingPublicBaseUrlUnsetError) {
+      // FAIL CLOSED, declared, and NAMED (D-25): no public origin is configured
+      // for the return pages, so there is no checkout to create. Refusing here
+      // is the point -- the alternative is a return URL on a dead host, which
+      // fails after the customer has paid. Raised before the GTM event and the
+      // Pipedrive sync so neither records an attempt that never happened.
+      res.status(503).json({
+        error: err.refusal,
+        message: err.message,
+      });
+      return;
+    }
+    throw err;
+  }
 
   recordGtmEvent({
     installId,
@@ -85,6 +105,16 @@ brokerageBillingRouter.post("/checkout", async (req: Request, res: Response) => 
     });
     res.json(session);
   } catch (err) {
+    if (err instanceof BrokerageCheckoutConfigError) {
+      // FAIL CLOSED, declared: this tier's price is not configured. Refuse
+      // rather than hand back a fake session under a real key.
+      res.status(503).json({
+        error: "checkout_unavailable",
+        message: err.message,
+        missing: err.missing,
+      });
+      return;
+    }
     res.status(502).json({
       error: "checkout_failed",
       message: String((err as Error).message || err),

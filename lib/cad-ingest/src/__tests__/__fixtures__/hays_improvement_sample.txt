@@ -1,0 +1,4 @@
+"RecordType","PropertyID","QuickRefID","PropertyNumber","InstanceID","Type","Description","StateCode","Sequence","PrevImpValue","ImpValue"
+"1","10001","R26199","11-2520-0000-03100-2","1","MA","MAIN AREA","A1","1","0","100000"
+"1","10001","R26199","11-2520-0000-03100-2","1","MA","MAIN AREA","A1","1","0","100000"
+"1","10002","R26200","11-2520-0000-03101-0","1","MA","MAIN AREA","A1","1","0","100000"

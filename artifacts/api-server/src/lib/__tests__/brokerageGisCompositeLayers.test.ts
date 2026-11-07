@@ -9,6 +9,7 @@ import {
   queryCompositeLayer,
   MOTIVATED_SELLER_SIGNAL_MODEL,
 } from "../brokerageGisCompositeLayers";
+import { femaFloodSeverity } from "../brokerageGisCompositeLayers";
 import * as gisLayers from "../brokerageGisLayers";
 import * as federalLayers from "../brokerageGisFederalLayers";
 import type { MotivatedSellerSignalDb } from "../brokerageMotivatedSellerSignals";
@@ -623,7 +624,53 @@ describe("MOTIVATED_SELLER_SIGNAL_MODEL (transparent documented weighted-sum)", 
   });
 });
 
+/**
+ * Serialize a payload for the "never a fabricated 0.74" guards. The payload
+ * carries wall-clock `generatedAt` ISO timestamps (`...:10.740Z` contains the
+ * text "0.74" about 1 run in 1000), which are not heat values, so they are
+ * dropped before matching. Every other field, including any heat/propensity/
+ * confidence value, is still scanned.
+ */
+const serializeWithoutTimestamps = (v: unknown): string =>
+  JSON.stringify(v, (k, x) => (k === "generatedAt" ? undefined : x));
+
 describe("deriveMotivatedSellerHeat (transparent public-record weighted-sum + honesty)", () => {
+  it("0.74 guard ignores generatedAt timestamps but still catches a planted 0.74 (falsifier)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-05T01:40:10.740Z"));
+    const spy = vi
+      .spyOn(gisLayers, "queryGisLayerGeoJson")
+      .mockRejectedValue(new Error("no-coverage"));
+    try {
+      const { payload } = await deriveMotivatedSellerHeat(bbox);
+      // Precondition: the timestamp itself contains "0.74", so the old
+      // whole-payload assertion would fail on this clock.
+      expect(JSON.stringify(payload)).toMatch(/0[.]74/);
+      // The tightened guard does not trip on it...
+      expect(serializeWithoutTimestamps(payload)).not.toMatch(/0[.]74/);
+      // ...and still fails when a fabricated 0.74 is planted in a heat field.
+      const plantedFeature = {
+        ...payload,
+        geojson: {
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: { propensity: 0.74 } }],
+        },
+      };
+      expect(serializeWithoutTimestamps(plantedFeature)).toMatch(/0[.]74/);
+      const plantedProvenance = {
+        ...payload,
+        motivatedSellerProvenance: {
+          ...payload.motivatedSellerProvenance,
+          confidence: 0.74,
+        },
+      };
+      expect(serializeWithoutTimestamps(plantedProvenance)).toMatch(/0[.]74/);
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("STATE c-no-parcels: no parcels -> out-of-scope, degraded, never a fabricated 0.74", async () => {
     const spy = vi
       .spyOn(gisLayers, "queryGisLayerGeoJson")
@@ -637,7 +684,7 @@ describe("deriveMotivatedSellerHeat (transparent public-record weighted-sum + ho
     expect(honesty.coverage.degraded).toBe(true);
     expect(honesty.confidence.kind).toBe("asserted");
     // The retired 0.74 propensity fixture must never appear anywhere.
-    expect(JSON.stringify(payload)).not.toMatch(/0\.74/);
+    expect(serializeWithoutTimestamps(payload)).not.toMatch(/0\.74/);
     expect(JSON.stringify(payload)).not.toMatch(/"propensity"/);
     // verification-state is explicit (calibration does not exist yet).
     expect(payload.motivatedSellerProvenance?.verificationState).toBe(
@@ -810,7 +857,23 @@ describe("deriveMotivatedSellerHeat (transparent public-record weighted-sum + ho
     expect(envelope.payload.fixture).toBe(false);
     expect(envelope.confidence.kind).toBe("asserted");
     expect(envelope.source.adapter).toContain("brokerage:composite");
-    expect(JSON.stringify(envelope.payload)).not.toMatch(/0\.74/);
+    expect(serializeWithoutTimestamps(envelope.payload)).not.toMatch(/0\.74/);
     expect(JSON.stringify(envelope.payload)).not.toMatch(/"propensity"/);
+  });
+});
+
+describe("femaFloodSeverity ranks by exact zone code", () => {
+  it.each([
+    ["VE", {}, 4],
+    ["V12", {}, 4],
+    ["AE", {}, 3],
+    ["A99", {}, 3],
+    ["AREA NOT INCLUDED", {}, 0],
+    ["OPEN WATER", {}, 1],
+    ["X", { ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" }, 2],
+    ["X", {}, 0],
+    ["D", {}, 1],
+  ])("%s %j -> %i", (zone, extra, rank) => {
+    expect(femaFloodSeverity({ FLD_ZONE: zone, ...extra })).toBe(rank);
   });
 });

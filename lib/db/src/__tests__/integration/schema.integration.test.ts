@@ -66,6 +66,8 @@ describe("lib/db schema integration", () => {
         // (adapter_key, lat_rounded, lng_rounded) with a TTL gate so
         // re-runs of generate-layers skip the slow upstream feeds.
         "adapter_response_cache",
+        // P-492 3f — Smart Site affiliate pipeline (not users).
+        "affiliate_partner",
         // Per-architect "last viewed the inbox" watermark for the
         // design-tools notification surface. One row per user-kind
         // requestor id; bumped to "now" on POST
@@ -190,6 +192,10 @@ describe("lib/db schema integration", () => {
         "findings",
         // GTM observation layer — Property Brief extension consent + events.
         "gtm_consent",
+        // P-100 item 5 — events this system declined to write for want of a
+        // consent row. Sorts before `gtm_events` (`_` < `s`) per
+        // `ORDER BY tablename`.
+        "gtm_event_refusals",
         "gtm_events",
         // OPS-9 S1 onboarding ledger, read-side mirror of hauska-engine's
         // frozen JurisdictionRegistryRow. Sorts before `knowledge_atoms`
@@ -219,13 +225,60 @@ describe("lib/db schema integration", () => {
         // R1 paywall (LOCK 2026-07-29) — signed-in-free chat counter +
         // per-property unlock record. Listed alphabetically to match
         // `ORDER BY tablename`.
+        // P-98 next-action rail — shown/acted per ladder rung, scoped to the
+        // PE USER rather than to `gtm_events`'s install_id. Sorts first in
+        // the whole `pe_` block: `pe_ac` < `pe_ai` (`c` < `i`) per
+        // `ORDER BY tablename`.
+        // P-100 item 4 — once-per-account activation milestone. A DIFFERENT
+        // subject from `pe_activation_events` (which is per ladder-rung
+        // impression). Sorts before it: `pe_acc` < `pe_act` (`c` < `t`).
+        "pe_account_activations",
+        // T1-A — duplicate-account merge log. Sorts after `pe_account_activations` (`_ac` < `_me`).
+        "pe_account_merge_rows",
+        "pe_account_merges",
+        "pe_activation_events",
+        // P-87 Claude Sync — MCP clients that have authenticated against
+        // this account. Sorts after `pe_activation_events` and before
+        // `pe_chat_message_counts` (`_ai` < `_ch`) per `ORDER BY tablename`.
+        "pe_ai_connections",
         "pe_chat_message_counts",
+        // P-413 — lifecycle outbox. Sorts after `pe_chat_message_counts`
+        // and before `pe_magic_link_tokens` (`pe_l` < `pe_m`).
+        "pe_lifecycle_outbox",
+        // P-112 email leg — magic-link sign-in tokens. Sorts after
+        // `pe_chat_message_counts` and before `pe_parcel_constraint_index`
+        // (`pe_ch` < `pe_l` < `pe_ma` < `pe_pa`) per `ORDER BY tablename`.
+        "pe_magic_link_tokens",
+        // P-106 constraint search - the filterable projection of already-baked
+        // facets, plus its build ledger. Sorts after `pe_chat_message_counts`
+        // and before `pe_property_unlocks` (`pe_pa` < `pe_pr`) per
+        // `ORDER BY tablename`.
+        "pe_parcel_constraint_index",
+        "pe_parcel_constraint_index_builds",
         "pe_property_unlocks",
+        "pe_push_subscriptions",
         "pe_saved_properties",
+        // P-91 / P-92 Wave B — screens are a different table from saves.
+        "pe_screen_rows",
+        "pe_screens",
+        // T1-A — server-side sessions and per-user token cutoffs.
+        "pe_session_cutoffs",
+        "pe_sessions",
         // P-86 — share grant registry. Resolvable URL is /s/{id}.
+        // P-100 item 3 — which sharer a recipient account belongs to, keyed
+        // on the grant row. Sorts before `pe_share_grants` (`_a` < `_g`).
+        "pe_share_attributions",
         "pe_share_grants",
+        // P-480 — append-only Stripe webhook delivery record.
+        "pe_stripe_webhook_events",
+        "pe_team_invitations",
+        "pe_team_members",
+        // P-480 — superseded entitlement snapshots keyed to webhook events.
+        "pe_user_entitlement_history",
         "pe_user_entitlements",
         "pe_user_identities",
+        "pe_watch_changes",
+        "pe_watch_snapshots",
         "pe_workbench_state",
         // PLR-11 — atomic tenant-scoped permit-number counter.
         "permit_counters",
@@ -321,6 +374,15 @@ describe("lib/db schema integration", () => {
         // IFC ingest metadata keyed off snapshots (parse status, global ids).
         "snapshot_ifc_files",
         "snapshots",
+        // P-499 — one national source-table shape, keyed on the provider's
+        // own id, list-partitioned by provider (migration 0111). Stage is
+        // the stage-check-swap write path's holding table.
+        "source_feature",
+        "source_feature_stage",
+        // P-492 — Smart Site contact record (system of record for the
+        // lifecycle) and the scheduled drain's per-tick record.
+        "ss_contact",
+        "ss_lifecycle_drain_run",
         // Track 1 — per-submission discipline / classification row.
         "submission_classifications",
         // Task #431 — reviewer↔architect inline reply thread anchored
@@ -347,6 +409,18 @@ describe("lib/db schema integration", () => {
         // `tx_city_boundary` and before `tx_parcel_tile_cache` (`_county` <
         // `_fema` < `_parcel`) per `ORDER BY tablename`.
         "tx_county_boundary",
+        // feat/p241-etj-acquisition (0102) — per-publisher extraterritorial-
+        // jurisdiction rings. ETJ has no statewide layer: each municipality
+        // publishes its own, acquired one publisher at a time. Sorts after
+        // `tx_county_boundary` and before `tx_etj_source` (`_boundary` <
+        // `_source`), both before `tx_fema_nfhl_flood_zone` (`_etj` < `_fema`)
+        // per `ORDER BY tablename`.
+        "tx_etj_boundary",
+        // feat/p241-etj-acquisition (0102) — one row per ENUMERATED city,
+        // including the publishers that expose city limits and no ETJ layer.
+        // This table is what keeps "checked, the ETJ does not reach here" apart
+        // from "there is no source to check".
+        "tx_etj_source",
         // feat/fema-nfhl-statewide-layer (0071) — statewide FEMA NFHL flood-
         // hazard polygons from NFHL_48 bulk FileGDB S_FLD_HAZ_AR. Sorts after
         // `tx_county_boundary` and before `tx_parcel_tile_cache` (`_fema` <
@@ -357,12 +431,20 @@ describe("lib/db schema integration", () => {
         // parallel to) the dormant Cotality spatial-tile cache tables.
         "tx_parcel_tile_cache",
         // 0076 / P-75 — L22 utility who-serves staging. Sorts after
-        // `tx_parcel_tile_cache` and before `txgio_address` (`_utility` <
-        // `txgio`) per `ORDER BY tablename`.
+        // `tx_parcel_tile_cache` and before `tx_wcad_ag_valuation`
+        // (`_utility` < `_wcad`) per `ORDER BY tablename`.
         "tx_utility_territory_staging",
+        // 0098 (F-01) — Williamson CAD per-property land-segment detail,
+        // NOT owned by this repo's own ingest (acquired by a separate
+        // pipeline; declared here for type-safe reads only). Sorts after
+        // `tx_utility_territory_staging` and before `txgio_address`
+        // (`tx_` < `txgio_`, then `_w` < `gio`) per `ORDER BY tablename`.
+        "tx_wcad_ag_valuation",
         // feat/txgio-address-points (0056) — self-hosted TxGIO/StratMap
         // address-POINT store (open paginated ArcGIS REST); point sibling
-        // of txgio_parcel, keyed (county_fips, full_addr, unit).
+        // of txgio_parcel. Keyed (county_fips, object_id) as of migration
+        // 0110 — was (county_fips, full_addr, unit), which collapsed
+        // distinct points sharing a label (measured Burnet 2026-10-09).
         "txgio_address",
         // feat/txgio-parcel-geometry (0053) — self-hosted TxGIO/StratMap
         // parcel geometry store for counties without a live county GIS
@@ -375,6 +457,8 @@ describe("lib/db schema integration", () => {
         "viewpoint_renders",
         // QA-57 — pilot workspace branding (firm display name, logo URL).
         "workspace_settings",
+        // Migration 0112 — the zoning-stamp CLI's own run record (hauska-factory gate 1 Tier 3).
+        "zoning_stamp_run",
       ]);
     });
   });

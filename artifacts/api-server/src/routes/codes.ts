@@ -5,8 +5,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, codeAtoms, codeAtomSources, codeAtomFetchQueue } from "@workspace/db";
 import { buildProvenanceFromCodeAtom } from "../lib/provenanceEnvelope";
-import { and, desc, eq, ilike, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { embedTexts, EMBEDDING_MODEL } from "@workspace/codes";
+import { logIccTextRefused } from "@workspace/codes/iccIngestGuard";
 import {
   enqueueWarmupForJurisdiction,
   drainQueue,
@@ -14,6 +15,42 @@ import {
   listJurisdictions,
 } from "@workspace/codes";
 import { logger } from "../lib/logger";
+import { hasSignedInUser, isIccRow, notIccAtomRowSql } from "../lib/iccAccess";
+import { isIccSource } from "@workspace/icc-notice";
+
+const ICC_SAFE_METADATA_KEYS = new Set([
+  "kind",
+  "scrapedAt",
+  "codeBookEdition",
+  "revision",
+  "articleNumber",
+  "articleRevision",
+  "isSplit",
+  "partIndex",
+  "partTotal",
+  "chunkBytes",
+  "pdfPageCount",
+  "nodeId",
+  "parentNodeId",
+  "docOrderId",
+  "isAmended",
+  "isUpdated",
+  "jobId",
+]);
+
+/** Structural provenance keys only; scalar values only. */
+export function iccSafeMetadata(
+  m: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!m) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(m)) {
+    if (!ICC_SAFE_METADATA_KEYS.has(k)) continue;
+    if (typeof v === "string" && v.length > 64) continue;
+    if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
+  }
+  return out;
+}
 
 const router: IRouter = Router();
 
@@ -127,6 +164,8 @@ router.get(
     const editionFilter = req.query.edition ? String(req.query.edition) : null;
     try {
       const conditions = [eq(codeAtoms.jurisdictionKey, key)];
+      // G-309: ICC rows are for signed-in users only.
+      if (!hasSignedInUser(req)) conditions.push(notIccAtomRowSql());
       if (codeBookFilter) conditions.push(eq(codeAtoms.codeBook, codeBookFilter));
       if (codeBookFilter && editionFilter)
         conditions.push(eq(codeAtoms.edition, editionFilter));
@@ -161,7 +200,9 @@ router.get(
           sourceUrl: r.sourceUrl,
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
-          bodyPreview: previewBody(r.body),
+          // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          citationOnly: isIccRow(r),
+          ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       );
     } catch (err) {
@@ -226,6 +267,8 @@ router.get(
       // Assemble WHERE clauses. The sourceName filter requires the join
       // (which we'd be doing anyway for the response shape).
       const conditions = [];
+      // G-309: ICC rows are for signed-in users only.
+      if (!hasSignedInUser(req)) conditions.push(notIccAtomRowSql());
       if (jurisdictionFilter)
         conditions.push(eq(codeAtoms.jurisdictionKey, jurisdictionFilter));
       if (codeBookFilter)
@@ -297,7 +340,9 @@ router.get(
           sourceUrl: r.sourceUrl,
           embedded: r.embedding !== null,
           fetchedAt: r.fetchedAt.toISOString(),
-          bodyPreview: previewBody(r.body),
+          // G-309 (Exhibit D §6): no ICC text for anyone, signed-in included.
+          citationOnly: isIccRow(r),
+          ...(isIccRow(r) ? {} : { bodyPreview: previewBody(r.body) }),
         })),
       });
     } catch (err) {
@@ -335,7 +380,8 @@ router.get(
         .where(eq(codeAtoms.id, id))
         .limit(1);
       const r = rows[0];
-      if (!r) {
+      // G-309: an ICC atom is not served to a caller who is not signed in.
+      if (!r || (!hasSignedInUser(req) && isIccSource(r))) {
         res.status(404).json({ error: "Atom not found" });
         return;
       }
@@ -350,12 +396,18 @@ router.get(
         sourceUrl: r.sourceUrl,
         embedded: r.embedding !== null,
         fetchedAt: r.fetchedAt.toISOString(),
-        bodyPreview: previewBody(r.body),
-        body: r.body,
-        bodyHtml: r.bodyHtml,
+        // G-309 (Exhibit D §6): an ICC atom is a citation only, for every caller.
+        citationOnly: isIccRow(r),
+        ...(isIccRow(r)
+          ? {}
+          : { bodyPreview: previewBody(r.body), body: r.body, bodyHtml: r.bodyHtml }),
         parentSection: r.parentSection,
         embeddingModel: r.embeddingModel,
-        metadata: (r.metadata as Record<string, unknown>) ?? null,
+        // G-309: `metadata` is a free-form source bag; for an ICC atom only
+        // structural keys are served, never anything that could hold text.
+        metadata: isIccRow(r)
+          ? iccSafeMetadata(r.metadata as Record<string, unknown> | null)
+          : ((r.metadata as Record<string, unknown>) ?? null),
         provenance: buildProvenanceFromCodeAtom({
           atomId: r.id,
           sourceUrl: r.sourceUrl,
@@ -540,11 +592,36 @@ router.post(
       1000,
     );
     try {
-      const pending = await db
-        .select({ id: codeAtoms.id, body: codeAtoms.body })
+      const candidates = await db
+        .select({
+          id: codeAtoms.id,
+          body: codeAtoms.body,
+          sourceUrl: codeAtoms.sourceUrl,
+          jurisdictionKey: codeAtoms.jurisdictionKey,
+          codeBook: codeAtoms.codeBook,
+          sectionNumber: codeAtoms.sectionNumber,
+          sourceName: codeAtomSources.sourceName,
+        })
         .from(codeAtoms)
-        .where(isNull(codeAtoms.embedding))
+        .innerJoin(codeAtomSources, eq(codeAtomSources.id, codeAtoms.sourceId))
+        // G-309: ICC atoms are blanked at ingest (body ""), never embedded.
+        .where(
+          and(
+            isNull(codeAtoms.embedding),
+            ne(codeAtoms.body, ""),
+            notIccAtomRowSql(),
+          ),
+        )
         .limit(limit);
+
+      // Title-based ICC detection (iccAccess.isIccRow) runs in JS: those rows
+      // are skipped here, so their text is never sent to the embeddings API.
+      const pending = candidates.filter((r) => !isIccRow(r));
+      logIccTextRefused(
+        logger,
+        "routes.codes.embeddingsBackfill",
+        candidates.length - pending.length,
+      );
 
       if (pending.length === 0) {
         res.json({ scanned: 0, embedded: 0, failed: 0, remaining: 0 });
@@ -589,7 +666,7 @@ router.post(
       const remainingRows = await db
         .select({ n: sql<number>`count(*)::int` })
         .from(codeAtoms)
-        .where(isNull(codeAtoms.embedding));
+        .where(and(isNull(codeAtoms.embedding), ne(codeAtoms.body, "")));
       res.json({
         scanned: pending.length,
         embedded,

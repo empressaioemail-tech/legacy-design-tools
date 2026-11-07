@@ -206,6 +206,9 @@ export async function classifyAndWriteRecordsRequestArtifact(input: {
       acquisitionMethod: artifact.acquisitionMethod,
       headerFacts,
       ...(route.documentKind ? { documentKind: route.documentKind } : {}),
+      ...(route.sourceDocumentType
+        ? { sourceDocumentType: route.sourceDocumentType }
+        : {}),
       visionTextPresent: !!visionText,
     };
 
@@ -277,6 +280,7 @@ export async function classifyAndWriteRecordsRequestArtifact(input: {
       clauseCount,
       instrumentType: route.instrumentType,
       documentKind: route.documentKind ?? null,
+      sourceDocumentType: route.sourceDocumentType ?? artifact.documentType ?? null,
       classifiedAt: extractedAt.toISOString(),
     });
 

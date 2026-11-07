@@ -40,18 +40,26 @@ const PUBLICSEARCH_TERMS_SELECTORS = [
 
 const AUMENTUM_TERMS_SELECTORS = TERMS_ACCEPT_SELECTORS;
 
+/** Caldwell CountyGovernmentRecords splash "Enter" control (P-113, verified live 2026-09-03). */
+const COUNTY_GOV_RECORDS_SPLASH_SELECTORS = [
+  'form.splash input[type="submit"]',
+  'input[type="submit"][value="Enter" i]',
+] as const;
+
 /** Registry keyed by probeId; portal lookup is many-to-one. */
 export const RECIPE_CANARY_PROBES: readonly RecipeCanaryProbe[] = [
   {
-    probeId: "aumentum-index-v2",
-    recipeVersion: "p85-aumentum-index-search-v2",
+    probeId: "aumentum-index-v3",
+    recipeVersion: "p85-aumentum-index-search-v3",
     portalIds: ["bastrop-aumentum", "travis-tccsearch"],
     driftSelectors: AUMENTUM_TERMS_SELECTORS,
   },
   {
-    probeId: "tyler-self-service-v1",
-    recipeVersion: "p85-tyler-self-service-v1",
-    portalIds: ["williamson-tylerhost", "hays-erss"],
+    probeId: "tyler-self-service-v2",
+    recipeVersion: "p85-tyler-self-service-v2",
+    // P-113: McLennan joined 2026-09-03 (same Tyler self-service DOCSEARCH
+    // product family as Hays, verified live; scaffold retired).
+    portalIds: ["williamson-tylerhost", "hays-erss", "mclennan-online-records"],
     driftSelectors: TYLER_ACCEPT_SELECTORS,
   },
   {
@@ -61,10 +69,12 @@ export const RECIPE_CANARY_PROBES: readonly RecipeCanaryProbe[] = [
     driftSelectors: PUBLICSEARCH_TERMS_SELECTORS,
   },
   {
-    probeId: "reachability-scaffold-v0",
-    recipeVersion: "p85-reachability-scaffold-v0",
-    portalIds: ["caldwell-clerk-web", "mclennan-online-records"],
-    driftSelectors: ['a[href*="clerk" i]', "body"],
+    // P-113: Caldwell's own probe (scaffold retired 2026-09-03) — the real
+    // vendor's splash "Enter" control, verified live.
+    probeId: "caldwell-countygovernmentrecords-v1",
+    recipeVersion: "p85-caldwell-countygovernmentrecords-v1",
+    portalIds: ["caldwell-clerk-web"],
+    driftSelectors: COUNTY_GOV_RECORDS_SPLASH_SELECTORS,
   },
 ] as const;
 

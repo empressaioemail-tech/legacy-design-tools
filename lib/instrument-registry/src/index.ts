@@ -132,7 +132,7 @@ export const FAMILY_SOURCE_TO_ENTITY_TYPE: Readonly<Record<string, string>> = {
   "building-footprint": "building-footprint",
   "property-boundary-edge": "property-boundary-edge",
   "special-district-fact": "special-district-fact",
-  "structural-fact": "cad-parcel-roll",
+  "structural-fact": "cad_property",
 };
 
 export function classificationForFactSource(
@@ -169,7 +169,7 @@ export const FACET_SLOT_TO_ENTITY_TYPE: Readonly<Record<string, string>> = {
   buildingFootprintFact: "building-footprint",
   boundaryEdgeFact: "property-boundary-edge",
   ownerFact: "owner-fact",
-  structuralFact: "cad-parcel-roll",
+  structuralFact: "cad_property",
 };
 
 /** Attach registry metadata onto a fact or verdict wire object. */

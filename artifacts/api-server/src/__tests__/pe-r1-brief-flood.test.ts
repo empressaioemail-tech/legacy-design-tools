@@ -2,13 +2,20 @@
  * R1 research/brief composition — unit tests (no DATABASE_URL required).
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { extractEnvelopeBriefRefusal } from "../lib/envelopeBriefRefusal";
 import {
   type FloodHazardFactPresent,
   type FloodHazardFactRefusal,
 } from "../lib/floodHazardFactRead";
-import { buildR1Brief, summarizeFloodZoneExposure } from "../lib/r1BriefCompose";
+import type { ParcelRecordFloodRead } from "../lib/parcelRecordFactRead";
+import { resolveIsSfha } from "../lib/floodHazardFactFromParcelRecord";
+import {
+  buildR1Brief,
+  summarizeFloodZoneExposure,
+  summarizeParcelRecordFloodZoneExposure,
+} from "../lib/r1BriefCompose";
 
 const tier2RetiredFloodDisposition = {
   state: "refused" as const,
@@ -34,6 +41,10 @@ const atomPresentFixture: FloodHazardFactPresent = {
   sourceVintage: "NFHL_48_20260101",
   sourceCitation: null,
   evaluatedAt: "2026-08-11T23:13:43.774Z",
+  // CARD F2: the atom path is always one point, one zone.
+  zones: [{ zone: "AO", subtype: null, isSfha: true, floodway: false, bfe: null, areaShare: null }],
+  overlap: "single",
+  touchesSfhaEdge: false,
 };
 
 const zoneXShadedFixture: FloodHazardFactPresent = {
@@ -44,6 +55,16 @@ const zoneXShadedFixture: FloodHazardFactPresent = {
   inSpecialFloodHazardArea: false,
   floodZone: "X",
   zoneSubtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+  zones: [
+    {
+      zone: "X",
+      subtype: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD",
+      isSfha: false,
+      floodway: false,
+      bfe: null,
+      areaShare: null,
+    },
+  ],
 };
 
 const zoneXUnsubtypedFixture: FloodHazardFactPresent = {
@@ -82,7 +103,8 @@ describe("buildR1Brief composition", () => {
     expect(floodSection?.refusal).toBeUndefined();
     expect(floodSection?.asOf).toBe(atomPresentFixture.evaluatedAt);
     expect(floodSection?.citationsDegraded).toBe(true);
-    expect(floodSection?.zoneExposureSummary).toMatch(/Special Flood Hazard Area/);
+    // F2 (triage D5): the prose is withheld while the citation is degraded.
+    expect(floodSection).not.toHaveProperty("zoneExposureSummary");
     expect(JSON.stringify(brief)).not.toContain("FLOODWAY");
   });
 
@@ -110,7 +132,7 @@ describe("buildR1Brief composition", () => {
     const brief = buildR1Brief(
       { baseFacts: { landUse: { code: "A1" } } },
       null,
-      { floodHazardFact: zoneXShadedFixture },
+      { floodHazardFact: { ...zoneXShadedFixture, sourceCitation: femaCitation } },
     );
     const floodSection = brief.sections.find((section) => section.id === "flood");
     expect(floodSection?.zoneExposureSummary).toBe(summary);
@@ -223,6 +245,29 @@ describe("buildR1Brief composition", () => {
     });
   });
 
+  it("P-91 item 9: present land-use with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+    );
+    const landUse = brief.sections.find((section) => section.id === "land-use");
+    expect(landUse?.data).toEqual({ code: "A1" });
+    expect(landUse?.citations).toEqual([]);
+    expect(landUse?.citationsDegraded).toBe(true);
+  });
+
+  it("P-91 item 9: present flood with empty citations is citationsDegraded", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: zoneXShadedFixture },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toMatchObject({ state: "present", floodZone: "X" });
+    expect(flood?.citations).toEqual([]);
+    expect(flood?.citationsDegraded).toBe(true);
+  });
+
   it("present wire envelope keeps data and citations", () => {
     const envelope = {
       status: "ok",
@@ -244,5 +289,492 @@ describe("buildR1Brief composition", () => {
     expect(envelopeSection?.refusal).toBeUndefined();
     expect(envelopeSection?.citations).toContain("https://example.test/setbacks");
     expect(envelopeSection?.asOf).toBeNull();
+  });
+});
+
+/**
+ * F2 (v2 card, triage D5). A degraded flood section produced the most
+ * quotable sentence in the brief. While the citation is degraded the prose
+ * is withheld; with a citation it is emitted; and none of it carries an em
+ * dash.
+ */
+describe("F2 flood prose is withheld while the citation is degraded", () => {
+  it("gold-shaped present flood with no citation: citationsDegraded, empty citations, no zoneExposureSummary", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+    expect(flood?.citations).toEqual([]);
+    expect(flood?.citationsDegraded).toBe(true);
+    expect(flood).not.toHaveProperty("zoneExposureSummary");
+  });
+
+  it("the same fact with a citation emits the summary", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: { ...atomPresentFixture, sourceCitation: femaCitation } },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.citations).toEqual([femaCitation]);
+    expect(flood).not.toHaveProperty("citationsDegraded");
+    expect(flood?.zoneExposureSummary).toMatch(/Special Flood Hazard Area/);
+  });
+
+  it("no summary string, emitted or in source, contains an em dash", () => {
+    const source = readFileSync(
+      new URL("../lib/r1BriefCompose.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/—/);
+    const fixtures: FloodHazardFactPresent[] = [
+      atomPresentFixture,
+      zoneXShadedFixture,
+      zoneXUnsubtypedFixture,
+      { ...zoneXShadedFixture, zoneSubtype: "AREA OF MINIMAL FLOOD HAZARD" },
+      { ...zoneXShadedFixture, floodZone: "D" },
+      { ...zoneXShadedFixture, floodZone: "" },
+      { ...atomPresentFixture, baseFloodElevation: 412 },
+    ];
+    for (const fixture of fixtures) {
+      expect(summarizeFloodZoneExposure(fixture) ?? "").not.toMatch(/—/);
+    }
+  });
+
+  it("CARD F2: a multi-zone FloodHazardFactPresent names every zone and its share", () => {
+    const multiZone: FloodHazardFactPresent = {
+      ...atomPresentFixture,
+      floodZone: "AE",
+      inSpecialFloodHazardArea: true,
+      sourceCitation: femaCitation,
+      zones: [
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: null, areaShare: 0.23 },
+        { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.77 },
+      ],
+      overlap: "partial",
+    };
+    const summary = summarizeFloodZoneExposure(multiZone);
+    expect(summary).toMatch(/AE \(23%\)/);
+    expect(summary).toMatch(/X \(77%\)/);
+  });
+
+  it("CARD F2: touchesSfhaEdge produces the edge sentence, never 'in', never without the full zone list", () => {
+    const edge: FloodHazardFactPresent = {
+      ...atomPresentFixture,
+      floodZone: "X",
+      inSpecialFloodHazardArea: false,
+      touchesSfhaEdge: true,
+      sourceCitation: femaCitation,
+      zones: [
+        { zone: "X", subtype: null, isSfha: false, floodway: false, bfe: null, areaShare: 0.993 },
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, bfe: 810, areaShare: 0.007 },
+      ],
+      overlap: "sliver",
+    };
+    const summary = summarizeFloodZoneExposure(edge);
+    expect(summary).toMatch(/touches Zone AE at the edge/i);
+    expect(summary).not.toMatch(/\bis in a Special Flood Hazard Area\b/);
+    expect(summary).toMatch(/AE \(1%\)/);
+  });
+});
+
+/**
+ * PARCEL-C-REPORT (2026-09-02). parcel_record is preferred for flood when it
+ * has earned a determination (value or absent-verified); the atoms path
+ * (floodHazardFact) is the fallback, never silently dropped. No "drainage"
+ * rail exists in parcel_record -- the drainage section is untouched by any
+ * of this and is covered by its own describe block below.
+ *
+ * P-297 / A-193 AMENDS THE FALLBACK'S SCOPE. This read is ungated -- it is not
+ * a `*ServeCutover.ts` wrapper, so it can carry a cell for a county whose
+ * flood rail is not slated -- and "earned a determination" is now read
+ * through the slate: on a SLATED pair the cell is the answer for every state
+ * (an unaccounted or refused cell is a declared refusal, not a licence to
+ * serve the atom), while an unslated pair keeps this exact pre-ruling
+ * behaviour. The slate question is asked from the read's own place_key in
+ * `composeFloodBriefSection` (r1BriefCompose.ts).
+ */
+describe("parcel_record flood preferred over the atoms path when earned", () => {
+  const parcelRecordValue: ParcelRecordFloodRead = {
+    state: "value",
+    source: "parcel_record",
+    placeKey: "48309:100000",
+    floodZone: "X",
+    floodway: false,
+    baseFloodElevation: null,
+    method: "point-on-surface",
+    sourceVintage: "NFHL_48_20260101",
+    // CARD F2: the old single-point payload maps to one zone row, areaShare null.
+    zones: [
+      {
+        zone: "X",
+        subtype: null,
+        isSfha: null,
+        floodway: false,
+        baseFloodElevation: null,
+        dfirmId: null,
+        areaShare: null,
+        overlap: "single",
+        method: "point-on-surface",
+        sourceVintage: "NFHL_48_20260101",
+      },
+    ],
+  };
+
+  // 2026-10-12 tristate fix: `data.zones[*].isSfha` is now RESOLVED (via the
+  // same `resolveIsSfha` the map/card overlay uses), not the row's raw,
+  // unresolved SFHA_TF flag -- that is the fix this PR makes (previously the
+  // brief kept this row's `isSfha: null` verbatim while the overlay resolved
+  // zone X to `false` for the SAME row; now both agree). Zone X is decisive
+  // (never SFHA), so the resolved value here is `false`, not the fixture's
+  // raw stated `null`.
+  const parcelRecordValueAsPresent = parcelRecordValue as Extract<
+    ParcelRecordFloodRead,
+    { state: "value" }
+  >;
+  const resolvedParcelRecordValue: ParcelRecordFloodRead = {
+    ...parcelRecordValueAsPresent,
+    zones: [{ ...parcelRecordValueAsPresent.zones[0], isSfha: false }],
+  };
+
+  /**
+   * THE 908 PINE ST PARITY TEST (end-to-end through the real `buildR1Brief`
+   * entry point, the SAME function `propertyExplorer.ts`'s `assembleNodeBriefBody`
+   * calls). For a legacy row with no SFHA_TF, the brief's served
+   * `data.zones[0].isSfha` must equal what the map/card overlay's own
+   * `floodHazardFactFromParcelRecord.ts` resolves for the IDENTICAL row via
+   * `resolveIsSfha` -- the exact function the overlay's `toWireZone` calls.
+   * Before this fix the brief exposed the row's raw, unresolved `isSfha`
+   * (always `null` for a legacy row) while the overlay always resolved a
+   * boolean; this proves they now agree for every letter class this bug
+   * named: D (unknown), X (decisive false), AE (decisive true).
+   */
+  describe("PARITY: the brief's served data and the map/card overlay resolve a legacy row (null SFHA_TF) the same way", () => {
+    it.each([
+      ["D", null],
+      ["X", false],
+      ["AE", true],
+    ] as const)("zone %s with no stated SFHA_TF -> isSfha %s on both the brief's data and the overlay's resolver", (zone, expected) => {
+      const legacyRow: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+        state: "value",
+        source: "parcel_record",
+        placeKey: "48053:908",
+        floodZone: zone,
+        floodway: false,
+        baseFloodElevation: null,
+        method: "point-on-surface",
+        sourceVintage: "NFHL_48_20260101",
+        zones: [
+          {
+            zone,
+            subtype: null,
+            isSfha: null, // the legacy shape this bug report names: no SFHA_TF stated
+            floodway: false,
+            baseFloodElevation: null,
+            dfirmId: null,
+            areaShare: null,
+            overlap: "single",
+            method: "point-on-surface",
+            sourceVintage: "NFHL_48_20260101",
+          },
+        ],
+      };
+      const brief = buildR1Brief(
+        { baseFacts: { landUse: { code: "A1" } } },
+        null,
+        { parcelRecordFloodFact: legacyRow },
+      );
+      const floodSection = brief.sections.find((section) => section.id === "flood");
+      const briefIsSfha = (floodSection?.data as { zones: { isSfha: boolean | null }[] } | undefined)
+        ?.zones[0].isSfha;
+      const overlayIsSfha = resolveIsSfha(legacyRow.zones[0]);
+      expect(briefIsSfha).toBe(expected);
+      expect(overlayIsSfha).toBe(expected);
+      expect(briefIsSfha).toBe(overlayIsSfha);
+    });
+  });
+
+  it("a parcel_record value wins over an atoms present fixture, and carries the reconciled zone/floodway/BFE in data", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: parcelRecordValue },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("present");
+    expect(flood?.data).toEqual(resolvedParcelRecordValue);
+    expect(flood?.data).not.toEqual(atomPresentFixture);
+  });
+
+  it("floodway true renders a distinct sentence naming the regulatory floodway (a real boolean the atoms path never carries)", () => {
+    const floodwayFact: ParcelRecordFloodRead = {
+      ...parcelRecordValue,
+      floodZone: "AE",
+      floodway: true,
+      baseFloodElevation: 512.3,
+    };
+    const summary = summarizeParcelRecordFloodZoneExposure(
+      floodwayFact as Extract<ParcelRecordFloodRead, { state: "value" }>,
+    );
+    expect(summary).toMatch(/floodway/i);
+    expect(summary).toMatch(/512\.3/);
+  });
+
+  it("BFE renders only where a real value exists -- null stays out of the sentence, never coerced (dispatch step 4)", () => {
+    const summary = summarizeParcelRecordFloodZoneExposure(
+      parcelRecordValue as Extract<ParcelRecordFloodRead, { state: "value" }>,
+    );
+    expect(summary).not.toMatch(/Base flood elevation/);
+  });
+
+  it("legacy single-point payload: AREA NOT INCLUDED and D read as unknown, never as 'in' the SFHA", () => {
+    for (const floodZone of ["AREA NOT INCLUDED", "D", "OPEN WATER"]) {
+      const summary = summarizeParcelRecordFloodZoneExposure({
+        ...parcelRecordValue,
+        floodZone,
+        floodway: false,
+        zones: parcelRecordValue.zones.map((z) => ({ ...z, areaShare: null })),
+      } as Extract<ParcelRecordFloodRead, { state: "value" }>);
+      expect(summary).toMatch(/status unknown/);
+      expect(summary).not.toMatch(/is in a Special Flood Hazard Area/);
+    }
+  });
+
+  describe("CARD F2: whole-parcel flood prose", () => {
+    const wholeParcelValue: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+      state: "value",
+      source: "parcel_record",
+      placeKey: "48053:1001",
+      floodZone: "AE",
+      floodway: false,
+      baseFloodElevation: 820,
+      method: "whole-parcel-area-share",
+      sourceVintage: "NFHL_48_20260101",
+      zones: [
+        { zone: "AE", subtype: null, isSfha: true, floodway: false, baseFloodElevation: 820, dfirmId: "48053C", areaShare: 0.23, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+        { zone: "X", subtype: null, isSfha: false, floodway: false, baseFloodElevation: null, dfirmId: "48053C", areaShare: 0.77, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+      ],
+    };
+
+    it("a multi-zone parcel names every zone and its share, not just the primary", () => {
+      const summary = summarizeParcelRecordFloodZoneExposure(wholeParcelValue);
+      expect(summary).toMatch(/Special Flood Hazard Area/);
+      expect(summary).toMatch(/AE \(23%\)/);
+      expect(summary).toMatch(/X \(77%\)/);
+    });
+
+    it("a sliver touch says 'touches ... at the edge', never 'in', and still names every zone", () => {
+      const sliver: Extract<ParcelRecordFloodRead, { state: "value" }> = {
+        ...wholeParcelValue,
+        floodZone: "X",
+        zones: [
+          { zone: "X", subtype: null, isSfha: false, floodway: false, baseFloodElevation: null, dfirmId: "48053C", areaShare: 0.993, overlap: "partial", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+          { zone: "AE", subtype: null, isSfha: true, floodway: false, baseFloodElevation: 810, dfirmId: "48053C", areaShare: 0.007, overlap: "sliver", method: "whole-parcel-area-share", sourceVintage: "NFHL_48_20260101" },
+        ],
+      };
+      const summary = summarizeParcelRecordFloodZoneExposure(sliver);
+      expect(summary).toMatch(/touches Zone AE at the edge/i);
+      expect(summary).not.toMatch(/\bis in a Special Flood Hazard Area\b/);
+      expect(summary).toMatch(/AE \(1%\)/);
+      expect(summary).toMatch(/X \(99%\)/);
+    });
+
+    it("this function's own summary never emits an em dash either", () => {
+      expect(summarizeParcelRecordFloodZoneExposure(wholeParcelValue)).not.toMatch(/—/);
+    });
+  });
+
+  it("a parcel_record value with no citation is citationsDegraded (F2 discipline applies here too): data still ships, prose is withheld", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { parcelRecordFloodFact: parcelRecordValue },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.citationsDegraded).toBe(true);
+    expect(flood).not.toHaveProperty("zoneExposureSummary");
+    expect(flood?.data).toEqual(resolvedParcelRecordValue);
+  });
+
+  it("absent-verified maps to disposition absent -- a real determination, never promoted past absent at section level (same rule as the atoms path's own typed absence)", () => {
+    const absentVerified: ParcelRecordFloodRead = {
+      state: "absent-verified",
+      source: "parcel_record",
+      placeKey: "48491:R005971",
+      basis: { source: "tx_fema_nfhl_flood_zone", method: "point-on-surface-sweep" },
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { parcelRecordFloodFact: absentVerified },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("absent");
+    expect(flood?.data).toEqual(absentVerified);
+  });
+
+  it("P-297: a SLATED county's unaccounted flood cell is a declared refusal with its reason -- the atoms present is NOT served", () => {
+    // INVERTED, NOT DELETED (operator ruling A-193). This test used to pin the
+    // opposite: "nothing has looked yet in parcel_record is not a reason to
+    // drop the existing determination". On a slated rail that fall-through IS
+    // the defect -- 48021 (Bastrop) is slated for flood, so the parcel's own
+    // cell is the answer, and an unaccounted cell is a declared refusal about
+    // this rail rather than a licence to serve the stale atom.
+    const unaccounted: ParcelRecordFloodRead = {
+      state: "unaccounted",
+      source: "parcel_record",
+      placeKey: "48021:34137",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: unaccounted },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("refused");
+    expect(flood?.refusal).toEqual(unaccounted);
+    expect(flood?.data).toBeNull();
+    expect(flood?.data).not.toEqual(atomPresentFixture);
+  });
+
+  it("P-297: a SLATED county's refused flood cell is a declared refusal carrying the store's own reason", () => {
+    const refused: ParcelRecordFloodRead = {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: "parcel_record",
+      placeKey: "48021:34137",
+      reason: "RETRIEVAL_API_KEY not configured.",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: refused },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.disposition).toBe("refused");
+    expect(flood?.refusal).toEqual(refused);
+    expect(flood?.reason).toBe("RETRIEVAL_API_KEY not configured.");
+    expect(flood?.data).toBeNull();
+  });
+
+  it("P-297: an UNSLATED county's unaccounted flood cell keeps the atoms path -- the slate does not cover the pair", () => {
+    // 48001 (Anderson) is not on PARCEL_RECORD_SLATE for flood. An unslated
+    // pair is untouched by P-297, so the ungated Consumer-C read cannot claim
+    // the rail here: the atom keeps the determination it already had.
+    const unaccounted: ParcelRecordFloodRead = {
+      state: "unaccounted",
+      source: "parcel_record",
+      placeKey: "48001:34137",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: unaccounted },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+    expect(flood?.disposition).not.toBe("refused");
+  });
+
+  it("a flood refusal with NO place_key keeps the atoms path -- a read that cannot place itself cannot answer the slate question", () => {
+    // `place_key: null` is the read's own unplaceable case (an unparseable
+    // node id). It cannot say which county it is in, so it is not evidence the
+    // rail is slated, and P-297's unslated branch stands: the working old
+    // source is not blanked out by a read that never identified a parcel.
+    const refused: ParcelRecordFloodRead = {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: "parcel_record",
+      placeKey: null,
+      reason: "FACTORY_DATABASE_URL not configured.",
+    };
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      null,
+      { floodHazardFact: atomPresentFixture, parcelRecordFloodFact: refused },
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.data).toEqual(atomPresentFixture);
+  });
+
+  it("neither source provided behaves exactly as before this card (no regression on the zero-flood-fact path)", () => {
+    const brief = buildR1Brief(
+      { baseFacts: { landUse: { code: "A1" } } },
+      { floodDisposition: tier2RetiredFloodDisposition },
+      {},
+    );
+    const flood = brief.sections.find((section) => section.id === "flood");
+    expect(flood?.refusal).toEqual(tier2RetiredFloodDisposition);
+  });
+});
+
+/**
+ * F7 (v2 card, triage D3). The stub advertises a drainage rail; node depth
+ * must carry a drainage section so the rail can be opened. Until the facet
+ * exists the section is unread with a reason; when the bake carries a
+ * drainage facet the section carries it like the other sections.
+ */
+describe("F7 drainage is a section", () => {
+  const BAKED_AT = "2026-08-20T00:00:00.000Z";
+
+  it("node depth carries a drainage section, unread with a reason, until the facet exists", () => {
+    const brief = buildR1Brief(
+      { bakedAt: BAKED_AT, baseFacts: { landUse: { code: "A1" } } },
+      null,
+    );
+    const drainage = brief.sections.find((section) => section.id === "drainage");
+    expect(drainage).toEqual({
+      id: "drainage",
+      title: "Drainage",
+      data: null,
+      citations: [],
+      asOf: BAKED_AT,
+      disposition: "unread",
+      reason: "drainage facet not produced for this parcel",
+    });
+  });
+
+  it("a bake with a drainage facet carries it present like the other sections", () => {
+    const facet = {
+      catchmentAreaAcres: 1.2,
+      flowLineCount: 2,
+      sourceUrl: "https://example.test/drainage/48021-34137",
+      evaluatedAt: "2026-08-25T00:00:00.000Z",
+    };
+    const brief = buildR1Brief({ bakedAt: BAKED_AT, drainage: facet }, null);
+    const drainage = brief.sections.find((section) => section.id === "drainage");
+    expect(drainage).toMatchObject({
+      id: "drainage",
+      title: "Drainage",
+      data: facet,
+      disposition: "present",
+      citations: ["https://example.test/drainage/48021-34137"],
+      asOf: "2026-08-25T00:00:00.000Z",
+    });
+    expect(drainage).not.toHaveProperty("reason");
+    expect(drainage).not.toHaveProperty("citationsDegraded");
+  });
+
+  it("every section carries a disposition in the four-word vocabulary", () => {
+    const brief = buildR1Brief(
+      { bakedAt: BAKED_AT, zoning: { district: "SF-1" }, baseFacts: { landUse: null } },
+      null,
+      { floodHazardFact: atomMissFixture },
+    );
+    expect(brief.sections.map((section) => section.id)).toEqual([
+      "zoning",
+      "setbacks-envelope",
+      "flood",
+      "land-use",
+      "drainage",
+    ]);
+    for (const section of brief.sections) {
+      expect(["present", "absent", "refused", "unread"]).toContain(
+        (section as { disposition?: unknown }).disposition,
+      );
+    }
   });
 });

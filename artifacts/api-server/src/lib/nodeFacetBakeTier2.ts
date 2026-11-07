@@ -7,6 +7,7 @@
  * `atom_path_pending` / `no-zoning-stamp` declines only.
  */
 
+import { classifyFemaZoneSfha } from "./femaZoneCode";
 import { NO_ZONING_STAMP_REASON } from "./buildableEnvelope/absentZoningHonesty";
 import type { RoadCandidate } from "./buildableEnvelope/edgeLabeling";
 import type { Ring } from "./buildableEnvelope/geometry";
@@ -131,7 +132,7 @@ export interface Tier2FloodFacet {
   status: "in-sfha" | "flood-zone" | "outside-sfha" | "unavailable";
   /** FEMA flood zone code (AE, X, VE, ...). Null when outside-sfha/unavailable. */
   floodZone: string | null;
-  /** FEMA SFHA_TF normalized to a boolean. Null when unavailable. */
+  /** FEMA SFHA_TF, else exact zone-code rule. Null when unavailable OR the zone is not decisive (D, AREA NOT INCLUDED, ...). */
   inSpecialFloodHazardArea: boolean | null;
   /** Zone subtype (FLOODWAY, "0.2 PCT ANNUAL CHANCE FLOOD HAZARD", ...). */
   zoneSubtype: string | null;
@@ -149,22 +150,19 @@ export interface Tier2FloodFacet {
 }
 
 /** FEMA stamps SFHA_TF as the literal "T"/"F"; some layers a boolean. */
-function normalizeSfha(v: unknown): boolean {
-  return v === "T" || v === true;
+function normalizeSfha(v: unknown): boolean | null {
+  if (v === "T" || v === true) return true;
+  if (v === "F" || v === false) return false;
+  return null;
 }
 
-/** SFHA zone codes (the 1% annual-chance floodplain). X and D are NON-SFHA. */
-const SFHA_ZONE_PREFIXES = ["A", "V"] as const;
-
-function isSfhaZone(zone: string | null, sfhaFlag: boolean): boolean {
-  if (sfhaFlag) return true;
-  if (!zone) return false;
-  const z = zone.trim().toUpperCase();
-  // "X" and "D" are explicitly non-SFHA even though X does not start with A/V;
-  // the flag is authoritative, but fall back to the code prefix when FEMA left
-  // SFHA_TF blank on an older panel.
-  if (z === "X" || z === "D" || z.startsWith("X")) return false;
-  return SFHA_ZONE_PREFIXES.some((p) => z.startsWith(p));
+/**
+ * Stated SFHA_TF wins; otherwise EXACT zone-code classification (never a
+ * prefix test: "AREA NOT INCLUDED" is not an A zone). null = unknown.
+ */
+function isSfhaZone(zone: string | null, sfhaFlag: boolean | null): boolean | null {
+  if (sfhaFlag !== null) return sfhaFlag;
+  return classifyFemaZoneSfha(zone);
 }
 
 /**
@@ -233,7 +231,7 @@ export function buildFloodFacet(
       : null;
 
   return {
-    status: inSfha ? "in-sfha" : "flood-zone",
+    status: inSfha === true ? "in-sfha" : "flood-zone",
     floodZone,
     inSpecialFloodHazardArea: inSfha,
     zoneSubtype,

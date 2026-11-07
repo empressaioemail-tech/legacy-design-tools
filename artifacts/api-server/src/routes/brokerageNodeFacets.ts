@@ -81,23 +81,159 @@
  * Status is incorporated | unincorporated | unmeasured. ETJ is
  * `etjStatus: unresolved` — no buffer, no offset ring. Empty table
  * is unmeasured, never unincorporated. Query point is the bake
- * lat/lng index. Never copy situs city as incorporated place.
+ * lat/lng index and is served on the fact as `queryPoint` (null when
+ * the bake holds the 0,0 sentinel). Never copy situs city as
+ * incorporated place.
+ *
+ * ZONING VERDICT DERIVES FROM CITY LIMITS (CTX card F, 2026-08-28).
+ * For a parcel WITHOUT a zoning stamp, `facets.zoning` is the verdict
+ * `zoningVerdictFromCityLimits` builds from `cityLimitsFact` and the
+ * county roster: `stamp-missing` inside an incorporated place (the
+ * place named), `not-applicable` only when the index is populated, the
+ * point is outside every place, and the county's unincorporated
+ * territory is unzoned; `unmeasured` otherwise, carrying the reason.
+ * `baseFacts.situsCity` is never an input: until this card a null
+ * situsCity (which the conformant bake wrote for every parcel) served
+ * central Austin as `not-applicable: unincorporated`. The land-use
+ * fact receives the same verdict only when it is `not-applicable`.
+ *
+ * UTILITY SERVICE IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `utilityServiceFact` is read from parcel_record via
+ * loadUtilityServiceFactForServe. UNLIKE every other root-sibling fact
+ * above, this one has no atom and no legacy path at all -- there was never
+ * a `utilityService` facet served anywhere before this card, so there is
+ * nothing to swap and nothing to retire. `water`, `sewer`, and `electric`
+ * are independent slots, not a picked lead: a parcel served by more than
+ * one shows all of them. BUGFIX 2026-09-04: the original cutover only read
+ * water/sewer (rowIndex 0/1), missing the electric slot (rowIndex 2) PARCEL
+ * wave 2 added to the same writer -- caught live via this card's own
+ * post-deploy witness-parcel check, not a unit test. See
+ * utilityServiceFactRead.ts's module doc for detail. No gate verdict has
+ * yet been computed for this rail (the scheduled evaluation has no
+ * automatic trigger and has never been run against utilityService as of
+ * this card -- see PARCEL-B-GATE-SCHED's own close), so every request
+ * today resolves to the typed `not-cut-over` refusal until that evaluation
+ * lands. Never SELECT bake / place_layer_snapshots / CAD / GIS for this
+ * field.
+ *
+ * OVERLAY DISTRICTS IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `overlayDistrictsFact` is read from parcel_record via
+ * loadOverlayDistrictsFactForServe. No atom, no legacy path -- nothing to
+ * swap, nothing to retire. `districts` is a plural array (a parcel can
+ * carry more than one overlay at once; there is no single "lead" the way
+ * wells/specialDistricts pick one). No gate verdict has yet been computed
+ * for this rail. Never SELECT bake / place_layer_snapshots / CAD / GIS for
+ * this field.
+ *
+ * AG VALUATION IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `agValuationFact` is read from parcel_record via
+ * loadAgValuationFactForServe. Williamson (48491) and Travis (48453) ONLY
+ * -- the writer refuses every other county outright. No atom, no legacy
+ * path. `entries` is plural (a parcel can carry multiple WCAD/TCAD land
+ * records). No gate verdict has yet been computed for this rail. Never
+ * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
+ *
+ * SCHOOL DISTRICT IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01, serve/prod
+ * cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `schoolDistrictFact` is read from parcel_record via
+ * loadSchoolDistrictFactForServe. No atom, no legacy path. `districtCode`
+ * is the hyphenated CCC-DDD form. A 13-parcel, program-wide zero-hit/multi-
+ * hit anomaly class (see schoolDistrictFactRead.ts's module doc) serves as
+ * an ordinary unaccounted refusal, not a defect. No gate verdict has yet
+ * been computed for this rail. Never SELECT bake / place_layer_snapshots /
+ * CAD / GIS for this field.
+ *
+ * MAX IMPERVIOUS COVER PCT IS A ROOT SIBLING, PARCEL_RECORD-ONLY (F-01,
+ * serve/prod cutover for ACQUIRE-GIS wave 1 + PARCEL wave 2, 2026-09-04).
+ * `maxImperviousCoverPctFact` is read from parcel_record via
+ * loadMaxImperviousCoverPctFactForServe. Travis (48453) / Austin ONLY. No
+ * atom, no legacy path. Most Travis parcels sit outside Austin's
+ * watershed-regulation area entirely and are deliberately untouched (not
+ * an anomaly). No gate verdict has yet been computed for this rail. Never
+ * SELECT bake / place_layer_snapshots / CAD / GIS for this field.
+ *
+ * SETBACKS IS A ROOT SIBLING, PARCEL_RECORD-ONLY (PE/MCP-vs-facets parity
+ * audit, 2026-09-07, finding D6). `setbacksFact` is read from parcel_record
+ * via loadSetbacksFactForServe -- the SAME loader propertyExplorer.ts's
+ * research/brief path already uses. Before this fix, this route's baked
+ * `facets.envelope` was UNCONDITIONALLY null (stripZombieEnvelopeFromFacets,
+ * anti-zombie WDLL 3.7) and no live setbacks fact was ever fetched, so this
+ * route reported NO setback data for ANY parcel, in ANY county, ever, while
+ * the brief/MCP path already had real frontFt/sideFt/rearFt/cornerFt figures
+ * for gate-passing counties -- the single largest capability gap the audit
+ * found. `setbacksFact` is additive: it does NOT resurrect `facets.envelope`
+ * (that stays permanently null by design), it is a new sibling field, same
+ * pattern as utilityServiceFact/overlayDistrictsFact/etc. above. No gate
+ * verdict has yet been computed for this rail. Never SELECT bake /
+ * place_layer_snapshots / CAD / GIS for this field.
+ *
+ * FIVE MORE ROOT SIBLINGS, PARCEL_RECORD-ONLY, NO LEGACY PATH (OPS-21 S5,
+ * P-148, 2026-09-11) -- the "written but no consumer" gap S4/P-135 found:
+ * `setbackRulesFact`, `parcelAreaSqFtFact`, `maxHeightFtFact`,
+ * `maxLotCoveragePctFact`, `maxFootprintSqFtFact` are read from parcel_record
+ * via their own loadXFactForServe wrappers, same pattern as
+ * utilityServiceFact/overlayDistrictsFact/etc. above. Only parcelAreaSqFt is
+ * slated (5 counties, Hays excluded); the other four ship wired but
+ * permanently inert until a future lane slates them (blocked on the
+ * 3,376-parcel zoningDistrict residual Z1/P-147 owns) -- resolving to a typed
+ * not-cut-over refusal for every parcel today, by construction. setbackRules
+ * is READ FROM A COMPANION ROW, not the cell's own value field (live-verified
+ * distinct from its Ft-suffixed siblings setbackFrontFt/SideFt/RearFt/
+ * CornerFt -- see setbackRulesFactRead.ts's own module doc). Never SELECT
+ * bake / place_layer_snapshots / CAD / GIS for any of these five fields.
+ *
+ * ZONING LEDGER PARITY (PE/MCP-vs-facets parity audit, 2026-09-07, finding
+ * D5). `facets.zoning` above (attachVerdictLayersToFacets) now also takes a
+ * `parcelRecordZoningFact` read via loadZoningFactForServe -- the SAME
+ * loader and the SAME "record wins unconditionally over the baked stamp
+ * whenever it has genuinely earned one" rule
+ * r1BriefCompose.ts's composeZoningBriefSectionFromParcelRecord already
+ * applies for the brief path. Before this fix the baked stamp always won
+ * here when present and this route never consulted the live ledger at all,
+ * so the two surfaces could report different zoning districts for the same
+ * parcel. See structuralFactToFacetsWire.ts's own module doc for the exact
+ * precedence logic.
  *
  * OWNER ATOM IS A ROOT SIBLING (lane serve P-54, 2026-08-22; gate
- * tightened 2026-08-24). `ownerFact` is read from owner-fact atoms.
- * Writer keys entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year
- * family as land-use-fact). Dual grammar is LIKE prefix:% on both
- * parcel prefixes; taxYear is the writer suffix. Owner name and mailing
- * leave this route only when PE entitlement is studio or team
- * (`subscriptionTierGrantsStudio` on `pe_user_entitlements`). Anonymous,
- * free, Solo, $15 unlock, and identified-only brokerage sessions receive
- * a typed `studio-gated` refusal with no ownerName and no mailing, and
- * do not query atoms. Identified session is not the gate. Operator /
- * extension API keys are not a session. Share-loop full-fidelity is a
- * locked exception on the share path, not this read. Never SELECT
- * cad-parcel-roll / bake / cad_property / GIS ParcelCardData.owner for
- * this field. Do not run sanitizeNodeFacetPayload on a granted
- * ownerFact (it would strip ownerName).
+ * tightened 2026-08-24; WIDENED 2026-09-05 to include Property Unlock).
+ * `ownerFact` is read from owner-fact atoms. Writer keys
+ * entity_id = `${parcelNodeId}:${taxYear}` (same CAD-year family as
+ * land-use-fact). Dual grammar is LIKE prefix:% on both parcel prefixes;
+ * taxYear is the writer suffix. Owner name and mailing leave this route
+ * only when `grantsOwnerCoGatedFields` grants: PE entitlement is studio or
+ * team, OR the caller holds an active Property Unlock for THIS parcel
+ * (operator, 2026-09-05: "owner needs to be a part of unlock too. i just
+ * kept it out of solo as a way to graduate user through the tiers" — Solo's
+ * exclusion is confirmed deliberate and unchanged). Anonymous, free, Solo,
+ * and identified-only brokerage sessions receive a typed `studio-gated`
+ * refusal with no ownerName and no mailing, and do not query atoms.
+ * Identified session is not the gate. Operator / extension API keys are not
+ * a session. Share-loop full-fidelity is a locked exception on the share
+ * path, not this read. Never SELECT cad-parcel-roll / bake / cad_property /
+ * GIS ParcelCardData.owner for this field. Do not run
+ * sanitizeNodeFacetPayload on a granted ownerFact (it would strip
+ * ownerName).
+ *
+ * CAD TAX-ASSESSED DOLLAR VALUES CO-GATE WITH OWNER (OPS-16 A-103 item 5 /
+ * A-104, 2026-09-05; co-gate widened same day). `facets.baseFacts.cadRoll.
+ * {marketValue,assessedValue,landValue,improvementValue}` are county
+ * tax-assessment figures — the operator's own distinction is that this is a
+ * sourced, factual figure from the CAD roll, NOT a market-valuation
+ * opinion, so Masters 06's "not a valuation tool" stance does not apply to
+ * it. It is cleared to display, and ruled to unlock at the exact same tier
+ * as owner info: gated by `grantsOwnerFact` (Studio|Team OR an active
+ * Property Unlock for this parcel — the SAME predicate `ownerFact` uses
+ * just above, never a second one). Before this gate these four fields were
+ * written into the response by `attachCadRollOverlaysToFacets` with NO GATE
+ * AT ALL, a live (if inert — nothing rendered it) exposure.
+ * `gateCadRollValuationOnFacets` runs AFTER the overlay merge so it catches
+ * dollar values regardless of whether they came from the live overlay or
+ * straight off the offline-baked snapshot; refused callers get a typed
+ * `studio-gated` refusal per field, never a silent omission. `livingAreaSqft`
+ * is not a dollar field and is not part of this ruling.
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -105,14 +241,33 @@ import { db, placeLayerSnapshots } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { brokerageCors } from "../middlewares/brokerageCors";
 import { gtmErrorBody } from "../lib/gtmErrorClass";
-import { refusePayloadAtServe } from "../lib/serveGuards";
+import { refusePayloadAtServe, retiredRecordAtServe } from "../lib/serveGuards";
+import type { Tier1RecordRetirement } from "../lib/recordRetirement";
 import { TIER1_ADAPTER_KEY } from "../lib/nodeFacetTier1Constants";
 import { TIER2_ADAPTER_KEY } from "../lib/nodeFacetTier2Constants";
-import { loadFloodHazardFactAtom } from "../lib/floodHazardFactRead";
+import { loadFloodHazardFactForServe } from "../lib/floodHazardFactServeCutover";
 import { loadLandUseFactAtom } from "../lib/landUseFactRead";
-import { loadSpecialDistrictFactAtom } from "../lib/specialDistrictFactRead";
+import { loadSpecialDistrictFactForServe } from "../lib/specialDistrictFactServeCutover";
 import { loadPipelineFactAtom } from "../lib/pipelineFactRead";
-import { loadWellFactAtom } from "../lib/wellFactRead";
+import { loadWellFactForServe } from "../lib/wellFactServeCutover";
+import { loadUtilityServiceFactForServe } from "../lib/utilityServiceFactServeCutover";
+import { loadOverlayDistrictsFactForServe } from "../lib/overlayDistrictsFactServeCutover";
+import { loadAgValuationFactForServe } from "../lib/agValuationFactServeCutover";
+import { loadSchoolDistrictFactForServe } from "../lib/schoolDistrictFactServeCutover";
+import { loadMaxImperviousCoverPctFactForServe } from "../lib/maxImperviousCoverPctFactServeCutover";
+import { loadValueHistoryFactForServe } from "../lib/valueHistoryFactServeCutover";
+import { gateValueHistoryFactValuation } from "../lib/valueHistoryFactRead";
+import {
+  applyExemptionTypesServeToNodeFacetsResponse,
+  exemptionDetailLevelForOwnerCoGate,
+} from "../lib/exemptionTypesServe";
+import { loadZoningFactForServe } from "../lib/zoningFactServeCutover";
+import { loadSetbacksFactForServe } from "../lib/setbacksFactServeCutover";
+import { loadSetbackRulesFactForServe } from "../lib/setbackRulesFactServeCutover";
+import { loadParcelAreaSqFtFactForServe } from "../lib/parcelAreaSqFtFactServeCutover";
+import { loadMaxHeightFtFactForServe } from "../lib/maxHeightFtFactServeCutover";
+import { loadMaxLotCoveragePctFactForServe } from "../lib/maxLotCoveragePctFactServeCutover";
+import { loadMaxFootprintSqFtFactForServe } from "../lib/maxFootprintSqFtFactServeCutover";
 import { loadBuildingFootprintFactAtom } from "../lib/buildingFootprintFactRead";
 import { loadBoundaryEdgeFactAtom } from "../lib/boundaryEdgeFactRead";
 import {
@@ -120,22 +275,46 @@ import {
   loadOwnerFactAtom,
 } from "../lib/ownerFactRead";
 import {
+  grantsOwnerCoGatedFields,
   resolvePeEntitlement,
-  subscriptionTierGrantsStudio,
 } from "../lib/peEntitlement";
 import { loadStructuralFactAtom } from "../lib/structuralFactRead";
-import { loadCityLimitsFact } from "../lib/cityLimitsFactRead";
+import { loadCityLimitsFactForServe } from "../lib/cityLimitsFactServeCutover";
 import { usableCityLimitsQueryPoint } from "@workspace/cad-ingest/city-limits";
 import { enrichLandUseFactWithZoningVerdict } from "../lib/landUseFactVerdict";
+import { zoningVerdictFromCityLimits } from "../lib/verdictLayerServe";
 import {
   attachVerdictLayersToFacets,
+  attachCadRollOverlaysToFacets,
+  gateCadRollValuationOnFacets,
 } from "../lib/structuralFactToFacetsWire";
+import { resolveCadRollOverlaysForServe } from "../lib/cadRollServeCutover";
+import { parseParcelNodeId } from "../lib/parcelNodeId";
 import { enrichFacetsResponseWithRegistry } from "@workspace/instrument-registry";
 import {
   authenticatedBrokerageUserId,
   extractBrokerageApiKey,
+  isIdentifiedUserSession,
 } from "../middlewares/brokerageAuth";
 import { verifySessionToken } from "../lib/sessionToken";
+import {
+  oneDoorEntitlementsFor,
+  oneDoorModeOf,
+  readOneDoorRecord,
+  recordHasFailedFact,
+  transportFailedRecord,
+  type OneDoorRead,
+  type OneDoorRecord,
+} from "../lib/oneDoor/oneDoorReaderClient";
+import { enqueueOneDoorShadowDiffs } from "../lib/oneDoor/oneDoorShadowDiff";
+import { enterRecordEntitlements } from "../lib/oneDoor/recordEntitlementsContext";
+import {
+  composeOneDoorFacetsBody,
+  oneDoorShadowDiffRows,
+  ONE_DOOR_SURFACE_RAILS,
+  type OneDoorPlacement,
+} from "../lib/oneDoor/oneDoorSurfaces";
+import { oneDoorParcelGeometry } from "../lib/oneDoor/oneDoorParcelGeometry";
 import {
   extractEnvelopeBriefRefusal,
   type EnvelopeBriefRefusal,
@@ -177,7 +356,7 @@ function applyExistingIdentifiedBrokerageSession(req: Request): void {
   } catch {
     return;
   }
-  if (verified.ok && verified.session.requestor?.kind === "user") {
+  if (verified.ok && isIdentifiedUserSession(verified.session)) {
     req.session = verified.session;
     req.brokerageAuth = { tier: "user" };
   }
@@ -189,14 +368,41 @@ export function isIdentifiedOwnerFactCaller(req: Request): boolean {
 }
 
 /**
- * Studio|Team PE entitlement is the owner-name gate. Identified session
- * alone is not enough (2026-08-24). Unlock and Solo refuse.
+ * Studio|Team PE entitlement OR an active Property Unlock for THIS parcel
+ * is the owner-name gate (widened 2026-09-05 — operator: "owner needs to
+ * be a part of unlock too. i just kept it out of solo as a way to graduate
+ * user through the tiers." Solo's exclusion is unchanged and deliberate;
+ * Property Unlock's was not). Identified session alone is not enough
+ * (2026-08-24). Solo still refuses.
  */
-export async function callerGrantsOwnerFact(req: Request): Promise<boolean> {
+export async function callerGrantsOwnerFact(
+  req: Request,
+  parcelNodeId: string,
+): Promise<boolean> {
+  const caller = await resolveOwnerFactCaller(req);
+  if (caller == null) return false;
+  return grantsOwnerCoGatedFields(caller.userId, caller.subscriptionTier, parcelNodeId);
+}
+
+/**
+ * The caller half of {@link callerGrantsOwnerFact}, split out so a surface
+ * that serves MANY parcels per request (the map-data `parcels` gis-layer,
+ * the motivated-seller composite) resolves the caller ONCE and then asks
+ * `grantsOwnerCoGatedFields` per parcel — the plan grant covers every
+ * parcel, a Property Unlock covers only its own parcel. `null` = no
+ * identified brokerage user session (anonymous, operator / extension /
+ * service key): such a caller is never granted owner co-gated fields.
+ */
+export async function resolveOwnerFactCaller(
+  req: Request,
+): Promise<{
+  userId: string | null;
+  subscriptionTier: Awaited<ReturnType<typeof resolvePeEntitlement>>["subscriptionTier"];
+} | null> {
   applyExistingIdentifiedBrokerageSession(req);
-  if (authenticatedBrokerageUserId(req) == null) return false;
+  if (authenticatedBrokerageUserId(req) == null) return null;
   const snap = await resolvePeEntitlement(req);
-  return subscriptionTierGrantsStudio(snap.subscriptionTier);
+  return { userId: snap.userId, subscriptionTier: snap.subscriptionTier };
 }
 
 function isOwnerIshKey(key: string): boolean {
@@ -503,13 +709,28 @@ export const brokerageNodeFacetsRouter: IRouter = Router();
 brokerageNodeFacetsRouter.use(brokerageCors);
 
 /**
+ * P-206 (2026-09-16). What a node's baked read actually resolved to.
+ *
+ * `loadBakedNodeFacetSnapshot` below collapses `retired` and `none` into the
+ * same `null`, which is what forced the P-180 decline to be reported as the
+ * generic `404 no_coverage/not_baked` and, on the property-explorer route, as
+ * `parcel_not_found`. Those are two DIFFERENT facts and the serve now says
+ * which one it is: `retired` carries the earned retirement it declined for,
+ * `none` means no tier-1 row was ever written.
+ */
+export type BakedNodeFacetRead =
+  | { kind: "snapshot"; snapshot: BakedNodeFacetSnapshot }
+  | { kind: "retired"; retirement: Tier1RecordRetirement }
+  | { kind: "none" };
+
+/**
  * Shared pure-read path for the public facet endpoint and paid Property
  * Explorer reports. Keeps R1 tethered to the same owner-free baked snapshot
  * rather than introducing a second query or compute path.
  */
-export async function loadBakedNodeFacetSnapshot(
+export async function readBakedNodeFacetSnapshot(
   parcelNodeId: string,
-): Promise<BakedNodeFacetSnapshot | null> {
+): Promise<BakedNodeFacetRead> {
   const placeKey = placeKeyForNode(parcelNodeId);
   const rows = await db
     .select({
@@ -532,7 +753,13 @@ export async function loadBakedNodeFacetSnapshot(
     .limit(2);
 
   const row = rows.find((r) => r.adapterKey === TIER1_ADAPTER_KEY);
-  if (!row) return null;
+  if (!row) return { kind: "none" };
+  // P-180: a retired record in a gate-blocked county declines at serve rather
+  // than presenting a hollow account-keyed card (48209:84639 and siblings).
+  // P-206: the decline keeps the retirement it declined for, so callers can
+  // declare it instead of reporting the node as never-having-existed.
+  const retirement = retiredRecordAtServe(parcelNodeId, row.payloadJson);
+  if (retirement) return { kind: "retired", retirement };
   try {
     refusePayloadAtServe(row.payloadJson);
   } catch (err) {
@@ -544,7 +771,7 @@ export async function loadBakedNodeFacetSnapshot(
     ? extractTier2Overlay(tier2Row.payloadJson, tier2Row.snapshotAt)
     : null;
 
-  return {
+  return { kind: "snapshot", snapshot: {
     parcelNodeId,
     facets: sanitizeNodeFacetPayload(
       stripZombieEnvelopeFromFacets(row.payloadJson),
@@ -562,7 +789,133 @@ export async function loadBakedNodeFacetSnapshot(
       Number(row.lngRounded),
       Number(row.latRounded),
     ),
-  };
+  } };
+}
+
+/**
+ * The pre-P-206 shape, kept for every caller that only wants the snapshot.
+ *
+ * P-206: this deliberately still collapses `retired` and `none` into `null`,
+ * so no existing consumer's behaviour moved. A caller that must tell the two
+ * apart reads `readBakedNodeFacetSnapshot` instead.
+ */
+export async function loadBakedNodeFacetSnapshot(
+  parcelNodeId: string,
+): Promise<BakedNodeFacetSnapshot | null> {
+  const read = await readBakedNodeFacetSnapshot(parcelNodeId);
+  return read.kind === "snapshot" ? read.snapshot : null;
+}
+
+/**
+ * ONE DOOR (WP-L): PLACEMENT ONLY. The bake's rounded coordinate for this
+ * node, and nothing else from the snapshot row: `on` mode keeps the bake for
+ * placement (spec §1) and reads no baked fact. `null` when there is no tier-1
+ * row or the coordinate is unusable.
+ */
+export async function readBakedPlacementQueryPoint(
+  parcelNodeId: string,
+): Promise<{ longitude: number; latitude: number } | null> {
+  const rows = await db
+    .select({
+      latRounded: placeLayerSnapshots.latRounded,
+      lngRounded: placeLayerSnapshots.lngRounded,
+    })
+    .from(placeLayerSnapshots)
+    .where(
+      and(
+        eq(placeLayerSnapshots.adapterKey, TIER1_ADAPTER_KEY),
+        eq(placeLayerSnapshots.placeKey, placeKeyForNode(parcelNodeId)),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return usableCityLimitsQueryPoint(Number(row.lngRounded), Number(row.latRounded));
+}
+
+/** Test seam for the placement read (the route suites mock `db`). */
+let placementReader: (parcelNodeId: string) => Promise<{ longitude: number; latitude: number } | null> =
+  readBakedPlacementQueryPoint;
+export function setOneDoorPlacementReaderForTests(
+  next: ((parcelNodeId: string) => Promise<{ longitude: number; latitude: number } | null>) | null,
+): void {
+  placementReader = next ?? readBakedPlacementQueryPoint;
+}
+
+async function placementOrNull(
+  parcelNodeId: string,
+): Promise<{ longitude: number; latitude: number } | null> {
+  try {
+    return await placementReader(parcelNodeId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ONE DOOR `on` placement: the reader's `parcelGeometry.placementPoint` first
+ * (`_design/2026-10-15_burnet_publish_without_bake.md` item 3), the bake's
+ * rounded coordinate only when the reader has no geometry value for the
+ * parcel. Placement only, never a fact. The bake is not read at all when the
+ * reader placed the parcel.
+ */
+export async function resolveOneDoorPlacement(
+  parcelNodeId: string,
+  record: OneDoorRecord | null,
+): Promise<OneDoorPlacement> {
+  const geometry = oneDoorParcelGeometry(record);
+  if (geometry) {
+    return { queryPoint: geometry.placementPoint, source: "reader-parcel-geometry" };
+  }
+  const queryPoint = await placementOrNull(parcelNodeId);
+  return { queryPoint, source: queryPoint ? "bake-latlng-index" : null };
+}
+
+/**
+ * ONE DOOR `on` mode for the facets route: every fact from the reader; the
+ * placement coordinate from the reader's geometry, else the bake. A reader
+ * that is unreachable for an `on` county serves every surface fact as
+ * `failed` (never cached).
+ */
+async function serveOneDoorFacets(
+  res: Response,
+  parcelNodeId: string,
+  read: OneDoorRead,
+): Promise<void> {
+  if (read.kind === "parcel-not-found") {
+    res.status(404).json(
+      gtmErrorBody("no_coverage", "parcel-not-found", "No parcel on record for this node", {
+        oneDoorMode: "on",
+      }),
+    );
+    return;
+  }
+  const record =
+    read.kind === "record"
+      ? read.record
+      : transportFailedRecord(parcelNodeId, ONE_DOOR_SURFACE_RAILS);
+  const placement = await resolveOneDoorPlacement(parcelNodeId, record);
+  if (recordHasFailedFact(record)) res.setHeader("Cache-Control", "no-store");
+  res.json(composeOneDoorFacetsBody({ parcelNodeId, record, placement }));
+}
+
+/** ONE DOOR `shadow` mode: diff what this response showed against the reader, off the response path. */
+function shadowFacetsAfterResponse(
+  read: OneDoorRead,
+  parcelNodeId: string,
+  oldBody: unknown,
+): void {
+  if (read.kind !== "record" || read.record.mode !== "shadow") return;
+  const record = read.record;
+  setImmediate(() => {
+    try {
+      enqueueOneDoorShadowDiffs(
+        oneDoorShadowDiffRows({ surface: "cortex-facets", parcelNodeId, record, oldBody }),
+      );
+    } catch {
+      // shadow evidence is best-effort and never affects a response
+    }
+  });
 }
 
 brokerageNodeFacetsRouter.get(
@@ -587,8 +940,23 @@ brokerageNodeFacetsRouter.get(
       return;
     }
 
-    const grantsOwnerFact = await callerGrantsOwnerFact(req);
-    let snapshot;
+    const grantsOwnerFact = await callerGrantsOwnerFact(req, parcelNodeId);
+    // ONE DOOR (WP-L): the reader decides the mode per request, read as the
+    // END USER (#813/#814 entitlement). `off` falls through to today's path
+    // unchanged; `on` never reaches the fan-out below.
+    const recordEntitlements = oneDoorEntitlementsFor(grantsOwnerFact);
+    const oneDoorRead = await readOneDoorRecord(parcelNodeId, {
+      entitlements: recordEntitlements,
+    });
+    if (oneDoorModeOf(oneDoorRead) === "on") {
+      await serveOneDoorFacets(res, parcelNodeId, oneDoorRead);
+      return;
+    }
+    // Every legacy /record read below runs as the END USER (#525 withholds the
+    // gated rails on the legacy wire unless X-Hauska-Entitlements grants them).
+    // One parcel per request, so the rest of this handler is one scope.
+    enterRecordEntitlements(recordEntitlements);
+    let bakedRead: BakedNodeFacetRead;
     let floodHazardFact;
     let landUseFactRaw;
     let specialDistrictFact;
@@ -598,9 +966,24 @@ brokerageNodeFacetsRouter.get(
     let boundaryEdgeFact;
     let ownerFactLoaded;
     let structuralFact;
+    let cadRollOverlay;
+    let utilityServiceFact;
+    let overlayDistrictsFact;
+    let agValuationFact;
+    let schoolDistrictFact;
+    let maxImperviousCoverPctFact;
+    let valueHistoryFact;
+    let setbacksFact;
+    let parcelRecordZoningFact;
+    let setbackRulesFact;
+    let parcelAreaSqFtFact;
+    let maxHeightFtFact;
+    let maxLotCoveragePctFact;
+    let maxFootprintSqFtFact;
     try {
+      const parsedForOverlay = parseParcelNodeId(parcelNodeId);
       [
-        snapshot,
+        bakedRead,
         floodHazardFact,
         landUseFactRaw,
         specialDistrictFact,
@@ -610,19 +993,60 @@ brokerageNodeFacetsRouter.get(
         boundaryEdgeFact,
         ownerFactLoaded,
         structuralFact,
+        cadRollOverlay,
+        utilityServiceFact,
+        overlayDistrictsFact,
+        agValuationFact,
+        schoolDistrictFact,
+        maxImperviousCoverPctFact,
+        valueHistoryFact,
+        setbacksFact,
+        parcelRecordZoningFact,
+        setbackRulesFact,
+        parcelAreaSqFtFact,
+        maxHeightFtFact,
+        maxLotCoveragePctFact,
+        maxFootprintSqFtFact,
       ] = await Promise.all([
-        loadBakedNodeFacetSnapshot(parcelNodeId),
-        loadFloodHazardFactAtom(parcelNodeId),
+        readBakedNodeFacetSnapshot(parcelNodeId),
+        loadFloodHazardFactForServe(parcelNodeId),
         loadLandUseFactAtom(parcelNodeId),
-        loadSpecialDistrictFactAtom(parcelNodeId),
+        loadSpecialDistrictFactForServe(parcelNodeId),
         loadPipelineFactAtom(parcelNodeId),
-        loadWellFactAtom(parcelNodeId),
+        loadWellFactForServe(parcelNodeId),
         loadBuildingFootprintFactAtom(parcelNodeId),
         loadBoundaryEdgeFactAtom(parcelNodeId),
         grantsOwnerFact
           ? loadOwnerFactAtom(parcelNodeId)
           : Promise.resolve(null),
         loadStructuralFactAtom(parcelNodeId),
+        // PARCEL-B-SLATE2: a malformed parcelNodeId already 400'd above this
+        // handler's own reachable code, but parseParcelNodeId is defensive
+        // regardless -- a null parse resolves every rail to "keep legacy"
+        // rather than throwing mid-Promise.all.
+        parsedForOverlay
+          ? resolveCadRollOverlaysForServe(parsedForOverlay.countyFips, parsedForOverlay.propId)
+          : Promise.resolve({
+              marketValue: null,
+              assessedValue: null,
+              landValue: null,
+              improvementValue: null,
+              livingAreaSqft: null,
+              yearBuilt: null,
+            }),
+        loadUtilityServiceFactForServe(parcelNodeId),
+        loadOverlayDistrictsFactForServe(parcelNodeId),
+        loadAgValuationFactForServe(parcelNodeId),
+        loadSchoolDistrictFactForServe(parcelNodeId),
+        loadMaxImperviousCoverPctFactForServe(parcelNodeId),
+        loadValueHistoryFactForServe(parcelNodeId),
+        loadSetbacksFactForServe(parcelNodeId),
+        loadZoningFactForServe(parcelNodeId),
+        loadSetbackRulesFactForServe(parcelNodeId),
+        loadParcelAreaSqFtFactForServe(parcelNodeId),
+        loadMaxHeightFtFactForServe(parcelNodeId),
+        loadMaxLotCoveragePctFactForServe(parcelNodeId),
+        loadMaxFootprintSqFtFactForServe(parcelNodeId),
       ]);
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -634,21 +1058,58 @@ brokerageNodeFacetsRouter.get(
       }
       throw err;
     }
+    // P-206: `retired` and `none` are different facts with different answers,
+    // so the route keeps the typed read and only the snapshot half is threaded
+    // through the existing rail code unchanged.
+    const snapshot = bakedRead.kind === "snapshot" ? bakedRead.snapshot : null;
     const ownerFact =
       ownerFactLoaded ?? studioGatedOwnerFactRefusal(parcelNodeId);
+    // City limits FIRST: the zoning verdict derives incorporation from this
+    // containment fact and from nothing else (CTX card F). A null situsCity
+    // is not evidence of anything.
+    const cityLimitsFact = await loadCityLimitsFactForServe(
+      parcelNodeId,
+      snapshot?.queryPoint ?? null,
+    );
+    const zoningVerdict = snapshot
+      ? zoningVerdictFromCityLimits(parcelNodeId, snapshot.facets, cityLimitsFact)
+      : null;
     const landUseFact = enrichLandUseFactWithZoningVerdict(
       landUseFactRaw,
-      parcelNodeId,
-      snapshot?.facets ?? null,
-    );
-    const cityLimitsFact = await loadCityLimitsFact(
-      snapshot?.queryPoint ?? null,
+      zoningVerdict,
     );
     if (!snapshot) {
       // Node has no baked snapshot. This is NOT an error the card should hide —
       // the web app falls back to a live envelope fetch for un-baked nodes — so
       // we answer 404 with the honest "not baked" signal and the node id so the
       // client can route to its fallback deterministically.
+      //
+      // P-206 (2026-09-16). A DECLINED EARNED RETIREMENT is not "no baked
+      // snapshot". P-180 declined it here correctly but reported it through
+      // this same branch, and the collapse was measured live on production:
+      // `48209:84629` (retired, per P-180's own store read) and `48209:999999`
+      // (a fabricated id) both answered this byte-identical body, so the panel
+      // could not tell a deliberate retirement from a node that never existed.
+      // The retirement is in hand at this point; it is served instead of
+      // discarded. Same 404 status and same `no_coverage` class as before, so
+      // the client's fallback routing is untouched and this change cannot
+      // become an outage; what moves is the `error` token, from the generic
+      // `not_baked` to a declared `record_retired`, plus the retirement
+      // object itself. The GTM error CLASS taxonomy is deliberately NOT
+      // widened here -- adding a class is a ruled change with its own
+      // consumers, and the token already carries the distinction.
+      if (bakedRead.kind === "retired") {
+        res.status(404).json(
+          gtmErrorBody(
+            "no_coverage",
+            "record_retired",
+            "This parcel node's record is retired: an earned, verified absence. The node was checked and the county carries no current parcel for it, so there is no card to bake.",
+            { retirement: bakedRead.retirement },
+          ),
+        );
+        shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, {});
+        return;
+      }
       res.status(404).json(
         gtmErrorBody(
           "no_coverage",
@@ -656,19 +1117,33 @@ brokerageNodeFacetsRouter.get(
           "No baked facets for this parcel node",
         ),
       );
+      shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, {});
       return;
     }
 
-    res.json(
-      enrichFacetsResponseWithRegistry({
+    const servedBody =
+      applyExemptionTypesServeToNodeFacetsResponse(
+        enrichFacetsResponseWithRegistry({
       parcelNodeId,
       adapterKey: TIER1_ADAPTER_KEY,
       source: "baked-snapshot",
       snapshotAt: snapshot.snapshotAt,
-      facets: attachVerdictLayersToFacets(
-        snapshot.facets as Record<string, unknown>,
-        structuralFact,
-        landUseFact,
+      // CAD tax-assessed dollar rails (marketValue/assessedValue/landValue/
+      // improvementValue) are gated Studio|Team, same predicate as ownerFact
+      // just below (OPS-16 A-103 item 5 / A-104). livingAreaSqft is not a
+      // dollar field and is never touched by this gate.
+      facets: gateCadRollValuationOnFacets(
+        attachCadRollOverlaysToFacets(
+          attachVerdictLayersToFacets(
+            snapshot.facets as Record<string, unknown>,
+            structuralFact,
+            zoningVerdict,
+            cadRollOverlay.livingAreaSqft,
+            parcelRecordZoningFact,
+          ),
+          cadRollOverlay,
+        ),
+        grantsOwnerFact,
       ),
       // `null` when the node has no Tier-2 row at all. When a row exists, the
       // overlay carries `flood: null` plus a typed `floodDisposition` saying
@@ -714,9 +1189,73 @@ brokerageNodeFacetsRouter.get(
       // counties return present. Never upgrades lookup-failed in transit.
       structuralFact,
       // City limits PIP against tx_city_boundary. Not an atom. Empty
-      // index is unmeasured. ETJ is unresolved, never a buffer.
+      // index is unmeasured. ETJ is unresolved, never a buffer. Carries
+      // the query point the containment (and the zoning verdict) rests on.
       cityLimitsFact,
+      // parcel_record-only, no legacy path (see module doc). water/sewer
+      // are independent slots. Resolves to a typed not-cut-over refusal
+      // until a gate evaluation for this rail lands.
+      utilityServiceFact,
+      // parcel_record-only, no legacy path (see module doc). districts is
+      // plural, never a picked lead. Resolves to a typed not-cut-over
+      // refusal until a gate evaluation for this rail lands.
+      overlayDistrictsFact,
+      // parcel_record-only, no legacy path (see module doc). Williamson +
+      // Travis only. entries is plural, never a picked lead. Resolves to a
+      // typed not-cut-over refusal until a gate evaluation for this rail
+      // lands.
+      agValuationFact,
+      // parcel_record-only, no legacy path (see module doc). A known
+      // 13-parcel anomaly class serves as an ordinary unaccounted refusal.
+      // Resolves to a typed not-cut-over refusal until a gate evaluation
+      // for this rail lands.
+      schoolDistrictFact,
+      // parcel_record-only, no legacy path (see module doc). Travis/Austin
+      // only. Resolves to a typed not-cut-over refusal until a gate
+      // evaluation for this rail lands.
+      maxImperviousCoverPctFact,
+      // parcel_record-only, no legacy path (see module doc). All six
+      // counties; entries is plural, one per distinct tax_year, never a
+      // picked lead. Resolves to a typed not-cut-over refusal until a gate
+      // evaluation for this rail lands.
+      //
+      // P-246 (2026-09-16): gated with the SAME grantsOwnerFact predicate
+      // as ownerFact above (grantsOwnerCoGatedFields) -- a Solo caller was
+      // getting a typed studio-gated refusal on the CAD dollar rails and
+      // the identical dollar figures unabridged one field later on
+      // valueHistoryFact.entries[]. Never a second independent tier check.
+      valueHistoryFact: gateValueHistoryFactValuation(
+        valueHistoryFact,
+        grantsOwnerFact,
+      ),
+      // parcel_record-only, no legacy path (see module doc, D6). Additive --
+      // does not resurrect facets.envelope, which stays permanently null.
+      // Resolves to a typed not-cut-over refusal until a gate evaluation for
+      // this rail lands.
+      setbacksFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). Read from a
+      // companion row, not the cell's own value field (see module doc).
+      // Resolves to a typed not-cut-over refusal until this rail is slated.
+      setbackRulesFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). The ONE rail
+      // this card slates (5 counties, Hays excluded). Independent of
+      // zoningDistrict, unlike its four siblings below.
+      parcelAreaSqFtFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // blocked on the zoningDistrict residual. Resolves to a typed
+      // not-cut-over refusal for every parcel today, by construction.
+      maxHeightFtFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // same zoningDistrict-residual block as maxHeightFt.
+      maxLotCoveragePctFact,
+      // parcel_record-only, no legacy path (OPS-21 S5, P-148). NOT slated --
+      // derived from parcelAreaSqFt x maxLotCoveragePct, so it inherits
+      // maxLotCoveragePct's own block.
+      maxFootprintSqFtFact,
       }),
-    );
+        exemptionDetailLevelForOwnerCoGate(grantsOwnerFact),
+      );
+    res.json(servedBody);
+    shadowFacetsAfterResponse(oneDoorRead, parcelNodeId, servedBody);
   },
 );

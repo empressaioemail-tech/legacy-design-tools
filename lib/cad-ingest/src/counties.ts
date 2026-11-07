@@ -83,6 +83,74 @@ export const CAD_COUNTIES: Record<string, CadCounty> = {
     format: "dcad-certified",
     bulkPage: "https://www.dallascad.org/DataProducts.aspx",
   },
+
+  // ---------------------------------------------------------------------
+  // BURNET (48053) — deliberately NOT listed here (OPS-24 Phase 1 research,
+  // 2026-10-07). Researched against Burnet CAD's actual export surface and
+  // confirmed against the live service; written up so the next author does
+  // not have to re-derive it.
+  //
+  // What exists: Burnet CAD (burnetcad.org) uses the BIS Consultants
+  // ArcGIS Online GIS template (the audit's "arcgis_rest / bis-consultants"
+  // — the SAME vendor as Bell/Guadalupe/McLennan, all "stratmap-roll" in
+  // DECLARED_CAD_VINTAGES). Its public FeatureServer
+  // (services8.arcgis.com/WB9lDuPLSvoToaB9/.../BurnetCADWebService1,
+  // layer 0 "Parcels") was re-probed live 2026-10-07: 50,655 features,
+  // fields prop_id / prop_id_text / owner_tax_yr / file_as_name /
+  // legal_desc* / land_val / imprv_val / market / situs_* / Deed_* — a
+  // roll-ACCOUNT schema. The service's full layer+table list (Parcels,
+  // Abstracts, Subdivisions, Schools, City Limits, Lot Lines, Streets,
+  // County Boundary, Texas Counties) has NO improvement-detail
+  // layer/table anywhere: no year-built, no living-area/segment columns,
+  // no per-improvement records of any kind.
+  //
+  // What was checked and ruled out: no self-serve bulk "Data Products" /
+  // certified-export download page was reachable (burnetcad.org /
+  // www.burnetcad.org return HTTP 403 to a programmatic fetch — WAF-gated,
+  // like Hays; a human browser session would be needed to confirm whether
+  // a manual-download bulk product even exists, which this pass could not
+  // do). No TrueAutomation, Socrata, or other known bulk-export surface
+  // was found for Burnet. Web search found only the ArcGIS map viewer
+  // (gis.bisclient.com/burnetcad/, esearch.burnetcad.org property search,
+  // burnet.trueautomation.com/mapSearch — all search/view UIs, not export
+  // endpoints) and the CAD's own published PDF appraisal-roll estimate
+  // (not a machine-readable bulk format).
+  //
+  // Conclusion: NONE of this repo's four parsers (pacs/orion/
+  // tad-propertydata/dcad-certified) fit, because none of them has
+  // anything to parse — there is no bulk improvement-detail export to
+  // read, unlike Bastrop/Caldwell/Travis (PACS), Hays/Williamson (Orion),
+  // Tarrant (TAD) or Dallas (DCAD). Burnet is wired instead as the
+  // stratmap-roll county it already is today (see vintage.ts
+  // DECLARED_CAD_VINTAGES 48053, and txgio/counties.ts TXGIO_COUNTIES
+  // 48053) via the generic StratMap-DBF land-use adapter
+  // (txgio/landuse-cli.ts), exactly like its BIS-Consultants siblings.
+  // Store-truth read 2026-10-07 confirms this is ALREADY how Burnet's
+  // 49,243 cad_property rows got there.
+  //
+  // What a direct-CAD parser would need, if Burnet CAD is later confirmed
+  // to offer one (none was found 2026-10-07):
+  //   1. A manual-download bulk product analogous to Hays's WAF-gated ZIP
+  //      (sources.ts ManualDownloadSource) — someone with a browser
+  //      session visiting burnetcad.org / esearch.burnetcad.org would need
+  //      to find and document the actual "Data Products" page and file
+  //      shape (fixed-width PACS-style TXT? delimited CSV? Orion-style
+  //      multi-file CSV?).
+  //   2. If it turns out to be PACS-shaped: a PACS_EXPORT_DECLARATIONS
+  //      entry here declaring Burnet's REAL improvement-detail segment
+  //      vocabulary (sources.ts PacsExportDeclaration.
+  //      livingAreaSegmentTypeCds), verified against Burnet's actual
+  //      IMPROVEMENT_DETAIL-equivalent file — NOT assumed to be the
+  //      generic "MAIN AREA" default. This is the exact trap P-157/A-133
+  //      already hit for Travis: declaring a county cad-export without
+  //      checking its segment vocabulary produces a parser that runs
+  //      clean and reports 100% null living area. Refuse rather than
+  //      guess that vocabulary — it is not knowable from this ArcGIS
+  //      service, which carries no improvement detail at all.
+  //   3. If it turns out to be Orion- or otherwise CSV-shaped: a new
+  //      `CadFormat` branch and parser, following the orion/ directory's
+  //      header-driven pattern.
+  // ---------------------------------------------------------------------
 };
 
 export function resolveCounty(input: string): CadCounty | undefined {

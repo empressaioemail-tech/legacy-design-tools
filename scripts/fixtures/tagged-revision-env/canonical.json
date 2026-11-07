@@ -1,0 +1,18 @@
+{
+  "predicateVersion": "tagged-revision-env/v1",
+  "fixtureSetId": "tagged-revision-env/2026-09-17",
+  "canonicalRepo": "empressaioemail-tech/hauska-engine",
+  "canonicalPath": "tools/check-tagged-revision-env.mjs",
+  "canonicalRef": "main",
+  "canonicalNote": "This copy is NOT canonical. --check-divergence fetches canonicalPath from canonicalRepo at canonicalRef and byte-compares it with this file. canonicalRef is a BRANCH, not a commit SHA, on purpose: a SHA pin would have to be re-pinned by hand on every canonical edit, and a squash-merge can make a branch commit unreachable, which reads as a broken gate rather than as drift. A branch pin is red exactly when the two copies differ, which is the state this control exists to catch. The engine PR that adds the canonical copy must merge before this check can pass; until then it REFUSEs with CANONICAL_UNREADABLE, and that refusal is the honest answer.",
+  "sha256": "edbcf318f225c97770c3eaa30b0bca5785f49d399065c2ff47aff649eb942d14",
+  "hashRule": "sha256 over the file's bytes with CRLF/CR normalized to LF (Windows clones and Linux CI must agree).",
+  "fixtureCases": [
+    "pass",
+    "fail",
+    "refuse-ambiguous-traffic",
+    "refuse-no-traffic",
+    "refuse-absent-revision",
+    "refuse-unreadable-revisions"
+  ]
+}

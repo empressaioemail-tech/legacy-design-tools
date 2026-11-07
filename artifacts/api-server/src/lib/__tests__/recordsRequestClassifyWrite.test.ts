@@ -217,6 +217,50 @@ describe("classifyAndWriteRecordsRequestArtifact", () => {
     expect(meta.headerFacts).toBeTruthy();
   });
 
+  it("writes ASSIGNMENT as unclassified and preserves the source label", async () => {
+    const { classifyAndWriteRecordsRequestArtifact } = await import(
+      "../recordsRequestClassifyWrite"
+    );
+    const result = await classifyAndWriteRecordsRequestArtifact({
+      artifact: baseArtifact({ documentType: "ASSIGNMENT" }),
+      job: JOB,
+    });
+    expect(result.status).toBe("written");
+    expect(result.documentKind).toBe("unclassified");
+    expect(fakeState.insertedInstruments).toHaveLength(1);
+    const meta = fakeState.insertedInstruments[0]?.extractMetadata as Record<
+      string,
+      unknown
+    >;
+    expect(meta.documentKind).toBe("unclassified");
+    expect(meta.sourceDocumentType).toBe("ASSIGNMENT");
+    const facts = meta.headerFacts as Record<string, unknown>;
+    expect(facts.documentType).toBe("ASSIGNMENT");
+  });
+
+  it("records absent document type as refused and writes no instrument", async () => {
+    const { classifyAndWriteRecordsRequestArtifact } = await import(
+      "../recordsRequestClassifyWrite"
+    );
+    const result = await classifyAndWriteRecordsRequestArtifact({
+      artifact: baseArtifact({ documentType: null }),
+      job: JOB,
+    });
+    expect(result.status).toBe("refused");
+    expect(result.refuseCode).toBe("unclassifiable_document_type");
+    expect(fakeState.insertedInstruments).toHaveLength(0);
+    expect(fakeState.artifactUpdates[0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          classify: expect.objectContaining({
+            status: "refused",
+            refuseCode: "unclassifiable_document_type",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("refuses artifact missing recording ref and image", async () => {
     const { classifyAndWriteRecordsRequestArtifact } = await import(
       "../recordsRequestClassifyWrite"
@@ -232,5 +276,26 @@ describe("classifyAndWriteRecordsRequestArtifact", () => {
     expect(result.status).toBe("refused");
     expect(result.refuseCode).toBe("missing_recording_ref_and_image");
     expect(fakeState.insertedInstruments).toHaveLength(0);
+  });
+
+  it("returns skipped without writing classify metadata on the artifact", async () => {
+    fakeState.engagementInstruments = [
+      {
+        id: "inst-existing",
+        extractMetadata: { recordsRequestArtifactId: "art-1" },
+      },
+    ];
+    const { classifyAndWriteRecordsRequestArtifact } = await import(
+      "../recordsRequestClassifyWrite"
+    );
+    const result = await classifyAndWriteRecordsRequestArtifact({
+      artifact: baseArtifact(),
+      job: JOB,
+    });
+    expect(result.status).toBe("skipped");
+    expect(result.instrumentId).toBe("inst-existing");
+    expect(result.refuseCode).toBe("already_classified");
+    expect(fakeState.insertedInstruments).toHaveLength(0);
+    expect(fakeState.artifactUpdates).toHaveLength(0);
   });
 });

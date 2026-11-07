@@ -183,3 +183,24 @@ export function assertWritableFacetKeys(facetKeys: readonly string[]): void {
     );
   }
 }
+
+/**
+ * A county_facet_coverage-shaped fixture used as a RAIL cell must carry a
+ * rail key. `land-use` is RETIRED and is not a rail; treating it as one is
+ * the overlay that would overwrite the `landuse` atom-count rail.
+ *
+ * Input type is `{ facet: string }` (plus any extra ledger columns). The
+ * cheapest satisfier of this check is any member of `RAIL_FACET_KEYS`, so
+ * the test that pins `land-use` is load-bearing: a generic "facet is a
+ * non-empty string" predicate would admit the retired key.
+ */
+export function assertRailLedgerRowFixture(row: { facet: string }): void {
+  if (!RAIL_FACET_KEYS.has(row.facet)) {
+    const retired = RETIRED_FACET_KEYS.has(row.facet)
+      ? ` '${row.facet}' is a RETIRED facet key, not a rail.`
+      : "";
+    throw new Error(
+      `ledger row fixture facet '${row.facet}' is not a rail key.` + retired,
+    );
+  }
+}

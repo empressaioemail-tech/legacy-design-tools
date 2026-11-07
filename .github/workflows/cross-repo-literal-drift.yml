@@ -1,0 +1,83 @@
+name: Cross-repo literal drift (P-331)
+
+# P-331 — the legacy-design-tools leg. Same rule, opposite direction: this repo
+# extracts ITS declaring modules and hauska-map's, and fails when the pair
+# disagrees. The script is byte-identical in both repos (DEV_PROCESS 2.4: two
+# implementations of one rule drift into two rules), and it auto-detects which
+# repo it is in, so there is no per-repo branch inside the rule.
+#
+# WHY A SCHEDULE. A push here does not re-run hauska-map's CI, and a push there
+# does not re-run this one. The nightly run is what catches "hauska-map changed
+# and legacy-design-tools did not push". Without it that direction is unobserved
+# until the next push here — a named bypass, stated in the script's header.
+#
+# WHAT FAILS: the drift step's exit code (1 = disagreement, 2 = a declaration
+# could not be read; 2 is never a pass). The selftest runs FIRST.
+#
+# A-30 (OPS-25, 2026-09-23). hauska-map went PRIVATE on 2026-09-22, and the
+# default GITHUB_TOKEN of this PUBLIC repo cannot read another private repo, so
+# this job began failing closed with `repository
+# 'https://github.com/empressaioemail-tech/hauska-map/' not found` on every PR.
+# The check stays and keeps failing closed: the checkout below passes
+# `SIBLING_REPO_READ_TOKEN` (a fine-grained read-only token the operator creates,
+# `contents: read` on hauska-map and hauska-engine only), and a missing secret
+# fails a step above it BY NAME rather than as a 404 that reads like a missing
+# repo. A fork PR never receives secrets, which is correct and intended.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: cross-repo literal drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the sibling-read token, by name
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::This job cannot read the sibling repo hauska-map, which is PRIVATE (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No drift was measured."
+            exit 1
+          fi
+          echo "Sibling-read credential present (value never printed)."
+      - name: checkout hauska-map main (the sibling copy)
+        uses: actions/checkout@v4
+        with:
+          repository: empressaioemail-tech/hauska-map
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
+          ref: main
+          path: map-main
+          sparse-checkout: |
+            apps/property-explorer/api/_lib/planned-development-district.ts
+            apps/property-explorer/api/_lib/setback-citation-vintage.ts
+            apps/property-explorer/api/_lib/pe-record-to-facets.ts
+            apps/property-explorer/api/_lib/pe-situs-search-core.ts
+            apps/property-explorer/src/lib/__fixtures__/envelope-verification.json
+            # P-270 city half (2026-09-19): the licence's declarations. Checked out
+            # now so the follow-up pin rows (see the check's header) need no
+            # workflow edit; the file exists on hauska-map main today.
+            apps/property-explorer/src/lib/situs-address.ts
+            # P-369 (2026-09-19): the P-340 conflict literal's home, and the
+            # sibling's copy of this check itself (the check-script-copies row).
+            apps/property-explorer/api/_lib/setback-source-conflict.ts
+            scripts/check-cross-repo-literal-drift.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: selftest (the control must be observed failing, not only passing)
+        run: node scripts/check-cross-repo-literal-drift.mjs --selftest
+      - name: drift against hauska-map main
+        run: node scripts/check-cross-repo-literal-drift.mjs --side ldt --map-root map-main

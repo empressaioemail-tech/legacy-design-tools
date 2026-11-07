@@ -6,17 +6,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
 import { brokeragePlaceSitusSearchRouter } from "../routes/brokeragePlaceSitusSearch";
-import type { SitusSearchHit } from "../lib/txgioAddressResolve";
+import type {
+  PlaceSearchResult,
+  SitusSearchHit,
+} from "../lib/txgioAddressResolve";
 
 const { searchMock, lookupMock } = vi.hoisted(() => ({
-  searchMock: vi.fn(async (_input: { query: string; limit?: number }) => [
-    {
-      parcelNodeId: "48209:193340",
-      situsAddress: "6026 MARSH LN, BUDA, TX 78610",
-      countyFips: "48209",
-      source: "parcel-situs",
-    },
-  ]),
+  searchMock: vi.fn(
+    async (_input: { query: string; limit?: number }): Promise<PlaceSearchResult> => ({
+      hits: [
+        {
+          parcelNodeId: "48209:193340",
+          situsAddress: "6026 MARSH LN, BUDA, TX 78610",
+          countyFips: "48209",
+          source: "parcel-situs",
+        },
+      ],
+    }),
+  ),
   lookupMock: vi.fn(
     async (_input: { parcelNodeId: string }): Promise<SitusSearchHit | null> =>
       null,
@@ -107,5 +114,130 @@ describe("GET /api/brokerage/v1/place/situs-search", () => {
     ]);
     expect(lookupMock).toHaveBeenCalledWith({ parcelNodeId: "48021:34137" });
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("completed empty carries missClass no-hit", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+  });
+
+  it("budget empty carries missClass situs-search-budget-exceeded", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "situs-search-budget-exceeded",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "908 Pine, Bastrop TX" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "situs-search-budget-exceeded",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("out-of-coverage empty carries missClass out_of_coverage plus outOfCoverageState (P-107 / OPS-16 A-072)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: "AZ",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "1600 E Camelback Rd, Phoenix, AZ" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "out_of_coverage",
+      outOfCoverageState: "AZ",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("does not attach outOfCoverageState to a plain no-hit (no cross-contamination)", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+    expect(res.body).not.toHaveProperty("outOfCoverageState");
+  });
+
+  it("county-out-of-coverage empty carries missClass county_out_of_coverage plus outOfCoverageCounty (P-205 / P-210)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "county_out_of_coverage",
+      outOfCoverageCounty: { countyFips: "48027", countyName: "Bell", state: "TX" },
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "301 W Avenue B, Killeen, TX 76541" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "county_out_of_coverage",
+      outOfCoverageCounty: { countyFips: "48027", countyName: "Bell", state: "TX" },
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("county-unconfirmed empty carries missClass county_unconfirmed and the confirm-the-county sentence, never the outage class", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "county_unconfirmed",
+      missClassDisplayText: "We can't confirm the county for this ZIP; add the full address",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "Georgetown, TX 78633" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "county_unconfirmed",
+      missClassDisplayText: "We can't confirm the county for this ZIP; add the full address",
+    });
+    expect(res.body.missClass).not.toBe("coverage_check_unavailable");
+    expect(JSON.stringify(res.body)).not.toMatch(/couldn't check coverage/i);
+  });
+
+  it("coverage-check-unavailable empty carries missClass coverage_check_unavailable plus coverageCheckUnavailableReason (P-205 / P-210)", async () => {
+    searchMock.mockResolvedValueOnce({
+      hits: [],
+      missClass: "coverage_check_unavailable",
+      coverageCheckUnavailableReason: "retrieval-api key not configured",
+    });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "301 W Avenue B, Killeen, TX 76541" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      hits: [],
+      missClass: "coverage_check_unavailable",
+      coverageCheckUnavailableReason: "retrieval-api key not configured",
+    });
+    expect(res.body.missClass).not.toBe("no-hit");
+  });
+
+  it("does not attach outOfCoverageCounty or coverageCheckUnavailableReason to a plain no-hit (no cross-contamination)", async () => {
+    searchMock.mockResolvedValueOnce({ hits: [], missClass: "no-hit" });
+    const res = await request(buildApp())
+      .get("/api/brokerage/v1/place/situs-search")
+      .query({ q: "zzzz-not-a-situs-99999" });
+
+    expect(res.body).toEqual({ hits: [], missClass: "no-hit" });
+    expect(res.body).not.toHaveProperty("outOfCoverageCounty");
+    expect(res.body).not.toHaveProperty("coverageCheckUnavailableReason");
   });
 });

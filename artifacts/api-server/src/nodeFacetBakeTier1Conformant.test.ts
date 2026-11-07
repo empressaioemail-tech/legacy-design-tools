@@ -1,0 +1,3537 @@
+/**
+ * Conformant-v1 Tier-1 bake: the bake projects the FULL old facet set, and
+ * old-versus-new is a TEST (OPS-19 A-025 items 1 and 2; CTX card E items 2
+ * and 3, 2026-08-28).
+ *
+ * DB-free. The old bake's `buildTier1Payload` and the conformant
+ * `buildConformantTier1Payload` are run on ONE fixture parcel (same txgio row,
+ * a claim consistent with it) and their leaf key-path sets must agree, minus
+ * the root keys the new shape carries on purpose and a named allowlist. The
+ * instrument is itself verified by violation (a thinned payload must fail),
+ * and the live production thin shape is a fixture that must fail.
+ */
+
+import { describe, it, expect } from "vitest";
+import { buildTier1Payload } from "./nodeFacetBakeTier1Cli";
+import type { Ring } from "./lib/nodeFacetBakeTier1";
+import type { AddressLandUseEntry } from "./lib/joinIntegrityGate";
+import {
+  addressJoinKey,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+  landUseJoinKey,
+  normalizeSitusAddress,
+} from "./lib/joinNormalize";
+import type { ParcelJoinRow } from "./lib/nodeFacetTier1ParcelJoin";
+import { situsStateFromCountyFips } from "./lib/nodeFacetTier1Assemble";
+import { assertSitusNotPunctuationOnly } from "./lib/serveGuards";
+import {
+  assertLandUseAbsenceEarned,
+  assertNoOwnerKey,
+  assertRequiredLeafStatesEarned,
+  assertSitusAddressAbsenceEarned,
+  BAKE_OWNED_REQUIRED_LEAF_PATHS,
+  buildConformantTier1Payload,
+  claimLeafAbsence,
+  conformantAcreageFromClaim,
+  conformantAcreageFromDeclaredRoll,
+  conformantClaimRecord,
+  declaredRollMayOverride,
+  resolveConformantAcreageWithoutRing,
+  resolveConformantSitusLocality,
+  resolveDeclaredRollTrust,
+  diffAgainstRequiredFacetPaths,
+  diffTier1KeyPaths,
+  DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES,
+  DIVERGENCE_IGNORE_NEW_SHAPE_KEYS,
+  hasKeyPath,
+  isEarnedLeafAbsence,
+  isEarnedRecordRetirement,
+  isResolvedAcreageFacet,
+  isResolvedLandUseFacet,
+  keyPathValue,
+  leafKeyPaths,
+  OLD_SHAPE_SCHEMA_VERSION_REJECTED_BY_WALK,
+  parcelNodeIdFromBody,
+  readConformantCadClaim,
+  REQUIRED_TIER1_FACET_PATHS,
+  resolveConformantSitusAddress,
+  situsAddressUnusableAbsence,
+  TIER1_CONFORMANT_FACET_SCHEMA_VERSION,
+  type ConformantTier1BuildInput,
+  type ConformantTier1Payload,
+  type Tier1LeafAbsence,
+  type Tier1RecordRetirement,
+} from "./lib/nodeFacetBakeTier1Conformant";
+
+/**
+ * CTX-LEAVES (P-124): `baseFacts.landUse` now carries EITHER a resolved land
+ * use OR the earned absence that says why there is none, so a test that wants
+ * the resolved facet narrows through the same guard every real consumer must.
+ */
+const resolvedLandUse = (p: { baseFacts: { landUse: unknown } }) =>
+  isResolvedLandUseFacet(p.baseFacts.landUse) ? p.baseFacts.landUse : undefined;
+
+// A ~100ft x 150ft rectangular lot near Bastrop, TX (same as the old test).
+const LNG0 = -97.31;
+const LAT0 = 30.11;
+const D_LNG = 0.00032;
+const D_LAT = 0.00041;
+const BASTROP_LOT: Ring = [
+  [LNG0, LAT0],
+  [LNG0 + D_LNG, LAT0],
+  [LNG0 + D_LNG, LAT0 + D_LAT],
+  [LNG0, LAT0 + D_LAT],
+  [LNG0, LAT0],
+];
+
+const NOW = "2026-08-28T14:00:00.000Z";
+const CANONICAL_ACCESS = { discoverability: "catalog-listed", entitlement: "anyone-free" };
+
+/** The txgio row for gold 48021:34137 as production holds it (read 2026-08-28). */
+function txgioRow(overrides: Partial<ParcelJoinRow> = {}): ParcelJoinRow {
+  return {
+    feature_index: 24587,
+    prop_id: "34137",
+    // CTX-HAYS-REBIND: the geometry publisher's own parcel id, now selected by
+    // both bakes. Bastrop 48021 populates it (64,652 of 74,729 rows live).
+    geo_id: "R34137",
+    situs_address: "908 PINE , BASTROP, TX 78602",
+    situs_city: "BASTROP",
+    situs_state: "TX",
+    situs_zip: "78602",
+    zoning_district: "SF-1",
+    zoning_jurisdiction: "bastrop-city-tx",
+    source_vintage: "stratmap25-landparcels_48021_bastrop_202503",
+    geometry: { type: "Polygon", coordinates: [BASTROP_LOT] },
+    txgio_owner_for_gate: null,
+    ...overrides,
+  };
+}
+
+/** A conformant cad-parcel-roll atom body (hauska-factory stageRows shape). */
+function conformantBody(overrides: Record<string, unknown> = {}) {
+  return {
+    shape: "conformant-v1",
+    nodeId: "48021:34137",
+    entityType: "cad-parcel-roll",
+    claim: {
+      kind: "cad-parcel-roll",
+      countyFips: "48021",
+      sourceIdentifiers: { prop_id: "34137", taxYear: 2025 },
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+      situsCity: "BASTROP",
+      situsZip: "78602",
+      // The claim carries the owner. The bake must never read it.
+      ownerName: "OWNER MUST NEVER BAKE",
+      legalDescription: "LOT 1 BLK 2",
+      landValue: 10000,
+      improvementValue: 90000,
+      marketValue: 100000,
+      assessedValue: 100000,
+      yearBuilt: 1950,
+      livingAreaSqft: 1200,
+      landAcres: 0.3815,
+      propertyUseCode: "A1",
+      centroid: null,
+      ...((overrides.claim as Record<string, unknown> | undefined) ?? {}),
+    },
+    access: CANONICAL_ACCESS,
+    ...Object.fromEntries(Object.entries(overrides).filter(([k]) => k !== "claim")),
+  };
+}
+
+/** The old bake on the same parcel: txgio row + the CAD roll's land-use join. */
+function oldPayload(row: ParcelJoinRow, landUseCode: string | null = "A1") {
+  const landUse = new Map(
+    landUseCode ? [["34137", { landUseCode, landUseVintage: "2025" }]] : [],
+  );
+  const p = buildTier1Payload(
+    { ...row, txgioOwnerForGate: null },
+    "48021",
+    "Bastrop",
+    landUse,
+    NOW,
+  );
+  if (!p) throw new Error("fixture: old bake returned null");
+  return p;
+}
+
+function newPayload(
+  row: ParcelJoinRow | null,
+  opts: {
+    gateBlocked?: boolean;
+    body?: Record<string, unknown>;
+    countyFips?: string;
+    countyName?: string;
+    parcelNodeId?: string;
+    situsAddress?: string | null;
+    situsAddressUnusable?: ConformantTier1BuildInput["situsAddressUnusable"];
+    situsAddressOrigin?: ConformantTier1BuildInput["situsAddressOrigin"];
+    situsAddressSupersededClaim?: ConformantTier1BuildInput["situsAddressSupersededClaim"];
+    situsAddressRefusedRoll?: ConformantTier1BuildInput["situsAddressRefusedRoll"];
+    declaredRollTrust?: ConformantTier1BuildInput["declaredRollTrust"];
+    situsLocality?: ConformantTier1BuildInput["situsLocality"];
+    acreageWithoutRing?: ConformantTier1BuildInput["acreageWithoutRing"];
+    situsRow?: ParcelJoinRow | null;
+    /** CTX-HAYS-REBIND: the published-identifier crosswalk row. */
+    crosswalkRow?: ParcelJoinRow | null;
+    /** P-183: the node's own parcel-table row (prop_id = the node's identity). */
+    ownRow?: ParcelJoinRow | null;
+    situsRecovery?: ConformantTier1BuildInput["situsRecovery"];
+    cadPropertyRoll?: ConformantTier1BuildInput["cadPropertyRoll"];
+    landUseRoll?: ConformantTier1BuildInput["landUseRoll"];
+  } = {},
+) {
+  return buildConformantTier1Payload({
+    body: opts.body ?? conformantBody(),
+    parcelNodeId: opts.parcelNodeId ?? "48021:34137",
+    countyFips: opts.countyFips ?? "48021",
+    countyName: opts.countyName ?? "Bastrop",
+    // `"situsAddress" in opts` (not `??`) so an explicit `situsAddress: null`
+    // means null, not "fall back to the default" -- `??` cannot distinguish
+    // "the caller wants null" from "the caller omitted this".
+    situsAddress: "situsAddress" in opts ? (opts.situsAddress ?? null) : "908 PINE , BASTROP, TX 78602",
+    ...(opts.situsAddressUnusable !== undefined
+      ? { situsAddressUnusable: opts.situsAddressUnusable }
+      : {}),
+    ...(opts.situsAddressOrigin !== undefined
+      ? { situsAddressOrigin: opts.situsAddressOrigin }
+      : {}),
+    ...(opts.situsAddressSupersededClaim !== undefined
+      ? { situsAddressSupersededClaim: opts.situsAddressSupersededClaim }
+      : {}),
+    ...(opts.situsAddressRefusedRoll !== undefined
+      ? { situsAddressRefusedRoll: opts.situsAddressRefusedRoll }
+      : {}),
+    ...(opts.declaredRollTrust !== undefined
+      ? { declaredRollTrust: opts.declaredRollTrust }
+      : {}),
+    ...(opts.situsLocality !== undefined ? { situsLocality: opts.situsLocality } : {}),
+    ...(opts.acreageWithoutRing !== undefined
+      ? { acreageWithoutRing: opts.acreageWithoutRing }
+      : {}),
+    access: CANONICAL_ACCESS,
+    accessNormalizedFrom: null,
+    publishRunId: "8e7dc598-e079-41b9-88e1-df1e4c49e33d",
+    parcelJoin: {
+      table: "txgio_parcel",
+      row,
+      gateBlocked: opts.gateBlocked ?? false,
+      ...(opts.situsRow !== undefined ? { situsRow: opts.situsRow } : {}),
+      ...(opts.crosswalkRow !== undefined ? { crosswalkRow: opts.crosswalkRow } : {}),
+      ...(opts.ownRow !== undefined ? { ownRow: opts.ownRow } : {}),
+    },
+    ...(opts.situsRecovery ? { situsRecovery: opts.situsRecovery } : {}),
+    ...(opts.cadPropertyRoll ? { cadPropertyRoll: opts.cadPropertyRoll } : {}),
+    ...(opts.landUseRoll ? { landUseRoll: opts.landUseRoll } : {}),
+    nowIso: NOW,
+  });
+}
+
+/**
+ * The FLAT body the Factory's stage E stores (hauska-factory src/stages/write/index.mjs
+ * stageRows spreads the six-field candidate): claim fields at the root, a minted
+ * nid_ nodeId, no `claim` key. Field values are the production golds' as read on
+ * 2026-08-28 19:54Z and 20:00Z (owner redacted; the reader never touches it).
+ */
+function flatProductionBody(
+  countyFips: string,
+  propId: string,
+  taxYear: number,
+  fields: { situsAddress: string | null; situsCity: string | null; situsZip: string | null; landAcres?: number | null; propertyUseCode?: string | null },
+) {
+  return {
+    kind: "cad-parcel-roll",
+    time: { validTo: null, validFrom: `${taxYear}-01-01T00:00:00.000Z`, knowledgeAt: "2026-08-28T08:43:19.097Z" },
+    shape: "conformant-v1",
+    access: CANONICAL_ACCESS,
+    nodeId: "nid_df21d4edd33d1226597be35aec2df3bf",
+    centroid: null,
+    citation: { locator: "nid_df21d4edd33d1226597be35aec2df3bf", sourceId: "tx:cad-property" },
+    situsZip: fields.situsZip,
+    landAcres: fields.landAcres ?? null,
+    landValue: 0,
+    ownerName: "OWNER MUST NEVER BAKE",
+    situsCity: fields.situsCity,
+    yearBuilt: null,
+    confidence: { basis: "county-cad-roll", value: "asserted" },
+    countyFips,
+    provenance: { class: "Record", sourceId: "tx:cad-property" },
+    marketValue: 2120,
+    logicVersion: "cad-six-field/1",
+    situsAddress: fields.situsAddress,
+    assessedValue: null,
+    livingAreaSqft: null,
+    propertyUseCode: fields.propertyUseCode ?? null,
+    improvementValue: 0,
+    legalDescription: "LEGAL",
+    sourceIdentifiers: { prop_id: propId, taxYear },
+  } as Record<string, unknown>;
+}
+
+/** The literal thin row production served for 48021:34137 at 12:39Z on 2026-08-28. */
+const PRODUCTION_THIN_ROW_2026_08_28 = {
+  baked: true,
+  access: { entitlement: "anyone-free", discoverability: "catalog-listed" },
+  facets: {
+    base: {
+      apn: "34137",
+      parcelNodeId: "48021:34137",
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+    },
+  },
+  source: "conformant-v1-cad-parcel-roll",
+  shapeSource: "conformant-v1",
+  publishRunId: "8e7dc598-e079-41b9-88e1-df1e4c49e33d",
+  facetCoverage: { tier1: "populated" },
+};
+
+describe("old versus new is a test: same fixture parcel through both bakes", () => {
+  it("stamp + claim: every leaf the old bake carries is on the conformant payload; nothing unallowed is added", () => {
+    const diff = diffTier1KeyPaths(oldPayload(txgioRow()), newPayload(txgioRow()));
+    // baseFacts.cadRoll is conformant-only populated content from the claim;
+    // the old txgio bake carries the keys as null leaves, the new shape as
+    // objects when values exist — exclude that prefix from the strict diff.
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
+    expect(diff.unexpected).toEqual([]);
+    // The old leaf set is not trivially small (zoning + provenance + envelope
+    // are all present on a stamped parcel).
+    expect(diff.oldLeafCount).toBeGreaterThan(30);
+  });
+
+  it("stamp + claim: the derived VALUES agree where both bakes read the same source", () => {
+    const o = oldPayload(txgioRow());
+    const n = newPayload(txgioRow());
+    expect(n.zoning).toEqual(o.zoning);
+    expect(n.envelope).toEqual(o.envelope);
+    expect(n.baseFacts.acreage).toEqual(o.baseFacts.acreage);
+    expect(n.baseFacts.apn).toBe(o.baseFacts.apn);
+    expect(n.baseFacts.situsAddress).toBe(o.baseFacts.situsAddress);
+    expect(n.baseFacts.situsCity).toBe(o.baseFacts.situsCity);
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
+    expect(n.baseFacts.situsState).toBe(o.baseFacts.situsState);
+    // Card F: the two new base-fact paths agree in value as well as in presence.
+    expect(n.baseFacts.situsZip).toBe(o.baseFacts.situsZip);
+    expect(n.baseFacts.situsZip).toBe("78602");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(resolvedLandUse(n)?.description).toBe(o.baseFacts.landUse?.description);
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll");
+    expect(resolvedLandUse(n)?.vintage).toBe("2025");
+    expect(n.facetCoverage).toEqual({ ...o.facetCoverage, tier1: "populated" });
+    expect(n.provenance.zoningSource).toBe(o.provenance.zoningSource);
+    expect(n.provenance.parcelSource).toBe("conformant-v1-cad-parcel-roll");
+    expect(n.provenance.parcelJoin).toMatchObject({
+      table: "txgio_parcel",
+      state: "joined",
+      featureIndex: 24587,
+      sourceVintage: "stratmap25-landparcels_48021_bastrop_202503",
+    });
+    // Claim carries 100000 / 1200. Without a cad_property roll those must
+    // stay null — that is the hollow-atom starve this card exists to kill.
+    expect(n.baseFacts.cadRoll.marketValue).toBeNull();
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+  });
+
+  it("no stamp: zoning is an explicit null, envelope declines no-zoning-stamp, every key stays present", () => {
+    const row = txgioRow({ zoning_district: null, zoning_jurisdiction: null });
+    const o = oldPayload(row);
+    const n = newPayload(row);
+    expect(n.zoning).toBeNull();
+    expect(n.facetCoverage.zoning).toBe(false);
+    expect(n.envelope?.status).toBe("declined");
+    expect(n.envelope?.declineReason).toBe("no-zoning-stamp");
+    expect(hasKeyPath(n, "zoning")).toBe(true);
+    expect(hasKeyPath(n, "envelope")).toBe(true);
+    const diff = diffTier1KeyPaths(o, n);
+    expect(diff.missing.filter((p) => !p.startsWith("baseFacts.cadRoll"))).toEqual(
+      [],
+    );
+    expect(diff.unexpected).toEqual([]);
+  });
+
+  it("kept new-shape keys: shapeSource, access, publishRunId, source, facets.base, facetCoverage.tier1", () => {
+    const n = newPayload(txgioRow());
+    expect(n.shapeSource).toBe("conformant-v1");
+    expect(n.source).toBe("conformant-v1-cad-parcel-roll");
+    expect(n.access).toEqual(CANONICAL_ACCESS);
+    expect(n).not.toHaveProperty("accessNormalizedFrom");
+    expect(n.publishRunId).toBe("8e7dc598-e079-41b9-88e1-df1e4c49e33d");
+    expect(n.facets.base).toEqual({
+      parcelNodeId: "48021:34137",
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+      apn: "34137",
+    });
+    expect(n.facetCoverage.tier1).toBe("populated");
+    // The body still says conformant-v1 (the Factory walk greps for it).
+    expect(JSON.stringify(n)).toContain("conformant-v1");
+  });
+
+  it("facetSchemaVersion is NOT the literal hauska-factory verify-walk.mjs rejects as old shape", () => {
+    const n = newPayload(txgioRow());
+    expect(n.facetSchemaVersion).toBe(TIER1_CONFORMANT_FACET_SCHEMA_VERSION);
+    expect(n.facetSchemaVersion).not.toBe(OLD_SHAPE_SCHEMA_VERSION_REJECTED_BY_WALK);
+  });
+});
+
+describe("explicit absence where a facet has no source (never an omitted key)", () => {
+  it("no txgio row: zoning null, envelope null, acreage from the claim's landAcres under its own method, parcelJoin no-row", () => {
+    const n = newPayload(null);
+    expect(n.zoning).toBeNull();
+    expect(n.envelope).toBeNull();
+    // CTX-situs: situsState is derived from countyFips, not the (missing) join
+    // row, so a join miss no longer bakes a null here (BP-CONTENT-01).
+    expect(n.baseFacts.situsState).toBe("TX");
+    expect(n.provenance.situsStateSource).toBe("derived-county-fips");
+    expect(n.baseFacts.acreage).toEqual({
+      value: 0.3815,
+      sqft: Math.round(0.3815 * 43560),
+      method: "cad-roll-land-acres",
+    });
+    expect(n.facetCoverage).toEqual({
+      baseFacts: true,
+      landUse: true,
+      acreage: true,
+      zoning: false,
+      envelope: false,
+      tier1: "populated",
+    });
+    expect(n.provenance.parcelJoin.state).toBe("no-row");
+    expect(n.provenance.parcelVintage).toBe("2025");
+    const req = diffAgainstRequiredFacetPaths(n);
+    expect(req.missing).toEqual([]);
+    expect(req.unexpectedRoots).toEqual([]);
+  });
+
+  it("no txgio row and no landAcres and no use code: the land-use AND acreage leaves carry an EARNED state, not a bare null (CTX-LEAVES / CTX-LEAVES2)", () => {
+    const n = newPayload(null, {
+      body: conformantBody({ claim: { landAcres: null, propertyUseCode: null } }),
+    });
+    // CTX-LEAVES (P-124): this test asserted `landUse: null` and
+    // `landUseSource: null`, which is precisely the defect -- BP-CONTENT-01
+    // says a present key holding null is none of the four states. No roll was
+    // supplied here, so the bake could not look, and could-not-look is
+    // `refused`, never `absent-verified`.
+    expect(isEarnedLeafAbsence(n.baseFacts.landUse)).toBe(true);
+    const lu = n.baseFacts.landUse as Tier1LeafAbsence;
+    expect(lu.verdict).toBe("refused");
+    expect(lu.lookupVerdict).toBe("lookup-failed");
+    expect(lu.basis).toContain("48021:34137");
+    // The twin is a VERBATIM mirror and cannot disagree with it.
+    expect(n.provenance.landUseSource).toEqual({ ...lu, mirrors: "baseFacts.landUse" });
+    // CTX-LEAVES2 (P-124): this test asserted `acreage: null`, the missed
+    // sibling -- no parcel-join row resolved (`row` is null: `newPayload(null)`)
+    // so the ring was never looked up at all; `refused`, never `absent-verified`,
+    // since the ring half of the pair was not genuinely checked.
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("refused");
+    expect(ac.lookupVerdict).toBe("lookup-failed");
+    expect(ac.basis).toContain("48021:34137");
+    expect(ac.basis).toContain("no parcel-join row resolved");
+    expect(n.zoning).toBeNull();
+    expect(n.envelope).toBeNull();
+    expect(n.facetCoverage.landUse).toBe(false);
+    expect(n.facetCoverage.acreage).toBe(false);
+    expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
+  });
+
+  it("gate-blocked county: an offered row is NOT used (fail closed), and the join state says gate-blocked", () => {
+    const n = newPayload(txgioRow(), { gateBlocked: true });
+    expect(n.zoning).toBeNull();
+    expect(n.envelope).toBeNull();
+    // CTX-situs: derived from countyFips regardless of the gate-blocked
+    // (dropped) row, so this stays a value, never null.
+    expect(n.baseFacts.situsState).toBe("TX");
+    // Acreage comes from the claim, not the (refused) ring. baseFacts.acreage
+    // is now a union with Tier1LeafAbsence (CTX-LEAVES2), so a resolved value
+    // must be narrowed rather than optional-chained.
+    expect(isResolvedAcreageFacet(n.baseFacts.acreage)).toBe(true);
+    expect((n.baseFacts.acreage as { method: string }).method).toBe("cad-roll-land-acres");
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+    expect(n.provenance.parcelJoin.basis).toMatch(/unmeasured/);
+    // Land use is the claim's own field: the join gate does not strip it.
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(n.provenance.landUseGateBlocked).toBe(false);
+    expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
+  });
+
+  it("the situs the predicate validated is what facets.base carries; baseFacts earns an absence when the claim is blank (CTX-B6)", () => {
+    const n = buildConformantTier1Payload({
+      body: conformantBody({ claim: { situsAddress: null } }),
+      parcelNodeId: "48021:34137",
+      countyFips: "48021",
+      situsAddress: null,
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: txgioRow(), gateBlocked: false },
+      nowIso: NOW,
+    });
+    // The legacy mirror still carries an address or nothing -- never an
+    // absence object. It is what refusePayloadAtServe and the Factory walk
+    // read, and both expect a string-or-null.
+    expect(n.facets.base.situsAddress).toBeNull();
+    // The LEAF, however, is no longer a bare null: until 2026-09-10 this
+    // asserted toBeNull(), and that null is exactly what Hays's staging walk
+    // failed BP-CONTENT-01 on across 22,805 rows in the six CTX counties.
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    // P-273: TRUE because this parcel's base facts carry real content — the
+    // claim's own situsCity/situsZip/landUse plus the CAD roll dollars and
+    // yearBuilt. NOT because `apn` is present: `apn` is
+    // `parcelNodeId.split(":")[1]` and exists for every parcel that exists,
+    // which is the degeneracy `baseFactsCarryReadContent` removed. The parcel
+    // that must read false (nothing but apn and the FIPS-derived situsState)
+    // is covered in p273BaseFactsCoverage.test.ts.
+    expect(n.facetCoverage.baseFacts).toBe(true);
+    expect(n).not.toHaveProperty("publishRunId");
+    expect(n.countyName).toBe("Bastrop");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CTX-situs (2026-09-08): situsState is derived from countyFips, never read
+// from the TxGIO join. cad_property has no situs_state column (there is no
+// CAD claim to prefer), and the TxGIO join's own situs_state is both
+// incomplete (312,169 nulls across six counties) and, on 6 known rows,
+// outright wrong (a non-TX value for a Texas parcel). Derivation resolves
+// both defects at the same certainty as countyName's own FIPS-keyed lookup.
+// ---------------------------------------------------------------------------
+
+describe("CTX-situs: situsState derived from countyFips, never a bare null", () => {
+  it("situsStateFromCountyFips: every registered county resolves to TX; an unmapped prefix falls back to the prefix, never null", () => {
+    for (const fips of Object.keys(
+      // Re-derive from the same registry the bake uses, so this test cannot
+      // silently drift from the real county list.
+      { "48209": 0, "48091": 0, "48453": 0, "48491": 0, "48029": 0, "48021": 0, "48055": 0, "48187": 0, "48027": 0, "48309": 0 },
+    )) {
+      expect(situsStateFromCountyFips(fips)).toBe("TX");
+    }
+    expect(situsStateFromCountyFips("99999")).toBe("99");
+  });
+
+  it("population (a), no txgio row, across multiple counties: situsState is TX, never null, never omitted", () => {
+    for (const countyFips of ["48453", "48491", "48209"]) {
+      const n = newPayload(null, { countyFips, countyName: "X" });
+      expect(n.provenance.parcelJoin.state).toBe("no-row");
+      expect(n.baseFacts.situsState).toBe("TX");
+      expect(hasKeyPath(n, "baseFacts.situsState")).toBe(true);
+    }
+  });
+
+  it("population (b), join hit but TxGIO's own situs_state is empty: derivation fills it, never null", () => {
+    const row = txgioRow({ situs_state: "" });
+    const n = newPayload(row);
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(n.baseFacts.situsState).toBe("TX");
+  });
+
+  it("a wrong TxGIO situs_state (the 6-parcel defect: ST/TE/TN for a Texas parcel) is overridden, not passed through", () => {
+    for (const wrong of ["ST", "TE", "TN", "ZZ"]) {
+      const row = txgioRow({ situs_state: wrong });
+      const n = newPayload(row);
+      expect(n.baseFacts.situsState).toBe("TX");
+      expect(n.baseFacts.situsState).not.toBe(wrong);
+    }
+  });
+
+  it("provenance.situsStateSource marks the value as derived, never mistaken for a CAD/join field", () => {
+    const n = newPayload(txgioRow());
+    expect(n.provenance.situsStateSource).toBe("derived-county-fips");
+  });
+
+  it("verify by violating: the real BP-CONTENT-01 classifier (hauska-factory verify-walk.mjs classifyRequiredLeaf, reproduced verbatim below from the 2026-09-08 read) refuses null and accepts the derived value", () => {
+    // Reproduced rather than imported: verify-walk.mjs lives in a sibling
+    // repo (hauska-factory), out of this dispatch's scope to depend on.
+    // Read at source 2026-09-08 (P:/tmp/ctx-w2-gate/src/jobs/verify-walk.mjs
+    // lines 252-258, the string/number/boolean branch) rather than
+    // reimplemented from memory.
+    function classifyRequiredLeaf(value: unknown): { state: string; ok: boolean } {
+      if (value === null || value === undefined) return { state: "null", ok: false };
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        if (value === "") return { state: "empty", ok: false };
+        return { state: "value", ok: true };
+      }
+      return { state: "unknown", ok: false };
+    }
+
+    // The old mechanism's failure mode, still checked so a future regression
+    // that reintroduces `row?.situs_state ?? null` is caught by THIS check
+    // failing to classify it as ok, not just by the value differing.
+    expect(classifyRequiredLeaf(null)).toEqual({ state: "null", ok: false });
+    expect(classifyRequiredLeaf("")).toEqual({ state: "empty", ok: false });
+
+    const populationA = newPayload(null, { countyFips: "48453", countyName: "Travis" });
+    const populationB = newPayload(txgioRow({ situs_state: "" }));
+    expect(classifyRequiredLeaf(populationA.baseFacts.situsState)).toEqual({
+      state: "value",
+      ok: true,
+    });
+    expect(classifyRequiredLeaf(populationB.baseFacts.situsState)).toEqual({
+      state: "value",
+      ok: true,
+    });
+  });
+});
+
+describe("owner never enters a baked payload", () => {
+  it("the claim's ownerName is not read and not serialized", () => {
+    const n = newPayload(txgioRow({ txgio_owner_for_gate: "TXGIO OWNER" }));
+    expect(() => assertNoOwnerKey(n)).not.toThrow();
+    expect(JSON.stringify(n)).not.toMatch(/OWNER MUST NEVER BAKE|TXGIO OWNER/);
+    expect(JSON.stringify(n)).not.toMatch(/"owner/i);
+    expect(Object.keys(readConformantCadClaim(conformantBody()))).not.toContain("ownerName");
+  });
+
+  it("the guard can fail: an injected owner-shaped key at depth is refused with OWNER_KEY_IN_PAYLOAD", () => {
+    const n = newPayload(txgioRow()) as unknown as Record<string, unknown>;
+    const poisoned = {
+      ...n,
+      baseFacts: { ...(n.baseFacts as Record<string, unknown>), owner_name: "LEAK" },
+    };
+    expect(() => assertNoOwnerKey(poisoned)).toThrow(
+      expect.objectContaining({ code: "OWNER_KEY_IN_PAYLOAD" }),
+    );
+    expect(() => assertNoOwnerKey({ ...n, txgioOwner: "LEAK" })).toThrow();
+  });
+});
+
+describe("the divergence instrument fails when it should", () => {
+  it("a thinned payload is caught: deleting zoning and baseFacts.landUse lists them as missing", () => {
+    const o = oldPayload(txgioRow());
+    const n = newPayload(txgioRow()) as unknown as Record<string, unknown>;
+    const thinned = {
+      ...n,
+      baseFacts: Object.fromEntries(
+        Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "landUse"),
+      ),
+    };
+    delete (thinned as Record<string, unknown>).zoning;
+    const diff = diffTier1KeyPaths(o, thinned);
+    expect(diff.missing).toContain("zoning.district");
+    expect(diff.missing).toContain("baseFacts.landUse.code");
+    expect(diff.missing.length).toBeGreaterThanOrEqual(6);
+    const req = diffAgainstRequiredFacetPaths(thinned);
+    expect(req.missing).toEqual(["baseFacts.landUse", "zoning"]);
+  });
+
+  it("the production thin row of 2026-08-28 12:39Z fails on every required facet path (the regression fixture)", () => {
+    const req = diffAgainstRequiredFacetPaths(PRODUCTION_THIN_ROW_2026_08_28);
+    expect(req.missing).toEqual([...REQUIRED_TIER1_FACET_PATHS]);
+    expect(req.present).toBe(0);
+    expect(req.unexpectedRoots).toEqual([]);
+    const strict = diffTier1KeyPaths(oldPayload(txgioRow()), PRODUCTION_THIN_ROW_2026_08_28);
+    expect(strict.missing.length).toBe(strict.oldLeafCount);
+  });
+
+  it("an unallowed new root key is reported as unexpected", () => {
+    const n = { ...(newPayload(txgioRow()) as unknown as Record<string, unknown>), bonus: 1 };
+    expect(diffTier1KeyPaths(oldPayload(txgioRow()), n).unexpected).toEqual(["bonus"]);
+    expect(diffAgainstRequiredFacetPaths(n).unexpectedRoots).toEqual(["bonus"]);
+  });
+
+  it("REQUIRED_TIER1_FACET_PATHS is exactly the old bake's leaf set on a parcel with no stamp, no ring and no land-use (cannot drift from the code)", () => {
+    const bare = buildTier1Payload(
+      {
+        feature_index: 1,
+        prop_id: "34137",
+        situs_address: null,
+        situs_city: null,
+        situs_state: null,
+        zoning_district: null,
+        zoning_jurisdiction: null,
+        source_vintage: null,
+        geometry: null,
+        txgioOwnerForGate: null,
+      },
+      "48021",
+      "Bastrop",
+      new Map(),
+      NOW,
+    );
+    expect(bare).not.toBeNull();
+    expect([...leafKeyPaths(bare)].sort()).toEqual([...REQUIRED_TIER1_FACET_PATHS].sort());
+  });
+
+  it("the ignore list and the allowlist are the ones the card names", () => {
+    expect([...DIVERGENCE_IGNORE_NEW_SHAPE_KEYS].sort()).toEqual(
+      [
+        "access",
+        "accessNormalizedFrom",
+        "baked",
+        "publishRunId",
+        "shapeSource",
+        "source",
+        "recordRetirement",
+      ].sort(),
+    );
+    expect([...DIVERGENCE_ALLOWLIST_NEW_SHAPE_PREFIXES].sort()).toEqual(
+      [
+        "facetCoverage.tier1",
+        "facets.base",
+        "provenance.parcelJoin",
+        // Land-use projection (2026-08-31): which upstream supplied the value,
+        // and the earned absence written when none did. Both are new-shape
+        // only, so the old-versus-new leaf diff still compares strictly.
+        "provenance.landUseOrigin",
+        "provenance.landUseAbsence",
+        // CTX-situs (2026-09-08): situsState is derived, not join-sourced;
+        // same new-shape-only treatment as the two above.
+        "provenance.situsStateSource",
+        // CTX-B6 (2026-09-10, reopened): which upstream supplied the situs, and
+        // the claim value the declared roll overrode. This pin FIRED when the
+        // two keys were added, which is the control working: widening the
+        // allowlist is a deliberate act with a reason, never a silent one. The
+        // old bake had no concept of a situs SOURCE because it had only one.
+        "provenance.situsAddressSource",
+        "provenance.situsAddressSupersededClaim",
+        // CTX-B7 (2026-09-10): the same treatment for the three sibling leaves,
+        // plus the same-parcel gate's verdict and what it refused. This pin FIRED
+        // AGAIN when these seven keys were added, on a lane whose dispatch had
+        // pre-declared that it would -- which is the difference between a control
+        // that works and one nobody has watched fire twice.
+        "provenance.situsCitySource",
+        "provenance.situsCitySupersededClaim",
+        "provenance.situsZipSource",
+        "provenance.situsZipSupersededClaim",
+        "provenance.acreageSource",
+        "provenance.declaredRollTrust",
+        "provenance.declaredRollRefused",
+        "baseFacts.cadRoll",
+        "baseFacts.yearBuilt",
+        "baseFacts.legalDescription",
+        "baseFacts.exemptionCodes",
+      ].sort(),
+    );
+  });
+});
+
+describe("claim reading and node identity", () => {
+  it("reads claim fields by name, never defaults, coerces numeric strings, and ignores the owner", () => {
+    const c = readConformantCadClaim(
+      conformantBody({ claim: { landAcres: "0.5", propertyUseCode: " B2 " } }) as Record<string, unknown>,
+    );
+    expect(c).toEqual({
+      countyFips: "48021",
+      propId: "34137",
+      taxYear: 2025,
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+      situsCity: "BASTROP",
+      situsZip: "78602",
+      landAcres: 0.5,
+      propertyUseCode: "B2",
+      marketValue: 100000,
+      assessedValue: 100000,
+      landValue: 10000,
+      improvementValue: 90000,
+      livingAreaSqft: 1200,
+    });
+    expect(readConformantCadClaim({})).toEqual({
+      countyFips: null,
+      propId: null,
+      taxYear: null,
+      situsAddress: null,
+      situsCity: null,
+      situsZip: null,
+      landAcres: null,
+      propertyUseCode: null,
+      marketValue: null,
+      assessedValue: null,
+      landValue: null,
+      improvementValue: null,
+      livingAreaSqft: null,
+    });
+  });
+
+  it("card F: the FLAT body hauska_mcp actually stores (claim fields at the root, minted nid_ nodeId, no body.claim) is read by name; every field the nested reader read is read here", () => {
+    const flat = flatProductionBody("48453", "493738", 2026, { situsAddress: "4707 SHOALWOOD AVE", situsCity: "AUSTIN", situsZip: "78756" });
+    expect(flat).not.toHaveProperty("claim");
+    expect(conformantClaimRecord(flat).placement).toBe("flat");
+    expect(conformantClaimRecord(conformantBody()).placement).toBe("nested");
+    expect(readConformantCadClaim(flat)).toEqual({
+      countyFips: "48453",
+      propId: "493738",
+      taxYear: 2026,
+      situsAddress: "4707 SHOALWOOD AVE",
+      situsCity: "AUSTIN",
+      situsZip: "78756",
+      landAcres: null,
+      propertyUseCode: null,
+      marketValue: 2120,
+      assessedValue: null,
+      landValue: 0,
+      improvementValue: 0,
+      livingAreaSqft: null,
+    });
+    // A flat body with a use code and acreage reaches the bake too (until card F both baked null on every production row).
+    const withUse = flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602", landAcres: 0.3815, propertyUseCode: "A1" });
+    expect(readConformantCadClaim(withUse)).toMatchObject({ landAcres: 0.3815, propertyUseCode: "A1", situsCity: "BASTROP", situsZip: "78602" });
+    // The nested placement reads identically: one reader, two placements, same values.
+    const nested = { claim: { ...withUse }, access: withUse.access };
+    expect(readConformantCadClaim(nested)).toEqual(readConformantCadClaim(withUse));
+    expect(parcelNodeIdFromBody(flat, "48453")).toBe("48453:493738");
+  });
+
+  it("card F: a claim with a city bakes a city and a zip (flat production bodies of the golds)", () => {
+    const travis = buildConformantTier1Payload({
+      body: flatProductionBody("48453", "493738", 2026, { situsAddress: "4707 SHOALWOOD AVE", situsCity: "AUSTIN", situsZip: "78756" }),
+      parcelNodeId: "48453:493738",
+      countyFips: "48453",
+      situsAddress: "4707 SHOALWOOD AVE",
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: null, gateBlocked: false },
+      nowIso: NOW,
+    });
+    expect(travis.baseFacts.situsCity).toBe("AUSTIN");
+    expect(travis.baseFacts.situsZip).toBe("78756");
+    expect(travis.provenance.parcelVintage).toBe("2026");
+    expect(travis.countyName).toBe("Travis");
+    const bastrop = buildConformantTier1Payload({
+      body: flatProductionBody("48021", "34137", 2025, { situsAddress: "908 PINE , BASTROP, TX 78602", situsCity: "BASTROP", situsZip: "78602" }),
+      parcelNodeId: "48021:34137",
+      countyFips: "48021",
+      situsAddress: "908 PINE , BASTROP, TX 78602",
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: txgioRow(), gateBlocked: false },
+      nowIso: NOW,
+    });
+    expect(bastrop.baseFacts.situsCity).toBe("BASTROP");
+    expect(bastrop.baseFacts.situsZip).toBe("78602");
+    expect(bastrop.zoning?.district).toBe("SF-1");
+    // Explicit null, never an omitted key, when the claim carries no city or zip
+    // (the literal 48021 prop 10090 body read 2026-08-28: situs ", ,", city and zip null).
+    const noCity = buildConformantTier1Payload({
+      body: flatProductionBody("48021", "10090", 2025, { situsAddress: null, situsCity: null, situsZip: null }),
+      parcelNodeId: "48021:10090",
+      countyFips: "48021",
+      situsAddress: null,
+      access: CANONICAL_ACCESS,
+      accessNormalizedFrom: null,
+      publishRunId: undefined,
+      parcelJoin: { table: "txgio_parcel", row: null, gateBlocked: false },
+      nowIso: NOW,
+    });
+    // CTX-LEAVES (P-124): these two asserted a bare null. The claim IS the
+    // source and it is always read, so a missing value is a verified absence
+    // OF THE CAD-CARRIED FIELD -- and the basis says in words that it is not a
+    // finding that the parcel has no city.
+    for (const field of ["situsCity", "situsZip"] as const) {
+      const cell = noCity.baseFacts[field];
+      expect(isEarnedLeafAbsence(cell)).toBe(true);
+      const wire = cell as Tier1LeafAbsence;
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.scopeSearched).toContain(`claim.${field}`);
+      expect(wire.basis).toContain("48021:10090");
+      expect(wire.basis).toContain("not a finding that the parcel has none");
+    }
+    expect(hasKeyPath(noCity, "baseFacts.situsCity")).toBe(true);
+    expect(hasKeyPath(noCity, "baseFacts.situsZip")).toBe(true);
+    expect(JSON.stringify(noCity)).not.toMatch(/owner/i);
+  });
+
+  it("card F: the divergence test carries baseFacts.situsCity and baseFacts.situsZip (a thinned payload missing either is caught)", () => {
+    const o = oldPayload(txgioRow());
+    const n = newPayload(txgioRow()) as unknown as Record<string, unknown>;
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsCity");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
+    const thinned = { ...n, baseFacts: Object.fromEntries(Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity" && k !== "situsZip")) };
+    const diff = diffTier1KeyPaths(o, thinned);
+    expect(diff.missing).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
+    expect(diffAgainstRequiredFacetPaths(thinned).missing).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+    ]);
+    // The literal 2026-08-28 production row for 48453:493738 (read 19:48Z) carried situsCity null and NO situsZip key.
+    const productionRow = { ...n, baseFacts: { apn: "493738", acreage: null, landUse: null, situsCity: null, situsState: null, situsAddress: "4707 SHOALWOOD AVE" } };
+    expect(diffAgainstRequiredFacetPaths(productionRow).missing).toEqual([
+      "baseFacts.situsZip",
+      "baseFacts.cadRoll.marketValue",
+      "baseFacts.cadRoll.assessedValue",
+      "baseFacts.cadRoll.landValue",
+      "baseFacts.cadRoll.improvementValue",
+      "baseFacts.cadRoll.livingAreaSqft",
+      "baseFacts.yearBuilt",
+      "baseFacts.legalDescription",
+      "baseFacts.exemptionCodes",
+    ]);
+  });
+
+  it("conformantAcreageFromClaim refuses zero, negative and non-finite (never a fabricated 0)", () => {
+    expect(conformantAcreageFromClaim(0)).toBeNull();
+    expect(conformantAcreageFromClaim(-1)).toBeNull();
+    expect(conformantAcreageFromClaim(Number.NaN)).toBeNull();
+    expect(conformantAcreageFromClaim(null)).toBeNull();
+    expect(conformantAcreageFromClaim(1)).toEqual({ value: 1, sqft: 43560, method: "cad-roll-land-acres" });
+  });
+
+  it("parcelNodeIdFromBody: nodeId first, then county:prop_id, never invented", () => {
+    expect(parcelNodeIdFromBody({ nodeId: "48021:34137" }, "48021")).toBe("48021:34137");
+    expect(parcelNodeIdFromBody({ claim: { sourceIdentifiers: { prop_id: "34137" } } }, "48021")).toBe("48021:34137");
+    expect(parcelNodeIdFromBody({ sourceIdentifiers: { prop_id: 34137 } }, "48021")).toBe("48021:34137");
+    expect(parcelNodeIdFromBody({ claim: {} }, "48021")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CTX card H: owner-gated situs recovery on the conformant bake.
+// These fixtures fail on origin/main (gate-blocked drops the offered row;
+// landUseAddressRecovered is hardcoded false; no joined-situs state) and
+// pass only after the recovery is wired. The seed is not lifted.
+// ---------------------------------------------------------------------------
+
+const HAYS_SITUS = "275 CIBOLO CREEK DR, KYLE, TX 78640";
+const HAYS_ADDR_KEY = normalizeSitusAddress(HAYS_SITUS);
+const WILL_SITUS = "1804 DAVIS ST, TAYLOR, TX 76574";
+const WILL_ADDR_KEY = normalizeSitusAddress(WILL_SITUS);
+
+function addrLookup(key: string, owner: string | null, code = "A1"): Map<string, AddressLandUseEntry> {
+  return new Map([[key, { code, vintage: "2025", owner }]]);
+}
+
+function haysBody(overrides: Record<string, unknown> = {}) {
+  return conformantBody({
+    nodeId: "48209:135570",
+    claim: {
+      countyFips: "48209",
+      sourceIdentifiers: { prop_id: "135570", taxYear: 2025 },
+      situsAddress: HAYS_SITUS,
+      situsCity: "KYLE",
+      situsZip: "78640",
+      propertyUseCode: "A1",
+      ...overrides,
+    },
+  });
+}
+
+describe("CTX card H: situs recovery on blocked counties, never prop_id", () => {
+  it("seed is still {48209, 48491} and landUseJoinKey stays null for both", () => {
+    expect([...LANDUSE_JOIN_DISABLED_FIPS_SEED].sort()).toEqual(["48209", "48491"]);
+    expect(landUseJoinKey("48209", "135570")).toBeNull();
+    expect(landUseJoinKey("48209", "any")).toBeNull();
+    expect(landUseJoinKey("48491", "76149")).toBeNull();
+    expect(landUseJoinKey("48491", "R062578")).toBeNull();
+  });
+
+  it("blocked county: an offered prop_id txgio row is still unused (fail closed)", () => {
+    const colliding = txgioRow({
+      prop_id: "135570",
+      zoning_district: "FABRICATED",
+      zoning_jurisdiction: "wrong-city",
+      situs_state: "TX",
+    });
+    const n = newPayload(colliding, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+    });
+    expect(n.zoning).toBeNull();
+    expect(n.envelope).toBeNull();
+    // CTX-situs: the colliding row is correctly unused for zoning/envelope
+    // (asserted above/below), but situsState no longer depends on it at all.
+    expect(n.baseFacts.situsState).toBe("TX");
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+  });
+
+  it("blocked county + owners AGREE: land-use recovered, source cad-roll-address-join", () => {
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "PURVIS, MICHAEL J",
+      },
+    });
+    expect(resolvedLandUse(n)?.code).toBe("F1");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseSource).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.facetCoverage.landUse).toBe(true);
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(n.provenance.parcelJoin.basis).toMatch(/situs/i);
+    expect(n.provenance.parcelJoin.basis).not.toMatch(/prop_id/);
+  });
+
+  it("blocked county + owners DISAGREE: land-use null (never the mismatched code)", () => {
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "BREM SARAH",
+      },
+    });
+    // CTX-LEAVES: a refused recovery is `refused`, and never the mismatched
+    // code -- the point the original assertion was making, now stated in the
+    // four-state vocabulary instead of as a null.
+    expect((n.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
+    expect(JSON.stringify(n.baseFacts.landUse)).not.toContain("F1");
+    expect(n.facetCoverage.landUse).toBe(false);
+    expect((n.provenance.landUseSource as Tier1LeafAbsence).mirrors).toBe("baseFacts.landUse");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("blocked county + blank owner: land-use null", () => {
+    const blankCad = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, null, "F1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect((blankCad.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
+    expect(blankCad.provenance.landUseAddressRecovered).toBe(false);
+
+    const blankTxgio = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: null,
+      },
+    });
+    expect((blankTxgio.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
+    expect(blankTxgio.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("blocked county + blank situs: land-use null (addressJoinKey is null)", () => {
+    expect(addressJoinKey("48209", null)).toBeNull();
+    expect(addressJoinKey("48209", "")).toBeNull();
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody({ situsAddress: null }),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: null,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "F1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect((n.baseFacts.landUse as Tier1LeafAbsence).verdict).toBe("refused");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+  });
+
+  it("situs-keyed row is used; prop_id-keyed row on the same blocked parcel is ignored", () => {
+    const propIdRow = txgioRow({
+      feature_index: 1,
+      prop_id: "135570",
+      zoning_district: "WRONG-PROP-ID",
+      zoning_jurisdiction: "fabricated-city",
+      situs_address: "999 COLLISION RD",
+      situs_state: "ZZ",
+      geometry: {
+        type: "Polygon",
+        coordinates: [[
+          [-98, 29],
+          [-98.001, 29],
+          [-98.001, 29.001],
+          [-98, 29.001],
+          [-98, 29],
+        ]],
+      },
+    });
+    const situsRow = txgioRow({
+      feature_index: 99,
+      prop_id: "TXGIO-OTHER",
+      situs_address: HAYS_SITUS,
+      situs_city: "KYLE",
+      situs_state: "TX",
+      situs_zip: "78640",
+      zoning_district: "SF-2",
+      zoning_jurisdiction: "kyle-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "PURVIS MICHAEL",
+    });
+    const n = newPayload(propIdRow, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "A1"),
+        txgioOwner: "PURVIS MICHAEL",
+      },
+    });
+    expect(n.zoning?.district).toBe("SF-2");
+    expect(n.zoning?.jurisdictionKey).toBe("kyle_city_tx");
+    expect(n.baseFacts.situsState).toBe("TX");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(n.provenance.parcelJoin).toMatchObject({
+      table: "txgio_parcel",
+      state: "joined-situs",
+      featureIndex: 99,
+      sourceVintage: "stratmap25-landparcels_48209_hays_202503",
+    });
+    expect(n.provenance.parcelJoin.basis).toMatch(/situs/i);
+    expect(n.provenance.parcelJoin.basis).not.toMatch(/prop_id/);
+    expect(n.zoning?.district).not.toBe("WRONG-PROP-ID");
+    expect(n.envelope).not.toBeNull();
+  });
+
+  it("non-blocked county: addressJoinKey is null; prop_id join and cad-roll land-use stay", () => {
+    expect(addressJoinKey("48021", "908 PINE , BASTROP, TX 78602")).toBeNull();
+    expect(addressJoinKey("48453", WILL_SITUS)).toBeNull();
+    expect(addressJoinKey("48055", HAYS_SITUS)).toBeNull();
+    expect(addressJoinKey("48309", HAYS_SITUS)).toBeNull();
+    const situsRow = txgioRow({
+      zoning_district: "SHOULD-NOT-USE",
+      feature_index: 777,
+    });
+    const n = newPayload(txgioRow(), {
+      gateBlocked: false,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("908 PINE , BASTROP, TX 78602"),
+          "OWNER X",
+          "Z9",
+        ),
+        txgioOwner: "OWNER X",
+      },
+    });
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll");
+    expect(n.provenance.landUseAddressRecovered).toBe(false);
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(n.zoning?.district).toBe("SF-1");
+    expect(n.zoning?.district).not.toBe("SHOULD-NOT-USE");
+  });
+
+  it("Williamson gold shape recovers the same way (agree) and refuses a prop_id row", () => {
+    const propIdRow = txgioRow({
+      prop_id: "76149",
+      zoning_district: "COLLISION",
+    });
+    const situsRow = txgioRow({
+      feature_index: 42,
+      prop_id: "R-OTHER",
+      situs_address: WILL_SITUS,
+      situs_city: "TAYLOR",
+      situs_state: "TX",
+      zoning_district: "R-1",
+      zoning_jurisdiction: "taylor-city-tx",
+    });
+    const n = newPayload(propIdRow, {
+      gateBlocked: true,
+      body: conformantBody({
+        nodeId: "48491:76149",
+        claim: {
+          countyFips: "48491",
+          sourceIdentifiers: { prop_id: "76149", taxYear: 2026 },
+          situsAddress: WILL_SITUS,
+          situsCity: "TAYLOR",
+          situsZip: "76574",
+          propertyUseCode: "A1",
+        },
+      }),
+      countyFips: "48491",
+      countyName: "Williamson",
+      parcelNodeId: "48491:76149",
+      situsAddress: WILL_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(WILL_ADDR_KEY, "ACME HOLDINGS LLC", "A1"),
+        txgioOwner: "ACME HOLDINGS INC",
+      },
+    });
+    expect(resolvedLandUse(n)?.source).toBe("cad-roll-address-join");
+    expect(n.provenance.landUseAddressRecovered).toBe(true);
+    expect(n.zoning?.district).toBe("R-1");
+    expect(n.zoning?.district).not.toBe("COLLISION");
+    expect(n.provenance.parcelJoin.state).toBe("joined-situs");
+  });
+
+  it("owner never on the wire on the recovery path; an injected owner key is refused", () => {
+    const situsRow = txgioRow({
+      situs_address: HAYS_SITUS,
+      txgio_owner_for_gate: "PURVIS MICHAEL MUST NEVER BAKE",
+    });
+    const n = newPayload(null, {
+      gateBlocked: true,
+      body: haysBody(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      situsAddress: HAYS_SITUS,
+      situsRow,
+      situsRecovery: {
+        addressLandUse: addrLookup(HAYS_ADDR_KEY, "PURVIS MICHAEL", "A1"),
+        txgioOwner: "PURVIS MICHAEL MUST NEVER BAKE",
+      },
+    });
+    expect(() => assertNoOwnerKey(n)).not.toThrow();
+    expect(JSON.stringify(n)).not.toMatch(/PURVIS|MUST NEVER BAKE/i);
+    expect(JSON.stringify(n)).not.toMatch(/"owner/i);
+    const poisoned = {
+      ...(n as unknown as Record<string, unknown>),
+      baseFacts: {
+        ...(n.baseFacts as unknown as Record<string, unknown>),
+        owner_name: "LEAK",
+      },
+    };
+    expect(() => assertNoOwnerKey(poisoned)).toThrow(
+      expect.objectContaining({ code: "OWNER_KEY_IN_PAYLOAD" }),
+    );
+  });
+});
+
+function cadPropertyRollFor(
+  propId: string,
+  row: {
+    taxYear: number;
+    marketValue?: number | null;
+    assessedValue?: number | null;
+    landValue?: number | null;
+    improvementValue?: number | null;
+    livingAreaSqft?: number | null;
+    yearBuilt?: number | null;
+    legalDescription?: string | null;
+    exemptionCodes?: string[] | null;
+  },
+): ConformantTier1BuildInput["cadPropertyRoll"] {
+  return {
+    consulted: true,
+    declaredTaxYear: row.taxYear,
+    byPropId: new Map([
+      [
+        propId,
+        {
+          taxYear: row.taxYear,
+          marketValue: row.marketValue ?? null,
+          assessedValue: row.assessedValue ?? null,
+          landValue: row.landValue ?? null,
+          improvementValue: row.improvementValue ?? null,
+          livingAreaSqft: row.livingAreaSqft ?? null,
+          yearBuilt: row.yearBuilt ?? null,
+          legalDescription: row.legalDescription ?? null,
+          exemptionCodes: row.exemptionCodes ?? null,
+        },
+      ],
+    ]),
+  };
+}
+
+describe("Wave R: cad_property is the only dollar source", () => {
+  it("reads market/living/year/legal from cad_property and stamps source cad_property", () => {
+    const n = newPayload(txgioRow(), {
+      cadPropertyRoll: cadPropertyRollFor("34137", {
+        taxYear: 2025,
+        marketValue: 397260,
+        assessedValue: 397260,
+        landValue: 80000,
+        improvementValue: 317260,
+        livingAreaSqft: 2145,
+        yearBuilt: 1910,
+        legalDescription: "LOT 1 BLK 2",
+        exemptionCodes: ["HS"],
+      }),
+    });
+    expect(n.baseFacts.cadRoll.marketValue).toEqual({
+      v: 397260,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft?.v).toBe(2145);
+    expect(n.baseFacts.yearBuilt).toEqual({
+      v: 1910,
+      source: "cad_property",
+      vintage: "2025",
+    });
+    expect(n.baseFacts.legalDescription?.v).toBe("LOT 1 BLK 2");
+    expect(n.baseFacts.exemptionCodes?.v).toEqual(["HS"]);
+  });
+
+  it("hollow-atom county: Hays claim dollars are ignored; cad_property supplies the value", () => {
+    const hollowClaim = conformantBody({
+      claim: {
+        kind: "cad-parcel-roll",
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "135570", taxYear: 2025 },
+        marketValue: null,
+        assessedValue: null,
+        landValue: null,
+        improvementValue: null,
+        livingAreaSqft: null,
+        yearBuilt: null,
+        propertyUseCode: null,
+      },
+    });
+    const starved = newPayload(null, {
+      body: hollowClaim,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      gateBlocked: true,
+    });
+    expect(starved.baseFacts.cadRoll.marketValue).toBeNull();
+    expect(starved.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(starved.baseFacts.yearBuilt).toBeNull();
+
+    const filled = newPayload(null, {
+      body: hollowClaim,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:135570",
+      gateBlocked: true,
+      cadPropertyRoll: cadPropertyRollFor("135570", {
+        taxYear: 2025,
+        marketValue: 412000,
+        livingAreaSqft: 2444,
+        yearBuilt: 2018,
+      }),
+    });
+    expect(filled.baseFacts.cadRoll.marketValue?.v).toBe(412000);
+    expect(filled.baseFacts.cadRoll.marketValue?.source).toBe("cad_property");
+    expect(filled.baseFacts.cadRoll.livingAreaSqft?.v).toBe(2444);
+    expect(filled.baseFacts.yearBuilt?.v).toBe(2018);
+  });
+
+  it("Bastrop atom overcount is refused: claim living 2184 does not bake when cad_property is null", () => {
+    const inventingClaim = conformantBody({
+      claim: {
+        livingAreaSqft: 2184,
+        assessedValue: 77053,
+        improvementValue: 0,
+        marketValue: 100000,
+      },
+    });
+    const n = newPayload(txgioRow(), {
+      body: inventingClaim,
+      cadPropertyRoll: cadPropertyRollFor("34137", {
+        taxYear: 2025,
+        marketValue: 100000,
+        assessedValue: null,
+        improvementValue: null,
+        livingAreaSqft: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(n.baseFacts.cadRoll.assessedValue).toBeNull();
+    expect(n.baseFacts.cadRoll.improvementValue).toBeNull();
+    expect(n.baseFacts.cadRoll.marketValue?.v).toBe(100000);
+  });
+
+  it("McLennan assessed stays null when cad_property.assessed_value is null (source gap, not filled)", () => {
+    const n = newPayload(txgioRow(), {
+      countyFips: "48309",
+      countyName: "McLennan",
+      parcelNodeId: "48309:1",
+      cadPropertyRoll: cadPropertyRollFor("1", {
+        taxYear: 2025,
+        marketValue: 88000,
+        assessedValue: null,
+        landValue: 20000,
+        improvementValue: 68000,
+        livingAreaSqft: null,
+        yearBuilt: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.marketValue?.v).toBe(88000);
+    expect(n.baseFacts.cadRoll.assessedValue).toBeNull();
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+    expect(n.baseFacts.yearBuilt).toBeNull();
+  });
+
+  it("Caldwell stored improvement $0 bakes as v:0, never collapsed to absent", () => {
+    const n = newPayload(txgioRow(), {
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      cadPropertyRoll: cadPropertyRollFor("1", {
+        taxYear: 2025,
+        marketValue: 45000,
+        // CTX-B1: Caldwell is a genuine CAD-export county (48055:32541 is
+        // this program's own known-good CAD control) -- assessedValue
+        // present is what makes valueBasis county-assessed rather than
+        // stratmap-redistributed; a real Caldwell row always carries one.
+        assessedValue: 45000,
+        landValue: 45000,
+        improvementValue: 0,
+        livingAreaSqft: null,
+      }),
+    });
+    expect(n.baseFacts.cadRoll.improvementValue).toEqual({
+      v: 0,
+      source: "cad_property",
+      vintage: "2025",
+      valueBasis: "county-assessed",
+    });
+    expect(n.baseFacts.cadRoll.livingAreaSqft).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-LEAVES (2026-09-08): six required leaves were bare nulls.
+//
+// The dispatch's own instruction is that a check observed only passing has not
+// been observed working, so every block below proves the negative case too.
+// ---------------------------------------------------------------------------
+
+/**
+ * hauska-factory's REAL BP-CONTENT-01 leaf classifier, reproduced verbatim
+ * from `P:/tmp/ctx-w2-gate/src/jobs/verify-walk.mjs` lines 252-306 as read on
+ * 2026-09-08 -- the WHOLE function this time, object branch included, not the
+ * scalar-only slice CTX-situs needed. Reproduced rather than imported because
+ * verify-walk.mjs lives in a sibling repo this dispatch does not depend on;
+ * reproduced rather than paraphrased because a check written from memory
+ * grades what we think the walk does, not what it does.
+ */
+function classifyRequiredLeafVerbatim(
+  value: unknown,
+  { requestClock, path = "leaf" }: { requestClock?: string; path?: string } = {},
+): { state: string; ok: boolean; reason?: string; basis?: unknown } {
+  if (value === null || value === undefined) {
+    return { state: "null", ok: false, reason: `${path} is null; null is not value|absent-verified|not-applicable|refused` };
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (value === "") return { state: "empty", ok: false, reason: `${path} is empty` };
+    return { state: "value", ok: true };
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0
+      ? { state: "value", ok: true }
+      : { state: "empty", ok: false, reason: `${path} is an empty array` };
+  }
+  const rec =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!rec) return { state: "unknown", ok: false, reason: `${path} is not a four-state leaf` };
+
+  const verdict = rec.verdict ?? rec.state ?? null;
+  const absence = verdict === "absent-verified" || verdict === "not-applicable" || verdict === "refused";
+  if (absence) {
+    if (verdict === "absent-verified") {
+      const scope = rec.scope ?? rec.scopeSearched;
+      const asOf = rec.asOf;
+      const basis = rec.basis;
+      if (scope == null || String(scope).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing scope` };
+      }
+      if (asOf == null || String(asOf).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing asOf` };
+      }
+      if (basis == null || String(basis).trim() === "") {
+        return { state: "absent-verified", ok: false, reason: `${path} absent-verified missing basis` };
+      }
+      if (requestClock != null && String(asOf) === String(requestClock)) {
+        return { state: "absent-verified", ok: false, reason: `${path} asOf equals request clock; evaluation-time asOf required` };
+      }
+      return { state: "absent-verified", ok: true, basis };
+    }
+    if (verdict === "not-applicable") {
+      const basis = rec.basis;
+      if (basis == null || String(basis).trim() === "") {
+        return { state: "not-applicable", ok: false, reason: `${path} not-applicable missing basis` };
+      }
+      return { state: "not-applicable", ok: true, basis };
+    }
+    return { state: "refused", ok: true };
+  }
+  if (Object.keys(rec).length === 0) {
+    return { state: "empty", ok: false, reason: `${path} is an empty object` };
+  }
+  return { state: "value", ok: true };
+}
+
+/** A parcel whose CAD roll WAS consulted and simply carries no coded row for it. */
+function rollConsultedButMisses(parcelNodeId = "48021:34137") {
+  const propId = parcelNodeId.split(":")[1]!;
+  return newPayload(null, {
+    parcelNodeId,
+    body: conformantBody({
+      nodeId: parcelNodeId,
+      claim: {
+        propertyUseCode: null,
+        sourceIdentifiers: { prop_id: propId, taxYear: 2025 },
+      },
+    }),
+    landUseRoll: { byPropId: new Map(), declaredTaxYear: 2025, consulted: true },
+  });
+}
+
+describe("CTX-LEAVES: the four bake-owned leaves classify as a four-state, never a bare null", () => {
+  it("POPULATED case is untouched: every leaf is still a plain value the walk grades as a value", () => {
+    const n = newPayload(txgioRow());
+    for (const [path, v] of [
+      ["baseFacts.situsCity", n.baseFacts.situsCity],
+      ["baseFacts.situsZip", n.baseFacts.situsZip],
+      ["baseFacts.landUse", n.baseFacts.landUse],
+      ["provenance.landUseSource", n.provenance.landUseSource],
+    ] as const) {
+      expect(classifyRequiredLeafVerbatim(v, { path })).toEqual({ state: "value", ok: true });
+    }
+    // Still the literal strings/objects the old bake produced -- this fix adds
+    // a state for the ABSENT case and changes nothing about the present one.
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
+    expect(n.baseFacts.situsZip).toBe("78602");
+    expect(resolvedLandUse(n)?.code).toBe("A1");
+    expect(n.provenance.landUseSource).toBe("cad-roll");
+  });
+
+  it("ABSENT case: situsCity and situsZip earn absent-verified scoped to the CAD claim, not to the parcel", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48453", "1000000", 2026, {
+        situsAddress: null,
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48453:1000000",
+      countyFips: "48453",
+      countyName: "Travis",
+      situsAddress: null,
+    });
+    for (const field of ["situsCity", "situsZip"] as const) {
+      const cls = classifyRequiredLeafVerbatim(n.baseFacts[field], { path: `baseFacts.${field}` });
+      expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+      const wire = n.baseFacts[field] as Tier1LeafAbsence;
+      // The claim was consulted -- there is no join here that could have missed.
+      expect(wire.scopeSearched).toContain("cad-parcel-roll atom body");
+      expect(wire.asOf).toBe(NOW);
+      // THE PRECISION: an absence of the CAD-carried field, never of the fact.
+      // Travis leaves situs_city null on most of its roll and those parcels
+      // are in Austin.
+      expect(wire.basis).toContain("not a finding that the parcel has none");
+    }
+  });
+
+  it("ABSENT case: a consulted-and-missed CAD roll earns absent-verified on landUse (the 09-05 join-miss ruling)", () => {
+    const n = rollConsultedButMisses();
+    const cls = classifyRequiredLeafVerbatim(n.baseFacts.landUse, { path: "baseFacts.landUse" });
+    expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+    const wire = n.baseFacts.landUse as Tier1LeafAbsence;
+    expect(wire.lookupVerdict).toBeUndefined();
+    // The leaf carries the record the bake already earned -- byte-identical,
+    // not a paraphrase of it.
+    expect(wire.basis).toBe(n.provenance.landUseAbsence?.basis);
+    expect(wire.scopeSearched).toBe(n.provenance.landUseAbsence?.scopeSearched);
+    // The scope names the DECLARED tax year, because that is what
+    // fetchCountyLandUseRoll actually queries -- the absence travels with the
+    // scope it was earned in.
+    expect(wire.scopeSearched).toContain("tax_year 2025");
+  });
+
+  it("lookup-failed becomes refused, NEVER absent-verified: could-not-look stays tellable from found-nothing", () => {
+    // No roll supplied: the bake could not consult one.
+    const notConsulted = newPayload(null, {
+      body: conformantBody({ claim: { propertyUseCode: null } }),
+    });
+    const wire = notConsulted.baseFacts.landUse as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("refused");
+    expect(wire.verdict).not.toBe("absent-verified");
+    expect(wire.lookupVerdict).toBe("lookup-failed");
+    expect(notConsulted.provenance.landUseAbsence?.verdict).toBe("lookup-failed");
+    expect(classifyRequiredLeafVerbatim(wire, { path: "baseFacts.landUse" })).toEqual({
+      state: "refused",
+      ok: true,
+    });
+    // And the walk's own hole is not being exploited: a wire that kept the raw
+    // lookup-failed verdict would have slipped through as a VALUE, reading as
+    // a populated land use. That is why it is mapped rather than passed on.
+    expect(
+      classifyRequiredLeafVerbatim({ ...wire, verdict: "lookup-failed" }, { path: "x" }),
+    ).toEqual({ state: "value", ok: true });
+  });
+
+  it("the twin cannot disagree: provenance.landUseSource is a VERBATIM mirror of baseFacts.landUse", () => {
+    const cases = [
+      rollConsultedButMisses(),
+      newPayload(null, { body: conformantBody({ claim: { propertyUseCode: null } }) }),
+    ];
+    for (const n of cases) {
+      const leaf = n.baseFacts.landUse as Tier1LeafAbsence;
+      const twin = n.provenance.landUseSource as Tier1LeafAbsence;
+      expect(twin).toEqual({ ...leaf, mirrors: "baseFacts.landUse" });
+      expect(classifyRequiredLeafVerbatim(twin).state).toBe(
+        classifyRequiredLeafVerbatim(leaf).state,
+      );
+    }
+  });
+
+  it("absent-verified bases DIFFER between parcels (gradeAbsentVerifiedBasisDiversity cannot fire)", () => {
+    // Reproduced from verify-walk.mjs lines 309-331 (read 2026-09-08): two
+    // earned absences on the same path must not share a character-identical
+    // basis, because a basis identical across parcels is a ceremony.
+    const a = rollConsultedButMisses("48021:34137");
+    const b = rollConsultedButMisses("48021:8720522");
+    for (const path of ["baseFacts.landUse"] as const) {
+      const seen = new Set<string>();
+      for (const payload of [a, b]) {
+        const cls = classifyRequiredLeafVerbatim(keyPathValue(payload, path), { path });
+        expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+        expect(seen.has(String(cls.basis))).toBe(false);
+        seen.add(String(cls.basis));
+      }
+      expect(seen.size).toBe(2);
+    }
+  });
+
+  it("no leaf is REMOVED and no fifth state is admitted: the required set and its presence rule are unchanged", () => {
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsCity");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.situsZip");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("baseFacts.landUse");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("provenance.landUseSource");
+    expect(REQUIRED_TIER1_FACET_PATHS).toContain("provenance.zoningSource");
+    const n = rollConsultedButMisses();
+    expect(diffAgainstRequiredFacetPaths(n).missing).toEqual([]);
+    // A malformed wire is NOT a state: isEarnedLeafAbsence checks every field.
+    expect(isEarnedLeafAbsence({ status: "absent", verdict: "absent-verified" })).toBe(false);
+    expect(
+      isEarnedLeafAbsence({
+        status: "absent",
+        verdict: "made-up",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+      }),
+    ).toBe(false);
+    expect(isEarnedLeafAbsence(null)).toBe(false);
+  });
+
+  it("the ENVELOPE strip is untouched: this fix writes no state onto the anti-zombie leaf", () => {
+    const n = newPayload(null, { body: conformantBody({ claim: { landAcres: null } }) });
+    expect(n.envelope).toBeNull();
+    expect(isEarnedLeafAbsence(n.envelope)).toBe(false);
+    // provenance.zoningSource is deliberately still whatever the bake wrote:
+    // its state is the SERVE's to earn, from the rail, and a verdict invented
+    // here would be a second answer to the same question.
+    expect(n.provenance.zoningSource).toBeNull();
+  });
+});
+
+describe("CTX-LEAVES: the controls are proven able to FIRE", () => {
+  const nulled = (path: string): Record<string, unknown> => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    const [parent, leaf] = path.split(".") as [string, string];
+    (n[parent] as Record<string, unknown>)[leaf] = null;
+    return n;
+  };
+
+  it("assertRequiredLeafStatesEarned REFUSES a bare null at each of the SIX leaves (situsAddress joined 2026-09-10, CTX-B6)", () => {
+    expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+      "baseFacts.landUse",
+      "provenance.landUseSource",
+      "baseFacts.acreage",
+      "baseFacts.situsAddress",
+    ]);
+    for (const path of BAKE_OWNED_REQUIRED_LEAF_PATHS) {
+      let code: string | undefined;
+      try {
+        assertRequiredLeafStatesEarned(nulled(path));
+      } catch (err) {
+        code = (err as { code?: string }).code;
+        expect((err as Error).message).toContain(path);
+      }
+      expect(code).toBe("REQUIRED_LEAF_BARE_NULL");
+    }
+    // ... and passes the payload the builder actually produces.
+    expect(() => assertRequiredLeafStatesEarned(rollConsultedButMisses())).not.toThrow();
+  });
+
+  it("assertRequiredLeafStatesEarned REFUSES a half-built wire (the tolerance cannot be bought with a shape)", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    (n.baseFacts as Record<string, unknown>).situsCity = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
+  });
+
+  it("assertLandUseAbsenceEarned REFUSES a leaf whose verdict contradicts its own absence record", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    // The record says absent-verified; the leaf claims refused.
+    ((n.baseFacts as Record<string, unknown>).landUse as Record<string, unknown>).verdict =
+      "refused";
+    expect(() => assertLandUseAbsenceEarned(n)).toThrow(/must correspond/);
+  });
+
+  it("assertLandUseAbsenceEarned REFUSES a twin that is not a verbatim mirror", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    ((n.provenance as Record<string, unknown>).landUseSource as Record<string, unknown>).basis =
+      "a tidier sentence";
+    expect(() => assertLandUseAbsenceEarned(n)).toThrow(/verbatim mirror/);
+  });
+
+  it("the divergence instrument still reports a GENUINELY dropped leaf as missing", () => {
+    const o = oldPayload(txgioRow({ situs_city: null }), null);
+    const n = rollConsultedButMisses() as unknown as Record<string, unknown>;
+    // An earned absence answers the old null leaf -- not missing, not unexpected.
+    expect(diffTier1KeyPaths(o, n).missing.filter((p) => p.startsWith("baseFacts.situsCity"))).toEqual([]);
+    expect(diffTier1KeyPaths(o, n).unexpected.filter((p) => p.startsWith("baseFacts.situsCity"))).toEqual([]);
+    // Delete the key outright and it is missing again, immediately.
+    const dropped = {
+      ...n,
+      baseFacts: Object.fromEntries(
+        Object.entries(n.baseFacts as Record<string, unknown>).filter(([k]) => k !== "situsCity"),
+      ),
+    };
+    expect(diffTier1KeyPaths(o, dropped).missing).toContain("baseFacts.situsCity");
+    // A HALF-BUILT wire buys nothing either: only a complete one is answered.
+    const half = {
+      ...n,
+      baseFacts: {
+        ...(n.baseFacts as Record<string, unknown>),
+        situsCity: { status: "absent", verdict: "absent-verified" },
+      },
+    };
+    expect(diffTier1KeyPaths(o, half).missing).toContain("baseFacts.situsCity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-LEAVES2 (2026-09-10): `baseFacts.acreage` is a missed sibling of
+// the four CTX-LEAVES leaves -- same bare-null defect, same earned-absence
+// machinery, added to BAKE_OWNED_REQUIRED_LEAF_PATHS above. Two sources feed
+// it (parcel-join geometry, claim.landAcres); the verdict is decided PER
+// PARCEL from whether the ring was genuinely checked, never by a blanket rule.
+// ---------------------------------------------------------------------------
+
+describe("CTX-LEAVES2: baseFacts.acreage classifies as a four-state, never a bare null", () => {
+  it("POPULATED case is untouched: a real ring still bakes a plain value", () => {
+    const n = newPayload(txgioRow());
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(false);
+    expect(n.baseFacts.acreage).toEqual({
+      value: expect.any(Number),
+      sqft: expect.any(Number),
+      method: "shoelace-wgs84",
+    });
+    expect(n.facetCoverage.acreage).toBe(true);
+  });
+
+  it("gate-blocked county with no usable claim acreage: refused, not absent-verified -- the ring was never looked up", () => {
+    const n = newPayload(txgioRow(), {
+      gateBlocked: true,
+      body: conformantBody({ claim: { landAcres: null } }),
+    });
+    expect(n.provenance.parcelJoin.state).toBe("gate-blocked");
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("refused");
+    expect(ac.lookupVerdict).toBe("lookup-failed");
+    expect(ac.basis).toContain("no parcel-join row resolved");
+    expect(classifyRequiredLeafVerbatim(ac, { path: "baseFacts.acreage" })).toEqual({
+      state: "refused",
+      ok: true,
+    });
+  });
+
+  it("a REAL parcel-join row with degenerate geometry and no usable claim acreage: absent-verified -- the ring WAS genuinely checked", () => {
+    // A non-polygon geometry: firstRing returns null, but a row genuinely
+    // existed and was examined -- the branch `no-row`/`gate-blocked` never
+    // reaches, proving the pair CAN be genuinely earned when it is.
+    const n = newPayload(
+      txgioRow({ geometry: { type: "Point", coordinates: [-97.31, 30.11] } }),
+      { body: conformantBody({ claim: { landAcres: null } }) },
+    );
+    expect(n.provenance.parcelJoin.state).toBe("joined");
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(true);
+    const ac = n.baseFacts.acreage as Tier1LeafAbsence;
+    expect(ac.verdict).toBe("absent-verified");
+    expect(ac.lookupVerdict).toBeUndefined();
+    expect(ac.basis).toContain("did not yield a usable ring");
+    expect(ac.basis).toContain("48021:34137");
+    expect(classifyRequiredLeafVerbatim(ac, { path: "baseFacts.acreage" })).toMatchObject({
+      state: "absent-verified",
+      ok: true,
+    });
+  });
+
+  it("acreage from the claim alone (no ring) is a resolved value, never treated as absent", () => {
+    const n = newPayload(null);
+    expect(isEarnedLeafAbsence(n.baseFacts.acreage)).toBe(false);
+    expect(n.baseFacts.acreage).toEqual({
+      value: 0.3815,
+      sqft: Math.round(0.3815 * 43560),
+      method: "cad-roll-land-acres",
+    });
+  });
+
+  it("assertRequiredLeafStatesEarned REFUSES a half-built acreage wire", () => {
+    const n = JSON.parse(JSON.stringify(rollConsultedButMisses())) as Record<string, unknown>;
+    (n.baseFacts as Record<string, unknown>).acreage = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
+  });
+
+  it("a resolved acreage object is never mistaken for a malformed absence wire", () => {
+    // rollConsultedButMisses() bakes acreage from the claim's real landAcres
+    // (0.3815, no ring): a resolved VALUE object, not an absence.
+    expect(() => assertRequiredLeafStatesEarned(rollConsultedButMisses())).not.toThrow();
+    expect(isResolvedAcreageFacet(rollConsultedButMisses().baseFacts.acreage)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P-124 CTX-RETIRE (2026-09-09): an account absent from the county's CURRENT
+// declared-vintage cad_property roll -- split, merged, renumbered or removed
+// -- must serve a declared retirement that names why, never a silent skip
+// and never the prior vintage's snapshot presented as though it were
+// current. Same family as CTX-LEAVES's Tier1LeafAbsence, one level up: at
+// the RECORD rather than the leaf.
+// ---------------------------------------------------------------------------
+
+/** A cadPropertyRoll that WAS consulted and carries no row for ANY prop_id -- the shape of Caldwell's 267 roll-dropouts (CP1). */
+function rollConsultedNoRowFor(
+  declaredTaxYear: number,
+): ConformantTier1BuildInput["cadPropertyRoll"] {
+  return { consulted: true, declaredTaxYear, byPropId: new Map() };
+}
+
+describe("CTX-RETIRE: record-level retirement for an account absent from the current roll", () => {
+  // The real production atom body for Caldwell (48055) prop_id 1 -- the
+  // dispatch's own worked example -- read live 2026-09-09: situsAddress is a
+  // punctuation-only placeholder, every CAD attribute is null, this record's
+  // own claim last carried tax_year 2025.
+  const RETIRED_48055_1 = flatProductionBody("48055", "1", 2025, {
+    situsAddress: ", ,",
+    situsCity: null,
+    situsZip: null,
+    landAcres: null,
+    propertyUseCode: null,
+  });
+
+  // A live 48055 sibling: same county, same body shape, but its prop_id IS
+  // present in the 2026 roll -- the negative case the mission requires proof
+  // of ("an account that IS on the current roll must never receive a
+  // retirement declaration").
+  const LIVE_48055_SIBLING = flatProductionBody("48055", "51716", 2026, {
+    situsAddress: "123 FM 1854, LULING, TX 78648",
+    situsCity: "LULING",
+    situsZip: "78648",
+    landAcres: 12.4,
+    propertyUseCode: "A1",
+  });
+
+  it("retired: roll consulted, no row for this prop_id -> a well-formed Tier1RecordRetirement, never a bare marker", () => {
+    const n = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    });
+    expect(isEarnedRecordRetirement(n.recordRetirement)).toBe(true);
+    const r = n.recordRetirement as Tier1RecordRetirement;
+    expect(r.status).toBe("retired");
+    expect(r.verdict).toBe("absent-verified");
+    expect(r.basis).toContain("48055:1");
+    expect(r.basis).toContain("tax_year 2026");
+    expect(r.basis).toContain("no successor account has been verified");
+    expect(r.scopeSearched).toContain("48055");
+    expect(r.lastSeenTaxYear).toBe(2025);
+    // Not deleted, not voided: the rest of the payload is still the
+    // last-known claim, side by side with the retirement.
+    expect(n.baseFacts.situsAddress).toBe(", ,");
+    expect(n.facetSchemaVersion).toBe(TIER1_CONFORMANT_FACET_SCHEMA_VERSION);
+  });
+
+  it("live: the SAME county, a prop_id the current roll DOES carry -> recordRetirement is null, by construction", () => {
+    const n = newPayload(null, {
+      body: LIVE_48055_SIBLING,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:51716",
+      situsAddress: "123 FM 1854, LULING, TX 78648",
+      cadPropertyRoll: cadPropertyRollFor("51716", { taxYear: 2026, marketValue: 210000 }),
+    });
+    expect(n.recordRetirement).toBeNull();
+  });
+
+  it("verify by violating: the two payloads side by side -- retired carries the declaration, live does not", () => {
+    const retired = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    });
+    const live = newPayload(null, {
+      body: LIVE_48055_SIBLING,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:51716",
+      situsAddress: "123 FM 1854, LULING, TX 78648",
+      cadPropertyRoll: cadPropertyRollFor("51716", { taxYear: 2026, marketValue: 210000 }),
+    });
+    expect(retired.recordRetirement).not.toBeNull();
+    expect(live.recordRetirement).toBeNull();
+    // Same schema, same shape -- retirement is a field, not a fork.
+    expect(retired.facetSchemaVersion).toBe(live.facetSchemaVersion);
+  });
+
+  it("no positive determination, no retirement: an UNCONSULTED roll (undeclared county, or cad_property absent) never earns the state", () => {
+    const noRollAtAll = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      // cadPropertyRoll omitted entirely.
+    });
+    expect(noRollAtAll.recordRetirement).toBeNull();
+
+    const consultedFalse = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: { consulted: false, declaredTaxYear: 2026, byPropId: new Map() },
+    });
+    expect(consultedFalse.recordRetirement).toBeNull();
+  });
+
+  it("the leaf-level guards are NOT weakened for a retired record: a bare-null leaf still refuses the write", () => {
+    const n = JSON.parse(
+      JSON.stringify(
+        newPayload(null, {
+          body: RETIRED_48055_1,
+          countyFips: "48055",
+          countyName: "Caldwell",
+          parcelNodeId: "48055:1",
+          situsAddress: ", ,",
+          cadPropertyRoll: rollConsultedNoRowFor(2026),
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(n.recordRetirement).not.toBeNull();
+    (n.baseFacts as Record<string, unknown>).situsCity = null;
+    expect(() => assertRequiredLeafStatesEarned(n)).toThrow(
+      expect.objectContaining({ code: "REQUIRED_LEAF_BARE_NULL" }),
+    );
+  });
+
+  it("isEarnedRecordRetirement rejects a half-built object (the tolerance cannot be bought with a shape)", () => {
+    expect(isEarnedRecordRetirement(null)).toBe(false);
+    expect(isEarnedRecordRetirement({ status: "retired", verdict: "absent-verified" })).toBe(
+      false,
+    );
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: "not-a-number",
+      }),
+    ).toBe(false);
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: 2025,
+      }),
+    ).toBe(true);
+    expect(
+      isEarnedRecordRetirement({
+        status: "retired",
+        verdict: "absent-verified",
+        authority: "a",
+        scopeSearched: "b",
+        asOf: "c",
+        basis: "d",
+        lastSeenTaxYear: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("the divergence instrument tolerates recordRetirement on both sides: a retired payload is not flagged as an unexpected new key", () => {
+    const o = oldPayload(txgioRow());
+    const retired = newPayload(null, {
+      body: RETIRED_48055_1,
+      countyFips: "48055",
+      countyName: "Caldwell",
+      parcelNodeId: "48055:1",
+      situsAddress: ", ,",
+      cadPropertyRoll: rollConsultedNoRowFor(2026),
+    }) as unknown as Record<string, unknown>;
+    const diff = diffTier1KeyPaths(o, retired);
+    expect(diff.unexpected.filter((p) => p.startsWith("recordRetirement"))).toEqual([]);
+    expect(diffAgainstRequiredFacetPaths(retired).unexpectedRoots).toEqual([]);
+  });
+});
+
+/**
+ * CTX-SITUS-SKIP (P-124, 2026-09-09). CTX-PROV located the mechanism: an
+ * on-roll claim whose raw situsAddress is punctuation-only (e.g. `", ,"`) was
+ * refused by `assertSitusNotPunctuationOnly`, and the CLI's per-row loop
+ * `continue`d on that refusal BEFORE any write -- the row's snapshot stayed
+ * frozen on whatever pre-conformant shape it last held, forever. 18,037 rows
+ * live (Bastrop 16,104, Hays 768, McLennan 1,165), 100% correlated with a
+ * StratMap land-parcels `source_file` lineage (verified live against staging
+ * `cad_property` 2026-09-09; see the SITUS ADDRESS block in
+ * nodeFacetBakeTier1Conformant.ts for the full finding).
+ *
+ * The fix does NOT touch `PUNCTUATION_ONLY_RE` or
+ * `assertSitusNotPunctuationOnly` (untouched import; still the guard from
+ * `serveGuards.ts`, tested in `lib/__tests__/serveGuards.test.ts`). It writes
+ * the row instead of skipping it, with an EARNED absence on
+ * `baseFacts.situsAddress` naming why.
+ */
+describe("CTX-SITUS-SKIP: a punctuation-only on-roll situs is WRITTEN with an earned absence, never skipped", () => {
+  it("the refusal writes: baseFacts.situsAddress earns a well-formed, four-state-compliant absence", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999001", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999001",
+      situsAddress: null, // the guard already refused it -- this mirrors the CLI
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    });
+    // It was WRITTEN (the builder returned a payload at all) -- the old
+    // defect was that the CLI never reached buildConformantTier1Payload for
+    // this row.
+    expect(n).toBeTruthy();
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("absent-verified");
+    expect(wire.basis).toContain("48021:999001");
+    expect(wire.basis).toContain('", ,"'); // the raw offending value, quoted verbatim
+    expect(wire.scopeSearched).toContain("claim.situsAddress");
+    expect(wire.scopeSearched).toContain("assertSitusNotPunctuationOnly");
+    expect(wire.asOf).toBe(NOW);
+    const cls = classifyRequiredLeafVerbatim(wire, { path: "baseFacts.situsAddress" });
+    expect(cls).toMatchObject({ state: "absent-verified", ok: true });
+  });
+
+  it("facets.base.situsAddress NEVER carries the refused raw value: the serve guard would refuse it again", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999001", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999001",
+      situsAddress: null,
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    });
+    // The legacy mirror stays null -- never the punctuation-only literal.
+    expect(n.facets.base.situsAddress).toBeNull();
+    // Proof the guard would in fact refuse it, so writing null here (rather
+    // than the raw value) is load-bearing, not cosmetic.
+    expect(() => assertSitusNotPunctuationOnly(", ,")).toThrow(/punctuation only/);
+  });
+
+  it("situsCity/situsZip are decided INDEPENDENTLY of the situsAddress refusal: a real city/zip still bakes as a value", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999002", 2025, {
+        situsAddress: ", ,",
+        situsCity: "BASTROP",
+        situsZip: "78602",
+      }),
+      parcelNodeId: "48021:999002",
+      situsAddress: null,
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    });
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    // situsCity/situsZip are read straight from the claim, never derived from
+    // situsAddress -- a punctuation-only address does not blanket them absent.
+    expect(n.baseFacts.situsCity).toBe("BASTROP");
+    expect(n.baseFacts.situsZip).toBe("78602");
+  });
+
+  it("situsCity/situsZip earn their OWN independent absence when the claim carries neither (matches the live population: 0 of 16,104 Bastrop rows carry either)", () => {
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "999003", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999003",
+      situsAddress: null,
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    });
+    for (const field of ["situsCity", "situsZip"] as const) {
+      expect(isEarnedLeafAbsence(n.baseFacts[field])).toBe(true);
+      const wire = n.baseFacts[field] as Tier1LeafAbsence;
+      // A distinct absence, not a copy of situsAddress's: no `mirrors` key,
+      // and its own basis naming its own field.
+      expect(wire.mirrors).toBeUndefined();
+      expect(wire.basis).not.toBe((n.baseFacts.situsAddress as Tier1LeafAbsence).basis);
+    }
+  });
+
+  it("CTX-B6 SUPERSEDES: the genuinely blank claim no longer stays a bare null -- it earns claimLeafAbsence", () => {
+    // This test asserted the OPPOSITE until 2026-09-10: that a blank claim
+    // writing `situsAddress: null` was correct and deliberately untouched.
+    // It was not. `null` is none of value|absent-verified|not-applicable|
+    // refused, BP-CONTENT-01 requires this leaf as a four-state, Hays failed
+    // its 2026-09-10 staging walk on exactly this, and 22,805 rows across the
+    // six CTX counties carried it (Bastrop 2,979 / Caldwell 15,289 / Hays
+    // 2,973 / Travis 1,545 / Williamson 19 / McLennan 0, measured read-only
+    // on staging place_layer_snapshots). Keeping the old expectation would
+    // have made the fix read as the regression.
+    const n = newPayload(null, {
+      body: flatProductionBody("48453", "999004", 2026, {
+        situsAddress: null,
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48453:999004",
+      countyFips: "48453",
+      countyName: "Travis",
+      situsAddress: null,
+      // situsAddressUnusable NOT set -- the CLI never sets it unless the
+      // claim actually carried something that was refused.
+    });
+    expect(n.baseFacts.situsAddress).not.toBeNull();
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+    const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+    expect(wire.verdict).toBe("absent-verified");
+    expect(wire.basis).toContain("48453:999004");
+    // The BLANK basis must be distinguishable from the UNUSABLE one: it says
+    // the claim carries nothing, and quotes no raw value because there is none.
+    expect(wire.basis).toContain("carries no situsAddress");
+    expect(wire.basis).not.toContain("no street component");
+    expect(wire.scopeSearched).toContain("claim.situsAddress");
+    expect(() => assertRequiredLeafStatesEarned(n)).not.toThrow();
+    expect(() => assertSitusAddressAbsenceEarned(n)).not.toThrow();
+    // facets.base stays null: the legacy mirror carries an address or nothing,
+    // never an absence object.
+    expect(n.facets.base.situsAddress).toBeNull();
+  });
+
+  /**
+   * CTX-B6 (P-124, 2026-09-10). THE FOURTH SHAPE. `PUNCTUATION_ONLY_RE` asks
+   * "is EVERY character punctuation". `", TX 78756"` is not, so it passed
+   * every guard in this repo and was served as a paying customer's address on
+   * 146,494 Travis parcels and 696 McLennan ones, with facetCoverage.baseFacts
+   * true and a well-formed absent-verified sitting on situsCity right beside
+   * it (live: node:48453:224793, bakedAt 2026-09-10T05:59:22.982Z).
+   *
+   * It is not composed here. Travis's 2026 PACS roll carries
+   * "4709 SHOALWOOD AVE" for that same prop_id; the defective string is the
+   * raw SITUS_ADDR of the 2025 StratMap land-parcels drop, which is the
+   * county's declared vintage. So the fix is not to stop assembling (nothing
+   * assembles) -- it is to stop PRESENTING a street-less claim as the value.
+   */
+  describe("CTX-B6: a claim with no street component earns an absence too, and says which way it was unusable", () => {
+    const noStreetPayload = () =>
+      newPayload(null, {
+        body: flatProductionBody("48453", "224793", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: "78756",
+        }),
+        parcelNodeId: "48453:224793",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: null, // the predicate refused it -- this mirrors the CLI
+        situsAddressUnusable: { raw: ", TX 78756", reason: "no-street-component" },
+      });
+
+    it("the worked example bakes an earned absence, not a sentinel string", () => {
+      const n = noStreetPayload();
+      expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(true);
+      const wire = n.baseFacts.situsAddress as Tier1LeafAbsence;
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.basis).toContain("48453:224793");
+      expect(wire.basis).toContain(JSON.stringify(", TX 78756"));
+      expect(wire.basis).toContain("no street component");
+      expect(wire.scopeSearched).toContain("situsCarriesStreetComponent");
+      expect(classifyRequiredLeafVerbatim(wire, { path: "baseFacts.situsAddress" })).toMatchObject(
+        { state: "absent-verified", ok: true },
+      );
+    });
+
+    it("ruling A1: the ZIP that IS on record survives on its own leaf, untouched", () => {
+      const n = noStreetPayload();
+      expect(n.baseFacts.situsZip).toBe("78756");
+      // and the raw string is not destroyed either -- it is quoted verbatim.
+      expect((n.baseFacts.situsAddress as Tier1LeafAbsence).basis).toContain("78756");
+    });
+
+    it("the two unusable reasons produce DIFFERENT bases: a reader can tell a placeholder from a lost street", () => {
+      const noStreet = (noStreetPayload().baseFacts.situsAddress as Tier1LeafAbsence).basis;
+      const punct = (
+        newPayload(null, {
+          body: flatProductionBody("48021", "999006", 2025, {
+            situsAddress: ", ,",
+            situsCity: null,
+            situsZip: null,
+          }),
+          parcelNodeId: "48021:999006",
+          situsAddress: null,
+          situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+        }).baseFacts.situsAddress as Tier1LeafAbsence
+      ).basis;
+      expect(noStreet).not.toBe(punct);
+      expect(punct).toContain("punctuation-only");
+      expect(noStreet).toContain("no street component");
+    });
+
+    it("facets.base.situsAddress is null, so the S1 sentinel family cannot fire on the served row", () => {
+      expect(noStreetPayload().facets.base.situsAddress).toBeNull();
+    });
+  });
+
+  it("a normal, usable situsAddress bakes IDENTICALLY to today: the 1.5M healthy rows are untouched", () => {
+    const n = newPayload(txgioRow());
+    expect(n.baseFacts.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
+    expect(n.facets.base.situsAddress).toBe("908 PINE , BASTROP, TX 78602");
+    expect(isEarnedLeafAbsence(n.baseFacts.situsAddress)).toBe(false);
+  });
+
+  it("situsAddressUnusableAbsence never fabricates: the raw value is quoted verbatim for BOTH reasons, and each is a well-formed leaf on its own", () => {
+    for (const [rawValue, reason] of [
+      [", ,", "punctuation-only"],
+      [", TX 76574", "no-street-component"],
+    ] as const) {
+      const wire = situsAddressUnusableAbsence({
+        parcelNodeId: "48309:103671",
+        countyFips: "48309",
+        countyName: "McLennan",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        rawValue,
+        reason,
+        nowIso: NOW,
+      });
+      expect(isEarnedLeafAbsence(wire)).toBe(true);
+      expect(wire.verdict).toBe("absent-verified");
+      expect(wire.basis).toContain("48309:103671");
+      expect(wire.basis).toContain(JSON.stringify(rawValue));
+    }
+  });
+
+  /**
+   * CTX-B6 REOPENED (2026-09-10). The first pass had the shape right and the
+   * SOURCE wrong. It read `provenance.parcelVintage` (which is the CLAIM's
+   * taxYear) as the county's declared CAD vintage, concluded the stale
+   * StratMap situs was correct-by-declaration, and was about to convert
+   * 139,256 Travis addresses that exist in the declared 2026 roll into
+   * "verified absent". Travis is declared 2026 in DECLARED_CAD_VINTAGES;
+   * 48453:224793 carries "4709 SHOALWOOD AVE" there.
+   *
+   * Measured per county against each county's OWN declared vintage:
+   * Travis 139,256 of 146,494 street-less rows recoverable (95.1%), Hays 27 of
+   * its 2,973 bare nulls, and zero in Bastrop, Caldwell, McLennan and
+   * Williamson.
+   */
+  describe("CTX-B6 reopened: the declared-vintage roll is preferred over the claim", () => {
+    const resolve = resolveConformantSitusAddress;
+
+    it("the declared roll wins when it carries a street: the Travis worked example recovers", () => {
+      const r = resolve({
+        claimRaw: ", TX 78756", // the 2025 StratMap drop
+        rollRaw: "4709 SHOALWOOD AVE", // cad_property at the declared 2026 vintage
+        trust: "same-vintage",
+      });
+      expect(r.situs).toBe("4709 SHOALWOOD AVE");
+      expect(r.origin).toBe("declared-roll");
+      expect(r.unusable).toBeNull();
+      // The overridden claim is RECORDED, not discarded silently.
+      expect(r.supersededClaimValue).toBe(", TX 78756");
+    });
+
+    it("the claim is used only when the declared roll carries nothing usable", () => {
+      expect(resolve({ claimRaw: "12 OAK ST", rollRaw: null, trust: "same-vintage" })).toEqual({
+        situs: "12 OAK ST",
+        origin: "claim",
+        unusable: null,
+        supersededClaimValue: null,
+        // CTX-B7: nothing was refused -- the roll simply carried nothing.
+        // `refusedRollValue` is reserved for a USABLE roll value the
+        // same-parcel gate would not let win, so it must stay null here.
+        refusedRollValue: null,
+        trust: "same-vintage",
+      });
+      expect(
+        resolve({ claimRaw: "12 OAK ST", rollRaw: ", TX 78701", trust: "same-vintage" }),
+      ).toMatchObject({ situs: "12 OAK ST", origin: "claim" });
+    });
+
+    it("both sources unusable earns the absence, quoting the DECLARED ROLL's value", () => {
+      const r = resolve({ claimRaw: ", ,", rollRaw: ", TX 78612", trust: "same-vintage" });
+      expect(r.situs).toBeNull();
+      expect(r.origin).toBe("none");
+      // The roll is the authority the rest of the payload reports, so its
+      // refusal is the one shown -- not the claim's.
+      expect(r.unusable).toEqual({ raw: ", TX 78612", reason: "no-street-component" });
+    });
+
+    it("both sources empty earns the blank-claim absence, with nothing to quote", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "same-vintage" })).toEqual({
+        situs: null,
+        origin: "none",
+        unusable: null,
+        supersededClaimValue: null,
+        refusedRollValue: null,
+        trust: "same-vintage",
+      });
+    });
+
+    it("ORDERING: the retired branch is reached BEFORE the roll is consulted at all", () => {
+      // A roll-absent record has no declared-roll row by construction, so a
+      // rollRaw here is a contradiction -- and the resolver must still take the
+      // retired branch. This is the test that keeps CTX-RETIRE and CTX-B1
+      // working: if the preference ever ran first, 48055:1 would stop serving
+      // its last-known situs.
+      const r = resolve({ claimRaw: ", ,", rollRaw: "999 SHOULD NOT WIN", trust: "no-roll-row" });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.situs).toBe(", ,");
+      expect(r.unusable).toBeNull();
+    });
+
+    it("a retired record with no claim situs resolves null, and the builder earns its absence", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "no-roll-row" })).toMatchObject({
+        situs: null,
+        origin: "retired-claim",
+      });
+    });
+
+    it("a claim that AGREES with the roll supersedes nothing", () => {
+      expect(
+        resolve({ claimRaw: "4709 SHOALWOOD AVE", rollRaw: "4709 SHOALWOOD AVE", trust: "same-vintage" }),
+      ).toMatchObject({ origin: "declared-roll", supersededClaimValue: null });
+    });
+
+    it("the payload records the source, so a re-bake that stopped preferring the roll is visible", () => {
+      const recovered = newPayload(null, {
+        body: flatProductionBody("48453", "224793", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: "78756",
+        }),
+        parcelNodeId: "48453:224793",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: "4709 SHOALWOOD AVE",
+        situsAddressOrigin: "declared-roll",
+        situsAddressSupersededClaim: ", TX 78756",
+      });
+      expect(recovered.baseFacts.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.facets.base.situsAddress).toBe("4709 SHOALWOOD AVE");
+      expect(recovered.provenance.situsAddressSource).toBe("declared-roll");
+      expect(recovered.provenance.situsAddressSupersededClaim).toBe(", TX 78756");
+      // and it is a plain value, not an absence
+      expect(isEarnedLeafAbsence(recovered.baseFacts.situsAddress)).toBe(false);
+    });
+
+    it("an absence still records source \"none\", never a missing key", () => {
+      const absent = newPayload(null, {
+        body: flatProductionBody("48453", "999007", 2025, {
+          situsAddress: ", TX 78756",
+          situsCity: null,
+          situsZip: null,
+        }),
+        parcelNodeId: "48453:999007",
+        countyFips: "48453",
+        countyName: "Travis",
+        situsAddress: null,
+        situsAddressUnusable: { raw: ", TX 78756", reason: "no-street-component" },
+        situsAddressOrigin: "none",
+      });
+      expect(isEarnedLeafAbsence(absent.baseFacts.situsAddress)).toBe(true);
+      expect(absent.provenance.situsAddressSource).toBe("none");
+      expect(absent.provenance.situsAddressSupersededClaim).toBeNull();
+    });
+  });
+
+  it("CTX-B6 SUPERSEDES: baseFacts.situsAddress IS in BAKE_OWNED_REQUIRED_LEAF_PATHS, and the list is exactly six", () => {
+    // This asserted `not.toContain` until 2026-09-10, on the reasoning that
+    // this leaf's absence was narrower than the owned leaves. That was true of
+    // the CTX-SITUS-SKIP absence and irrelevant to the question the list
+    // answers, which is "does a bare null here fail the write". It did not,
+    // and the walk required the leaf as a four-state the whole time.
+    expect(BAKE_OWNED_REQUIRED_LEAF_PATHS).toContain("baseFacts.situsAddress");
+    expect([...BAKE_OWNED_REQUIRED_LEAF_PATHS]).toEqual([
+      "baseFacts.situsCity",
+      "baseFacts.situsZip",
+      "baseFacts.landUse",
+      "provenance.landUseSource",
+      "baseFacts.acreage",
+      "baseFacts.situsAddress",
+    ]);
+  });
+
+  it("verify by violating: assertRequiredLeafStatesEarned FIRES on a bare null at baseFacts.situsAddress", () => {
+    // The membership above is only a control if it can fail. A correctly built
+    // payload cannot reach that state any more, so the violation is
+    // constructed by hand from a good one.
+    const good = newPayload(txgioRow());
+    expect(() => assertRequiredLeafStatesEarned(good)).not.toThrow();
+
+    const violated = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    (violated.baseFacts as Record<string, unknown>).situsAddress = null;
+    let code: string | undefined;
+    let message = "";
+    try {
+      assertRequiredLeafStatesEarned(violated);
+    } catch (err) {
+      code = (err as { code?: string }).code;
+      message = (err as Error).message;
+    }
+    expect(code).toBe("REQUIRED_LEAF_BARE_NULL");
+    expect(message).toContain("baseFacts.situsAddress");
+
+    // And the per-parcel assert refuses it too, with its own code -- both are
+    // invoked back to back in the bake CLI on the same payload.
+    let situsCode: string | undefined;
+    try {
+      assertSitusAddressAbsenceEarned(violated);
+    } catch (err) {
+      situsCode = (err as { code?: string }).code;
+    }
+    expect(situsCode).toBe("SITUS_ADDRESS_ABSENCE_UNEARNED");
+  });
+
+  it("the divergence instrument answers the old bake's null situsAddress leaf with the new earned absence, not a missing leaf", () => {
+    const o = oldPayload(txgioRow({ situs_address: "" }));
+    expect(o.baseFacts.situsAddress).toBeNull();
+    const n = newPayload(null, {
+      body: flatProductionBody("48021", "34137", 2025, {
+        situsAddress: ", ,",
+        situsCity: "BASTROP",
+        situsZip: "78602",
+      }),
+      situsAddress: null,
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    }) as unknown as Record<string, unknown>;
+    const diff = diffTier1KeyPaths(o, n);
+    expect(diff.missing.filter((p) => p.startsWith("baseFacts.situsAddress"))).toEqual([]);
+    expect(diff.unexpected.filter((p) => p.startsWith("baseFacts.situsAddress"))).toEqual([]);
+  });
+
+  it("verify by violating: assertSitusAddressAbsenceEarned REFUSES a malformed object and a basis that does not name the parcel", () => {
+    const good = newPayload(null, {
+      body: flatProductionBody("48021", "999005", 2025, {
+        situsAddress: ", ,",
+        situsCity: null,
+        situsZip: null,
+      }),
+      parcelNodeId: "48021:999005",
+      situsAddress: null,
+      situsAddressUnusable: { raw: ", ,", reason: "punctuation-only" },
+    });
+    expect(() => assertSitusAddressAbsenceEarned(good)).not.toThrow();
+
+    const halfBuilt = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    (halfBuilt.baseFacts as Record<string, unknown>).situsAddress = {
+      status: "absent",
+      verdict: "absent-verified",
+    };
+    let code: string | undefined;
+    try {
+      assertSitusAddressAbsenceEarned(halfBuilt);
+    } catch (err) {
+      code = (err as { code?: string }).code;
+    }
+    expect(code).toBe("SITUS_ADDRESS_ABSENCE_UNEARNED");
+
+    const wrongBasis = JSON.parse(JSON.stringify(good)) as Record<string, unknown>;
+    ((wrongBasis.baseFacts as Record<string, unknown>).situsAddress as Record<string, unknown>).basis =
+      "a basis that names no parcel at all";
+    expect(() => assertSitusAddressAbsenceEarned(wrongBasis)).toThrow(/does not name the parcel/);
+  });
+
+  it("verify by violating: the guard itself is untouched and still refuses the exact live defect string", () => {
+    // The literal 2026-09-09 finding: 100% of Bastrop/McLennan/Hays'
+    // punctuation-only rows carry EXACTLY this raw value.
+    expect(() => assertSitusNotPunctuationOnly(", ,")).toThrow(/punctuation only/);
+    // And a genuinely malformed absence marker (not this fix's output) is
+    // still rejected by the required-leaf guard on the four owned leaves --
+    // proving the fix did not weaken that instrument either.
+    const n = rollConsultedButMisses();
+    const mutated = JSON.parse(JSON.stringify(n)) as Record<string, unknown>;
+    (mutated.baseFacts as Record<string, unknown>).situsCity = { status: "absent" };
+    expect(() => assertRequiredLeafStatesEarned(mutated)).toThrow(
+      /neither a resolved value nor a well-formed earned absence/,
+    );
+  });
+});
+
+/**
+ * P-124 CTX-B7 (2026-09-10). The three siblings CTX-B6 named and left, plus the
+ * same-parcel gate that had to exist before any of them could be taken.
+ *
+ * THE CARD'S PREMISE WAS FALSE AND THAT IS THE FIRST RESULT. B6 left situsCity
+ * because it believed the leaf moved zoning jurisdiction for ~78,000 parcels.
+ * It moves ZERO, in every county, and the reason is structural: the situs
+ * fallback in resolveZoningJurisdiction is consulted ONLY when
+ * txgio_parcel.zoning_jurisdiction is blank, the zoning facet exists ONLY when
+ * zoning_district is non-blank, and the single writer of either column
+ * (cad-ingest zoning-stamp-db.ts flushBatch) sets BOTH in one UPDATE. Measured:
+ * 0 of 1,568,849 txgio_parcel rows in the six CTX counties carry one without
+ * the other, and 0 of 109,269 city changes land on an unstamped parcel with a
+ * district.
+ *
+ * THE REAL BLOCKER WAS SOMEWHERE ELSE. The join under all four roll-preferring
+ * leaves is prop_id at the declared vintage, and on Hays a prop_id names a
+ * different parcel in 2025 than in 2026: cross-vintage situs-ZIP agreement is
+ * 53.86% there against 99.73% on Travis and 99.21% on Caldwell. Hays claims
+ * agree with their OWN vintage on 104,937 of 104,937 rows, so the disagreement
+ * is entirely cross-vintage -- renumbering, not correction.
+ */
+describe("CTX-B7: the declared roll is preferred only where the row is provably this parcel", () => {
+  describe("resolveDeclaredRollTrust", () => {
+    it("no row at all is the RETIRED state, and it outranks every other signal", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: true,
+          claimTaxYear: 2025,
+          declaredTaxYear: 2026,
+          claimSitusZip: "78640",
+          rollSitusZip: "78666",
+        }),
+      ).toBe("no-roll-row");
+    });
+
+    it("claim taxYear === declared vintage is the SAME ROW, so nothing needs corroborating", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: false,
+          claimTaxYear: 2026,
+          declaredTaxYear: 2026,
+          claimSitusZip: null,
+          rollSitusZip: null,
+        }),
+      ).toBe("same-vintage");
+    });
+
+    it("agreeing ZIPs corroborate; conflicting ZIPs refuse", () => {
+      const base = { rollAbsent: false, claimTaxYear: 2025, declaredTaxYear: 2026 };
+      expect(
+        resolveDeclaredRollTrust({ ...base, claimSitusZip: "78756", rollSitusZip: "78756" }),
+      ).toBe("zip-corroborated");
+      expect(
+        resolveDeclaredRollTrust({ ...base, claimSitusZip: "78640", rollSitusZip: "78666" }),
+      ).toBe("zip-conflict");
+    });
+
+    it("ZIP+4 and stray spacing collapse to the 5-digit comparison, so formatting is not a conflict", () => {
+      expect(
+        resolveDeclaredRollTrust({
+          rollAbsent: false,
+          claimTaxYear: 2025,
+          declaredTaxYear: 2026,
+          claimSitusZip: " 78756-1234 ",
+          rollSitusZip: "78756",
+        }),
+      ).toBe("zip-corroborated");
+    });
+
+    it("a missing ZIP on either side is UNCORROBORATED, which is not corroborated AND not conflicting", () => {
+      const base = { rollAbsent: false, claimTaxYear: 2025, declaredTaxYear: 2026 };
+      expect(resolveDeclaredRollTrust({ ...base, claimSitusZip: null, rollSitusZip: "78756" })).toBe(
+        "uncorroborated",
+      );
+      expect(resolveDeclaredRollTrust({ ...base, claimSitusZip: "78756", rollSitusZip: null })).toBe(
+        "uncorroborated",
+      );
+      // ...and an unknown claim vintage cannot claim same-vintage either.
+      expect(
+        resolveDeclaredRollTrust({
+          ...base,
+          claimTaxYear: null,
+          claimSitusZip: null,
+          rollSitusZip: null,
+        }),
+      ).toBe("uncorroborated");
+    });
+  });
+
+  describe("declaredRollMayOverride: the asymmetry is the rule, not an oversight", () => {
+    it("a GAIN is taken on uncorroborated; a SWAP is not", () => {
+      // The whole design in two assertions. A gain converts an absence into
+      // data and destroys nothing; a swap converts data into ANOTHER PARCEL'S
+      // data. "Nothing was established" licenses the first and not the second.
+      expect(declaredRollMayOverride("uncorroborated", false)).toBe(true);
+      expect(declaredRollMayOverride("uncorroborated", true)).toBe(false);
+    });
+
+    it("zip-conflict refuses BOTH, because the row is known not to be this parcel", () => {
+      expect(declaredRollMayOverride("zip-conflict", false)).toBe(false);
+      expect(declaredRollMayOverride("zip-conflict", true)).toBe(false);
+    });
+
+    it("same-vintage and zip-corroborated take both", () => {
+      for (const t of ["same-vintage", "zip-corroborated"] as const) {
+        expect(declaredRollMayOverride(t, false)).toBe(true);
+        expect(declaredRollMayOverride(t, true)).toBe(true);
+      }
+    });
+
+    it("no-roll-row never overrides: a retirement is not gated by data quality (CTX-RETIRE)", () => {
+      expect(declaredRollMayOverride("no-roll-row", false)).toBe(false);
+      expect(declaredRollMayOverride("no-roll-row", true)).toBe(false);
+    });
+  });
+
+  describe("the gate PROVEN ABLE TO FIRE on situsAddress, which is CTX-B6 merged code", () => {
+    it("REGRESSION CONTROL FOR MERGED CODE: a conflicting ZIP stops the roll overwriting a usable claim street", () => {
+      // Measured 2026-09-10: 52,158 parcels across the six counties would have
+      // a usable claim street replaced by a DIFFERENT roll street under B6's
+      // rule as merged, and 29,539 of those sit on a zip-conflict row (Hays
+      // 29,395). The store had not re-baked yet, so this gate lands before the
+      // first wrong row is written rather than after.
+      const refused = resolveConformantSitusAddress({
+        claimRaw: "1200 KOHLERS CROSSING",
+        rollRaw: "500 SOME OTHER PARCEL RD",
+        trust: "zip-conflict",
+      });
+      expect(refused.situs).toBe("1200 KOHLERS CROSSING");
+      expect(refused.origin).toBe("claim");
+      // The refusal is RECORDED. A refusal nobody can count is how a re-bake
+      // stops refusing without anyone noticing.
+      expect(refused.refusedRollValue).toBe("500 SOME OTHER PARCEL RD");
+      expect(refused.trust).toBe("zip-conflict");
+    });
+
+    it("NON-VACUITY: the identical inputs with a corroborated ZIP DO take the roll", () => {
+      // Without this the test above would pass on a resolver that never
+      // preferred the roll at all.
+      const taken = resolveConformantSitusAddress({
+        claimRaw: "1200 KOHLERS CROSSING",
+        rollRaw: "500 SOME OTHER PARCEL RD",
+        trust: "zip-corroborated",
+      });
+      expect(taken.situs).toBe("500 SOME OTHER PARCEL RD");
+      expect(taken.origin).toBe("declared-roll");
+      expect(taken.supersededClaimValue).toBe("1200 KOHLERS CROSSING");
+      expect(taken.refusedRollValue).toBeNull();
+    });
+
+    it("B6 Travis recovery is UNTOUCHED: a street-less claim still takes the roll real street", () => {
+      // The 139,283 cells B6 recovers must not be collateral damage. A
+      // street-less claim carries no usable value, so it is a GAIN, and a gain
+      // is taken even uncorroborated.
+      const r = resolveConformantSitusAddress({
+        claimRaw: ", TX 78756",
+        rollRaw: "4709 SHOALWOOD AVE",
+        trust: "uncorroborated",
+      });
+      expect(r.situs).toBe("4709 SHOALWOOD AVE");
+      expect(r.origin).toBe("declared-roll");
+    });
+
+    it("a zip-conflict on a street-less claim earns the absence rather than importing another parcel street", () => {
+      const r = resolveConformantSitusAddress({
+        claimRaw: ", TX 78756",
+        rollRaw: "4709 SHOALWOOD AVE",
+        trust: "zip-conflict",
+      });
+      expect(r.situs).toBeNull();
+      expect(r.origin).toBe("none");
+      // The quoted raw is the CLAIM value, never the refused roll row: quoting a
+      // different parcel junk in this parcel basis would attribute it here.
+      expect(r.unusable).toEqual({ raw: ", TX 78756", reason: "no-street-component" });
+      expect(r.refusedRollValue).toBe("4709 SHOALWOOD AVE");
+    });
+  });
+
+  describe("situsCity and situsZip", () => {
+    const resolve = resolveConformantSitusLocality;
+
+    it("GAIN: a blank Travis claim city takes the declared roll, which is 78,332 of the 78,428", () => {
+      const r = resolve({ claimRaw: null, rollRaw: "AUSTIN", trust: "zip-corroborated" });
+      expect(r).toEqual({
+        value: "AUSTIN",
+        origin: "declared-roll",
+        supersededClaimValue: null,
+        refusedRollValue: null,
+        trust: "zip-corroborated",
+      });
+    });
+
+    it("SWAP REFUSED: the Hays KYLE-vs-SAN-MARCOS scramble keeps the claim and records the refusal", () => {
+      const r = resolve({ claimRaw: "SAN MARCOS", rollRaw: "KYLE", trust: "zip-conflict" });
+      expect(r.value).toBe("SAN MARCOS");
+      expect(r.origin).toBe("claim");
+      expect(r.refusedRollValue).toBe("KYLE");
+    });
+
+    it("SWAP TAKEN when the ZIP corroborates: the 1,127 real Hays city corrections still land", () => {
+      const r = resolve({ claimRaw: "BUDA", rollRaw: "KYLE", trust: "zip-corroborated" });
+      expect(r.value).toBe("KYLE");
+      expect(r.origin).toBe("declared-roll");
+      expect(r.supersededClaimValue).toBe("BUDA");
+    });
+
+    it("A BLANK ROLL CELL NEVER DESTROYS A CLAIM CITY: the 1,676 Hays parcels keep theirs", () => {
+      // The falsifier CP1 pre-registered as "what would prove the whole card
+      // wrong". change_loss measured 0 in every county, and this is why.
+      for (const trust of [
+        "same-vintage",
+        "zip-corroborated",
+        "uncorroborated",
+        "zip-conflict",
+      ] as const) {
+        expect(resolve({ claimRaw: "KYLE", rollRaw: null, trust })).toMatchObject({
+          value: "KYLE",
+          origin: "claim",
+          refusedRollValue: null,
+        });
+      }
+      expect(resolve({ claimRaw: "KYLE", rollRaw: "   ", trust: "same-vintage" })).toMatchObject({
+        value: "KYLE",
+        origin: "claim",
+      });
+    });
+
+    it("RETIRED FIRST: a roll-absent record keeps its last-known claim even against a contradicting roll", () => {
+      const r = resolve({ claimRaw: "LOCKHART", rollRaw: "SHOULD NOT WIN", trust: "no-roll-row" });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.value).toBe("LOCKHART");
+    });
+
+    it("both empty resolves null and the builder earns the absence", () => {
+      expect(resolve({ claimRaw: null, rollRaw: null, trust: "same-vintage" })).toMatchObject({
+        value: null,
+        origin: "none",
+      });
+    });
+  });
+
+  describe("acreage: three sources, and the ring is a MEASUREMENT that outranks both transcriptions", () => {
+    it("the declared roll beats the claim, under its OWN method string", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 0.3815,
+        trust: "same-vintage",
+      });
+      expect(r.origin).toBe("declared-roll");
+      expect(r.acreage).toEqual({
+        value: 0.3815,
+        sqft: Math.round(0.3815 * 43_560),
+        // NOT "cad-roll-land-acres". 103,913 cells move to this source and a
+        // census that could not tell the two roll sources apart could not see
+        // it happen.
+        method: "cad-roll-declared-land-acres",
+      });
+    });
+
+    it("a zip-conflict refuses the roll acreage and keeps the claim, recording what was refused", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 0.3815,
+        trust: "zip-conflict",
+      });
+      expect(r.origin).toBe("claim");
+      expect(r.acreage?.method).toBe("cad-roll-land-acres");
+      expect(r.refusedRollAcres).toBe(0.3815);
+    });
+
+    it("THE DISPATCH OWN FINDING: a refused acreage with a usable roll value stops being a refusal", () => {
+      // 103,913 of the 292,578 stored acreage refusals have a usable
+      // land_acres at the declared vintage. Every one of them is served today
+      // as verdict "refused" and ZERO as a bare null -- a declared refusal
+      // sitting on top of data the same payload dollars already came from.
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: null,
+        rollLandAcres: 2.75,
+        trust: "same-vintage",
+      });
+      expect(r.origin).toBe("declared-roll");
+      expect(r.acreage?.value).toBe(2.75);
+    });
+
+    it("a non-positive or non-finite roll acreage is NOT a value, and falls through honestly", () => {
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(conformantAcreageFromDeclaredRoll(bad)).toBeNull();
+      }
+      // numeric arrives from node-postgres as a STRING; this function re-validates
+      // rather than trusting, so a caller that passed the raw string gets null
+      // instead of Math.round(NaN).
+      expect(conformantAcreageFromDeclaredRoll("0.3815" as unknown as number)).toBeNull();
+    });
+
+    it("retired keeps the claim acreage and never consults the roll", () => {
+      const r = resolveConformantAcreageWithoutRing({
+        claimLandAcres: 0.5,
+        rollLandAcres: 99,
+        trust: "no-roll-row",
+      });
+      expect(r.origin).toBe("retired-claim");
+      expect(r.acreage?.value).toBe(0.5);
+    });
+  });
+
+  describe("the payload records the gate, so a re-bake that stopped gating is visible", () => {
+    it("provenance carries the trust verdict and everything the gate refused", () => {
+      const payload = newPayload(null, {
+        body: flatProductionBody("48209", "111222", 2025, {
+          situsAddress: "1200 KOHLERS CROSSING",
+          situsCity: "SAN MARCOS",
+          situsZip: "78666",
+          landAcres: 0.5,
+        }),
+        parcelNodeId: "48209:111222",
+        countyFips: "48209",
+        countyName: "Hays",
+        situsAddress: "1200 KOHLERS CROSSING",
+        situsAddressOrigin: "claim",
+        situsAddressRefusedRoll: "500 SOME OTHER PARCEL RD",
+        declaredRollTrust: "zip-conflict",
+        situsLocality: {
+          city: {
+            value: "SAN MARCOS",
+            origin: "claim",
+            supersededClaimValue: null,
+            refusedRollValue: "KYLE",
+            trust: "zip-conflict",
+          },
+          zip: {
+            value: "78666",
+            origin: "claim",
+            supersededClaimValue: null,
+            refusedRollValue: "78640",
+            trust: "zip-conflict",
+          },
+        },
+        acreageWithoutRing: {
+          acreage: { value: 0.5, sqft: 21780, method: "cad-roll-land-acres" },
+          origin: "claim",
+          refusedRollAcres: 0.3815,
+        },
+      });
+      expect(payload.provenance.declaredRollTrust).toBe("zip-conflict");
+      expect(payload.provenance.declaredRollRefused).toEqual({
+        situsAddress: "500 SOME OTHER PARCEL RD",
+        situsCity: "KYLE",
+        situsZip: "78640",
+        acreage: 0.3815,
+      });
+      expect(payload.provenance.situsCitySource).toBe("claim");
+      expect(payload.provenance.situsZipSource).toBe("claim");
+      expect(payload.provenance.acreageSource).toBe("claim");
+      // ...and the leaves themselves kept the claim, not the other parcel data.
+      expect(payload.baseFacts.situsCity).toBe("SAN MARCOS");
+      expect(payload.baseFacts.situsZip).toBe("78666");
+    });
+
+    it("a PRE-CTX-B7 caller that omits the new inputs keeps its old behaviour rather than losing a leaf", () => {
+      const payload = newPayload(null, {
+        body: flatProductionBody("48021", "34137", 2025, {
+          situsAddress: "908 PINE , BASTROP, TX 78602",
+          situsCity: "BASTROP",
+          situsZip: "78602",
+          landAcres: 0.3815,
+        }),
+      });
+      expect(payload.baseFacts.situsCity).toBe("BASTROP");
+      expect(payload.baseFacts.situsZip).toBe("78602");
+      expect(payload.provenance.situsCitySource).toBe("claim");
+      expect(payload.provenance.acreageSource).toBe("claim");
+      expect(payload.provenance.declaredRollTrust).toBe("uncorroborated");
+    });
+  });
+
+  describe("the earned absences now name the SECOND source they searched", () => {
+    it("a claim absence says the declared roll was read too, and what it held", () => {
+      const searched = claimLeafAbsence({
+        parcelNodeId: "48453:1",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: true, rowPresent: true },
+        nowIso: NOW,
+      });
+      expect(searched.scopeSearched).toContain("cad_property.situs_city");
+      expect(searched.basis).toContain("both sources agree");
+
+      const noRow = claimLeafAbsence({
+        parcelNodeId: "48453:2",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: true, rowPresent: false },
+        nowIso: NOW,
+      });
+      expect(noRow.basis).toContain("holds no row for this prop_id");
+
+      const notConsulted = claimLeafAbsence({
+        parcelNodeId: "48453:3",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        declaredRoll: { consulted: false, rowPresent: false },
+        nowIso: NOW,
+      });
+      // The honest form: this absence is scoped to the claim ALONE and says so,
+      // rather than implying a search nobody ran.
+      expect(notConsulted.basis).toContain("scoped to the claim alone");
+    });
+
+    it("a pre-CTX-B7 caller that omits declaredRoll gets the old wording, not a false scope", () => {
+      const legacy = claimLeafAbsence({
+        parcelNodeId: "48453:4",
+        countyFips: "48453",
+        countyName: "Travis",
+        field: "situsCity",
+        placement: "flat",
+        access: CANONICAL_ACCESS,
+        nowIso: NOW,
+      });
+      expect(legacy.scopeSearched).not.toContain("cad_property");
+      expect(legacy.basis).not.toContain("declared-vintage");
+    });
+  });
+});
+
+/**
+ * P-124 CTX-HAYS-REBIND (2026-09-10): bind Hays geometry to the parcel the
+ * county's own published identifiers name, not to the parcel whose address a
+ * merge copied into the CAD row.
+ *
+ * EVERY VALUE BELOW IS A REAL ROW, read 2026-09-10 from two sources that do
+ * not know about each other:
+ *
+ *   Hays CAD public export 2026-PROPERTY-DATA-EXPORT-FILES-AS-OF-8-26-2026:
+ *     PropertyID 26199  QuickRefID R117015  PropertyNumber 11-2242-000I-02900-2
+ *                       Situs "134 LEAR AVE, BUDA, TX  78610"  CurrMarketValue 426,950
+ *     PropertyID 40138  QuickRefID R26199   PropertyNumber 11-2520-0000-03100-2
+ *                       Situs "340 WINDMILL WAY, BUDA, TX  78610"  CurrMarketValue 172,700
+ *
+ *   txgio_parcel 48209 (staging, read-only):
+ *     feature 40337  prop_id 117015  geo_id 11-2242-000I-02900-2  "134 LEAR AVE, BUDA, TX 78610"
+ *     feature 57725  prop_id 26199   geo_id 11-2520-0000-03100-2  "340 WINDMILL WAY, BUDA, TX 78610"
+ *
+ * And the defect, read verbatim off PRODUCTION place_layer_snapshots on the
+ * same day: node:48209:26199 carries baseFacts.situsAddress
+ * "340 WINDMILL WAY, BUDA, TX 78610", provenance.parcelJoin.state
+ * "joined-situs", featureIndex 57725, provenance.parcelVintage 2025. That is
+ * account 40138's parcel, drawn for account 26199, with account 26199's money
+ * beside it.
+ *
+ * Measured consequence across the county: 30,862 of 173,050 Hays tier-1 rows
+ * bind a DIFFERENT feature than the crosswalk names, and 19,902 more bind
+ * nothing where the crosswalk names a parcel.
+ */
+describe("CTX-HAYS-REBIND: geometry binds on the published crosswalk", () => {
+  // The account whose polygon is wrong on production today.
+  const LEAR_BODY = () =>
+    conformantBody({
+      nodeId: "48209:26199",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "26199", taxYear: 2025 },
+        // The CONTAMINATED claim: the 2025 cad_property row for account 26199
+        // carries TxGIO parcel 26199's address, because the P-78 StratMap
+        // merge coalesced it in over the account's own.
+        situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+        situsCity: "BUDA",
+        situsZip: "78610",
+        propertyUseCode: "A1",
+      },
+    });
+
+  /** txgio feature 57725: TxGIO parcel 26199 = CAD account 40138's parcel. */
+  const windmillParcel = () =>
+    txgioRow({
+      feature_index: 57725,
+      prop_id: "26199",
+      geo_id: "11-2520-0000-03100-2",
+      situs_address: "340 WINDMILL WAY, BUDA, TX 78610",
+      situs_city: "BUDA",
+      situs_state: "TX",
+      situs_zip: "78610",
+      zoning_district: "SF-4",
+      zoning_jurisdiction: "buda-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "OWNER OF WINDMILL",
+    });
+
+  /** txgio feature 40337: the parcel account 26199's OWN PropertyNumber names. */
+  const learParcel = () =>
+    txgioRow({
+      feature_index: 40337,
+      prop_id: "117015",
+      geo_id: "11-2242-000I-02900-2",
+      situs_address: "134 LEAR AVE, BUDA, TX 78610",
+      situs_city: "BUDA",
+      situs_state: "TX",
+      situs_zip: "78610",
+      zoning_district: "SF-2",
+      zoning_jurisdiction: "buda-city-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      txgio_owner_for_gate: "OWNER OF LEAR",
+    });
+
+  const learRoll = (): ConformantTier1BuildInput["cadPropertyRoll"] => ({
+    byPropId: new Map([
+      [
+        "26199",
+        {
+          taxYear: 2026,
+          marketValue: 426950,
+          assessedValue: 426950,
+          landValue: 102660,
+          improvementValue: 324290,
+          livingAreaSqft: 2216,
+          situsAddress: "134 LEAR AVE, BUDA, TX 78610",
+          situsCity: "BUDA",
+          situsZip: "78610",
+          propertyNumber: "11-2242-000I-02900-2",
+        },
+      ],
+    ]),
+    declaredTaxYear: 2026,
+    consulted: true,
+  });
+
+  it("VIOLATION, BEFORE: without a crosswalk row the address recovery draws the WRONG parcel", () => {
+    // This is production's behaviour, reproduced. The claim's contaminated
+    // situs matches txgio 57725's situs exactly -- because one was copied from
+    // the other -- so the recovery "succeeds" and returns another parcel.
+    const before = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      cadPropertyRoll: learRoll(),
+    });
+    expect(before.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(
+      (before.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    // Account 26199 is at 134 LEAR AVE and is drawing the 340 WINDMILL WAY
+    // polygon with 340 WINDMILL WAY's zoning stamp.
+    expect(before.zoning?.district).toBe("SF-4");
+  });
+
+  it("VIOLATION, AFTER: the crosswalk binds account 26199 to feature 40337", () => {
+    const after = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      // The situs recovery still offers the wrong parcel and is still
+      // accepted for LAND USE. The crosswalk overrules it for GEOMETRY only.
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(after.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(
+      (after.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(40337);
+    // The zoning stamp moves with the polygon, which is the point: a stamp is
+    // a fact about a parcel, not about a record.
+    expect(after.zoning?.district).toBe("SF-2");
+    // The basis names BOTH published identifiers and both columns, so the bind
+    // can be re-run from the basis alone rather than trusted.
+    expect(after.provenance.parcelJoin.basis).toContain("11-2242-000I-02900-2");
+    expect(after.provenance.parcelJoin.basis).toContain("feature_index 40337");
+    expect(after.provenance.parcelJoin.basis).toContain("geo_id");
+    // The prop_id gate is NOT lifted by this bind and the basis says so.
+    expect(after.provenance.parcelJoin.basis).toContain("gate-blocked");
+  });
+
+  it("the recorded state can never claim a bind the geometry did not take", () => {
+    // The provenance record is derived from the row every geometry consumer
+    // reads, not from the offered crosswalk row. So a payload that says
+    // `joined-crosswalk` at feature 40337 is drawing feature 40337, and the
+    // two cannot be edited apart without this assertion failing.
+    const bound = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    const recordedFeature = (
+      bound.provenance.parcelJoin as { featureIndex?: number | null }
+    ).featureIndex;
+    expect(recordedFeature).toBe(40337);
+    // The stamp is only on feature 40337, so this reads the geometry side of
+    // the payload rather than the provenance side and asserts they agree.
+    expect(bound.zoning?.district).toBe("SF-2");
+    expect(
+      (bound.provenance.parcelJoin as { sourceVintage?: string | null }).sourceVintage,
+    ).toBe("stratmap25-landparcels_48209_hays_202503");
+  });
+
+  it("NO-CHANGE CONTROL: account 40138 already binds 57725 and must stay there", () => {
+    // The dispatch named 40138 as the parcel that must MOVE. It does not: its
+    // claim carries taxYear 2026, so its situs was never the contaminated
+    // copy and the address recovery already lands on the right parcel. Its
+    // crosswalk resolves the SAME feature. A change that moved this parcel
+    // would be breaking something that works.
+    const windmillBody = conformantBody({
+      nodeId: "48209:40138",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "40138", taxYear: 2026 },
+        situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+        situsCity: "BUDA",
+        situsZip: "78610",
+        propertyUseCode: "A1",
+      },
+    });
+    const shared = {
+      gateBlocked: true as const,
+      body: windmillBody,
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:40138",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+    };
+    const before = newPayload(null, shared);
+    const after = newPayload(null, { ...shared, crosswalkRow: windmillParcel() });
+    expect(
+      (before.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    expect(
+      (after.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(57725);
+    expect(before.zoning?.district).toBe(after.zoning?.district);
+    expect(before.baseFacts.acreage).toEqual(after.baseFacts.acreage);
+  });
+
+  it("a crosswalk bind still runs the acreage ring check rather than skipping it", () => {
+    // ringRowAvailable must include the new state. If it did not, a
+    // crosswalk-bound parcel with unusable geometry would report `refused`
+    // ("never looked") where the truth is that it WAS looked at.
+    const bound = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(bound.facetCoverage.acreage).toBe(true);
+    // The METHOD is the discriminator, not truthiness: a claim-carried acreage
+    // would also be truthy, so asserting only truthiness would pass even if
+    // the crosswalk ring were never read.
+    expect(bound.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+
+  it("with no crosswalk row the county behaves exactly as it does today", () => {
+    // The fallback is the whole reason this is a rebind and not a withdrawal:
+    // 58,015 Hays rows have no crosswalk key and none of them loses anything.
+    const withOut = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "OWNER OF WINDMILL",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: null,
+    });
+    expect(withOut.provenance.parcelJoin.state).toBe("joined-situs");
+  });
+
+  it("a NON-blocked county ignores a crosswalk row entirely", () => {
+    // The Williamson-class proof at the code level, and also the Travis and
+    // Bastrop proof: a county that joins correctly on prop_id must not acquire
+    // a second geometry path. Offering one here must change nothing.
+    const propIdRow = txgioRow();
+    const plain = newPayload(propIdRow, {});
+    const offered = newPayload(propIdRow, { crosswalkRow: learParcel() });
+    expect(plain.provenance.parcelJoin.state).toBe("joined");
+    expect(offered.provenance.parcelJoin.state).toBe("joined");
+    expect(offered.provenance.parcelJoin).toEqual(plain.provenance.parcelJoin);
+    expect(offered.baseFacts).toEqual(plain.baseFacts);
+    expect(offered.zoning).toEqual(plain.zoning);
+  });
+
+  it("a crosswalk bind does NOT promote a land use the owner gate refused", () => {
+    // Scope discipline, enforced rather than asserted. The crosswalk supplies
+    // the parcel row; land use on a gate-blocked county still comes from the
+    // owner-gated address join and from nothing else. If this ever inverted,
+    // the five counties that are not Hays would start moving land-use codes
+    // through a path nobody reviewed for them.
+    const ownerDisagrees = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      situsRow: windmillParcel(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("340 WINDMILL WAY, BUDA, TX 78610"),
+          "SOMEBODY ELSE ENTIRELY",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF WINDMILL",
+      },
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: learRoll(),
+    });
+    expect(ownerDisagrees.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(resolvedLandUse(ownerDisagrees)).toBeUndefined();
+    expect(ownerDisagrees.provenance.landUseAddressRecovered).toBe(false);
+    // ...and the refusal is still EARNED, not a bare null.
+    expect(ownerDisagrees.provenance.landUseAbsence).toBeTruthy();
+  });
+
+  it("a retired record still takes its retirement branch, crosswalk or not", () => {
+    // CTX-RETIRE and CTX-B1 ordering must survive this card. A prop_id absent
+    // from the declared roll is retired regardless of whether its geometry
+    // could be crosswalk bound.
+    const retired = newPayload(null, {
+      gateBlocked: true,
+      body: LEAR_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:26199",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      crosswalkRow: learParcel(),
+      cadPropertyRoll: { byPropId: new Map(), declaredTaxYear: 2026, consulted: true },
+    });
+    expect(retired.recordRetirement?.status).toBe("retired");
+    expect(retired.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(
+      (retired.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex,
+    ).toBe(40337);
+    expect(retired.zoning?.district).toBe("SF-2");
+  });
+});
+
+/**
+ * P-183 (2026-09-14) — GEOCODED CELLS THROUGH THE CROSSWALK.
+ *
+ * The five Sturgeon Dr lots, read off production on 2026-09-14 (the probe's
+ * P-175 address set; `ADDRESSES` in scripts/surface-probe.mjs carries the same
+ * three ids per address: the CAD account, the parcel-table prop_id, the
+ * published Geographic ID):
+ *
+ *   `txgio_parcel`, county_fips 48209, keyed on the node's OWN identity -- the
+ *   parcel-table `prop_id` column, which is the second component of the node id:
+ *     prop_id 97651  feature 43809  geo_id 11-2011-0001-00400-3
+ *       situs "STURGEON DR, SAN MARCOS, TX 78666"   centre 29.87113, -97.92674
+ *     617/619/627/629 are prop_ids 97652/97653/97657/97658 = features
+ *       31908/87644/24392/31435, the same block of Conway Addition Sec IV.
+ *     Every CAPCOG address point the probe carries for those five falls inside
+ *     the node's OWN row (each row's centre is under 5 m from the point).
+ *
+ *   Hays CAD numbers the same lots 84632..84639. CAD account 97651 is a
+ *   DIFFERENT Hays parcel: 476 Catalina Ln, Austin 78737 = txgio feature 39514,
+ *   geo_id 11-0362-000E-00800-4, centre 30.18153, -97.97639 -- 34.8 km north of
+ *   the node's lot. That is the collision the bare number makes.
+ *
+ * Production's tier-1 bake selected the CAD-keyed row, so the ring whose
+ * centroid it writes into place_layer_snapshots.lat_rounded/lng_rounded (the
+ * column the served `cityLimitsFact.queryPoint` is read from) was 476 Catalina
+ * Ln's, and node 48209:97651's served record point sat on a parcel 34.8 km away.
+ */
+describe("P-183: a gate-blocked county draws the node's OWN parcel row", () => {
+  // ~0.24 acre, centred on the node's own lot (production bbox centre above).
+  const STURGEON_LOT: Ring = [
+    [-97.9268, 29.87105],
+    [-97.92668, 29.87105],
+    [-97.92668, 29.87122],
+    [-97.9268, 29.87122],
+    [-97.9268, 29.87105],
+  ];
+  // ~1.45 acre, centred on the colliding CAD account's lot.
+  const CATALINA_LOT: Ring = [
+    [-97.9765, 30.18145],
+    [-97.97625, 30.18145],
+    [-97.97625, 30.18168],
+    [-97.9765, 30.18168],
+    [-97.9765, 30.18145],
+  ];
+
+  const STURGEON_BODY = () =>
+    conformantBody({
+      nodeId: "48209:97651",
+      claim: {
+        countyFips: "48209",
+        sourceIdentifiers: { prop_id: "97651", taxYear: 2026 },
+        // The declared roll's own situs for this lot: no house number on the
+        // roll (the probe's P-160 label leg reads exactly this).
+        situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+        situsCity: "SAN MARCOS",
+        situsZip: "78666",
+        propertyUseCode: "A1",
+      },
+    });
+
+  /** txgio feature 43809: the parcel-table row whose prop_id IS node 48209:97651. */
+  const sturgeonOwnRow = () =>
+    txgioRow({
+      feature_index: 43809,
+      prop_id: "97651",
+      geo_id: "11-2011-0001-00400-3",
+      situs_address: "STURGEON DR, SAN MARCOS, TX 78666",
+      situs_city: "SAN MARCOS",
+      situs_state: "TX",
+      situs_zip: "78666",
+      zoning_district: "SF-6",
+      zoning_jurisdiction: "san-marcos-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      geometry: { type: "Polygon", coordinates: [STURGEON_LOT] },
+      // The membership prepass reads the prop_id column only; it is not the
+      // owner-carrying fetch, so this row can never lift the owner gate.
+      txgio_owner_for_gate: null,
+    });
+
+  /**
+   * txgio feature 39514: the parcel CAD account 97651's number names. Its
+   * zoning stamp is a discriminator for the test, not a measured value -- what
+   * is measured is the feature, the geo_id and the 34.8 km displacement.
+   */
+  const catalinaCadKeyedRow = () =>
+    txgioRow({
+      feature_index: 39514,
+      prop_id: "128069",
+      geo_id: "11-0362-000E-00800-4",
+      situs_address: "476 CATALINA LN, AUSTIN, TX 78737",
+      situs_city: "AUSTIN",
+      situs_state: "TX",
+      situs_zip: "78737",
+      zoning_district: "RR",
+      zoning_jurisdiction: "hays-county-tx",
+      source_vintage: "stratmap25-landparcels_48209_hays_202503",
+      geometry: { type: "Polygon", coordinates: [CATALINA_LOT] },
+      txgio_owner_for_gate: "OWNER OF CATALINA",
+    });
+
+  const shared = () => ({
+    gateBlocked: true as const,
+    body: STURGEON_BODY(),
+    countyFips: "48209",
+    countyName: "Hays",
+    parcelNodeId: "48209:97651",
+    situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+  });
+
+  const featureIndexOf = (p: ConformantTier1Payload) =>
+    (p.provenance.parcelJoin as { featureIndex?: number | null }).featureIndex;
+
+  it("VIOLATION, BEFORE: with no own row the CAD-keyed crosswalk draws 476 Catalina Ln", () => {
+    // Production's behaviour for this node today, reproduced. Nothing here
+    // goes through the own row: this is what the bake does when the only
+    // geometry it can reach is keyed off the CAD account's numbering.
+    const before = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(before.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(featureIndexOf(before)).toBe(39514);
+    // And the stamp and the ring follow the wrong polygon: that is the class.
+    expect(before.zoning?.district).toBe("RR");
+    expect(before.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+
+  it("AFTER: the node's own row wins, and the ring, the stamp and the acreage follow it", () => {
+    const ownRow = sturgeonOwnRow();
+    const after = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+      situsRow: catalinaCadKeyedRow(),
+      ownRow,
+    });
+    expect(after.provenance.parcelJoin.state).toBe("joined-own-prop-id");
+    expect(featureIndexOf(after)).toBe(43809);
+    // The zoning stamp is a fact about the polygon, so it moves with it.
+    expect(after.zoning?.district).toBe("SF-6");
+    // The acreage METHOD is the discriminator: only a payload whose ring was
+    // actually read can carry a shoelace value, and the own row's ring is a
+    // different shape from the CAD-keyed row's.
+    const control = newPayload(ownRow, {
+      body: STURGEON_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:97651",
+      situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+    });
+    const cadKeyed = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(after.baseFacts.acreage).toEqual(control.baseFacts.acreage);
+    expect(after.baseFacts.acreage).not.toEqual(cadKeyed.baseFacts.acreage);
+    // The basis can be re-run from the basis alone: it names the column, the
+    // node's own identity, and the gate it did not lift.
+    expect(after.provenance.parcelJoin.basis).toContain("prop_id 97651");
+    expect(after.provenance.parcelJoin.basis).toContain("feature_index 43809");
+    expect(after.provenance.parcelJoin.basis).toContain("gate-blocked");
+    expect(
+      (after.provenance.parcelJoin as { sourceVintage?: string | null }).sourceVintage,
+    ).toBe("stratmap25-landparcels_48209_hays_202503");
+  });
+
+  it("the CAD-keyed rows remain the fallback for a node id the parcel table does not carry", () => {
+    // No own row: the crosswalk still binds, and with neither, the situs
+    // recovery still binds. Nothing is withdrawn -- this is a re-ranking.
+    const crosswalkOnly = newPayload(null, {
+      ...shared(),
+      crosswalkRow: catalinaCadKeyedRow(),
+    });
+    expect(crosswalkOnly.provenance.parcelJoin.state).toBe("joined-crosswalk");
+    expect(featureIndexOf(crosswalkOnly)).toBe(39514);
+
+    const situsOnly = newPayload(null, {
+      ...shared(),
+      situsRow: catalinaCadKeyedRow(),
+      situsRecovery: {
+        addressLandUse: addrLookup(
+          normalizeSitusAddress("STURGEON DR, SAN MARCOS, TX 78666"),
+          "OWNER OF CATALINA",
+          "A1",
+        ),
+        txgioOwner: "OWNER OF CATALINA",
+      },
+    });
+    expect(situsOnly.provenance.parcelJoin.state).toBe("joined-situs");
+    expect(featureIndexOf(situsOnly)).toBe(39514);
+  });
+
+  it("a NON-blocked county ignores an own row entirely", () => {
+    // Scope discipline: on a county whose prop_id join is open, the own row
+    // changes nothing -- there is no divergence to re-rank.
+    const open = newPayload(sturgeonOwnRow(), {
+      body: STURGEON_BODY(),
+      countyFips: "48209",
+      countyName: "Hays",
+      parcelNodeId: "48209:97651",
+      situsAddress: "STURGEON DR, SAN MARCOS, TX 78666",
+      ownRow: catalinaCadKeyedRow(),
+    });
+    expect(open.provenance.parcelJoin.state).toBe("joined");
+    expect(featureIndexOf(open)).toBe(43809);
+    expect(open.zoning?.district).toBe("SF-6");
+  });
+
+  it("a refused land-use recovery does not withdraw the node's own row", () => {
+    // The own row supplies GEOMETRY only. With no address recovery offered at
+    // all (the Hays owner gate refuses these lots), the ring is still read and
+    // the state reports the bind the geometry took.
+    const bound = newPayload(null, {
+      ...shared(),
+      ownRow: sturgeonOwnRow(),
+    });
+    expect(bound.provenance.parcelJoin.state).toBe("joined-own-prop-id");
+    expect(featureIndexOf(bound)).toBe(43809);
+    // Land use is untouched by this key: the identical payload with no own row
+    // resolves the identical land use (the claim's own use code is served on a
+    // gate-blocked county; the owner-gated recovery is what decides recovery).
+    const withoutOwnRow = newPayload(null, { ...shared() });
+    expect(resolvedLandUse(bound)).toEqual(resolvedLandUse(withoutOwnRow));
+    expect(bound.provenance.landUseOrigin).toBe(withoutOwnRow.provenance.landUseOrigin);
+    expect(bound.provenance.landUseAddressRecovered).toBe(false);
+    // The ring WAS looked at, so acreage is measured rather than "never looked".
+    expect(bound.facetCoverage.acreage).toBe(true);
+    expect(bound.baseFacts.acreage).toMatchObject({ method: "shoelace-wgs84" });
+  });
+});
+
+// P-183: the duplicate describe block that stood here was removed. Its
+// coverage is superseded by "P-183: a gate-blocked county draws the node's OWN
+// parcel row" above, which carries the measured Sturgeon/Catalina fixtures
+// (production place_layer_snapshots, 2026-09-14) and the acreage leg as well.
+// It had been written against helpers scoped to the CTX-HAYS-REBIND describe
+// (LEAR_BODY / learParcel / windmillParcel / learRoll) and could not compile.
+export {};

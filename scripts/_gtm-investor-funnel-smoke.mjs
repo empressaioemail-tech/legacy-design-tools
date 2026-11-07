@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 /** Smoke investor GTM funnel on cortex-api canary. */
-const CANARY =
-  process.env.CORTEX_CANARY_URL?.trim() ||
-  "https://canary---cortex-api-tds7av26va-uc.a.run.app";
+// D-25: no default canary URL (the Cloud Run canary host is dead). Name it, or refuse.
+const CANARY = process.env.CORTEX_CANARY_URL?.trim();
+if (!CANARY) {
+  console.error(
+    "CORTEX_CANARY_URL required and there is no default (D-25): the retired Google\n" +
+      "  Cloud Run canary host is dead. Usage:\n" +
+      "    CORTEX_CANARY_URL=https://<origin> node scripts/_gtm-investor-funnel-smoke.mjs",
+  );
+  process.exit(1);
+}
 
 const API_KEY = process.env.BROKERAGE_OPERATOR_API_KEY?.trim();
 if (!API_KEY) {

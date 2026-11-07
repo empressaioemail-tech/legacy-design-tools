@@ -40,6 +40,8 @@
 
 import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 
+import { incorporatedDenominatorBasis } from "./cityBoundaryDenominator";
+
 // ---------------------------------------------------------------------------
 // Denominators and reach.
 // ---------------------------------------------------------------------------
@@ -47,8 +49,64 @@ import { COUNTY_RAIL_DECLARATION } from "@workspace/db/schema";
 export type DenominatorKind =
   /** DISTINCT feature_index in txgio_parcel for the county — the real-world parcel count. */
   | "txgio-parcel-distinct-feature-index"
-  /** No denominator: the rail could not be measured for this county. */
-  | "none";
+  /**
+   * DISTINCT feature_index whose representative point falls inside an
+   * incorporated municipal boundary in `tx_city_boundary` (lane SS-W15).
+   *
+   * The denominator for any rail whose subject is a MUNICIPAL AUTHORITY rather
+   * than a statewide fact. Unincorporated Texas has no municipal zoning
+   * authority, so a county-wide denominator charges a county for land nobody
+   * can zone: Bastrop 48021 measured 15.22% county-wide and 79.60% here, and
+   * only 18.89% of its parcels are inside a city at all. Full derivation and
+   * cost in `./cityBoundaryDenominator.ts`.
+   */
+  | "incorporated-city-parcels"
+  /**
+   * No measurement spec yet. The rail has never been measured; there is no
+   * counting rule to recover. This is the unspecified-never-measured state
+   * (roads, footprint, easement, …). It is NOT the state for live ledger
+   * rows whose denominator was lost — that is `retired-unknown-denominator`.
+   */
+  | "none"
+  /**
+   * Live ledger rows exist, but the denominator they were computed against
+   * is not reconstructible from checked-in source. Distinct from `none`:
+   * retired-rows-with-unknown-denominator is not unspecified-never-measured.
+   * A new scorer (a different card) must land before this rail is scored.
+   */
+  | "retired-unknown-denominator";
+
+/**
+ * Can a measurer actually execute this denominator today?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. A hardcoded allowlist (the prior
+ * shape here was a `Set` of "live" kinds) fails OPEN by omission: a new
+ * `DenominatorKind` added anywhere else in this file compiles fine and
+ * silently reads as "not live" here, which is exactly how a rail can vanish
+ * from `scoreableRailKeys()` — and therefore from a default
+ * `railScoring/run.ts` run — with no error and no test failure. The `never`
+ * assignment in the default case makes that omission a TYPE ERROR instead:
+ * adding a kind without deciding whether it is executable is not allowed to
+ * compile. This is not hypothetical: composing S-22's geometry retirement
+ * with SS-W15's zoning denominator (both landed independently) is exactly
+ * the scenario this exhaustiveness check exists for — without it,
+ * `"incorporated-city-parcels"` would have silently read "not live" here,
+ * and zoning would have vanished from `scoreableRailKeys()` with no error.
+ */
+export function isLiveCountingDenominatorKind(kind: DenominatorKind): boolean {
+  switch (kind) {
+    case "txgio-parcel-distinct-feature-index":
+    case "incorporated-city-parcels":
+      return true;
+    case "none":
+    case "retired-unknown-denominator":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
+}
 
 export interface DenominatorSpec {
   kind: DenominatorKind;
@@ -197,6 +255,18 @@ const PARCEL_FEATURE_DENOMINATOR: DenominatorSpec = {
     "count(DISTINCT feature_index) in txgio_parcel for the county (falling back to txgio_parcel_staging). The FEATURE is the real-world parcel; txgio_parcel carries multiple rows per feature, so the raw row count would understate coverage several-fold on some counties.",
 };
 
+/**
+ * The denominator for a MUNICIPAL-AUTHORITY rail (lane SS-W15, 2026-08-19).
+ *
+ * Measured before it was declared. The prose is the counting rule, and it
+ * travels into every run report and into the `artifact_path` provenance of
+ * every row it governs.
+ */
+const INCORPORATED_CITY_ZONING_DENOMINATOR: DenominatorSpec = {
+  kind: "incorporated-city-parcels",
+  basis: incorporatedDenominatorBasis("zoning_district"),
+};
+
 export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
   {
     railKey: "geometry",
@@ -204,9 +274,13 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     entityType: "parcel-node",
     instrument: "countyRailScoreCli.ts:geometry",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: {
+      kind: "retired-unknown-denominator",
+      basis:
+        "RETIRED / UNMEASURED. Live geometry ledger rows were computed against an 'accounted features' denominator by B2_cp2_geometry_scorer_apply.mjs, which is not in this repo. The reconstructible parcel-feature count is a different rule and is not claimed here. Re-scoring waits on a new scorer (S-21); until then this rail is unscored.",
+    },
     notes:
-      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here.",
+      "DENOMINATOR DIVERGENCE, UNRESOLVED AND DELIBERATELY NOT PAPERED OVER. The 253 live geometry rows were written by B2_cp2_geometry_scorer_apply.mjs against an 'accounted features' denominator (their artifact_path carries denom=accounted;rawFeatures=...;accountedFeatures=...;foldedExtraFeatures=...). That producer is NOT in this repo — only a verify script that regexes its output (_P1-2_cp2_verify.mjs). This rule therefore declares the denominator that IS reconstructible from checked-in source, and will NOT reproduce the live values for counties with foldedExtraFeatures > 0. Re-scoring geometry needs the accounted-features rule recovered or re-ruled first; that is a finding for the planner, not something to guess at here. RETIRED 2026-08-20 (S-22): the machine-readable denominator is no longer PARCEL_FEATURE_DENOMINATOR. Live geometry rows are 254 over 254 distinct county FIPS, not 253 (253 was a different rail's figure; source _inbox/2026-08-20_db_probe_five_answers.md Q2). Until a new scorer lands (S-21), this rail is unscored rather than re-derived against a different denominator.",
   },
   {
     railKey: "cad",
@@ -222,9 +296,9 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     column: "zoning_district",
     instrument: "countyRailScoreCli.ts:zoning",
     verificationMethod: "sweep",
-    denominator: PARCEL_FEATURE_DENOMINATOR,
+    denominator: INCORPORATED_CITY_ZONING_DENOMINATOR,
     notes:
-      "Stamp rate, not data presence: a low percentage is a wired-city gap, not missing zoning. 235 of the live zoning rows are roster-load doctrine rows (source zoning-regime-doctrine) which the rollup deliberately excludes; this rule measures the stamp and does not touch the doctrine rows' basis.",
+      "DENOMINATOR CORRECTED 2026-08-19 by lane SS-W15, measured first and declared second. This rule previously used PARCEL_FEATURE_DENOMINATOR — every parcel in the county — which answers a question nobody asks: unincorporated Texas has no municipal zoning authority, so those parcels can never be stamped and their presence in the denominator measures Texas geography rather than our coverage. Bastrop 48021 read 15.22% (9,642 / 63,357) and measures 79.60% (9,526 / 11,968); only 18.89% of its parcels are inside a city at all. Travis 48453 read 33.32% and measures 65.03%. The correction did NOT make the gap vanish and was not expected to: Bastrop's missing 20.40% is Smithville, 2,397 incorporated parcels with zero stamped, which the county-wide denominator had buried inside a number that looked like systemic failure. Stamp rate, not data presence, remains true: a low percentage is still a wired-city gap rather than missing zoning, and a county with no wired layer is now REFUSED rather than scored zero (see ./countyMeasurability.ts). 235 of the live zoning rows are roster-load doctrine rows (source zoning-regime-doctrine) which the rollup deliberately excludes; this rule measures the stamp and does not touch the doctrine rows' basis. TWO INSTRUMENTS NOW CLAIM FACET 'zoning' AND THEIR DENOMINATORS DISAGREE, WHICH IS AN OPERATOR RULING AND NOT THIS LANE'S TO MAKE. countyCoverageScoreCli.ts writes facet 'zoning' over the COUNTY parcel count; this rule writes it over the INCORPORATED count. Both are checked in, both upsert the same (county_fips, facet) primary key, and the last one run wins the cell: on Bastrop that is the difference between 15.22% and 79.60% depending on which CLI ran most recently. That is a paired-control divergence (DEV_PROCESS 2.4) created deliberately and named rather than resolved by unilateral edit (DEV_PROCESS 5.4), because countyCoverageScoreCli.ts is lane SS-W13's file and retiring a live instrument is a ruling. The ledger is not moved by either instrument in this PR: nothing here was applied.",
   },
   {
     railKey: "roads",
@@ -264,7 +338,7 @@ export const RAIL_SCORING_DECLARATION: readonly RailScoringRule[] = [
     verificationMethod: "sweep",
     denominator: PARCEL_FEATURE_DENOMINATOR,
     notes:
-      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which writes facet 'land-use' (orphaned: no such rail key) and is owned by lane SS-W13. Both are named here so a successor does not mistake one for the other.",
+      "The 254 live landuse rows are land-use-fact atom counts from score_cad_rails_fast.mjs, which is what this reproduces. SEPARATE from countyCoverageScoreCli.ts's owner-gated CAD-roll join, which now upserts diagnostic facet 'landuse-cad-join' (the historical 'land-use' key is RETIRED; 19 orphan rows remain until operator-authorised retirement SQL). Both are named here so a successor does not mistake one for the other.",
   },
   {
     railKey: "footprint",
@@ -372,6 +446,40 @@ export function railScoringRuleFor(railKey: string): RailScoringRule | undefined
 }
 
 /**
+ * Does this denominator require the municipal boundary table?
+ *
+ * EXHAUSTIVE OVER THE UNION, DELIBERATELY. The `never` assignment makes adding
+ * a `DenominatorKind` without deciding this question a TYPE ERROR rather than
+ * a silent `false`. That matters because until lane SS-W15 the `denominator`
+ * field was DECLARED AND NEVER READ: `measureColumnStamp` called
+ * `readParcelFeatureCount` unconditionally, so a rule could declare any
+ * denominator it liked and get the parcel-feature count regardless. One rule,
+ * two expressions, only one of them authoritative — the CTRL-1 shape
+ * (DEV_PROCESS 2.4), sitting inside the file whose whole purpose is that the
+ * rule is data. `registry.test.ts` and `measure` now both depend on this being
+ * the single answer.
+ */
+export function denominatorNeedsCityBoundary(kind: DenominatorKind): boolean {
+  switch (kind) {
+    case "incorporated-city-parcels":
+      return true;
+    case "txgio-parcel-distinct-feature-index":
+    case "none":
+    // A retired denominator (S-22, geometry) means the rail cannot be
+    // measured at all -- measureRailCell refuses it before this function is
+    // ever consulted (see measure.ts's own guard). false either way: this
+    // exhaustiveness check exists to force the decision, not to imply the
+    // question is live for a retired rail.
+    case "retired-unknown-denominator":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled denominator kind: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/**
  * The satisfied-vs-partial threshold for a rail, from `COUNTY_RAIL_DECLARATION`
  * — the single home for thresholds. Throws on an unknown rail rather than
  * defaulting, because a silent default is how a rail gets scored against a
@@ -387,10 +495,29 @@ export function thresholdPctForRail(railKey: string): number {
   return t;
 }
 
-export function isScoreableRule(
-  rule: RailScoringRule,
-): rule is Exclude<RailScoringRule, UnspecifiedRule> {
-  return rule.kind !== "unspecified";
+/**
+ * Plain `boolean`, NOT a type predicate. It used to narrow to
+ * `Exclude<RailScoringRule, UnspecifiedRule>`, which was accurate when
+ * "not scoreable" meant exactly `kind === "unspecified"`. It no longer does:
+ * a rule can keep a specified `kind` (geometry is still
+ * `atom-count-over-parcel-features`) and still be unscoreable because its
+ * denominator is retired. A stale predicate here does not just mislabel —
+ * `scoreRailCell`'s `if (!isScoreableRule(rule))` branch would have TypeScript
+ * narrow `rule` to `UnspecifiedRule`, prove its own `kind === "unspecified"`
+ * check always true, and therefore prove its own trailing fallback `throw`
+ * unreachable (`rule: never`) — a real compile error, not a rebase artifact.
+ *
+ * A measurement kind without an executable denominator is not scoreable.
+ * Geometry keeps kind `atom-count-over-parcel-features` (the numerator shape
+ * is still parcel-node atom count) but its denominator is retired, so
+ * substituting the reconstructible parcel-feature count would rescore live
+ * rows against a different rule. Unspecified rails use kind `none`.
+ */
+export function isScoreableRule(rule: RailScoringRule): boolean {
+  return (
+    rule.kind !== "unspecified" &&
+    isLiveCountingDenominatorKind(rule.denominator.kind)
+  );
 }
 
 /** Rails this capability can measure today. */
@@ -410,6 +537,25 @@ export function unspecifiedRails(): Array<{
     railKey,
     unspecifiedReason,
     specOwner,
+  }));
+}
+
+/**
+ * Rails whose live ledger rows were computed against a denominator that is
+ * not reconstructible from checked-in source. Distinct from `unspecifiedRails`
+ * (never measured) and from `scoreableRailKeys` (executable denominator).
+ */
+export function retiredDenominatorRails(): Array<{
+  railKey: string;
+  denominatorKind: DenominatorKind;
+  basis: string;
+}> {
+  return RAIL_SCORING_DECLARATION.filter(
+    (r) => r.denominator.kind === "retired-unknown-denominator",
+  ).map((r) => ({
+    railKey: r.railKey,
+    denominatorKind: r.denominator.kind,
+    basis: r.denominator.basis,
   }));
 }
 

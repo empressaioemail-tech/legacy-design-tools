@@ -1,0 +1,405 @@
+/**
+ * ETJ READ from `tx_etj_boundary` + `tx_etj_source`
+ * (feat/p241-etj-acquisition, P-241 acquisition half).
+ *
+ * Mirrors `cityLimitsFactRead.ts`: same store (`@workspace/db`, the deployment
+ * store — not ATOMS_DATABASE_URL), same bbox-prefilter-then-point-in-polygon
+ * shape, same honest-empty-table rule, same optional injected index for tests.
+ *
+ * The difference is coverage. City limits are statewide, so a miss has one
+ * meaning. ETJ is published per municipality, so a miss has two, and this
+ * module is where they are kept apart:
+ *
+ *   - `absent`     at least one registered publisher's own published ETJ
+ *                  extent covers the query point and none of its rings
+ *                  contains it;
+ *   - `unresolved` nothing was ingested, or the point lies outside every
+ *                  registered publisher's extent, or its city is enumerated as
+ *                  publishing no ETJ layer at all.
+ *
+ * A zero-row `tx_etj_boundary` is therefore `unresolved`, never `absent`, and
+ * so is a populated ring table whose source register is missing: a ring's own
+ * bbox is not a publisher's claim about what it covers, so coverage cannot be
+ * reconstructed from geometry. Guessing there would convert "we did not look"
+ * into "it is not there", which is the defect this module exists to avoid.
+ *
+ * NO §42.021 BUFFER PATH. Not deferred — retired. Austin's real ETJ is shaped
+ * by individual development agreements and disannexation actions, so a
+ * statutory buffer would contradict the published layer it claims to describe.
+ *
+ * P-359 — THE REFUSAL IS IN THIS READER. `ST_Contains` against an INVALID
+ * polygon is undefined in GEOS, so this module never assumes the store holds
+ * valid geometry. It selects `served_geometry`, `served_status` and
+ * `derivation`, hands EVERY candidate row to `buildEtjBoundaryIndex` (including
+ * the ones it will refuse), and lets the builder decide: only `verbatim`,
+ * `derived` and `repaired` are testable. A row that is `underived` (no
+ * derivation pass has run), `excluded` (a repair moved the area beyond the
+ * declared tolerance) or `withheld` (a self-containing ring whose subtraction
+ * left nothing usable) is carried into the determination as a DECLARATION, and
+ * a point whose only covering rings were refused answers `unresolved` naming the
+ * refusal — never `absent`. The SQL deliberately does not filter the refused
+ * rows out: filtering would erase the only evidence that a publisher's ring was
+ * never measured.
+ *
+ * Not wired to a route: this lane is the acquisition half, and the consumer
+ * sites that would read it (`hauska-engine`'s report/feasibility hardcodes,
+ * `hauska-map`'s three) are explicit follow-on work. This module is the read
+ * path those sites can adopt without touching how it is built.
+ *
+ * P-376 — INCORPORATION SETTLES THE ANSWER, AND IT SETTLES IT FIRST. When the
+ * caller's city-limits fact positively determined this parcel incorporated, the
+ * caller hands that determination in on `containing.incorporation` and this
+ * module answers `not in an ETJ` from it (the existing `absent` disposition,
+ * `settledBy: "incorporation"`, `coveredBy: []`, `ringsConsulted: 0`) BEFORE any
+ * store guard and before any ring is considered. An incorporated parcel is
+ * outside every ETJ by law, so a refused, underived or simply unloaded ring
+ * table has nothing to say about it — and letting one speak would turn a settled
+ * answer into `unresolved`.
+ */
+
+import { and, gte, lte } from "drizzle-orm";
+import { txEtjBoundary, txEtjSource } from "@workspace/db/schema";
+import {
+  buildEtjBoundaryIndex,
+  resolveEtjAtPoint,
+  resolveEtjByIncorporation,
+  type EtjBoundaryIndex,
+  type EtjBoundarySourceRow,
+  type EtjContainingCity,
+  type EtjSourceCoverageEntry,
+} from "@workspace/cad-ingest/boundary";
+import {
+  etjFactFromContainment,
+  unmeasuredEtjFact,
+  usableEtjQueryPoint,
+  type EtjFact,
+} from "@workspace/cad-ingest/etj";
+
+export const ETJ_FACT_SOURCE = "tx_etj_boundary" as const;
+
+export type EtjQueryPoint = {
+  longitude: number;
+  latitude: number;
+};
+
+export type EtjFactWire = EtjFact & {
+  queryPoint: EtjQueryPoint | null;
+};
+
+/** Injected index for tests, same shape as the city-limits injection. */
+export type EtjIndexInjection = {
+  sourceRowsPresent: boolean;
+  ringRowsPresent: boolean;
+  index: EtjBoundaryIndex;
+  coverage: EtjSourceCoverageEntry[];
+};
+
+type EtjBoundaryRow = {
+  etjId: string;
+  cityKey: string;
+  cityName: string;
+  ringLabel: string;
+  geometry: unknown;
+  servedGeometry: unknown;
+  servedStatus: string;
+  derivation: unknown;
+  westLng: number;
+  southLat: number;
+  eastLng: number;
+  northLat: number;
+  sourceCitation: string;
+};
+
+type EtjSourceRow = {
+  cityKey: string;
+  cityName: string;
+  cityGeoId: string | null;
+  mode: string;
+  hasEtjRings: boolean;
+  westLng: number | null;
+  southLat: number | null;
+  eastLng: number | null;
+  northLat: number | null;
+};
+
+/**
+ * The drizzle surface this module uses. `select(...).from(...)` is awaitable
+ * for the unfiltered source register and carries `.where`/`.limit` for the
+ * filtered reads, which is what the real builder gives.
+ */
+export type EtjFactDb = {
+  select: (fields: Record<string, unknown>) => {
+    from: (table: unknown) => PromiseLike<unknown[]> & {
+      where: (cond: unknown) => PromiseLike<unknown[]>;
+      limit: (n: number) => PromiseLike<unknown[]>;
+    };
+  };
+};
+
+async function deploymentDb(): Promise<EtjFactDb> {
+  const { db } = await import("@workspace/db");
+  return db as unknown as EtjFactDb;
+}
+
+let injectedIndex: EtjIndexInjection | null | undefined;
+
+export function setEtjIndexForTests(
+  index: EtjIndexInjection | null,
+): void {
+  injectedIndex = index;
+}
+
+export function resetEtjIndexForTests(): void {
+  injectedIndex = undefined;
+}
+
+/** Every enumerated publisher, rings or not. */
+async function loadSourceCoverage(
+  db: EtjFactDb,
+): Promise<{ coverage: EtjSourceCoverageEntry[]; rows: EtjSourceRow[] }> {
+  const rows = (await db
+    .select({
+      cityKey: txEtjSource.cityKey,
+      cityName: txEtjSource.cityName,
+      cityGeoId: txEtjSource.cityGeoId,
+      mode: txEtjSource.mode,
+      hasEtjRings: txEtjSource.hasEtjRings,
+      westLng: txEtjSource.westLng,
+      southLat: txEtjSource.southLat,
+      eastLng: txEtjSource.eastLng,
+      northLat: txEtjSource.northLat,
+    })
+    .from(txEtjSource)) as EtjSourceRow[];
+
+  const coverage: EtjSourceCoverageEntry[] = rows.map((r) => ({
+    cityKey: r.cityKey,
+    cityName: r.cityName,
+    cityGeoId: r.cityGeoId,
+    mode: r.mode,
+    hasEtjRings: r.hasEtjRings,
+    bbox:
+      r.westLng !== null &&
+      r.southLat !== null &&
+      r.eastLng !== null &&
+      r.northLat !== null
+        ? {
+            westLng: r.westLng,
+            southLat: r.southLat,
+            eastLng: r.eastLng,
+            northLat: r.northLat,
+          }
+        : null,
+  }));
+  return { coverage, rows };
+}
+
+async function countRings(db: EtjFactDb): Promise<number> {
+  const rows = (await db
+    .select({ etjId: txEtjBoundary.etjId })
+    .from(txEtjBoundary)
+    .limit(1)) as Array<{ etjId: string }>;
+  return rows.length;
+}
+
+/** Rings whose bbox contains the query point — the pre-filter only.
+ *
+ * The bbox tested is the PUBLISHED ring's (`west_lng` … `north_lat`), and that
+ * is sound for every served geometry (P-359): `derived` is the published ring
+ * minus something, and `repaired` is `ST_MakeValid`'s redistribution of the
+ * published ring's own nodes, so neither can reach outside the footprint the
+ * publisher drew. A served geometry is therefore never lost to the pre-filter;
+ * a ring that cannot be tested at all still reaches the builder, which refuses
+ * it and says why.
+ */
+async function loadBboxCandidates(
+  db: EtjFactDb,
+  longitude: number,
+  latitude: number,
+): Promise<EtjBoundaryIndex> {
+  const rows = (await db
+    .select({
+      etjId: txEtjBoundary.etjId,
+      cityKey: txEtjBoundary.cityKey,
+      cityName: txEtjBoundary.cityName,
+      ringLabel: txEtjBoundary.ringLabel,
+      geometry: txEtjBoundary.geometry,
+      servedGeometry: txEtjBoundary.servedGeometry,
+      servedStatus: txEtjBoundary.servedStatus,
+      derivation: txEtjBoundary.derivation,
+      westLng: txEtjBoundary.westLng,
+      southLat: txEtjBoundary.southLat,
+      eastLng: txEtjBoundary.eastLng,
+      northLat: txEtjBoundary.northLat,
+      sourceCitation: txEtjBoundary.sourceCitation,
+    })
+    .from(txEtjBoundary)
+    .where(
+      and(
+        lte(txEtjBoundary.westLng, longitude),
+        gte(txEtjBoundary.eastLng, longitude),
+        lte(txEtjBoundary.southLat, latitude),
+        gte(txEtjBoundary.northLat, latitude),
+      ),
+    )) as EtjBoundaryRow[];
+
+  // Every candidate row is handed to the builder, INCLUDING the ones the reader
+  // cannot test (`underived`, `excluded`, `withheld`) and the ones whose status
+  // claims a served geometry that is not a polygon. The builder refuses those
+  // and says why, and resolveEtjAtPoint turns a refusal into a declaration — so a
+  // ring that was never proven testable can never quietly become an `absent`.
+  // Filtering the refusals out in SQL would erase the only evidence of them.
+  const built: EtjBoundarySourceRow[] = rows.map((row) => ({
+    etjId: row.etjId,
+    cityKey: row.cityKey,
+    cityName: row.cityName,
+    ringLabel: row.ringLabel,
+    geometry: row.geometry,
+    servedGeometry: row.servedGeometry,
+    servedStatus: row.servedStatus as EtjBoundarySourceRow["servedStatus"],
+    derivation: row.derivation,
+    bbox: {
+      westLng: row.westLng,
+      southLat: row.southLat,
+      eastLng: row.eastLng,
+      northLat: row.northLat,
+    },
+    sourceCitation: row.sourceCitation,
+  }));
+  return buildEtjBoundaryIndex(built);
+}
+
+/**
+ * Resolve ETJ for a WGS84 point. Pass null when the inspect snapshot has no
+ * usable centroid — that is unresolved, not absent. `containing` is the
+ * already-resolved containing city when the caller has it, used so the
+ * unresolved basis can name the city and its enumeration outcome — and, when the
+ * caller's own city-limits fact determined this parcel INCORPORATED, so the ETJ
+ * question can be settled without consulting a ring at all (P-376).
+ *
+ * P-376 — THE INCORPORATION CHECK RUNS FIRST. Before every store guard below and
+ * before any ring. A Texas ETJ is, by definition, the unincorporated area
+ * contiguous to a municipality (Tex. Loc. Gov't Code ch. 42), so an incorporated
+ * parcel's ETJ answer does not depend on our ETJ coverage in any way. Reading the
+ * store first would let an empty register, an incomplete acquisition or a ring
+ * the reader must refuse (P-359) turn a settled answer into `unresolved` — "we
+ * could not look" served for a parcel the law already placed outside every ETJ.
+ * The store's health stays visible exactly where it IS the answer: the
+ * unincorporated point that the ring test is the only answer for.
+ */
+export async function loadEtjFact(
+  point: EtjQueryPoint | null,
+  db?: EtjFactDb,
+  containing: EtjContainingCity | null = null,
+): Promise<EtjFactWire> {
+  const usable = point
+    ? usableEtjQueryPoint(point.longitude, point.latitude)
+    : null;
+  if (!usable) {
+    return {
+      ...unmeasuredEtjFact("no usable parcel query point; ETJ is unmeasured"),
+      queryPoint: null,
+    };
+  }
+  const queryPoint = { longitude: usable.longitude, latitude: usable.latitude };
+
+  // The settlement is returned before the injected/real store branches are even
+  // read: an incorporated parcel's ETJ answer is not a claim about tx_etj_boundary.
+  const settled = resolveEtjByIncorporation(containing);
+  if (settled !== null) {
+    return { ...etjFactFromContainment(settled), queryPoint };
+  }
+
+  if (injectedIndex !== undefined) {
+    if (injectedIndex === null || !injectedIndex.sourceRowsPresent) {
+      return {
+        ...unmeasuredEtjFact(
+          "tx_etj_source has zero rows; ETJ is unmeasured, not absent — " +
+            "no ETJ source has been acquired",
+        ),
+        queryPoint,
+      };
+    }
+    if (!injectedIndex.ringRowsPresent && injectedIndex.coverage.some((c) => c.hasEtjRings)) {
+      // The register claims publishers WITH rings and the ring table holds none.
+      // That is an incomplete acquisition, not a checked absence: the rings that
+      // would have answered were never loaded, so zero rings consulted proves
+      // nothing. Ring identity is per publisher, so "no ring contains the point"
+      // and "no ring was ever written" are only distinguishable here.
+      return {
+        ...unmeasuredEtjFact(
+          "tx_etj_source lists publishers with ETJ rings but tx_etj_boundary " +
+            "holds none; the acquisition is incomplete, so ETJ is unmeasured " +
+            "rather than absent",
+        ),
+        queryPoint,
+      };
+    }
+    if (injectedIndex.ringRowsPresent && injectedIndex.coverage.length === 0) {
+      return {
+        ...unmeasuredEtjFact(
+          "tx_etj_boundary has rings but tx_etj_source is empty; publisher " +
+            "coverage is unreadable, so ETJ is unresolved rather than a guess",
+        ),
+        queryPoint,
+      };
+    }
+    return {
+      ...etjFactFromContainment(
+        resolveEtjAtPoint(
+          usable.longitude,
+          usable.latitude,
+          injectedIndex.index,
+          injectedIndex.coverage,
+          containing,
+        ),
+      ),
+      queryPoint,
+    };
+  }
+
+  const store = db ?? (await deploymentDb());
+  const { coverage: coverageRows } = await loadSourceCoverage(store);
+  const ringRows = await countRings(store);
+  if (coverageRows.length === 0) {
+    return {
+      ...unmeasuredEtjFact(
+        ringRows > 0
+          ? "tx_etj_boundary has rings but tx_etj_source is empty; publisher " +
+            "coverage is unreadable, so ETJ is unresolved rather than a guess"
+          : "tx_etj_source has zero rows; ETJ is unmeasured, not absent — " +
+            "no ETJ source has been acquired",
+      ),
+      queryPoint,
+    };
+  }
+  // The register claiming rings while the ring table is empty is an incomplete
+  // acquisition. Answering `absent` here would report a verified absence from
+  // zero rings consulted — "we looked and it is not there" when nothing was
+  // ever written to look at. Same class as the empty-register case above, and
+  // deliberately distinct from "the table is populated but no ring's bbox
+  // reaches this point", which is what the absent path below means.
+  if (ringRows === 0 && coverageRows.some((c) => c.hasEtjRings)) {
+    return {
+      ...unmeasuredEtjFact(
+        "tx_etj_source lists publishers with ETJ rings but tx_etj_boundary " +
+          "holds none; the acquisition is incomplete, so ETJ is unmeasured " +
+          "rather than absent",
+      ),
+      queryPoint,
+    };
+  }
+
+  const index = await loadBboxCandidates(store, usable.longitude, usable.latitude);
+  return {
+    ...etjFactFromContainment(
+      resolveEtjAtPoint(
+        usable.longitude,
+        usable.latitude,
+        index,
+        coverageRows,
+        containing,
+      ),
+    ),
+    queryPoint,
+  };
+}

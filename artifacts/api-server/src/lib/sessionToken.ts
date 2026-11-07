@@ -10,13 +10,19 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { SessionUser } from "../middlewares/session";
 
 const TOKEN_VERSION = 1;
-const DEFAULT_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
+export const DEFAULT_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
 export const DEFAULT_TENANT_ID = "default";
 
 export type SignedSessionPayload = SessionUser & {
   exp: number;
   iat: number;
   v: number;
+  /**
+   * T1-A: server-side session id (a `pe_sessions` row). Present on every
+   * token minted at PE sign-in or refresh since 2026-10-22; absent on older
+   * tokens and on tokens other flows mint. See `peSessions.ts`.
+   */
+  sid?: string;
 };
 
 function sessionSecret(): string {
@@ -50,6 +56,7 @@ function sign(data: string): string {
 export function mintSessionToken(
   session: SessionUser,
   ttlSec = DEFAULT_TTL_SEC,
+  opts: { sid?: string } = {},
 ): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SignedSessionPayload = {
@@ -58,6 +65,7 @@ export function mintSessionToken(
     iat: now,
     exp: now + ttlSec,
     v: TOKEN_VERSION,
+    ...(opts.sid ? { sid: opts.sid } : {}),
   };
   const body = b64urlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
   const sig = sign(body);
@@ -117,6 +125,26 @@ export function verifySessionToken(
     );
   }
   return { ok: true, session };
+}
+
+/**
+ * T1-A: the timing claims of a token that has ALREADY passed
+ * {@link verifySessionToken}. Returns null for anything that does not verify,
+ * so a caller can never read claims off a forged token.
+ */
+export function verifiedSessionTokenClaims(
+  token: string,
+): { session: SessionUser; iat: number; exp: number; sid: string | null } | null {
+  const verified = verifySessionToken(token);
+  if (!verified.ok) return null;
+  const body = token.slice(0, token.lastIndexOf("."));
+  const parsed = JSON.parse(b64urlDecode(body).toString("utf8")) as SignedSessionPayload;
+  return {
+    session: verified.session,
+    iat: typeof parsed.iat === "number" ? parsed.iat : 0,
+    exp: parsed.exp,
+    sid: typeof parsed.sid === "string" && parsed.sid.length > 0 ? parsed.sid : null,
+  };
 }
 
 /** Stable id for migration backfill rows — not a real login account. */

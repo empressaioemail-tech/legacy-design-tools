@@ -29,16 +29,29 @@ import {
  * address autocomplete/geocode and the situs->parcel resolver for
  * counties without a live county geocoder.
  *
- * Keyed (county_fips, full_addr, unit):
- *  - `full_addr` is the program's assembled address label (e.g.
- *    `3075 HILL ST`). It is not unique on its own — a multi-unit
- *    building repeats the label per `unit` — so `unit` (empty string
- *    when the point carries none) is the tiebreaker in the key. This
- *    keeps the key on fips + full_addr while never silently collapsing
- *    two distinct delivery points into one row.
- *  - `object_id` is the source service's statewide-unique OBJECTID,
- *    kept for provenance and re-fetch, not as the key (it churns across
- *    program vintages; the address label is the stable join surface).
+ * Keyed (county_fips, object_id) — changed from (county_fips, full_addr,
+ * unit) in migration 0110 (P-txgio-address-key, measured 2026-10-09).
+ * `full_addr` is the program's assembled address label (e.g.
+ * `3075 HILL ST`) and is NOT unique on its own: distinct delivery points
+ * with no shared coordinates repeat the same label (e.g. a road number
+ * that recurs 21 km apart, or several buildings on one rural route).
+ * Keying on (full_addr, unit) silently collapsed those into one row —
+ * measured on Burnet (48053): the service returned 35,857 points, only
+ * 35,690 were stored, 167 lost across 86 colliding (full_addr, unit)
+ * groups, none of them actually the same point.
+ *
+ * `object_id` is the source service's OBJECTID. It churns across
+ * program vintages WHEN COMPARED BARE, STATEWIDE — the same OBJECTID
+ * repeats across different counties loaded from different vintages of
+ * the statewide layer — but scoped to (county_fips, object_id) it is
+ * reliable: verified live 2026-10-09, object_id is never null and
+ * (county_fips, object_id) has zero duplicate groups across all 7 loaded
+ * counties. The vintage-churn risk does not reach this table either way,
+ * because the ingest replaces a county wholesale (see below), so a
+ * fresher vintage's OBJECTIDs never have to coexist with a stale
+ * vintage's OBJECTIDs for the same county. `full_addr`/`unit` remain —
+ * they are still the join surface to CAD situs, via the normalized
+ * full_addr index from migration 0058, not this table's key.
  *
  * `tile_key` is the same snapped 0.02-degree grid CELL key as
  * `txgio_parcel`/#242 (single-cell `g0.02:<w>,<s>` from
@@ -62,8 +75,15 @@ export const txgioAddress = pgTable(
     /** Unit/suite as shipped; empty string (not null) when absent, so it
      *  can sit in the primary key. */
     unit: text("unit").notNull().default(""),
-    /** Source service OBJECTID (statewide-unique within a vintage). */
-    objectId: integer("object_id"),
+    /**
+     * Source service OBJECTID. Statewide-unique within a vintage, and
+     * (county_fips, object_id) is unique across vintages too because the
+     * ingest replaces a county wholesale (see module header). Half of
+     * the primary key as of migration 0110; NOT NULL since the same
+     * migration (a feature with no usable objectid is skipped at parse
+     * time, never inserted — see address/parse.ts).
+     */
+    objectId: integer("object_id").notNull(),
     /** Parsed house number, e.g. `3075`. */
     addNumber: text("add_number"),
     /** Base street name, e.g. `Hill`. */
@@ -95,7 +115,7 @@ export const txgioAddress = pgTable(
       .notNull(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.countyFips, t.fullAddr, t.unit] }),
+    pk: primaryKey({ columns: [t.countyFips, t.objectId] }),
     tileIdx: index("txgio_address_tile_idx").on(t.countyFips, t.tileKey),
   }),
 );

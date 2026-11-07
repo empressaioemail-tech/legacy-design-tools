@@ -42,13 +42,51 @@ export function floodHazardFactBindKeys(
   return [parcelNodeId, `${parcelNodeId}${PADDED_SUFFIX}`];
 }
 
+/**
+ * One zone's share of the parcel, as the whole-parcel flood wire carries it
+ * (card F1/F2, `2026-10-12_whole_parcel_flood_design.md` §3.C). `bfe` is the
+ * wire's own field name (matching the companion row payload's own `bfe`),
+ * not `baseFloodElevation` -- the top-level scalar below keeps that name
+ * for compatibility; this is the new array, free to match the rail payload.
+ */
+export type FloodHazardFactZone = {
+  zone: string | null;
+  subtype: string | null;
+  /**
+   * `null` when neither the writer's own SFHA_TF nor a decisive zone letter
+   * (A/V prefix true; B/C/X prefix false) can answer it -- D, "unmapped",
+   * blank, or any unrecognized code (2026-10-12 tristate fix, operator
+   * ruling D1 extended: genuinely unknown is never defaulted to false).
+   * See `floodHazardFactFromParcelRecord.ts`'s `resolveZoneIsSfha`, the one
+   * shared function every surface (brief, map/card overlay) resolves this
+   * through.
+   */
+  isSfha: boolean | null;
+  floodway: boolean;
+  bfe: number | null;
+  areaShare: number | null;
+};
+
 export type FloodHazardFactPresent = {
   state: "present";
   source: typeof FLOOD_HAZARD_FACT_SOURCE;
   boundAs: string;
   tried: FloodHazardFactBindKeys;
   entityId: string;
-  inSpecialFloodHazardArea: boolean;
+  /**
+   * Whole-parcel D1: true when any zone RESOLVES true (via
+   * `resolveZoneIsSfha`) with a real `areaShare > 0`, EXCEPT a qualifying
+   * zone whose own `overlap` is "sliver" -- that touch sets
+   * `touchesSfhaEdge` instead (below), never this flag, and never silently
+   * drops the touch. `null` (2026-10-12 tristate fix) when no zone resolves
+   * true but at least one qualifying zone resolves genuinely unknown (D,
+   * "unmapped", blank, or an unrecognized code with no stated SFHA_TF) --
+   * never defaulted to false. The atom path's own body always states a
+   * definite boolean (see `interpretBody` below), so this is only ever
+   * `null` for a parcel_record-sourced read.
+   */
+  inSpecialFloodHazardArea: boolean | null;
+  /** Row 0 -- the largest-share zone. Kept for compatibility; a new reader should use `zones`. */
   floodZone: string | null;
   zoneSubtype: string | null;
   baseFloodElevation: number | null;
@@ -56,6 +94,18 @@ export type FloodHazardFactPresent = {
   sourceVintage: string | null;
   sourceCitation: string | null;
   evaluatedAt: string | null;
+  /** EVERY zone touching the parcel, row 0 first (the largest share). The old payload maps to one entry, `areaShare: null`. */
+  zones: FloodHazardFactZone[];
+  /** Row 0's own overlap classification. "single" for the atom path and the old payload (one point, one zone). */
+  overlap: "single" | "partial" | "sliver";
+  /**
+   * Operator ruling D1: an SFHA zone whose only qualifying touch is a
+   * sliver (below the writer's 1%-of-parcel-and-50m² threshold) is never
+   * "in" the flood zone and never hidden -- it sets this instead. True only
+   * when `inSpecialFloodHazardArea` is false and at least one zone has
+   * `isSfha` with a sliver `overlap`.
+   */
+  touchesSfhaEdge: boolean;
 };
 
 export type FloodHazardFactTypedAbsence = {
@@ -68,6 +118,7 @@ export type FloodHazardFactTypedAbsence = {
   verifiedAbsence: unknown;
   sourceTier: string | null;
   sourceAdapter: string | null;
+  sourceVintage: string | null;
 };
 
 export type FloodHazardFactRefusal = {
@@ -76,7 +127,21 @@ export type FloodHazardFactRefusal = {
     | "atom-miss"
     | "bind-conflict"
     | "atoms-store-not-configured"
-    | "malformed-atom";
+    | "malformed-atom"
+    /**
+     * PARCEL-FLOOD-CUTOVER (F-01): floodHazardFactFromParcelRecord.ts's own
+     * refusal codes, distinct from the atom-store codes above -- a
+     * parcel_record cell miss/store-not-configured/malformed-cell/
+     * unaccounted/invalid-id is a different failure mode than an atom-store
+     * miss and must not be collapsed into "atom-miss" (that would
+     * misrepresent which store failed), matching the same discipline
+     * PARCEL-B-SLATE1's own wells/specialDistricts adapters used.
+     */
+    | "invalid-parcel-node-id"
+    | "parcel-record-cell-miss"
+    | "parcel-record-unaccounted"
+    | "parcel-record-store-not-configured"
+    | "parcel-record-malformed-cell";
   source: typeof FLOOD_HAZARD_FACT_SOURCE;
   tried: FloodHazardFactBindKeys | [];
   reason: string;
@@ -201,6 +266,7 @@ function interpretBody(
       verifiedAbsence: rec.verifiedAbsence ?? null,
       sourceTier: asNullableString(rec.sourceTier),
       sourceAdapter: asNullableString(rec.sourceAdapter),
+      sourceVintage: asNullableString(rec.sourceVintage),
     };
   }
 
@@ -214,6 +280,9 @@ function interpretBody(
     };
   }
 
+  const floodZone = typeof rec.floodZone === "string" ? rec.floodZone : null;
+  const zoneSubtype = typeof rec.zoneSubtype === "string" ? rec.zoneSubtype : null;
+  const baseFloodElevation = asNullableNumber(rec.baseFloodElevation);
   return {
     state: "present",
     source: FLOOD_HAZARD_FACT_SOURCE,
@@ -221,13 +290,30 @@ function interpretBody(
     tried,
     entityId,
     inSpecialFloodHazardArea: rec.inSpecialFloodHazardArea,
-    floodZone: typeof rec.floodZone === "string" ? rec.floodZone : null,
-    zoneSubtype: typeof rec.zoneSubtype === "string" ? rec.zoneSubtype : null,
-    baseFloodElevation: asNullableNumber(rec.baseFloodElevation),
+    floodZone,
+    zoneSubtype,
+    baseFloodElevation,
     sourceAdapter: asNullableString(rec.sourceAdapter),
     sourceVintage: asNullableString(rec.sourceVintage),
     sourceCitation: asNullableString(rec.sourceCitation),
     evaluatedAt: asNullableString(rec.evaluatedAt),
+    // The atom path is always a single point, one zone: the same "old
+    // payload" shape the whole-parcel design maps to `overlap: "single"`,
+    // `areaShare: null`. Atoms carry no floodway field (parcel_record's
+    // flood companion does; see that module's own header comment), so
+    // this is always false here, never guessed from the free-text zone label.
+    zones: [
+      {
+        zone: floodZone,
+        subtype: zoneSubtype,
+        isSfha: rec.inSpecialFloodHazardArea,
+        floodway: false,
+        bfe: baseFloodElevation,
+        areaShare: null,
+      },
+    ],
+    overlap: "single",
+    touchesSfhaEdge: false,
   };
 }
 

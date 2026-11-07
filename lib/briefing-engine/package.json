@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^1.4.0",
     "@workspace/integrations-anthropic-ai": "workspace:*",
     "@workspace/integrations-xai-grok": "workspace:*"
   },

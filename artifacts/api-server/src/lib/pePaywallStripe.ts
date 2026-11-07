@@ -11,12 +11,12 @@
  * with brokerageStripe.ts):
  *   STRIPE_SOLO_PRICE_ID           Smart Site Solo   $49/mo
  *   STRIPE_STUDIO_PRICE_ID         Smart Site Studio $129/mo
- *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 10 seats)
+ *   STRIPE_TEAM_PRICE_ID           Smart Site Team   $299/mo (covers 3 seats)
  *   STRIPE_TEAM_SEAT_PRICE_ID      Smart Site Team additional seat $25/mo
  *   STRIPE_PE_UNLOCK_PRICE_ID      $15 one-time 30-day property unlock
  *   STRIPE_SOLO_ANNUAL_PRICE_ID    Smart Site Solo   $490/yr  (ruled 2026-08-24)
  *   STRIPE_STUDIO_ANNUAL_PRICE_ID  Smart Site Studio $1,290/yr
- *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 10 seats)
+ *   STRIPE_TEAM_ANNUAL_PRICE_ID    Smart Site Team   $2,990/yr (covers 3 seats)
  *
  * FAIL CLOSED: a tier whose price id is not configured refuses checkout
  * (PeCheckoutConfigError -> 503) rather than defaulting to any other
@@ -26,19 +26,32 @@
  * brokerage extension seam.
  */
 
+import { adMatchToStripeParams, type AdMatch } from "./peAdMatch";
 import { eq } from "drizzle-orm";
-import { db, peUserEntitlements, type PeSubscriptionTier } from "@workspace/db";
+import {
+  db,
+  peUserEntitlements,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import {
+  createStripePortalSessionForCustomer,
   isStripeConfigured,
+  stripeGet,
   stripePostForm,
   stripePublishableKey,
   type StripeCheckoutResult,
 } from "./brokerageStripe";
 import { setPeStripeCustomerId } from "./peIdentity";
+import {
+  PE_TEAM_INCLUDED_SEATS,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
+import { applyPromotekitReferral } from "./promotekitReferral";
+import { peCustomerHasCheckoutBlockingSubscription } from "./peSubscriptionStripe";
 
-/** Seats included in the Team base price (LOCKED ladder: "$299/mo for up to 10 seats"). */
-export const PE_TEAM_INCLUDED_SEATS = 10;
+export { PE_TEAM_INCLUDED_SEATS } from "./peTeamSeatsFromStripe";
 
 /** 30-day bound on the $15 per-property unlock (LOCKED ladder). */
 export const PE_PROPERTY_UNLOCK_DURATION_DAYS = 30;
@@ -74,6 +87,14 @@ export class PeCheckoutConfigError extends Error {
   }
 }
 
+/** Customer already holds an active, trialing, or past_due subscription (P-494). */
+export class PeSubscriptionExistsError extends Error {
+  constructor() {
+    super("subscription_exists");
+    this.name = "PeSubscriptionExistsError";
+  }
+}
+
 const TIER_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> = {
   solo: "STRIPE_SOLO_PRICE_ID",
   studio: "STRIPE_STUDIO_PRICE_ID",
@@ -84,7 +105,7 @@ const TIER_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> = {
  * Annual prices, ratified by operator ruling 2026-08-24
  * (`_decisions/2026-08-24_stripe_annual_pricing_and_live_activation.md`):
  * two months free — Solo $490/yr, Studio $1,290/yr, Team $2,990/yr (base
- * covers 10 seats). There is NO annual extra-seat price: extra seats stay
+ * covers 3 seats). There is NO annual extra-seat price: extra seats stay
  * monthly $25, and because Stripe Checkout requires every recurring line
  * item in one subscription to share a billing interval, an annual Team
  * checkout with more than the included seats is REFUSED rather than
@@ -96,7 +117,13 @@ export const TIER_ANNUAL_PRICE_ENV: Record<PeSubscriptionCheckoutTier, string> =
   team: "STRIPE_TEAM_ANNUAL_PRICE_ID",
 };
 
-export type PeBillingInterval = "month" | "year";
+/**
+ * `"month" | "year"`. Defined once, on the column that stores it
+ * (`pe_user_entitlements.billing_interval`, migration 0092), and re-exported
+ * here so checkout, the webhook, and the store cannot drift into two
+ * vocabularies for one fact.
+ */
+export type { PeBillingInterval };
 
 /**
  * Resolve the Stripe price id for a ladder tier + billing interval from
@@ -111,6 +138,80 @@ export function stripePriceIdForPeTier(
   const envName =
     interval === "year" ? TIER_ANNUAL_PRICE_ENV[tier] : TIER_PRICE_ENV[tier];
   return process.env[envName]?.trim() || null;
+}
+
+/**
+ * Every price id we have configured for one interval, across all three
+ * ladder tiers. Read through {@link stripePriceIdForPeTier} rather than
+ * `process.env` directly, so this file has exactly ONE place that knows
+ * which env name carries which (tier, interval) pair. Unset and blank env
+ * vars are dropped by that helper and never enter the set — a sentinel must
+ * not be able to match.
+ */
+function configuredPeTierPriceIds(
+  interval: PeBillingInterval,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const tier of PE_SUBSCRIPTION_TIERS) {
+    const id = stripePriceIdForPeTier(tier, interval);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * INVERSE of {@link stripePriceIdForPeTier}: which interval did WE configure
+ * this price id under? (P-98.)
+ *
+ * The billed price id is an opaque identifier we chose and put in env
+ * ourselves, so mapping it back through our own config is a derivation from
+ * a source we control. That is deliberately NOT `price.recurring.interval`,
+ * `plan.interval`, or `current_period_end`: those are Stripe API fields
+ * whose shape moves with the API version, and nothing in this repo pins a
+ * version.
+ *
+ * FAIL CLOSED. A price id that matches nothing we configured returns null —
+ * never "month". So does a price id configured under BOTH a monthly and an
+ * annual env name: that is a misconfiguration, we cannot tell which one the
+ * customer was billed under, and a guess would be a fabricated fact about
+ * their billing.
+ */
+export function peBillingIntervalForPriceId(
+  priceId: string | null | undefined,
+): PeBillingInterval | null {
+  if (typeof priceId !== "string") return null;
+  const needle = priceId.trim();
+  if (!needle) return null;
+  const isMonthly = configuredPeTierPriceIds("month").has(needle);
+  const isAnnual = configuredPeTierPriceIds("year").has(needle);
+  // Neither (unknown price) and both (ambiguous config) are the same
+  // answer: we do not know, so we say so.
+  if (isMonthly === isAnnual) return null;
+  return isMonthly ? "month" : "year";
+}
+
+/**
+ * The interval a subscription's billed line items were priced at.
+ *
+ * Items that match no configured price id are SKIPPED, not treated as a
+ * refusal — a Team subscription legitimately carries the $25 extra-seat
+ * line alongside its base price, and only the base price is in the tier
+ * config. Two items resolving to DIFFERENT intervals is a contradiction
+ * (Stripe requires one interval per subscription) and refuses with null
+ * rather than taking the first. No matching item at all is also null:
+ * unknown, never "month".
+ */
+export function peBillingIntervalFromPriceItems(
+  items: readonly StripePriceItem[],
+): PeBillingInterval | null {
+  let resolved: PeBillingInterval | null = null;
+  for (const item of items) {
+    const interval = peBillingIntervalForPriceId(item.priceId);
+    if (!interval) continue;
+    if (resolved !== null && resolved !== interval) return null;
+    resolved = interval;
+  }
+  return resolved;
 }
 
 export function stripeTeamSeatPriceId(): string | null {
@@ -248,7 +349,21 @@ async function getOrCreatePeStripeCustomer(input: {
     .from(peUserEntitlements)
     .where(eq(peUserEntitlements.ownerUserId, input.userId))
     .limit(1);
-  if (row?.stripeCustomerId) return row.stripeCustomerId;
+  if (row?.stripeCustomerId) {
+    // A customer created before this account's email was known (or before
+    // this fix shipped) has no email on file, and Custom Checkout refuses
+    // to confirm without one. Backfill it rather than leaving every prior
+    // customer permanently broken.
+    if (input.email) {
+      const existing = await stripeGet(`/customers/${row.stripeCustomerId}`);
+      if (!existing.email) {
+        await stripePostForm(`/customers/${row.stripeCustomerId}`, {
+          email: input.email,
+        });
+      }
+    }
+    return row.stripeCustomerId;
+  }
 
   const customer = await stripePostForm("/customers", {
     "metadata[pe_user_id]": input.userId,
@@ -292,6 +407,18 @@ export async function createPeSubscriptionCheckoutSession(input: {
   returnUrl?: string;
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
+  /**
+   * Ad-platform match keys from the visitor's browser (forwarded by the BFF on
+   * checkout creation). Stored on the Checkout SESSION metadata only, never the
+   * subscription, so the Stripe webhook's server-side Purchase is matchable.
+   */
+  adMatch?: AdMatch;
+  /**
+   * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
+   * `promotekitReferral.ts`; an id that does not look like one is dropped,
+   * never an error.
+   */
+  promotekitReferral?: string | null;
 }): Promise<StripeCheckoutResult> {
   const { tier } = input;
   const interval: PeBillingInterval = input.interval ?? "month";
@@ -317,7 +444,7 @@ export async function createPeSubscriptionCheckoutSession(input: {
     // base monthly. Route zod schema already rejects this with 400; this
     // guards programmatic callers.
     throw new Error(
-      "annual Team checkout supports at most the 10 included seats — extra seats bill monthly only",
+      `annual Team checkout supports at most the ${PE_TEAM_INCLUDED_SEATS} included seats — extra seats bill monthly only`,
     );
   }
 
@@ -372,6 +499,9 @@ export async function createPeSubscriptionCheckoutSession(input: {
   }
 
   const customerId = await getOrCreatePeStripeCustomer(input);
+  if (await peCustomerHasCheckoutBlockingSubscription(customerId)) {
+    throw new PeSubscriptionExistsError();
+  }
   const params: Record<string, string> = {
     mode: "subscription",
     customer: customerId,
@@ -388,6 +518,11 @@ export async function createPeSubscriptionCheckoutSession(input: {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": "1",
   };
+  if (tier === "team") {
+    const billedSeats = String(PE_TEAM_INCLUDED_SEATS + extraSeats);
+    params["metadata[seats_purchased]"] = billedSeats;
+    params["subscription_data[metadata][seats_purchased]"] = billedSeats;
+  }
   applyPeCheckoutUiMode(params, input);
   if (extraSeats > 0 && seatPriceId) {
     params["line_items[1][price]"] = seatPriceId;
@@ -396,6 +531,13 @@ export async function createPeSubscriptionCheckoutSession(input: {
   if (input.installId) {
     params["metadata[install_id]"] = input.installId;
   }
+  // OPS-16 P-185: the affiliate referral rides the session AND the
+  // subscription, so renewals attribute too (PromoteKit's Subscription tab).
+  // Absent when the id was missing or malformed — never a placeholder.
+  applyPromotekitReferral(params, input.promotekitReferral, {
+    subscription: true,
+  });
+  Object.assign(params, adMatchToStripeParams(input.adMatch ?? {}));
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, {
     custom,
@@ -423,6 +565,18 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   returnUrl?: string;
   /** Absent defaults to hosted (today's checkoutUrl redirect). */
   uiMode?: PeCheckoutUiMode;
+  /**
+   * Ad-platform match keys from the visitor's browser (forwarded by the BFF on
+   * checkout creation). Stored on the Checkout SESSION metadata only, never the
+   * subscription, so the Stripe webhook's server-side Purchase is matchable.
+   */
+  adMatch?: AdMatch;
+  /**
+   * OPS-16 P-185: PromoteKit affiliate referral id, if any. Normalized by
+   * `promotekitReferral.ts`; an id that does not look like one is dropped,
+   * never an error.
+   */
+  promotekitReferral?: string | null;
 }): Promise<StripeCheckoutResult> {
   const publishableKey = stripePublishableKey();
   const custom = isCustomPeCheckoutUiMode(input.uiMode);
@@ -467,6 +621,10 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   const params: Record<string, string> = {
     mode: "payment",
     customer: customerId,
+    // OPS-16 P-185: PromoteKit tracks by promo code as well as by `?via=`
+    // link, and a promo code can only be entered if Checkout offers the field.
+    // The subscription path already carried this; the $15 unlock did not.
+    allow_promotion_codes: "true",
     "metadata[pe_user_id]": input.userId,
     "metadata[parcel_node_id]": input.parcelNodeId,
     "metadata[checkout_kind]": "property_unlock" satisfies PeCheckoutKind,
@@ -477,6 +635,195 @@ export async function createPePropertyUnlockCheckoutSession(input: {
   if (input.installId) {
     params["metadata[install_id]"] = input.installId;
   }
+  applyPromotekitReferral(params, input.promotekitReferral);
+  Object.assign(params, adMatchToStripeParams(input.adMatch ?? {}));
   const session = await stripePostForm("/checkout/sessions", params);
   return livePeCheckoutFromSession(session, { custom, publishableKey });
+}
+
+// ---------------------------------------------------------------------------
+// A-062 — THE PE USER-SCOPED STRIPE CUSTOMER PORTAL.
+//
+// WHY THIS EXISTS. `apps/property-explorer/public/terms.html` tells every
+// customer "You can cancel a paid plan through the Stripe billing flow in the
+// product." Until this function there was no such flow for a PE user: the only
+// portal in the codebase was `brokerageStripe.createBillingPortalSession`,
+// which is keyed on an EXTENSION INSTALL ID and resolves a
+// `brokerage_wallets.stripe_customer_id`. A PE subscriber's customer lives on
+// `pe_user_entitlements.stripe_customer_id` and the two are different columns
+// on different rows for different subjects. Reusing the install seam for a
+// signed-in web user would open the wrong customer's portal, or create a
+// customer that never pays.
+//
+// WHAT IS SHARED AND WHAT IS NOT. The HTTP call is shared —
+// `createStripePortalSessionForCustomer` in brokerageStripe.ts is the single
+// `/billing_portal/sessions` poster and both seams go through it. The CUSTOMER
+// RESOLUTION is deliberately not shared, because the two seams need opposite
+// behaviour on a missing customer: the install seam creates one, and this one
+// must never create one (acceptance item 2).
+//
+// THE READ IS NOT `getOrCreatePeStripeCustomer`. That function is one letter
+// of intent away and would satisfy every "did we get a customer id" check
+// while silently registering a Stripe customer for a free user who merely
+// clicked "cancel subscription" to see what it said. Asking to manage billing
+// is not a purchase and must leave no trace in Stripe.
+// ---------------------------------------------------------------------------
+
+/**
+ * The path A-062 mounts, exported so the route and its test name the same
+ * string once. The client half (hauska-map `src/lib/portalClient.ts`) carries
+ * the proxy-side spelling of the same path and the two are pinned
+ * independently on each side of the wire.
+ */
+export const PE_BILLING_PORTAL_ROUTE = "/property-explorer/v1/billing/portal";
+
+/**
+ * ABSENT IS NOT AN ERROR AND NOT A ZERO. A signed-in user with no Stripe
+ * customer is the ordinary state of every free account and every account that
+ * abandoned a checkout, so it gets its own arm of the result type rather than
+ * a thrown error or an empty string. The compiler makes every consumer handle
+ * it; no `if (!customerId)` can be forgotten.
+ */
+export type PeBillingPortalResult =
+  | { kind: "portal"; mode: "live"; portalUrl: string }
+  /** The account has never had a Stripe customer. Declared, not fabricated. */
+  | { kind: "no-billing-account" }
+  /**
+   * Stripe is not configured on this deployment, so no portal can be opened.
+   *
+   * DELIBERATELY NOT SIMULATED, unlike the install-scoped seam, which returns
+   * a fake `?simulated_portal=1` bounce. A simulated portal cannot cancel a
+   * subscription, and this route exists precisely because a cancellation
+   * promise the product could not honour was the defect. Handing back a URL
+   * that looks like a portal and cancels nothing would re-create it one layer
+   * down.
+   */
+  | { kind: "not-configured" };
+
+/**
+ * Read-only lookup of the PE user's Stripe customer id.
+ *
+ * Exported so a test can prove the no-customer path without reaching Stripe.
+ * Returns `null` for both "no entitlement row" and "row with a null customer"
+ * because the customer is what the caller needs and both mean it is absent;
+ * the two are not otherwise distinguished by anything downstream.
+ */
+export async function readPeStripeCustomerId(
+  userId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ stripeCustomerId: peUserEntitlements.stripeCustomerId })
+    .from(peUserEntitlements)
+    .where(eq(peUserEntitlements.ownerUserId, userId))
+    .limit(1);
+  const id = row?.stripeCustomerId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+/**
+ * Open a Stripe Customer Portal session for a signed-in PE user (A-062).
+ *
+ * `userId` MUST come from the authenticated session. The route that calls this
+ * refuses a caller-supplied customer id outright rather than ignoring it, so
+ * there is no path by which a request body reaches this argument.
+ *
+ * `returnUrl` is REQUIRED and has no default here. The historical default,
+ * `peWebAppBaseUrl()`, falls back to the hardcoded
+ * `https://property-explorer-xi.vercel.app` when PE_WEB_APP_BASE_URL is unset,
+ * which would land a Smart Site customer on a stale Vercel host after
+ * cancelling. A required argument makes that a compile error rather than a
+ * silent wrong destination (acceptance item 4).
+ */
+export async function createPeBillingPortalSession(input: {
+  /** Resolved from the authenticated session by the route. Never from a body. */
+  userId: string;
+  /** Explicit. No default — see the note above. */
+  returnUrl: string;
+}): Promise<PeBillingPortalResult> {
+  if (!isStripeConfigured()) {
+    return { kind: "not-configured" };
+  }
+
+  // READ, never get-or-create. See the header note.
+  const customerId = await readPeStripeCustomerId(input.userId);
+  if (!customerId) {
+    logger.info(
+      { userId: input.userId.slice(0, 8) },
+      "pe-stripe: billing portal refused — account has no stripe customer",
+    );
+    return { kind: "no-billing-account" };
+  }
+
+  const session = await createStripePortalSessionForCustomer({
+    customerId,
+    returnUrl: input.returnUrl,
+  });
+  return { kind: "portal", mode: session.mode, portalUrl: session.portalUrl };
+}
+
+/**
+ * Hosts a portal `return_url` may land a customer on (A-062 item 4).
+ *
+ * THIS IS AN ALLOWLIST, NOT A SANITISER. An unrecognised host is refused; it
+ * is never rewritten to a "safe" one, because silently redirecting a customer
+ * somewhere other than where the caller asked is the same class of defect as
+ * the stale hardcoded default this card removes — a wrong destination nobody
+ * is told about.
+ *
+ * Derived, in order: an explicit `PE_PORTAL_RETURN_HOSTS` (comma separated),
+ * else the host of `PE_WEB_APP_BASE_URL` when it is set, plus the Smart Site
+ * production hosts, plus Vercel preview hosts, plus loopback outside
+ * production. The Vercel arm is here because PE checkout ALREADY returns to
+ * `window.location.origin` on a preview deployment; a portal stricter than the
+ * checkout beside it would refuse a flow the product already permits, and a
+ * control that blocks work it was never meant to reach teaches the fleet to
+ * route around it.
+ */
+export function peAllowedReturnHosts(): string[] {
+  const explicit = process.env.PE_PORTAL_RETURN_HOSTS?.trim();
+  if (explicit) {
+    return explicit
+      .split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  const hosts = new Set<string>(["smartsite.cloud", "www.smartsite.cloud"]);
+  const configured = process.env.PE_WEB_APP_BASE_URL?.trim();
+  if (configured) {
+    try {
+      hosts.add(new URL(configured).hostname.toLowerCase());
+    } catch {
+      // A malformed PE_WEB_APP_BASE_URL contributes NOTHING rather than a
+      // guessed host. The two production entries above still stand.
+    }
+  }
+  return [...hosts];
+}
+
+/**
+ * Is this a return URL we will hand to Stripe?
+ *
+ * Pure and exported so the rule is testable without a request. Refuses on a
+ * parse failure, on any scheme other than https (http only on loopback, for
+ * local dev), and on a host outside {@link peAllowedReturnHosts} — with the
+ * Vercel preview and loopback arms named explicitly rather than folded into a
+ * regex nobody can read.
+ */
+export function isAllowedPeReturnUrl(candidate: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    return false;
+  }
+  if (loopback) return process.env.NODE_ENV !== "production";
+  if (peAllowedReturnHosts().includes(host)) return true;
+  // Vercel preview deployments for this app. Exact suffix, so `vercel.app`
+  // itself and `notvercel.app` are both refused.
+  return host.endsWith(".vercel.app");
 }

@@ -2,12 +2,10 @@
  * Authoritative-source URL builders for the web-code allowlist.
  */
 
-import type { WebCodeReviewTarget } from "./types";
+import { isIccHost, isIccMirrorUrl, type WebCodeReviewTarget } from "./types";
 import {
   bareSectionFromCodeRef,
   driverProfileForJurisdiction,
-  inferChapterNumber,
-  sectionAnchorToken,
   slugConfigForTarget,
   upcodesChapterPath,
   upcodesJurisdictionSlug,
@@ -34,7 +32,8 @@ export function buildDriverUrls(
   for (const driver of target.drivers) {
     urls.push(...singleDriverUrls(driver, target));
   }
-  return urls;
+  // G-309 (A15): no ICC model-code title URL is ever built for a mirror.
+  return urls.filter((c) => !isIccMirrorUrl(c.url));
 }
 
 function singleDriverUrls(
@@ -62,17 +61,8 @@ function singleDriverUrls(
 function floridaDriverUrl(driver: WebDriverId, codeRef: string): string | null {
   switch (driver) {
     case "icc":
-      if (codeRef.startsWith("NEC")) return null;
-      if (codeRef.includes("M601") || codeRef.includes("Ch.4")) {
-        return "https://codes.iccsafe.org/content/FLMECH2023P1";
-      }
-      if (codeRef.includes("1405")) {
-        return "https://codes.iccsafe.org/content/FLBC2023P1/chapter-14-exterior-walls";
-      }
-      if (codeRef.includes("FBCEB") || codeRef.includes("601.2")) {
-        return "https://codes.iccsafe.org/content/FLFEC2023P1";
-      }
-      return "https://codes.iccsafe.org/content/FLBC2023P1";
+      // G-309: ICC Digital Codes is never fetched.
+      return null;
     case "florida":
       return "https://www.floridabuilding.org/fbc/commission_fbc_8th_edition.htm";
     case "nfpa":
@@ -107,11 +97,9 @@ function nationalOrTexasDriverUrls(
     target.edition,
     cfg?.upcodesBookSlug,
   );
-  const iccChapter = inferChapterNumber(section);
-  const anchor = sectionAnchorToken(section);
 
   if (cfg?.deeplinkOnly && cfg.deeplinkUrl) {
-    return driver === "icc"
+    return driver === "icc" && !isIccHost(new URL(cfg.deeplinkUrl).hostname)
       ? [{ driver, url: cfg.deeplinkUrl, granularity: "chapter" }]
       : [];
   }
@@ -126,18 +114,9 @@ function nationalOrTexasDriverUrls(
           granularity: "chapter",
         },
       ];
-    case "icc": {
-      if (!cfg?.iccContentSlug) return [];
-      const chapterUrl = `https://codes.iccsafe.org/content/${cfg.iccContentSlug}/chapter-${iccChapter}`;
-      return [
-        {
-          driver,
-          url: `${chapterUrl}#${anchor}`,
-          granularity: "section",
-        },
-        { driver, url: chapterUrl, granularity: "chapter" },
-      ];
-    }
+    case "icc":
+      // G-309 item 5: no iccsafe.org URL is ever built or fetched.
+      return [];
     case "upcodes": {
       if (!cfg?.upcodesBookSlug) return [];
       if (target.codeRef.startsWith("NEC")) {

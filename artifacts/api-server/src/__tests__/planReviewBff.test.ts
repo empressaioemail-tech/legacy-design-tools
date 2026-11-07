@@ -18,18 +18,19 @@ import { LEGACY_INTERNAL_OWNER_USER_ID } from "../lib/anonymousOwnerCookie";
 
 // No-network vision: the singleton returns a valid bbox JSON text block.
 vi.mock("@workspace/integrations-anthropic-ai", () => ({
-  anthropic: {
-    messages: {
-      create: vi.fn(async () => ({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }),
-          },
-        ],
-      })),
-    },
-  },
+  anthropic: (() => {
+    const create = vi.fn(async () => ({
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }),
+        },
+      ],
+    }));
+    // The intake route (G-309 A25) uses the beta endpoint; vision uses messages.
+    return { messages: { create }, beta: { messages: { create } } };
+  })(),
   createAnthropicClient: vi.fn(),
 }));
 

@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+﻿import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { SMARTSITE_MCP_TOOLS, type SmartsiteToolName } from "./constants.js";
@@ -10,16 +10,307 @@ import {
 import {
   canRunDeepReport,
   canRunStudioReport,
+  isPropertyExportKind,
   isStudioExportKind,
   refuseDeepReport,
+  refusePropertyExport,
   refuseStudioReport,
   snapshotFromAuth,
 } from "./entitlement.js";
-import { requireAuthContext } from "./request-context.js";
-import { executeExportInstrument } from "./export-instrument.js";
-import { loadHauskaMcpConfig } from "./hauska-client.js";
-import { buildRunReportEnvelope, normalizeR1ResponseText, stripSavedPropertiesForExternal } from "./tool-honesty.js";
+import { customerBriefReason } from "./customer-brief-reason.js";
+import {
+  ANCHOR_TIMEOUT_MS,
+  anchorFromFacetsBody,
+  attachAnchorToResponseText,
+  attachBatchAnchorsToResponseText,
+  parcelFacetsPath,
+  readParcelAnchor,
+  readParcelAnchorsForBatch,
+  skippedAnchorForStub,
+  type AnchorOutcome,
+  type BatchAnchorOutcome,
+} from "./parcel-anchor.js";
+import { hostSessionFromAuth, requireAuthContext } from "./request-context.js";
+import {
+  executeExportInstrument,
+  exportKindNotAvailableResult,
+} from "./export-instrument.js";
+import { executeFeasibilityExport } from "./feasibility-export.js";
+import { hasPropertyUnlock } from "./property-unlock.js";
+import {
+  buildRunReportEnvelope,
+  declarePlaceSearchRefusal,
+  declareUpstreamNonOk,
+  mapGetSmartSiteNonOk,
+  mapScreensGateNonOk,
+  missClassDisplayText,
+  normalizeGetSmartSiteResponseText,
+  outOfCoverageAgentGuidance,
+  stripSavedPropertiesForExternal,
+} from "./tool-honesty.js";
 import type { ToolResult } from "./tools-types.js";
+import {
+  appendCardContractProse,
+  cardViewFromToolPayload,
+  injectCardContract,
+  type CardView,
+} from "./card-contract.js";
+import {
+  appMetaFor,
+  registerMcpApp,
+  APP_MIME,
+  APP_RESOURCE_URI,
+} from "./mcp-app.js";
+import {
+  registerVocabularyResource,
+  STANDING_VOCAB_CONTENT_PART,
+} from "./vocabulary.js";
+import { LIST_NODE_DEPTH_CAP } from "./map-reliability.js";
+import {
+  wireFindNearestParcelsForMap,
+  wireFindParcelForMap,
+  wireFindParcelsForMap,
+} from "./map-tool-wire.js";
+import type { McpRenderHostKey } from "./mcp-host-key.js";
+import { hostKeyFromSession } from "./host-ui-capability.js";
+import { applyHostTierToResult } from "./host-tier-result.js";
+import {
+  recordMapRenderNoMap,
+  recordMapRenderSent,
+} from "./render-metrics.js";
+import { mintMapRenderReportToken } from "./seat-metrics-auth.js";
+import { registerPlanReviewPreview } from "./plan-review-preview.js";
+import { registerSmartsitePrompts } from "./prompts.js";
+import { slimBatchResponseText } from "./batch-slim.js";
+
+const SMARTSITE_BATCH_CAP = 50;
+/**
+ * H2 (measured 2026-08-30 on p557): a node body averages 4,711 characters
+ * (largest 5,549), and the host writes any tool result over roughly 150,000
+ * characters to a file and hands the panel a pointer, so a 50-id node batch
+ * (about 235,000) never reaches the panel. Node arrays cap at 25; stub keeps
+ * 50. The JSON schema cannot express a depth-dependent cap, so the array
+ * stays max(50) there and this rule is enforced here and published in the
+ * description.
+ */
+const SMARTSITE_NODE_BATCH_CAP = 25;
+const GET_SMART_SITE_DEPTHS = ["stub", "node", "hop1", "subgraph"] as const;
+type ImplementedDepth = "stub" | "node";
+
+function batchCapFor(depth: ImplementedDepth): number {
+  return depth === "node" ? SMARTSITE_NODE_BATCH_CAP : SMARTSITE_BATCH_CAP;
+}
+const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
+const SCREEN_ROW_SOURCES = ["walk", "saved", "pasted"] as const;
+/** P-436: map multi-select create_screen provenance (not used on add_to_screen). */
+const CREATE_SCREEN_SOURCES = ["pasted", "map-selection"] as const;
+
+/**
+ * P-91 v3 Q1. Mirrors PARCEL_NODE_ID_RE in
+ * artifacts/api-server/src/routes/brokeragePlaceSitusSearch.ts (read
+ * 2026-08-31): county FIPS, colon, county-assigned parcel id. Used to pick
+ * find_parcel's `near` centre-point path ΓÇö a parcel node id reads the
+ * anchor (node facets) route the same way M-1 does; anything else geocodes
+ * as free text via place/resolve.
+ */
+const PARCEL_NODE_ID_RE = /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Mirror RADIUS_SEARCH_CAP / STREET_SEARCH_CAP in
+ * artifacts/api-server/src/lib/txgioRadiusSearch.ts /
+ * txgioStreetSearch.ts (both 50, read 2026-08-31). Bounds the LOCAL `cap`
+ * argument at the MCP schema so a caller mistake on cap fails at the tool
+ * boundary instead of a round trip. Deliberately NOT applied to
+ * `near.radiusFt`: that bound is exactly what radius_exceeds_max exists to
+ * refuse, and pre-validating it here would make that refusal code
+ * unreachable through this tool.
+ */
+const FIND_PARCEL_NEAR_CAP_MAX = 50;
+const FIND_PARCEL_STREET_CAP_MAX = 50;
+
+/**
+ * P-106. Mirrors CONSTRAINT_SEARCH_MAX_CAP in
+ * artifacts/api-server/src/lib/parcelConstraintSearch.ts (200, read
+ * 2026-09-02). Bounds the LOCAL `cap` so a caller mistake fails at the tool
+ * boundary rather than a round trip. The county list and the unmeasured
+ * ceiling are deliberately NOT mirrored here: the first would go stale the
+ * day a county is added, and the second is an operator ruling that lives with
+ * the measurement, not in a package that cannot verify it.
+ */
+const FIND_PARCELS_CAP_MAX = 200;
+/** Matches NEAREST_PARCELS_MAX_CAP in api-server txgioNearestParcels.ts. */
+const FIND_NEAREST_CAP_MAX = 50;
+
+/**
+ * The filter grammar, closed at the tool boundary. Every member is strict, so
+ * an extra key is a rejection rather than a silently ignored field, and an
+ * unrecognised op never reaches the SQL builder.
+ */
+const FIND_PARCELS_FILTER = z.union([
+  z
+    .object({
+      rail: z.string().min(1),
+      op: z.enum(["gte", "lte"]),
+      number: z.number(),
+    })
+    .strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.literal("eq"), number: z.number() })
+    .strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.literal("eq"), text: z.string().min(1) })
+    .strict(),
+  z
+    .object({
+      rail: z.string().min(1),
+      op: z.literal("in"),
+      texts: z.array(z.string().min(1)).min(1),
+    })
+    .strict(),
+  z.object({ rail: z.string().min(1), op: z.literal("absent") }).strict(),
+  z
+    .object({ rail: z.string().min(1), op: z.enum(["is_true", "is_false"]) })
+    .strict(),
+]);
+
+const ASK_THE_MAP_REFUSAL = "ask_the_map accepts parcelNodeId and message.";
+const ASK_THE_MAP_STRICT = z
+  .object({
+    parcelNodeId: z.string().min(1),
+    message: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Strict at the type: tools/list publishes additionalProperties false and
+ * the SDK refuses extra keys before the handler runs. The SDK prints every
+ * zod issue verbatim, and a strict object's unrecognized_keys issue names
+ * the extra keys, which is the P-91 item 10 leak on the MCP error path.
+ * This instance keeps the strict schema (same shape, same published JSON
+ * schema) and replaces only that issue with a fixed sentence.
+ */
+function askTheMapInputSchema(): typeof ASK_THE_MAP_STRICT {
+  const guarded: typeof ASK_THE_MAP_STRICT = Object.create(ASK_THE_MAP_STRICT);
+  guarded.safeParseAsync = async (data: unknown) => {
+    const result = await ASK_THE_MAP_STRICT.safeParseAsync(data);
+    if (
+      result.success ||
+      !result.error.issues.some((issue) => issue.code === "unrecognized_keys")
+    ) {
+      return result;
+    }
+    return {
+      success: false,
+      error: new z.ZodError([
+        { code: z.ZodIssueCode.custom, path: [], message: ASK_THE_MAP_REFUSAL },
+      ]),
+    };
+  };
+  return guarded;
+}
+
+/**
+ * P-91 QA 2026-08-30 D1. Cortex situs-search merges parcel hits with
+ * address-point rows (`parcelNodeId: null`, lat/lon) that exist for the web
+ * typeahead. To a third-party agent a null id inside `hits` is a trap. Here
+ * `hits` carries parcel hits only; when there is no parcel hit, the address
+ * points move to `located` (typed, never a hit) so a caller can say "address
+ * exists, parcel not bound" instead of "no match". Non-JSON bodies pass through.
+ *
+ * P-107 (OPS-16 A-072). Cortex may also carry `missClass: "out_of_coverage"`
+ * (plus `outOfCoverageState`) straight through from searchPlaceByPrefix ΓÇö
+ * the query resolved to a state Smart Site's store has not reached, fired
+ * BEFORE the store was ever searched, so there is no `located` row to move
+ * here either. That token is enriched with `missClassDisplayText` and
+ * `agentGuidance` (read from the shared VOCABULARY / mirrored coverage
+ * constant in tool-honesty.ts) so a caller reads a served answer ΓÇö what IS
+ * covered today ΓÇö rather than a bare, unexplained machine token. `no-hit`
+ * and `located-unbound` are left exactly as they were: unenriched.
+ */
+export function splitFindParcelHits(bodyText: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return bodyText;
+  const record = parsed as Record<string, unknown>;
+  if (!Array.isArray(record.hits)) return bodyText;
+  const parcelHits: unknown[] = [];
+  const located: unknown[] = [];
+  for (const raw of record.hits) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const hit = raw as Record<string, unknown>;
+    if (typeof hit.parcelNodeId === "string" && hit.parcelNodeId.length > 0) {
+      parcelHits.push(hit);
+    } else if (hit.source === "address-point") {
+      const { parcelNodeId: _null, ...point } = hit;
+      located.push(point);
+    }
+  }
+  const out: Record<string, unknown> = { ...record, hits: parcelHits };
+  if (parcelHits.length === 0 && located.length > 0) {
+    out.located = located;
+    if (out.missClass === undefined) out.missClass = "located-unbound";
+  }
+  if (out.missClass === "out_of_coverage") {
+    out.missClassDisplayText = missClassDisplayText("out_of_coverage");
+    out.agentGuidance = outOfCoverageAgentGuidance(
+      typeof record.outOfCoverageState === "string"
+        ? record.outOfCoverageState
+        : undefined,
+    );
+  }
+  return JSON.stringify(out);
+}
+
+function hostKeyFromAuth(): McpRenderHostKey {
+  const auth = requireAuthContext();
+  return hostKeyFromSession(
+    hostSessionFromAuth(auth),
+    auth.userId,
+  ) as McpRenderHostKey;
+}
+
+function injectMapRenderReportFields(
+  text: string,
+  correlationId: string | null,
+): string {
+  if (!correlationId) return text;
+  const reportToken = mintMapRenderReportToken(correlationId);
+  if (!reportToken) return text;
+  try {
+    const data = JSON.parse(text) as Record<string, unknown>;
+    data.mapRenderReport = { correlationId, reportToken };
+    return JSON.stringify(data);
+  } catch {
+    return text;
+  }
+}
+
+function attachMapRenderReportToStructuredContent(
+  structuredContent: Record<string, unknown> | undefined,
+  correlationId: string | null,
+): void {
+  if (!structuredContent || !correlationId) return;
+  const reportToken = mintMapRenderReportToken(correlationId);
+  if (!reportToken) return;
+  structuredContent.mapRenderReport = { correlationId, reportToken };
+}
+
+function recordToolMapIntent(
+  host: McpRenderHostKey,
+  tool: SmartsiteToolName,
+  view: CardView,
+  reasonCode: string,
+): string | null {
+  if (view === "none") {
+    recordMapRenderNoMap(host, tool, reasonCode);
+    return null;
+  }
+  return recordMapRenderSent(host, tool, reasonCode);
+}
 
 function notReadyMessage(tool: string, reason: string): string {
   return JSON.stringify({
@@ -51,6 +342,165 @@ function upgradeRequiredResult(
   };
 }
 
+/** H1: a cortex non-OK travels as a declared error body, never raw. */
+function upstreamErrorResult(httpStatus: number, bodyText: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(declareUpstreamNonOk(httpStatus, bodyText)),
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * A refusal this server itself makes (as opposed to one it relays from an
+ * upstream serve_refused body ΓÇö see declarePlaceSearchRefusal in
+ * tool-honesty.ts for that case, which carries its own shape). `reason` is
+ * a machine token, matching this file's own convention (parcel_batch_cap,
+ * screen_id_not_accepted); `extra` carries any additional declared fields
+ * (e.g. the parcelNodeId and anchorRead a near centre-point miss names).
+ */
+/**
+ * P-452 serve_refused bodies from research/nearest-parcels (codes not in the
+ * place-search vocabulary table).
+ */
+function declareNearestParcelsServeRefusal(
+  bodyText: string,
+): { status: "refused"; reason: string; message: string; reasonDisplayText: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const body = parsed as Record<string, unknown>;
+  if (body.errorClass !== "serve_refused") return null;
+  const code = body.error;
+  if (typeof code !== "string" || !code.startsWith("nearest_")) return null;
+  if (typeof body.message !== "string" || body.message.length === 0) return null;
+  return {
+    status: "refused",
+    reason: code,
+    message: body.message,
+    reasonDisplayText: body.message,
+  };
+}
+
+async function resolveNearestSubjectFromQuery(
+  config: CortexClientConfig,
+  userId: string,
+  query: string,
+): Promise<
+  | { ok: true; parcelNodeId: string }
+  | { ok: false; result: ToolResult }
+> {
+  const res = await cortexFetch(
+    config,
+    `/api/brokerage/v1/place/situs-search?q=${encodeURIComponent(query)}`,
+    { userId },
+  );
+  const body = await res.text();
+  if (!res.ok) return { ok: false, result: upstreamErrorResult(res.status, body) };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(splitFindParcelHits(body));
+  } catch {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  const rec =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  const hits = Array.isArray(rec?.hits) ? rec.hits : [];
+  const ids: string[] = [];
+  for (const raw of hits) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const id = (raw as Record<string, unknown>).parcelNodeId;
+    if (typeof id === "string" && id.length > 0) ids.push(id);
+  }
+  if (ids.length === 1) return { ok: true, parcelNodeId: ids[0]! };
+  if (ids.length === 0) {
+    const miss =
+      typeof rec?.missClass === "string" ? rec.missClass : "no-hit";
+    return {
+      ok: false,
+      result: declaredRefusalResult(
+        "nearest_subject_not_found",
+        "That address did not bind to one parcel. Use find_parcel, then call this tool with the parcelNodeId.",
+        { missClass: miss, query },
+      ),
+    };
+  }
+  return {
+    ok: false,
+    result: declaredRefusalResult(
+      "nearest_subject_ambiguous",
+      "That address hit more than one parcel. Pick one parcelNodeId and call again; do not search the web.",
+      { query, hits: ids },
+    ),
+  };
+}
+
+function declaredRefusalResult(
+  reason: string,
+  message: string,
+  extra?: Record<string, unknown>,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ status: "refused", reason, message, ...extra }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+function isDeclaredErrorText(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+    const rec = parsed as Record<string, unknown>;
+    return (
+      typeof rec.status === "string" &&
+      rec.status.length > 0 &&
+      typeof rec.reason === "string" &&
+      rec.reason.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * H1 for a result built outside this file (the export proxy): an error
+ * result whose text is not already a declared body is wrapped here. The
+ * upstream HTTP status did not travel with it, so it is `"unmeasured"`,
+ * never a guessed number.
+ */
+function ensureDeclaredError(result: ToolResult): ToolResult {
+  if (!result.isError) return result;
+  const first = result.content[0];
+  const text = first && first.type === "text" ? first.text : undefined;
+  if (typeof text !== "string" || isDeclaredErrorText(text)) return result;
+  return {
+    ...result,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(declareUpstreamNonOk("unmeasured", text)),
+      },
+    ],
+  };
+}
+
 async function withCortex(
   fn: (config: CortexClientConfig) => Promise<ToolResult>,
 ): Promise<ToolResult> {
@@ -61,60 +511,856 @@ async function withCortex(
       "Smart Site MCP cannot reach the workbench backend.",
     );
   }
-  return fn(config);
+  try {
+    return await fn(config);
+  } catch (err) {
+    // A slow or unreachable backend is a declared answer, never a raw
+    // "This operation was aborted" (QA 2026-09-29, fix register B1).
+    const name = (err as { name?: string } | null)?.name;
+    if (name === "AbortError" || name === "TimeoutError") {
+      return degradedResult("upstream_timeout", "Smart Site took too long to answer. Try again, or narrow the request.");
+    }
+    if (err instanceof TypeError) {
+      return degradedResult("upstream_unreachable", "Smart Site could not reach its data service. Try again shortly.");
+    }
+    throw err;
+  }
+}
+
+type CenterPointOutcome =
+  | { ok: true; lat: number; lng: number }
+  | { ok: false; result: ToolResult };
+
+/**
+ * P-91 v3 Q1. find_parcel's `near` needs one absolute point to search a
+ * radius around. Three ways to get one exist on cortex today: situs-search
+ * address-point hits carry latitude/longitude; POST place/resolve geocodes
+ * any address; the node facets route serves cityLimitsFact.queryPoint per
+ * parcel (parcel-anchor.ts's M-1 anchor).
+ *
+ * situs-search is not used here. Its parcel-situs hits ΓÇö the common case
+ * when `query` already names a known parcel ΓÇö carry no coordinate at all
+ * (SitusSearchHit in txgioAddressResolve.ts has no lat/lng field; only the
+ * rarer address-point hits do), so routing through it would still need a
+ * second lookup for the common case and buys nothing over calling the
+ * right one of the other two directly.
+ *
+ * A parcel node id reads the same facets route M-1's anchor already reads,
+ * reusing anchorFromFacetsBody's own honesty rules verbatim: no 0,0
+ * sentinel, no centroid guess, a miss is declared rather than defaulted. A
+ * free-text query geocodes through place/resolve.
+ */
+async function resolveNearCenterPoint(
+  config: CortexClientConfig,
+  query: string,
+  userId: string | undefined,
+): Promise<CenterPointOutcome> {
+  if (PARCEL_NODE_ID_RE.test(query)) {
+    const res = await cortexFetch(config, parcelFacetsPath(query), {
+      userId,
+      timeoutMs: ANCHOR_TIMEOUT_MS,
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      return { ok: false, result: upstreamErrorResult(res.status, body) };
+    }
+    const outcome = anchorFromFacetsBody(body);
+    if (!outcome.anchor) {
+      return {
+        ok: false,
+        result: declaredRefusalResult(
+          "near_center_absent",
+          "No centre point on file for that parcel to search a radius around.",
+          { parcelNodeId: query, anchorRead: outcome.anchorRead },
+        ),
+      };
+    }
+    return { ok: true, lat: outcome.anchor.lat, lng: outcome.anchor.lon };
+  }
+
+  const res = await cortexFetch(config, "/api/brokerage/v1/place/resolve", {
+    method: "POST",
+    userId,
+    body: JSON.stringify({ address: query }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  const geocode =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).geocode
+      : undefined;
+  const point =
+    geocode && typeof geocode === "object" && !Array.isArray(geocode)
+      ? (geocode as Record<string, unknown>)
+      : undefined;
+  const lat = point?.lat;
+  const lng = point?.lng;
+  if (
+    typeof lat !== "number" ||
+    typeof lng !== "number" ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng)
+  ) {
+    // place/resolve answered 200 with a body this tool cannot read as a
+    // coordinate. Declared as an upstream problem (H1), not fabricated as
+    // a near-specific refusal: resolve itself made no refusal claim here.
+    return { ok: false, result: upstreamErrorResult(res.status, body) };
+  }
+  return { ok: true, lat, lng };
 }
 
 function inputSchemaFor(name: SmartsiteToolName) {
   switch (name) {
+    case "find_nearest_parcels":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1).optional(),
+          query: z.string().min(1).optional(),
+          cap: z.number().int().min(1).max(FIND_NEAREST_CAP_MAX).optional(),
+        })
+        .strict();
+    case "find_parcels":
+      // P-106. countyFips and filters are OPTIONAL at the schema and required
+      // in the handler, on purpose and for the same reason find_parcel's three
+      // modes are: a caller that omits the bound gets a DECLARED refusal naming
+      // the problem, not a raw zod validation error. "No geographic bound is
+      // refused" is an acceptance item, and a schema-level rejection would make
+      // constraint_bound_missing unreachable through this tool.
+      return z
+        .object({
+          countyFips: z
+            .string()
+            .regex(/^\d{5}$/)
+            .optional(),
+          filters: z.array(FIND_PARCELS_FILTER).optional(),
+          cap: z.number().int().min(1).max(FIND_PARCELS_CAP_MAX).optional(),
+          query: z.string().min(1).optional(),
+        })
+        .strict();
     case "find_parcel":
-      return z.object({ query: z.string().min(1) });
+      // P-91 v3 Q1. query, near, and street are three alternate modes on
+      // one tool; exactly one is required, enforced in the handler (not
+      // here via .refine()) so a caller gets a declared refusal naming the
+      // problem instead of a raw zod validation error. radiusFt carries no
+      // local bound: that ceiling is exactly what radius_exceeds_max
+      // exists to refuse, and pre-validating it here would make that
+      // refusal code unreachable through this tool.
+      return z
+        .object({
+          query: z.string().min(1).optional(),
+          near: z
+            .object({
+              query: z.string().min(1),
+              radiusFt: z.number(),
+              cap: z.number().int().min(1).max(FIND_PARCEL_NEAR_CAP_MAX).optional(),
+            })
+            .strict()
+            .optional(),
+          street: z
+            .object({
+              query: z.string().min(1),
+              cap: z.number().int().min(1).max(FIND_PARCEL_STREET_CAP_MAX).optional(),
+              countyFips: z
+                .string()
+                .regex(/^\d{5}$/)
+                .optional(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict();
     case "list_my_properties":
-      return z.object({});
+      return z.object({}).passthrough();
+    case "create_screen":
+      return z
+        .object({
+          name: z.string().optional(),
+          queries: z.array(z.string()),
+          source: z.enum(CREATE_SCREEN_SOURCES),
+        })
+        .strict();
+    case "add_to_screen":
+      return z
+        .object({
+          screenId: z.string().min(1),
+          parcelNodeId: z.string().min(1),
+          source: z.enum(SCREEN_ROW_SOURCES),
+        })
+        .strict();
+    case "list_screens":
+      return z
+        .object({
+          screenId: z.string().min(1).optional(),
+        })
+        .strict();
+    case "save_property":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          status: z.enum(CRM_STATUSES).optional(),
+          note: z.string().optional(),
+        })
+        .strict();
+    case "set_property_status":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          status: z.enum(CRM_STATUSES),
+        })
+        .strict();
     case "check_request":
       return z.object({ jobId: z.string().min(1) });
+    case "list_purchased_records":
+      return z.object({ parcelNodeId: z.string().min(1) }).strict();
+    case "read_purchased_record":
+      return z
+        .object({
+          parcelNodeId: z.string().min(1),
+          artifactId: z.string().min(1),
+        })
+        .strict();
     case "ask_the_map":
-      return z.object({
-        parcelNodeId: z.string().min(1),
-        message: z.string().min(1),
-      });
+      return askTheMapInputSchema();
     case "export_instrument":
       return z.object({
         parcelNodeId: z.string().min(1),
-        kind: z.enum(["brief", "siteplan", "terrain", "dossier"]),
+        kind: z.enum(["brief", "siteplan", "terrain", "dossier", "feasibility"]),
+      });
+    case "get_smart_site":
+      return z.object({
+        parcelNodeId: z.union([
+          z.string().min(1),
+          z.array(z.string().min(1)).min(1).max(SMARTSITE_BATCH_CAP),
+        ]),
+        depth: z.enum(GET_SMART_SITE_DEPTHS).optional(),
       });
     default:
       return z.object({ parcelNodeId: z.string().min(1) });
   }
 }
 
+/** P-91 item 1 plus Wave B writes. Reads keep readOnlyHint true. */
+function annotationsFor(name: SmartsiteToolName) {
+  if (name === "list_screens") {
+    return { readOnlyHint: true };
+  }
+  if (
+    name === "request_records" ||
+    name === "export_instrument" ||
+    name === "create_screen" ||
+    name === "add_to_screen" ||
+    name === "save_property" ||
+    name === "set_property_status"
+  ) {
+    return { readOnlyHint: false, destructiveHint: false };
+  }
+  return { readOnlyHint: true };
+}
+
+const APP_BOARD_LINK = {
+  type: "resource_link" as const,
+  uri: APP_RESOURCE_URI,
+  name: "Smart Site board",
+  mimeType: APP_MIME,
+  description: "Inline Smart Site MCP App (map, screening board, or parcel panel).",
+};
+
+function cardViewFromResultContent(content: HandlerResult["content"]): CardView | null {
+  const first = content[0];
+  if (!first || first.type !== "text") return null;
+  try {
+    const data = JSON.parse(first.text) as Record<string, unknown>;
+    if (typeof data.cardContract === "string") return data.cardContract as CardView;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function enrichAppToolJsonText(
+  toolName: SmartsiteToolName,
+  text: string,
+  host?: McpRenderHostKey,
+): HandlerResult {
+  let view: CardView = "none";
+  try {
+    view = cardViewFromToolPayload(toolName, JSON.parse(text) as Record<string, unknown>);
+  } catch {
+    view = toolName === "create_screen" || toolName === "list_screens" ? "screen-board" : "none";
+  }
+  const correlationId = host
+    ? recordToolMapIntent(
+        host,
+        toolName,
+        view,
+        view === "none" ? "card_contract_none" : "ok",
+      )
+    : null;
+  const withReport = injectMapRenderReportFields(text, correlationId);
+  const { text: enriched } = injectCardContract(withReport, view);
+  return { content: [{ type: "text" as const, text: enriched }], isError: false };
+}
+
+type HandlerResult = ToolResult & {
+  /**
+   * P-243: set only by a handler branch that has already composed its own
+   * prose from the vocabulary (never raw tokens a model would need this
+   * glossary to translate). Internal to this module -- stripped below,
+   * never reaches the wire. Every OTHER tool, and every other branch of
+   * get_smart_site (stub, batch, error, not-implemented, refused), is
+   * unaffected: this flag is opt-in per result, not per tool.
+   */
+  skipStandingVocab?: boolean;
+};
+type ToolHandler = (args: Record<string, unknown>) => Promise<HandlerResult>;
+
+/**
+ * V2 (P-91 v3), payload half, standing-block leg. Every tool result gets
+ * one extra content entry: the vocabulary lookup block, byte-identical on
+ * every call. content[0] ΓÇö the tool's own JSON ΓÇö is never touched or
+ * reordered, so every existing caller that reads content[0] sees exactly
+ * what it saw before this wrapper existed; this is purely additive.
+ *
+ * P-243 amendment: a result may opt out via skipStandingVocab when its own
+ * content[0] is already composed prose, not raw tokens.
+ */
+function attachStandingVocabBlock(
+  toolName: SmartsiteToolName,
+  handler: ToolHandler,
+): ToolHandler {
+  return async (args) => {
+    const auth = requireAuthContext();
+    const hostSession = hostSessionFromAuth(auth);
+    const { skipStandingVocab, ...result } = await handler(args);
+    let shaped = result;
+    // The vocabulary block explains result tokens; an error result has none (fix register B4).
+    if (!skipStandingVocab && !result.isError) {
+      const withVocab = {
+        ...shaped,
+        content: [...shaped.content, STANDING_VOCAB_CONTENT_PART],
+      };
+      const view = cardViewFromResultContent(withVocab.content);
+      if (view && view !== "none" && hostSession.uiCapable) {
+        shaped = { ...withVocab, content: [...withVocab.content, APP_BOARD_LINK] };
+      } else {
+        shaped = withVocab;
+      }
+    }
+    return applyHostTierToResult(toolName, shaped, hostSession, auth.userId);
+  };
+}
+
+type BriefSection = {
+  id?: string;
+  title?: string;
+  data?: Record<string, unknown> | null;
+  citations?: Array<{ url?: string }>;
+  citationsDegraded?: boolean;
+  disposition?: string;
+  dispositionDisplayText?: string;
+  reason?: string;
+  agentGuidance?: string;
+};
+
+function mono(value: unknown): string {
+  return "`" + String(value) + "`";
+}
+
+/** Citation column: never invents a link where citationsDegraded is true (falsifier 3). */
+function citationText(section: BriefSection): string {
+  if (section.citationsDegraded) return "No citation link on this read";
+  const url = section.citations?.[0]?.url;
+  return url ? url : "no citation on record";
+}
+
+function briefSectionRow(section: BriefSection): string {
+  const value = briefSectionValue(section);
+  const disposition = section.dispositionDisplayText ?? section.disposition ?? "unknown";
+  const note =
+    section.disposition === "present"
+      ? citationText(section)
+      : (customerBriefReason(section.reason ?? null) ?? disposition);
+  return `| ${section.title ?? section.id ?? "?"} | ${value} | ${disposition} | ${note} |`;
+}
+
+function briefSectionValue(section: BriefSection): string {
+  if (section.disposition !== "present" || !section.data) return "ΓÇö";
+  const d = section.data;
+  switch (section.id) {
+    case "zoning":
+      return mono(d.district ?? "?");
+    case "setbacks-envelope":
+      return mono(`${d.frontFt ?? "-"}/${d.sideFt ?? "-"}/${d.rearFt ?? "-"}/${d.cornerFt ?? "-"} ft (F/S/R/C)`);
+    case "flood":
+      return mono(`${d.floodZone ?? "?"}${d.floodway ? " (floodway)" : ""}`);
+    case "land-use":
+      return mono(d.landUseLabel ? `${d.landUseCode} - ${d.landUseLabel}` : `${d.landUseCode ?? "?"}`);
+    default:
+      return mono(JSON.stringify(d));
+  }
+}
+
+/**
+ * P-243. Replaces get_smart_site's single-node content[0] -- previously the
+ * entire raw JSON record (measured 2026-09-16 on 48021:34137: 31,826 bytes
+ * across two content parts) -- with a short plain-language paragraph plus a
+ * compact cited-value table, per the Claude-view design of record. The FULL
+ * record moves to structuredContent, unchanged, so nothing the panel needs
+ * (geometry, edges, footprint, every *Fact rail) is dropped -- it is
+ * relocated, not deleted. **P-399 amendment (2026-09-21):** "moved to
+ * structuredContent" turned out to be the defect, not the design. Measured on
+ * the wire, the record existed ONLY in structuredContent while content[0]
+ * asserted it was attached; a consumer that renders content parts and does not
+ * read structuredContent got the claim and no record. structuredContent is
+ * unchanged and still carries it, but the record is now ALSO emitted as
+ * content[1] -- see the note at the return.
+ * A resource_link to the app board tells any
+ * spec-compliant client that a panel exists for this result, which is the
+ * literal gap the dispatch measured (no content-array reference to
+ * ui://smartsite/app-p562.html anywhere). skipStandingVocab is set because
+ * this content[0] is now server-composed prose, not raw tokens a model
+ * needs the glossary to translate -- the vocabulary resource remains
+ * registered and fetchable, and every other tool keeps inlining it.
+ *
+ * Deliberately NOT rendered in the table (see CP1 _inbox/2026-09-16_p243-*
+ * and the close): ownerFact (P-220 is a separate gated concern, out of
+ * scope here) and valueHistoryFact's dollar figures (the same call's own
+ * cadRoll refuses those dollar categories as studio-gated for this caller;
+ * rendering valueHistoryFact's unrestricted figures in the new shaped
+ * surface would launder that inconsistency rather than report it). Both
+ * remain fully present in structuredContent, untouched.
+ */
+export function shapeSmartSiteNodeResult(rawText: string): HandlerResult {
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(rawText) as Record<string, unknown>;
+  } catch {
+    // Defensive only: normalizeGetSmartSiteResponseText/attachAnchorToResponseText
+    // are expected to always hand back valid JSON. Fail closed to the raw
+    // text rather than throwing, and skip shaping rather than guess.
+    return { content: [{ type: "text" as const, text: rawText }], isError: false };
+  }
+
+  const draw = (data.draw ?? {}) as Record<string, unknown>;
+  const onRecord = (data.onRecord ?? {}) as Record<string, unknown>;
+  const cityLimits = data.cityLimitsFact as Record<string, unknown> | undefined;
+  const structural = data.structuralFact as Record<string, unknown> | undefined;
+  const pipeline = data.pipelineFact as Record<string, unknown> | undefined;
+  const overlays = (draw.overlays ?? []) as Array<Record<string, unknown>>;
+  const pipelineOverlay = overlays.find((o) => o.id === "pipeline");
+  const sections = ((data.brief as Record<string, unknown> | undefined)?.sections ??
+    []) as BriefSection[];
+
+  const label =
+    (typeof draw.label === "string" ? draw.label.replace(/\s+,/, ",").trim() : null) ??
+    (onRecord.apn ? `parcel APN ${onRecord.apn}` : "this parcel");
+  const acreage = (onRecord.acreage as Record<string, unknown> | undefined)?.value;
+  const countyName = onRecord.countyName;
+  const zoningSection = sections.find((s) => s.id === "zoning");
+  const zoningDistrict =
+    zoningSection?.disposition === "present" ? (zoningSection.data?.district as string) : null;
+
+  const proseParts: string[] = [];
+  proseParts.push(
+    `${label}${countyName ? `, ${countyName} County` : ""}${
+      typeof acreage === "number" ? `, ${acreage} acres` : ""
+    }${zoningDistrict ? `, zoned ${zoningDistrict}` : ""}.`,
+  );
+  if (cityLimits?.status) {
+    proseParts.push(
+      `${cityLimits.status === "incorporated" ? "Inside" : "Outside"} city limits${
+        cityLimits.cityName ? ` (${cityLimits.cityName})` : ""
+      }.`,
+    );
+  }
+  if (structural?.yearBuilt) {
+    proseParts.push(`Structure on record from ${structural.yearBuilt}.`);
+  }
+  const degradedCount = sections.filter((s) => s.citationsDegraded).length;
+  const unreadCount = sections.filter((s) => s.disposition && s.disposition !== "present").length;
+  if (degradedCount || unreadCount) {
+    proseParts.push(
+      `${degradedCount ? `${degradedCount} section(s) below carry a degraded citation (source exists, no verifiable link).` : ""} ${
+        unreadCount ? `${unreadCount} section(s) were not read or are absent on this call.` : ""
+      }`.trim(),
+    );
+  }
+
+  const rows: string[] = [
+    "| Rail | Value | Disposition | Citation / note |",
+    "| --- | --- | --- | --- |",
+    ...sections.map(briefSectionRow),
+  ];
+  if (cityLimits) {
+    rows.push(
+      `| City limits | ${mono(cityLimits.status ?? "unknown")} | ${cityLimits.status ? "Present" : "unknown"} | ${cityLimits.basis ?? "no citation on record"} |`,
+    );
+  }
+  if (structural?.yearBuilt) {
+    rows.push(`| Year built | ${mono(structural.yearBuilt)} | Present | ${structural.source ?? "cad_property"} |`);
+  }
+  if (pipeline) {
+    // P-217, not fixed here: the structured fact and its own map overlay
+    // disagree on confidence. Both halves render; neither is collapsed into
+    // the other (dispatch known trap, reproduced live 2026-09-16).
+    rows.push(
+      `| Pipeline (staged RRC data) | ${mono(pipeline.nearPipeline === false ? "no pipeline within ~500 ft" : "present nearby")} | ${pipeline.state ?? "unknown"} | source vintage ${pipeline.sourceVintage ?? "unknown"} |`,
+    );
+    if (pipelineOverlay) {
+      rows.push(
+        `| Pipeline (map confidence) | ${mono(pipelineOverlay.state ?? "unknown")} | ${pipelineOverlay.state === "unknown" ? "Not a finding either way" : String(pipelineOverlay.state)} | ${pipelineOverlay.reason ?? pipelineOverlay.reasonDisplayText ?? "-"} |`,
+      );
+    }
+  }
+
+  const text = appendCardContractProse(
+    `${proseParts.join(" ")}\n\n${rows.join("\n")}\n\nThe full record and geometry summarised above follow in this same result, so this summary stands in for nothing. The interactive Smart Site panel is referenced by a resource link when the host renders MCP Apps. Owner data and county tax-assessed dollar figures are not repeated in this table (see the record for entitled callers).`,
+    "single-parcel",
+  );
+
+  // P-399. The record, in the channel every client reads.
+  //
+  // Measured on the wire 2026-09-21 (_inbox/2026-09-21_p399_wireread_surface_probe.json,
+  // 7 get_smart_site calls at depth node, all identical in shape): content was
+  // exactly ["text", "resource_link"] and the record existed ONLY in
+  // structuredContent. A consumer that surfaces content parts without reading
+  // structuredContent -- the widget-capable path -- therefore received the
+  // summary above and no record, while that summary asserted the record was
+  // attached. `structuredContent` is a field a host may simply not read; `content`
+  // is the part every MCP client renders. So the record travels in both: it is
+  // relocated nowhere, duplicated, and the sentence above describes only what is
+  // actually present in this array.
+  //
+  // Appended as content[1], not content[0]: content[0] is the Claude-view prose
+  // P-243 designed and callers/tests read the first text part, so the record is
+  // added after it and no existing reader of content[0] changes behaviour.
+  const recordPart = { type: "text" as const, text: rawText };
+
+  return {
+    content: [
+      { type: "text" as const, text },
+      recordPart,
+      {
+        type: "resource_link" as const,
+        uri: APP_RESOURCE_URI,
+        name: "Smart Site board",
+        mimeType: APP_MIME,
+        description: "Interactive parcel panel: map, boundary, and buildable envelope for this read.",
+      },
+    ],
+    structuredContent: data,
+    isError: false,
+    skipStandingVocab: true,
+  };
+}
+
 export function registerTools(server: McpServer): void {
+  registerMcpApp(server);
+  registerVocabularyResource(server);
+  registerSmartsitePrompts(server as unknown as Parameters<typeof registerSmartsitePrompts>[0]);
+  // Demo card for the ICC plan review preview; registers nothing unless the
+  // caller's email is in PLAN_REVIEW_PREVIEW_EMAILS.
+  registerPlanReviewPreview(server as unknown as Parameters<typeof registerPlanReviewPreview>[0]);
   for (const tool of SMARTSITE_MCP_TOOLS) {
+    // Parked tools are not listed (operator, 2026-10-05). See LISTED_TOOLS.
+    if (tool.readiness === "blocked") continue;
+    const uiMeta = appMetaFor(tool.name);
     server.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
         inputSchema: inputSchemaFor(tool.name),
+        annotations: annotationsFor(tool.name),
+        ...(uiMeta ? { _meta: uiMeta } : {}),
       },
-      async (args) => {
+      attachStandingVocabBlock(tool.name, async (args: Record<string, unknown>) => {
         const auth = requireAuthContext();
         const entitlement = snapshotFromAuth(auth);
 
-        if (tool.readiness === "blocked") {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: notReadyMessage(tool.name, tool.blockedReason ?? "blocked"),
-              },
-            ],
-            isError: true,
-          };
-        }
-
         switch (tool.name) {
+          case "find_nearest_parcels": {
+            const { parcelNodeId, query, cap } = args as {
+              parcelNodeId?: string;
+              query?: string;
+              cap?: number;
+            };
+            const givenId = parcelNodeId?.trim() ?? "";
+            const givenQuery = query?.trim() ?? "";
+            if (!givenId && !givenQuery) {
+              return declaredRefusalResult(
+                "nearest_invalid_node",
+                "Give parcelNodeId or query (the subject address or parcel you want neighbours for).",
+              );
+            }
+            return withCortex(async (config) => {
+              let subject = givenId;
+              if (!subject && givenQuery) {
+                if (/^\d{5}:\S+/.test(givenQuery)) {
+                  subject = givenQuery;
+                } else {
+                  const resolved = await resolveNearestSubjectFromQuery(
+                    config,
+                    auth.userId,
+                    givenQuery,
+                  );
+                  if (!resolved.ok) return resolved.result;
+                  subject = resolved.parcelNodeId;
+                }
+              }
+              const payload: { parcelNodeId: string; cap?: number } = {
+                parcelNodeId: subject,
+              };
+              // Default 8 keeps the result well under the host's size cap (UX review 2026-10-05).
+              payload.cap = cap ?? 8;
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/research/nearest-parcels`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify(payload),
+                },
+              );
+              const body = await res.text();
+              if (!res.ok) {
+                if (res.status === 422 || res.status === 404) {
+                  const refusal =
+                    declarePlaceSearchRefusal(body) ??
+                    declareNearestParcelsServeRefusal(body);
+                  if (refusal) {
+                    return {
+                      content: [{ type: "text" as const, text: JSON.stringify(refusal) }],
+                      isError: true,
+                    };
+                  }
+                }
+                const declared = mapGetSmartSiteNonOk(res.status, body, [subject]);
+                if (declared !== null) {
+                  return {
+                    content: [{ type: "text" as const, text: declared }],
+                    isError: false,
+                  };
+                }
+                return upstreamErrorResult(res.status, body);
+              }
+              const host = hostKeyFromAuth();
+              const wired = await wireFindNearestParcelsForMap(
+                config,
+                auth.userId,
+                body,
+                false,
+              );
+              return enrichAppToolJsonText("find_nearest_parcels", wired, host);
+            });
+          }
+          case "find_parcels": {
+            const { countyFips, filters, cap, query } = args as {
+              countyFips?: string;
+              filters?: unknown[];
+              cap?: number;
+              query?: string;
+            };
+            // Both bound checks are DECLARED refusals rather than schema
+            // rejections, so a caller that omits either gets a reason token
+            // and a sentence instead of a zod dump. Refusing here also keeps
+            // a bound-less call off the wire entirely.
+            if (!countyFips) {
+              return declaredRefusalResult(
+                "constraint_bound_missing",
+                "A county is required. Give countyFips; there is no statewide constraint search.",
+              );
+            }
+            if (!filters || filters.length === 0) {
+              return declaredRefusalResult(
+                "constraint_filters_missing",
+                "At least one filter is required. A county with no filter is not a search.",
+              );
+            }
+            return withCortex(async (config) => {
+              const qs = new URLSearchParams({
+                countyFips,
+                filters: JSON.stringify(filters),
+              });
+              if (cap !== undefined) qs.set("cap", String(cap));
+              if (query !== undefined) qs.set("q", query);
+              const res = await cortexFetch(
+                config,
+                `/api/brokerage/v1/place/constraint-search?${qs.toString()}`,
+                { userId: auth.userId },
+              );
+              const body = await res.text();
+              if (!res.ok) {
+                if (res.status === 422) {
+                  const refusal = declarePlaceSearchRefusal(body);
+                  if (refusal) {
+                    return {
+                      content: [
+                        { type: "text" as const, text: JSON.stringify(refusal) },
+                      ],
+                      isError: true,
+                    };
+                  }
+                }
+                return upstreamErrorResult(res.status, body);
+              }
+              // 200: matched, excluded, notEvaluated, countingRule,
+              // unmeasuredPctByRail and projection pass through VERBATIM. All
+              // three sets are fields cortex already put on the wire, and this
+              // tool must not strip, merge, or reorder any of them: a response
+              // carrying only `matched` is the defect this card exists to
+              // prevent.
+              const host = hostKeyFromAuth();
+              const canSeeOwner = canRunStudioReport(entitlement);
+              const wired = await wireFindParcelsForMap(config, auth.userId, body, canSeeOwner);
+              let view: CardView = "single-parcel";
+              try {
+                view = cardViewFromToolPayload(
+                  "find_parcels",
+                  JSON.parse(wired) as Record<string, unknown>,
+                );
+              } catch {
+                view = "none";
+              }
+              return enrichAppToolJsonText("find_parcels", wired, host);
+            });
+          }
           case "find_parcel": {
-            const { query } = args as { query: string };
+            const { query, near, street } = args as {
+              query?: string;
+              near?: { query: string; radiusFt: number; cap?: number };
+              street?: { query: string; cap?: number; countyFips?: string };
+            };
+            const modesGiven = [query, near, street].filter(
+              (v) => v !== undefined,
+            ).length;
+            if (modesGiven === 0) {
+              return declaredRefusalResult(
+                "find_parcel_mode_missing",
+                "Provide one of query, near, or street.",
+              );
+            }
+            if (modesGiven > 1) {
+              return declaredRefusalResult(
+                "find_parcel_mode_ambiguous",
+                "Provide exactly one of query, near, or street, not more than one.",
+              );
+            }
+
+            if (near !== undefined) {
+              return withCortex(async (config) => {
+                const center = await resolveNearCenterPoint(
+                  config,
+                  near.query,
+                  auth.userId,
+                );
+                if (!center.ok) return center.result;
+                const qs = new URLSearchParams({
+                  lat: String(center.lat),
+                  lng: String(center.lng),
+                  radiusFt: String(near.radiusFt),
+                });
+                if (near.cap !== undefined) qs.set("cap", String(near.cap));
+                const res = await cortexFetch(
+                  config,
+                  `/api/brokerage/v1/place/radius-search?${qs.toString()}`,
+                  { userId: auth.userId },
+                );
+                const body = await res.text();
+                if (!res.ok) {
+                  if (res.status === 422) {
+                    const refusal = declarePlaceSearchRefusal(body);
+                    if (refusal) {
+                      return {
+                        content: [
+                          { type: "text" as const, text: JSON.stringify(refusal) },
+                        ],
+                        isError: true,
+                      };
+                    }
+                  }
+                  return upstreamErrorResult(res.status, body);
+                }
+                // 200: cap, received, truncated, radiusFt, hits pass through
+                // verbatim. Truncation is a field cortex already puts on
+                // the wire; this tool must not strip it.
+                const host = hostKeyFromAuth();
+                const canSeeOwner = canRunStudioReport(entitlement);
+                const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
+                let view: CardView = "single-parcel";
+                try {
+                  view = cardViewFromToolPayload(
+                    "find_parcel",
+                    JSON.parse(wired) as Record<string, unknown>,
+                  );
+                } catch {
+                  view = "none";
+                }
+                return enrichAppToolJsonText("find_parcel", wired, host);
+              });
+            }
+
+            if (street !== undefined) {
+              return withCortex(async (config) => {
+                const qs = new URLSearchParams({ q: street.query });
+                if (street.cap !== undefined) qs.set("cap", String(street.cap));
+                if (street.countyFips !== undefined) {
+                  qs.set("countyFips", street.countyFips);
+                }
+                const res = await cortexFetch(
+                  config,
+                  `/api/brokerage/v1/place/street-search?${qs.toString()}`,
+                  { userId: auth.userId, timeoutMs: 45_000 },
+                );
+                const body = await res.text();
+                if (!res.ok) {
+                  if (res.status === 422) {
+                    const refusal = declarePlaceSearchRefusal(body);
+                    if (refusal) {
+                      return {
+                        content: [
+                          { type: "text" as const, text: JSON.stringify(refusal) },
+                        ],
+                        isError: true,
+                      };
+                    }
+                  }
+                  return upstreamErrorResult(res.status, body);
+                }
+                // 200: cap, received, truncated, hits pass through verbatim.
+                const host = hostKeyFromAuth();
+                const canSeeOwner = canRunStudioReport(entitlement);
+                const wired = await wireFindParcelForMap(config, auth.userId, body, canSeeOwner);
+                let view: CardView = "single-parcel";
+                try {
+                  view = cardViewFromToolPayload(
+                    "find_parcel",
+                    JSON.parse(wired) as Record<string, unknown>,
+                  );
+                } catch {
+                  view = "none";
+                }
+                return enrichAppToolJsonText("find_parcel", wired, host);
+              });
+            }
+
+            if (typeof query !== "string") {
+              // Unreachable given the modesGiven checks above (near and
+              // street are both undefined on this path), kept so `query`
+              // is narrowed to `string` below without a non-null assertion.
+              return declaredRefusalResult(
+                "find_parcel_mode_missing",
+                "Provide one of query, near, or street.",
+              );
+            }
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -122,33 +1368,196 @@ export function registerTools(server: McpServer): void {
                 { userId: auth.userId },
               );
               const body = await res.text();
-              return {
-                content: [{ type: "text" as const, text: body }],
-                isError: !res.ok,
-              };
+              if (!res.ok) return upstreamErrorResult(res.status, body);
+              const split = splitFindParcelHits(body);
+              const host = hostKeyFromAuth();
+              const canSeeOwner = canRunStudioReport(entitlement);
+              const wired = await wireFindParcelForMap(config, auth.userId, split, canSeeOwner);
+              let view: CardView = "single-parcel";
+              try {
+                view = cardViewFromToolPayload(
+                  "find_parcel",
+                  JSON.parse(wired) as Record<string, unknown>,
+                );
+              } catch {
+                view = "none";
+              }
+              return enrichAppToolJsonText("find_parcel", wired, host);
             });
           }
           case "get_smart_site": {
-            const { parcelNodeId } = args as { parcelNodeId: string };
+            const { parcelNodeId, depth } = args as {
+              parcelNodeId: string | string[];
+              depth?: (typeof GET_SMART_SITE_DEPTHS)[number];
+            };
+            if (depth === "hop1" || depth === "subgraph") {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "not_implemented",
+                      reason: "depth_not_implemented",
+                      depth,
+                    }),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const ids = Array.isArray(parcelNodeId)
+              ? parcelNodeId
+              : [parcelNodeId];
+            // P-446: small lists default to node depth so the map canvas can draw.
+            const effectiveDepth: ImplementedDepth =
+              depth ??
+              (Array.isArray(parcelNodeId) &&
+              parcelNodeId.length > 0 &&
+              parcelNodeId.length <= LIST_NODE_DEPTH_CAP
+                ? "node"
+                : Array.isArray(parcelNodeId)
+                  ? "stub"
+                  : "node");
+            const cap = batchCapFor(effectiveDepth);
+            if (Array.isArray(parcelNodeId) && ids.length > cap) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "refused",
+                      reason: "parcel_batch_cap",
+                      cap,
+                      received: ids.length,
+                      depth: effectiveDepth,
+                    }),
+                  },
+                ],
+                isError: true,
+              };
+            }
+            const briefBody: Record<string, unknown> = { parcelNodeId };
+            if (depth) briefBody.depth = depth;
+            // M-1: a single-id node read carries one anchor. M-4: a node-depth
+            // ARRAY carries one anchor per parcel, bounded by
+            // ANCHOR_BATCH_READ_CAP and declared when it truncates, because a
+            // shared canvas cannot place two rings without two coordinates.
+            // A stub row still has no draw for an anchor to hold, at any arity.
+            const readsAnchor =
+              !Array.isArray(parcelNodeId) && effectiveDepth === "node";
+            const readsAnchorBatch =
+              Array.isArray(parcelNodeId) && effectiveDepth === "node";
+            // P-220: ownerFact travels on this same brief response and this
+            // tool's own description promises it never does. A single-id
+            // node read can carry a real per-parcel property-unlock, exactly
+            // like the server-side co-gate does; a batch read stays
+            // account-wide only (see normalizeGetSmartSiteResponseText's own
+            // comment for why) rather than running an unlock lookup per id.
+            const canSeeOwnerAccountWide = canRunStudioReport(entitlement);
+            const canSeeOwner =
+              readsAnchor && !canSeeOwnerAccountWide
+                ? canSeeOwnerAccountWide ||
+                  (await hasPropertyUnlock(auth.userId, parcelNodeId as string))
+                : canSeeOwnerAccountWide;
             return withCortex(async (config) => {
-              const res = await cortexFetch(
+              const briefPromise = cortexFetch(
                 config,
                 `/api/property-explorer/v1/research/brief`,
                 {
                   method: "POST",
                   userId: auth.userId,
-                  body: JSON.stringify({ parcelNodeId }),
+                  body: JSON.stringify(briefBody),
                 },
               );
+              // Both anchor reads are issued WITH the brief, never after it, and
+              // joined once the brief has landed, so the panel waits
+              // max(brief, anchors) and the batch's twelve run concurrently
+              // rather than in series. Neither rejects, so both are safe to
+              // leave unawaited on the non-OK returns below.
+              //
+              // The single top-level outcome: a stub row carries no draw at any
+              // arity, so a stub read declares that and reads nothing. A node
+              // ARRAY never reaches this value, because the batch branch below
+              // is taken instead and attaches per parcel.
+              const anchorPromise: Promise<AnchorOutcome> = readsAnchor
+                ? readParcelAnchor(config, parcelNodeId as string)
+                : Promise.resolve(skippedAnchorForStub());
+              const batchPromise: Promise<BatchAnchorOutcome | null> =
+                readsAnchorBatch
+                  ? readParcelAnchorsForBatch(config, ids)
+                  : Promise.resolve(null);
+              const res = await briefPromise;
               const body = await res.text();
-              const normalized = normalizeR1ResponseText(body);
+              if (!res.ok) {
+                // Wire contract 4.1: a declared miss or refusal is a result
+                // the host forwards to the panel; anything else is an error.
+                const declared = mapGetSmartSiteNonOk(res.status, body, ids);
+                if (declared === null) {
+                  return upstreamErrorResult(res.status, body);
+                }
+                return {
+                  content: [{ type: "text" as const, text: declared }],
+                  isError: false,
+                };
+              }
+              const mode =
+                Array.isArray(parcelNodeId) || depth === "stub"
+                  ? "stub-or-batch"
+                  : "single-node";
+              const normalized = normalizeGetSmartSiteResponseText(
+                body,
+                mode,
+                canSeeOwner,
+              );
+              const batchOutcome = await batchPromise;
+              const anchoredFull = batchOutcome
+                ? attachBatchAnchorsToResponseText(normalized, batchOutcome)
+                : attachAnchorToResponseText(normalized, await anchorPromise);
+              // F13: a multi-parcel node read drops per-parcel duplicates (batch-slim.ts).
+              const anchored = readsAnchorBatch ? slimBatchResponseText(anchoredFull) : anchoredFull;
+              const host = hostKeyFromAuth();
+              if (mode === "single-node") {
+                const correlationId = recordToolMapIntent(
+                  host,
+                  "get_smart_site",
+                  "single-parcel",
+                  "ok",
+                );
+                const shaped = shapeSmartSiteNodeResult(anchored);
+                if (shaped.structuredContent) {
+                  attachMapRenderReportToStructuredContent(
+                    shaped.structuredContent as Record<string, unknown>,
+                    correlationId,
+                  );
+                }
+                return shaped;
+              }
+              if (Array.isArray(parcelNodeId)) {
+                return enrichAppToolJsonText("get_smart_site", anchored, host);
+              }
               return {
-                content: [{ type: "text" as const, text: normalized }],
-                isError: !res.ok,
+                content: [{ type: "text" as const, text: anchored }],
+                isError: false,
               };
             });
           }
           case "list_my_properties": {
+            const raw = args as Record<string, unknown>;
+            if (Object.prototype.hasOwnProperty.call(raw, "screenId")) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      status: "refused",
+                      reason: "screen_id_not_accepted",
+                      error: "screen_id_not_accepted",
+                    }),
+                  },
+                ],
+                isError: true,
+              };
+            }
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -156,20 +1565,14 @@ export function registerTools(server: McpServer): void {
                 { userId: auth.userId },
               );
               const body = await res.text();
-              if (!res.ok) {
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: true,
-                };
-              }
+              if (!res.ok) return upstreamErrorResult(res.status, body);
               let parsed: unknown;
               try {
                 parsed = JSON.parse(body);
               } catch {
-                return {
-                  content: [{ type: "text" as const, text: body }],
-                  isError: true,
-                };
+                // A 200 that is not JSON is still an error this server
+                // declares (H1), carrying the status it actually saw.
+                return upstreamErrorResult(res.status, body);
               }
               const summary = stripSavedPropertiesForExternal(parsed);
               return {
@@ -185,6 +1588,13 @@ export function registerTools(server: McpServer): void {
             if (!canRunDeepReport(entitlement)) {
               return upgradeRequiredResult(refuseDeepReport(entitlement));
             }
+            // P-220: same co-gate as get_smart_site's single-node read --
+            // account-wide Studio|Team, or a property unlock on this exact
+            // parcel. run_report is always single-parcel, so the real
+            // per-parcel check always applies here, no batch narrowness.
+            const canSeeOwner =
+              canRunStudioReport(entitlement) ||
+              (await hasPropertyUnlock(auth.userId, parcelNodeId));
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
@@ -196,63 +1606,240 @@ export function registerTools(server: McpServer): void {
                 },
               );
               const body = await res.text();
-              const envelope = buildRunReportEnvelope(parcelNodeId, body);
+              if (!res.ok) {
+                // No read happened, so no read stamp (reportKind /
+                // reportReadMode / async). The upstream body travels under
+                // its own keys as a declared error (H1).
+                return upstreamErrorResult(res.status, body);
+              }
+              const envelope = buildRunReportEnvelope(parcelNodeId, body, canSeeOwner);
               return {
                 content: [
                   { type: "text" as const, text: JSON.stringify(envelope) },
                 ],
-                isError: !res.ok,
+                isError: false,
               };
             });
           }
+          // list_purchased_records / read_purchased_record have no handler
+          // here while readiness is "blocked" (P-242): the blocked branch
+          // above answers not_ready before the switch, the same as
+          // request_records/check_request and ask_the_map. Re-arming either
+          // tool means restoring a case here that calls listPurchasedRecords
+          // / readPurchasedRecord from recordsExtraction.ts.
+          // P-110: re-armed. The three rulings P-109 left open are closed
+          // (A-096): there is no upstream "brief" export kind, so it is
+          // refused before any config load or network call, never proxied;
+          // the upstream shape is two-hop refresh-then-download, per format,
+          // now spoken as real MCP JSON-RPC (POST /mcp) instead of the
+          // never-existent POST /tools/export_instrument REST route; and the
+          // upstream tools' SDK metering is absorbed on Legacy Group ATX's
+          // side via this server's own HAUSKA_MCP_SERVICE_KEY (operator
+          // ruling, not a new billing mechanism ΓÇö see export-instrument.ts).
+          //
+          // GATES CORRECTED, P-119 / OPS-16 A-103. The operator's final
+          // package table settled two things this connector had wrong:
+          // dossier (X-ray) was gated Studio/Team here while the web app
+          // has only ever required Solo+ (or a property unlock) ΓÇö backwards,
+          // corrected below to match the web app (A-068/A-074/A-099 named
+          // this divergence; never resolved until now). Site plan and
+          // terrain keep their Studio/Team ceiling but now ALSO clear on a
+          // property unlock, per the table's Property Unlock row ΓÇö a
+          // per-parcel lookup, checked only when the account-wide Studio
+          // check fails, never a broadened account-level predicate (that
+          // shape ΓÇö `tier !== 'paid'` ΓÇö is exactly the over-grant class
+          // A-068 found live once already).
           case "export_instrument": {
             const { parcelNodeId, kind } = args as {
               parcelNodeId: string;
-              kind: "brief" | "siteplan" | "terrain" | "dossier";
+              kind: "brief" | "siteplan" | "terrain" | "dossier" | "feasibility";
             };
-            if (isStudioExportKind(kind) && !canRunStudioReport(entitlement)) {
-              return upgradeRequiredResult(refuseStudioReport(entitlement));
+            if (kind === "brief") {
+              return exportKindNotAvailableResult();
             }
-            if (!loadHauskaMcpConfig()) {
-              return {
-                content: [
-                  {
-                    type: "text" as const,
-                    text: notReadyMessage(
-                      "export_instrument",
-                      "P-87 export honesty — Hauska MCP export proxy not configured",
-                    ),
-                  },
-                ],
-                isError: true,
-              };
+            if (kind === "feasibility") {
+              // Studio/Team OR a property unlock (P-119) ΓÇö same shape as
+              // site plan/terrain below, but there is no hauska-mcp-server
+              // tool to proxy: this calls hauska-engine-api directly (see
+              // feasibility-export.ts).
+              if (!canRunStudioReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refuseStudioReport(entitlement));
+                }
+              }
+              // P152-ENTITLEMENT (OPS-23 wave 4, CP1 approved 2026-09-13):
+              // this line is reached ONLY after the Studio-or-unlock check
+              // above already passed (by subscription OR by unlock ΓÇö either
+              // one), so callerTier is always "public-paid" here. Passed
+              // explicitly, never a hardcoded default inside
+              // buildEngineGateHeaders, so a future call site that skips
+              // the check above sends "public-free" and the engine's own
+              // independent tier check refuses it ΓÇö defense in depth.
+              // `entitlement` is carried too so a refusal from the ENGINE's
+              // own gate (an outcome this local check did not expect,
+              // since it already said yes) surfaces in the same
+              // upgrade_required vocabulary as every other refusal here.
+              return ensureDeclaredError(
+                await executeFeasibilityExport({
+                  parcelNodeId,
+                  callerTier: "public-paid",
+                  entitlement,
+                }),
+              );
             }
-            return executeExportInstrument({ parcelNodeId, kind });
+            if (isPropertyExportKind(kind)) {
+              // dossier (X-ray): Solo+ OR a property unlock ΓÇö matches the
+              // web app's resolveDossierExportAuth exactly (P-119 row 1).
+              if (!canRunDeepReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refusePropertyExport(entitlement));
+                }
+              }
+            } else if (isStudioExportKind(kind)) {
+              // siteplan, terrain: Studio/Team OR a property unlock.
+              if (!canRunStudioReport(entitlement)) {
+                const unlocked = await hasPropertyUnlock(auth.userId, parcelNodeId);
+                if (!unlocked) {
+                  return upgradeRequiredResult(refuseStudioReport(entitlement));
+                }
+              }
+            }
+            return ensureDeclaredError(
+              await executeExportInstrument({ parcelNodeId, kind }),
+            );
           }
-          case "ask_the_map": {
-            const { parcelNodeId, message } = args as {
-              parcelNodeId: string;
-              message: string;
+          case "create_screen": {
+            const body = args as {
+              name?: string;
+              queries: string[];
+              source: string;
             };
             return withCortex(async (config) => {
               const res = await cortexFetch(
                 config,
-                `/api/brokerage/v1/research/chat`,
+                `/api/property-explorer/v1/screens`,
                 {
                   method: "POST",
                   userId: auth.userId,
-                  body: JSON.stringify({ parcelNodeId, message }),
+                  body: JSON.stringify(body),
                 },
               );
-              const body = await res.text();
+              const text = await res.text();
+              if (!res.ok) {
+                // OPS-16 A-101: screens have no local Studio predicate (the
+                // route is the sole gate ΓÇö see mapScreensGateNonOk). A 402
+                // shaped as its own refusal reshapes into the same declared
+                // upgrade_required envelope export_instrument's local gate
+                // returns; anything else stays the generic upstream error.
+                const upgrade = mapScreensGateNonOk(res.status, text);
+                if (upgrade) return upgradeRequiredResult(upgrade);
+                return upstreamErrorResult(res.status, text);
+              }
+              return enrichAppToolJsonText("create_screen", text, hostKeyFromAuth());
+            });
+          }
+          case "add_to_screen": {
+            const { screenId, parcelNodeId, source } = args as {
+              screenId: string;
+              parcelNodeId: string;
+              source: string;
+            };
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/screens/${encodeURIComponent(screenId)}/rows`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify({ parcelNodeId, source }),
+                },
+              );
+              const text = await res.text();
+              if (!res.ok) {
+                // Same reshape as create_screen; see the comment there.
+                const upgrade = mapScreensGateNonOk(res.status, text);
+                if (upgrade) return upgradeRequiredResult(upgrade);
+                return upstreamErrorResult(res.status, text);
+              }
               return {
-                content: [{ type: "text" as const, text: body }],
-                isError: !res.ok,
+                content: [{ type: "text" as const, text }],
+                isError: false,
               };
             });
           }
+          case "list_screens": {
+            const { screenId } = args as { screenId?: string };
+            const path = screenId
+              ? `/api/property-explorer/v1/screens/${encodeURIComponent(screenId)}`
+              : `/api/property-explorer/v1/screens`;
+            return withCortex(async (config) => {
+              const res = await cortexFetch(config, path, {
+                userId: auth.userId,
+              });
+              const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
+              return enrichAppToolJsonText("list_screens", text, hostKeyFromAuth());
+            });
+          }
+          case "save_property": {
+            const { parcelNodeId, status, note } = args as {
+              parcelNodeId: string;
+              status?: string;
+              note?: string;
+            };
+            const body: Record<string, string> = {};
+            if (status !== undefined) body.status = status;
+            if (note !== undefined) body.note = note;
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/saved-properties/${encodeURIComponent(parcelNodeId)}/save`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify(body),
+                },
+              );
+              const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: false,
+              };
+            });
+          }
+          case "set_property_status": {
+            const { parcelNodeId, status } = args as {
+              parcelNodeId: string;
+              status: string;
+            };
+            return withCortex(async (config) => {
+              const res = await cortexFetch(
+                config,
+                `/api/property-explorer/v1/saved-properties/${encodeURIComponent(parcelNodeId)}/status`,
+                {
+                  method: "POST",
+                  userId: auth.userId,
+                  body: JSON.stringify({ status }),
+                },
+              );
+              const text = await res.text();
+              if (!res.ok) return upstreamErrorResult(res.status, text);
+              return {
+                content: [{ type: "text" as const, text }],
+                isError: false,
+              };
+            });
+          }
+          // ask_the_map has no handler while readiness is "blocked" (P-91
+          // item 34): the blocked branch above answers not_ready before the
+          // switch, the same as the records pair. Re-arming it means a case
+          // here that builds the chat subject from the bake and keeps
+          // sanitizeAskTheMapErrorBody on the cortex error path.
         }
-      },
+      }),
     );
   }
 }

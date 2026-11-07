@@ -177,3 +177,83 @@ describe("Orion PropertyDataExport parser (WCAD Socrata variant)", () => {
     ).rejects.toThrow(/expected an Orion property file/);
   });
 });
+
+describe("CTX-HAYS-REBIND: the two identifiers the parser used to drop", () => {
+  it("reads QuickRefID and PropertyNumber verbatim from the Hays export", async () => {
+    // Real fixture rows, copied from the county's own drop. PropertyID 12350
+    // carries QuickRefID R10041 and PropertyNumber 10-0001-0037-00000-2 -- three
+    // DIFFERENT identifiers for one account, in adjacent columns, of which this
+    // parser read exactly one until 2026-09-10.
+    const { records } = await collect({
+      countyFips: "48209",
+      propertyFile: fx("hays_property_sample.txt"),
+      taxYear: 2025,
+    });
+    const rec = records.find((r) => r.propId === "12350");
+    expect(rec).toMatchObject({
+      propId: "12350",
+      quickRefId: "R10041",
+      propertyNumber: "10-0001-0037-00000-2",
+    });
+    // NON-VACUITY: the three are genuinely different values, which is the whole
+    // finding. If the parser ever derived one from another this would pass and
+    // mean nothing.
+    expect(rec?.quickRefId).not.toBe(rec?.propId);
+    expect(rec?.propertyNumber).not.toBe(rec?.propId);
+    expect(rec?.propertyNumber).not.toBe(rec?.quickRefId);
+    // Every row in the sample carries both; none is an empty string.
+    for (const r of records) {
+      expect(typeof r.quickRefId).toBe("string");
+      expect(typeof r.propertyNumber).toBe("string");
+      expect(r.quickRefId).not.toBe("");
+      expect(r.propertyNumber).not.toBe("");
+    }
+  });
+
+  it("WCAD's Socrata shape also publishes both, lowercased", async () => {
+    // Measured, not assumed. The WCAD property dataset DOES carry
+    // quickrefid/propertynumber (propertyid 63514 -> R002338 /
+    // R-17-W338-401P-0013-0006), so the reason a general change leaves
+    // Williamson alone is NOT that its roll lacks a key. It is that
+    // txgio_parcel 48491 carries zero non-blank geo_id, so the index the key
+    // is looked up in is empty. Recording that here so the next reader does
+    // not inherit the weaker claim.
+    const { records } = await collect({
+      countyFips: "48491",
+      propertyFile: fx("wcad_property_sample.csv"),
+      taxYear: 2026,
+    });
+    const rec = records.find((r) => r.propId === "63514");
+    expect(rec).toMatchObject({
+      quickRefId: "R002338",
+      propertyNumber: "R-17-W338-401P-0013-0006",
+    });
+  });
+
+  it("a publisher that omits the columns yields NULL, never an empty string", async () => {
+    // THROUGH THE PARSER, not through HeaderIndex. An earlier version of this
+    // test asserted only that HeaderIndex.get returns "" for a missing column,
+    // which is a presence-shaped check on the wrong layer: replacing
+    // textOrNull with the raw get() in the parser left it passing while every
+    // row in such a county acquired an empty-string identifier. An empty
+    // string is a SENTINEL -- it satisfies a not-null check, identifies
+    // nothing, and would become a join key that every row in the county
+    // shared. Caught by violating the parser, not by re-reading it.
+    const { records, counters } = await collect({
+      countyFips: "48999",
+      propertyFile: fx("orion_no_identifier_columns_sample.csv"),
+      taxYear: 2026,
+    });
+    expect(counters.rowsParsed).toBe(1);
+    const rec = records[0];
+    expect(rec?.propId).toBe("900001");
+    expect(rec?.quickRefId).toBeNull();
+    expect(rec?.propertyNumber).toBeNull();
+    // ...and the file still classifies as a property file, so the absence is
+    // a property of the PUBLISHER and not of a rejected input.
+    const header = new HeaderIndex(["propertyid", "marketvalue", "situs"]);
+    expect(header.has("quickrefid")).toBe(false);
+    expect(header.has("propertynumber")).toBe(false);
+    expect(classifyOrionHeader(header)).toBe("property");
+  });
+});

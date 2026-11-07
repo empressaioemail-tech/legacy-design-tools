@@ -3,6 +3,11 @@
  */
 import type pg from "pg";
 import { COVERAGE_CLASS_BY_RAIL_KEY } from "./schema/countyRailDimension";
+import {
+  DEPTH_GATE_DEMOTION_STATE,
+  MANIFEST_DISPLAY_STATE_SQL,
+  MANIFEST_IS_PARTIAL_SQL,
+} from "./manifestDisplayState";
 import type { ReconciliationManifestCell } from "./manifestReconciliationGate";
 import {
   effectiveRailFieldsByKey,
@@ -45,7 +50,11 @@ export function applyDepthRailDisplayGate(
   if (coverage === null || threshold === null || coverage < threshold) {
     // Downgrade display only — isPartial stays true when SQL computed partial
     // (R-09: erasing isPartial made the indicator constant on live ledger).
-    return { ...cell, displayState: "not-yet" };
+    // Ruling 4's displayState split composed on top: see
+    // countyLedgerCompute.ts's sibling function for the full reasoning and
+    // the empirical proof that isPartial and displayState answer different
+    // questions and both must survive.
+    return { ...cell, displayState: DEPTH_GATE_DEMOTION_STATE };
   }
   return cell;
 }
@@ -101,20 +110,8 @@ export async function readManifestGridFromPool(
       c.honest_coverage_pct,
       c.threshold_pct AS cell_threshold,
       c.verified_by_instrument,
-      CASE
-        WHEN r.atom_family_state <> 'present' THEN 'no-atom'
-        WHEN r.has_writer = false THEN 'no-writer'
-        WHEN c.rail_state IS NULL THEN 'not-yet'
-        ELSE c.rail_state
-      END AS display_state,
-      CASE
-        WHEN r.atom_family_state = 'present'
-         AND r.has_writer = true
-         AND c.rail_state = 'satisfied-present'
-         AND c.honest_coverage_pct < COALESCE(c.threshold_pct, r.threshold_pct)
-        THEN true
-        ELSE false
-      END AS is_partial
+${MANIFEST_DISPLAY_STATE_SQL},
+${MANIFEST_IS_PARTIAL_SQL}
     FROM county_manifest m
     CROSS JOIN county_rail r
     LEFT JOIN county_facet_coverage c

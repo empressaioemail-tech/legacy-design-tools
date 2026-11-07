@@ -2,6 +2,8 @@
  * P-85 — shared Records Request job orchestration for engagement and PE routes.
  */
 
+import { inArray } from "drizzle-orm";
+import { db, recordsRequestArtifacts } from "@workspace/db";
 import { logger as defaultLogger } from "./logger";
 import { isP85CountyFips } from "./p85ClerkPortalRegistry";
 import { assertCountyPortalsAllowAutomatedSearch } from "./clerkPortalSearchGate";
@@ -14,6 +16,7 @@ import {
   parcelNodeIdFromParcelKey,
   recordsRequestJobToWire,
 } from "./recordsRequestJobWorker";
+import { enrichRecordsRequestJobWire } from "./recordsRequestDocumentServe";
 import { resolveRecordsSearchTerms } from "./recordsSearchTerms";
 
 export function parcelKeyCountyFips(parcelKey: string): string | null {
@@ -181,9 +184,28 @@ export async function listRecordsRequestJobsWire(
   userId: string,
 ): Promise<Record<string, unknown>> {
   const jobs = await listRecordsRequestJobsForEngagement(engagementId, userId);
+  const jobIds = jobs.map((job) => job.id);
+  const artifactRows =
+    jobIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(recordsRequestArtifacts)
+          .where(inArray(recordsRequestArtifacts.jobId, jobIds));
+  const artifactsByJob = new Map<string, typeof artifactRows>();
+  for (const row of artifactRows) {
+    const list = artifactsByJob.get(row.jobId) ?? [];
+    list.push(row);
+    artifactsByJob.set(row.jobId, list);
+  }
   return {
     engagementId,
-    jobs: jobs.map(recordsRequestJobToWire),
+    jobs: jobs.map((job) =>
+      enrichRecordsRequestJobWire(
+        recordsRequestJobToWire(job),
+        artifactsByJob.get(job.id) ?? [],
+      ),
+    ),
   };
 }
 

@@ -19,13 +19,14 @@
  * zero-padded or numeric ids.
  */
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   db as defaultDb,
   cadProperty,
   cadPropertyVintageCrosswalk,
   cadPropertyVintageFallback,
+  txgioParcel,
 } from "@workspace/db";
 import type { CadPropertyLookup } from "@workspace/adapters";
 import {
@@ -34,6 +35,11 @@ import {
   tryResolveDeclaredCadVintage,
 } from "@workspace/cad-ingest";
 import { normalizeCadPropId } from "./parcelNodeId";
+import {
+  accountCrosswalkForNode,
+  cadAccountNumberStem,
+  LANDUSE_JOIN_DISABLED_FIPS_SEED,
+} from "./joinNormalize";
 
 // Re-exported so existing `./cadPropertyLookup` import sites keep working;
 // the single implementation now lives in the dependency-free
@@ -50,6 +56,130 @@ export type CadLookupDb = Pick<
   NodePgDatabase<Record<string, unknown>>,
   "select"
 >;
+
+/**
+ * P-180 (2026-09-13). GATE-BLOCKED ACCOUNT LOOKUP -- the THIRD instance of the
+ * OPS-21 identity law (never join a cell, a label or a dollar to `cad_property`
+ * by the bare number in a gate-blocked county).
+ *
+ * WHY THIS FILE. For a gate-blocked county a property node is keyed by TxGIO's
+ * `prop_id`, which is a DIFFERENT numbering system from the CAD roll's
+ * `PropertyID` and only coincidentally collides with it. For Hays 48209 every
+ * one of 97651/97652/97653/97657/97658 is ALSO a real, unrelated CAD account
+ * (the Mesa Verde / Catalina Ln block), so this accessor's bare
+ * `(county_fips, prop_id)` lookup served the colliding account's living area
+ * and year built under the Sturgeon lots' identity.
+ *
+ * THE ACCOUNT IS REACHED THROUGH THE PUBLISHED IDENTIFIERS, not the bare
+ * number: the node's own `txgio_parcel.geo_id` names `cad_property.property_number`,
+ * corroborated by the account's `quick_ref_id` R-stem agreeing with the node's
+ * own `prop_id` -- the SAME rule `joinNormalize.accountCrosswalkForNode` and the
+ * tier-1 bake's `effectiveCadPropertyRoll` already apply, reused here rather
+ * than re-derived.
+ *
+ * FAIL CLOSED: no `geo_id` on the node, no account publishing it, an ambiguous
+ * `property_number`, or a disagreeing corroborator all return `null` (an honest
+ * absence), NEVER a fallback to the colliding bare-number row. A non-blocked
+ * county is byte-identical to the old behaviour -- this branch is never entered.
+ */
+export function shouldCrosswalkAccountLookup(
+  countyFips: string,
+  blockedFips: ReadonlySet<string> = LANDUSE_JOIN_DISABLED_FIPS_SEED,
+): boolean {
+  return blockedFips.has(countyFips);
+}
+
+/** The two columns the crosswalk bind needs from a candidate CAD account row. */
+export interface CrosswalkAccountCandidate {
+  propId: string;
+  quickRefId: string | null;
+}
+
+/**
+ * Pure half of the gate-blocked lookup, so the collision fixture is testable
+ * without a database. `accounts` is every `cad_property` row at the declared
+ * vintage whose `property_number` equals the node's `geo_id` -- the caller
+ * refuses an ambiguous set rather than picking one.
+ *
+ * Returns the ACCOUNT prop id the node's own published Geographic ID names,
+ * or null when the bind is absent, ambiguous, or refused by corroboration.
+ */
+export function chooseCrosswalkAccount(
+  nodePropId: string,
+  nodeGeoId: string | null | undefined,
+  accounts: readonly CrosswalkAccountCandidate[],
+): string | null {
+  const geoId = nodeGeoId?.trim();
+  if (!geoId) return null;
+  const candidates = accounts.filter((a) => a.propId);
+  if (candidates.length !== 1) return null; // none, or ambiguous -> refuse
+  const account = candidates[0]!;
+  const geoIdToAccountPropId = new Map<string, string>([
+    [geoId, account.propId],
+  ]);
+  const stem = cadAccountNumberStem(account.quickRefId);
+  const accountStemByPropId = new Map<string, string>();
+  if (stem != null) accountStemByPropId.set(account.propId, stem);
+  const { accountPropId } = accountCrosswalkForNode(
+    nodePropId,
+    geoId,
+    geoIdToAccountPropId,
+    accountStemByPropId,
+  );
+  return accountPropId;
+}
+
+async function lookupAccountViaCrosswalk(
+  database: CadLookupDb,
+  countyFips: string,
+  nodePropId: string,
+  taxYear: number,
+) {
+  const nodeRows = await database
+    .select({ geoId: txgioParcel.geoId })
+    .from(txgioParcel)
+    .where(
+      and(
+        eq(txgioParcel.countyFips, countyFips),
+        eq(txgioParcel.propId, nodePropId),
+        isNotNull(txgioParcel.geoId),
+      ),
+    )
+    .limit(3);
+  const geoId =
+    nodeRows.map((r) => r.geoId?.trim()).find((v) => v && v !== "") ?? null;
+  if (!geoId) return null;
+
+  const accounts = await database
+    .select({
+      propId: cadProperty.propId,
+      quickRefId: cadProperty.quickRefId,
+    })
+    .from(cadProperty)
+    .where(
+      and(
+        eq(cadProperty.countyFips, countyFips),
+        eq(cadProperty.taxYear, taxYear),
+        sql`btrim(${cadProperty.propertyNumber}) = ${geoId}`,
+      ),
+    )
+    .limit(3);
+  const accountPropId = chooseCrosswalkAccount(nodePropId, geoId, accounts);
+  if (!accountPropId) return null;
+
+  const rows = await database
+    .select()
+    .from(cadProperty)
+    .where(
+      and(
+        eq(cadProperty.countyFips, countyFips),
+        eq(cadProperty.propId, accountPropId),
+        eq(cadProperty.taxYear, taxYear),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
 
 /**
  * Build the accessor. `database` is injectable for tests (the
@@ -70,6 +200,19 @@ export function makeCadPropertyLookup(
     if (!declared) return null;
 
     const prop = normalizeCadPropId(propId);
+
+    // P-180: a gate-blocked county's bare prop_id names a DIFFERENT account
+    // (or none). Take the crosswalk bind or return an honest absence -- never
+    // the bare-number row. Non-blocked counties skip this entirely.
+    if (shouldCrosswalkAccountLookup(declared.countyFips)) {
+      return lookupAccountViaCrosswalk(
+        database,
+        declared.countyFips,
+        prop,
+        declared.taxYear,
+      );
+    }
+
     const exact = await database
       .select()
       .from(cadProperty)

@@ -16,13 +16,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildQueryLadder, geocodeAddress } from "@workspace/site-context/server";
 
+/**
+ * A house-grade answer, as Nominatim returns for a house-number query.
+ * `effectiveMatchRung` only keeps a street query's "street" claim when the
+ * ANSWER is house-grade, so the fixture carries the fields that decide it
+ * (`class`/`type`/`address.house_number`).
+ */
 function nominatimHit(lat: string, lon: string, city: string, state: string) {
   return [
     {
       lat,
       lon,
-      display_name: `${city}, ${state}`,
-      address: { town: city, state },
+      display_name: `1144, North Kayenta Drive, ${city}, ${state}`,
+      class: "place",
+      type: "house",
+      address: {
+        house_number: "1144",
+        road: "North Kayenta Drive",
+        town: city,
+        state,
+      },
     },
   ];
 }
@@ -118,6 +131,92 @@ describe("geocodeAddress", () => {
     expect(geo!.matchRung).toBe("zip");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   }, 15_000);
+
+  it("re-labels a street-rung hit Nominatim answered with the ZIP centroid (P-393)", async () => {
+    // The measured 2026-09-21 case: "8459 ROCK CREEK RD, WACO, TX 76708"
+    // came back as the 76708 POSTCODE node. The query's shape says "street";
+    // the answer is a ZIP centroid ~3.5 km from the parcel, and stamping it
+    // "street" is what let it become the front-edge reference.
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse([
+        {
+          lat: "31.58903",
+          lon: "-97.18525",
+          display_name: "76708, Waco, McLennan County, Texas, United States",
+          class: "place",
+          type: "postcode",
+          address: { postcode: "76708", city: "Waco", state: "Texas" },
+        },
+      ]),
+    );
+    const geo = await geocodeAddress("1144 N Kayenta Dr\nWaco TX 76708");
+    expect(geo).not.toBeNull();
+    // The coordinates are still whatever the ladder's first hit gave...
+    expect(geo!.latitude).toBeCloseTo(31.58903, 5);
+    // ...but the rung now reports the answer's own precision, so the
+    // consumer's geocode-centroid gate can fire instead of trusting it.
+    expect(geo!.matchRung).toBe("zip");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-labels a street-rung hit that came back locality-grade", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse([
+        {
+          lat: "31.55451",
+          lon: "-97.13256",
+          display_name: "Waco, McLennan County, Texas, United States",
+          class: "boundary",
+          type: "administrative",
+          address: { city: "Waco", state: "Texas" },
+        },
+      ]),
+    );
+    const geo = await geocodeAddress("1144 N Kayenta Dr\nWaco TX 76708");
+    expect(geo!.matchRung).toBe("locality");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps 'street' when the answer is the street the query named (road class)", async () => {
+    // Measured 2026-09-20: 4 of the 33 corpus addresses get a road-class
+    // answer on the street rung. That is a street match, not a centroid —
+    // it must not be downgraded into a decline.
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse([
+        {
+          lat: "29.88795",
+          lon: "-97.87044",
+          display_name: "Airport Drive, San Marcos, Caldwell County, Texas",
+          class: "highway",
+          type: "unclassified",
+          address: { road: "Airport Drive", town: "San Marcos", state: "Texas" },
+        },
+      ]),
+    );
+    const geo = await geocodeAddress("1825 AIRPORT DR\nSAN MARCOS TX 78656");
+    expect(geo!.matchRung).toBe("street");
+  });
+
+  it("keeps 'street' when the answer carries a house number (no class/type needed)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResponse([
+        {
+          lat: "31.62991",
+          lon: "-97.19727",
+          display_name: "8459, Rock Creek Road, Waco, Texas, United States",
+          address: {
+            house_number: "8459",
+            road: "Rock Creek Road",
+            city: "Waco",
+            state: "Texas",
+            postcode: "76708",
+          },
+        },
+      ]),
+    );
+    const geo = await geocodeAddress("8459 ROCK CREEK RD\nWACO TX 76708");
+    expect(geo!.matchRung).toBe("street");
+  });
 
   it("returns null when every rung is a clean miss", async () => {
     fetchMock.mockResolvedValue(fakeResponse([]));

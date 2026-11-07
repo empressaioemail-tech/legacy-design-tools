@@ -447,6 +447,50 @@ export function expandGroupLabelsToEdges(
 const ROAD_TRUST_MAX_M = 45;
 
 /**
+ * SECOND signal for the front edge, and its own trust bound (m): a geocoded
+ * reference point may name the front edge only while it is plausibly THIS
+ * parcel's frontage.
+ *
+ * P-393: a reference point that is not on the parcel cannot describe its
+ * frontage, but `frontFromPoint` used to accept one at any distance — it
+ * returned whichever edge midpoint happened to be nearest. When the geocode
+ * ladder answered a street query with the postcode centroid (see
+ * `effectiveMatchRung` in `lib/site-context/src/server/geocode.ts`), the
+ * reference point sat 3,512 m from parcel 48309:103015 and still set its
+ * front edge: a 4.8 M sqft tract was drawn with a 5 ft SIDE setback across
+ * its street frontage and no rear, moving the envelope 664 m (canary
+ * comparison `_inbox/2026-09-21_cortex_canary_compare2.json`). The point
+ * signal now declines rather than fabricating a frontage, and the ring falls
+ * to the shape signal with the refusal disclosed.
+ *
+ * The bound is the parcel's own extent with this floor, so a small lot still
+ * accepts the tens-of-metres offsets real geocodes carry (a 30 m lot keeps the
+ * 250 m floor while a 1.3 km tract is bounded by its own diameter).
+ */
+export const POINT_FRONT_TRUST_MIN_FLOOR_M = 250;
+
+/** Parcel diameter proxy (m): 2x the farthest edge midpoint from the ring centroid. */
+function parcelSpanM(edges: ProjEdges): number {
+  const n = edges.edgeMid.length;
+  if (n === 0) return 0;
+  let cx = 0;
+  let cy = 0;
+  for (const m of edges.edgeMid) {
+    cx += m.x;
+    cy += m.y;
+  }
+  cx /= n;
+  cy /= n;
+  let r2 = 0;
+  for (const m of edges.edgeMid) {
+    const dx = m.x - cx;
+    const dy = m.y - cy;
+    r2 = Math.max(r2, dx * dx + dy * dy);
+  }
+  return 2 * Math.sqrt(r2);
+}
+
+/**
  * SECOND-frontage adjacency bound (m) — WDLL P-60b item 5. Claiming a CORNER
  * lot asserts the parcel adjoins a second street, so the bar is adjacency,
  * not mere proximity: the road centerline must be within roughly one
@@ -605,12 +649,17 @@ function frontFromRoads(
   };
 }
 
-/** Choose the FRONT edge as the one nearest a reference (geocoded) point. */
+/**
+ * Choose the FRONT edge as the one nearest a reference (geocoded) point.
+ * Returns the winning index, its confidence, and the distance from the point
+ * to that edge's midpoint so the caller can hold the PLACE-ref trust bound
+ * (P-393) rather than trusting any distance.
+ */
 function frontFromPoint(
   edges: ProjEdges,
   refLng: number,
   refLat: number,
-): { index: number; confidence: number } {
+): { index: number; confidence: number; dist: number } {
   const proj = edges.proj!;
   const ref = projectPoint(refLng, refLat, proj);
   let best = 0;
@@ -624,7 +673,7 @@ function frontFromPoint(
   }
   // Medium confidence: the geocoded point trends toward the street-facing
   // structure but is not the frontage line.
-  return { index: best, confidence: 0.55 };
+  return { index: best, confidence: 0.55, dist: bestD };
 }
 
 /** |cos| below this => edge is street-facing (perpendicular to lot depth). */
@@ -883,18 +932,32 @@ export function labelEdges(input: LabelInputs): EdgeLabelingResult | null {
     }
   }
 
+  // P-393: a placed reference point may name the front edge only while it is
+  // plausibly this parcel's own frontage. Past that bound the point cannot
+  // describe the frontage at all — it is a coarse geocode (a ZIP centroid sits
+  // kilometres away), so claiming an edge from it fabricates a front and a
+  // setback. Decline the signal; the shape fallback below discloses it.
+  const placeRefMaxM = Math.max(POINT_FRONT_TRUST_MIN_FLOOR_M, parcelSpanM(edges));
+  let placeRefRefusedM: number | null = null;
   if (!front && input.refPoint) {
-    front = frontFromPoint(edges, input.refPoint.lng, input.refPoint.lat);
-    signal = "point";
-    note =
-      "Front edge inferred from the geocoded address point (approximate — not the surveyed frontage).";
+    const point = frontFromPoint(edges, input.refPoint.lng, input.refPoint.lat);
+    if (point.dist <= placeRefMaxM) {
+      front = { index: point.index, confidence: point.confidence };
+      signal = "point";
+      note =
+        "Front edge inferred from the geocoded address point (approximate — not the surveyed frontage).";
+    } else {
+      placeRefRefusedM = point.dist;
+    }
   }
 
   if (!front) {
     front = frontFromShape(edges);
     signal = "shape";
     note =
-      "Front edge inferred from lot shape only (no street or address reference) — orientation is approximate.";
+      placeRefRefusedM === null
+        ? "Front edge inferred from lot shape only (no street or address reference) — orientation is approximate."
+        : "Front edge inferred from lot shape only — the address reference point was too far from this parcel to be its frontage, so it was not used. Orientation is approximate.";
   }
 
   const frontGroup = eg.groupOf[front.index]!;

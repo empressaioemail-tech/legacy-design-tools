@@ -115,6 +115,16 @@ describe("Tier-2 FEMA flood facet", () => {
     expect(f.baseFloodElevation).toBeNull();
   });
 
+  it("NFHL free-text FLD_ZONE (AREA NOT INCLUDED / OPEN WATER) with no SFHA_TF is NOT an SFHA", () => {
+    for (const zone of ["AREA NOT INCLUDED", "OPEN WATER", "D"]) {
+      const f = buildFloodFacet({ features: [{ attributes: { FLD_ZONE: zone } }] }, nowIso);
+      expect(f.status).toBe("flood-zone");
+      expect(f.inSpecialFloodHazardArea).toBeNull();
+    }
+    const ae = buildFloodFacet({ features: [{ attributes: { FLD_ZONE: "AE" } }] }, nowIso);
+    expect(ae.inSpecialFloodHazardArea).toBe(true);
+  });
+
   it("reads a clean empty result as outside-sfha (a real answer, not absence)", () => {
     const f = buildFloodFacet({ features: [] }, nowIso);
     expect(f.status).toBe("outside-sfha");

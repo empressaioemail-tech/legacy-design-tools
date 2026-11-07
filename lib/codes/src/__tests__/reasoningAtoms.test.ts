@@ -156,6 +156,46 @@ describe("reasoning atom persistence", () => {
         edition: "FBC 2023",
         editionSlug: "fbc-2023",
         label: "FBC Mechanical M601.6",
+        drivers: ["florida"],
+      };
+      const atom = await upsertReasoningAtomFromWebFetch({
+        jurisdictionKey: "miami_beach_fl",
+        target,
+        result: {
+          text: fullText,
+          sourceUrl: "https://floridabuilding.org/c/FLMECH2023P1",
+          retrievedAt: "2026-06-08T12:00:00.000Z",
+          edition: "FBC 2023",
+          section: "FBC-M601.6",
+          confidence: 0.9,
+          verified: true,
+          sourceName: "floridabuilding",
+        },
+      });
+
+      expect(atom.id).toBe(
+        jurisdictionReasoningAtomId("miami_beach_fl", "fbc-2023", "FBC-M601.6"),
+      );
+      expect(atom.id.startsWith(REASONING_ATOM_PREFIX)).toBe(true);
+      expect(atom.snippet!.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
+      expect(atom.snippet).not.toBe(fullText);
+      expect(atom.reasoning).toContain("FBC-M601.6");
+
+      const rows = await db.select().from(reasoningAtoms);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.snippet!.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
+    });
+  });
+
+  it("an ICC-sourced atom persists and returns with snippet and reasoning null (G-309)", async () => {
+    await withTestSchema(async ({ db }) => {
+      mocks.db = db;
+      const fullText = "Return air ducts shall be insulated. ".repeat(80);
+      const target: WebCodeReviewTarget = {
+        codeRef: "FBC-M601.6",
+        edition: "FBC 2023",
+        editionSlug: "fbc-2023",
+        label: "FBC Mechanical M601.6",
         drivers: ["icc"],
       };
       const atom = await upsertReasoningAtomFromWebFetch({
@@ -173,17 +213,10 @@ describe("reasoning atom persistence", () => {
         },
       });
 
-      expect(atom.id).toBe(
-        jurisdictionReasoningAtomId("miami_beach_fl", "fbc-2023", "FBC-M601.6"),
-      );
-      expect(atom.id.startsWith(REASONING_ATOM_PREFIX)).toBe(true);
-      expect(atom.snippet!.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
-      expect(atom.snippet).not.toBe(fullText);
-      expect(atom.reasoning).toContain("FBC-M601.6");
-
-      const rows = await db.select().from(reasoningAtoms);
-      expect(rows).toHaveLength(1);
-      expect(rows[0]!.snippet!.length).toBeLessThanOrEqual(REASONING_SNIPPET_MAX_CHARS);
+      expect(atom.snippet).toBeNull();
+      expect(atom.reasoning).toBeNull();
+      expect(atom.sources[0]!.url).toContain("iccsafe.org");
+      expect(atom.codeRef).toBe("FBC-M601.6");
     });
   });
 

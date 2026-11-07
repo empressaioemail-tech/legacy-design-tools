@@ -32,3 +32,32 @@ describe("consequenceGatedRouting", () => {
     ).toBe("critical");
   });
 });
+
+describe("consequenceGatedRouting: one model, no ensemble (G-309 A20)", () => {
+  it("carries no model id and ignores XAI_* and the ensemble flag", () => {
+    const keys = ["XAI_MODEL", "XAI_FINDING_HIGH_MODEL", "AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE"];
+    const saved = keys.map((k) => process.env[k]);
+    process.env.XAI_MODEL = "grok-3-mini";
+    process.env.XAI_FINDING_HIGH_MODEL = "grok-3";
+    process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE = "1";
+    try {
+      for (const sections of [
+        [{ consequence: { asce7RiskCategory: "IV" as const } }],
+        [{ consequence: null }],
+      ]) {
+        const route = resolveConsequenceGatedRoute(
+          sections as never,
+        ) as unknown as Record<string, unknown>;
+        expect("grokModel" in route).toBe(false);
+        expect("anthropicModel" in route).toBe(false);
+        expect("ensembleEnabled" in route).toBe(false);
+        expect(String(route.label)).not.toMatch(/ensemble/i);
+      }
+    } finally {
+      keys.forEach((k, n) => {
+        if (saved[n] === undefined) delete process.env[k];
+        else process.env[k] = saved[n];
+      });
+    }
+  });
+});

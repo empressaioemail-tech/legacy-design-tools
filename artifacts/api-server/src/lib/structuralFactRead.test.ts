@@ -32,6 +32,7 @@ describe("resolveStructuralFactRead", () => {
     });
     expect(read).toMatchObject({
       state: "present",
+      entityType: "cad_property",
       livingAreaSqft: 1800,
       yearBuilt: 1998,
     });

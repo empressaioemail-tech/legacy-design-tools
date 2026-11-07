@@ -25,14 +25,20 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
     pageIncludes: vi.fn().mockResolvedValue(false),
     currentUrl: vi.fn().mockResolvedValue("https://example.test/detail"),
     extractResultRows: vi.fn().mockResolvedValue([]),
+    inspectDocumentPurchase: vi.fn().mockResolvedValue({
+      visibleMainText: "Official Record",
+      visibleMainControls: ["View"],
+      rowPriceText: null,
+    }),
     ...overrides,
   };
 }
 
 describe("normalizeIndexHit", () => {
-  it("maps table cells to index fields", () => {
+  it("maps named header columns to index fields", () => {
     expect(
       normalizeIndexHit({
+        headers: ["Instrument Number", "Document Type", "Date", "Grantor"],
         cells: ["2024-12345", "DEED", "2024-01-02", "SMITH JOHN"],
         link: "https://portal/doc/1",
       }),
@@ -47,6 +53,73 @@ describe("normalizeIndexHit", () => {
 });
 
 describe("acquireIndexHits", () => {
+  it("captures a free document even when the page HTML contains Pay Taxes", async () => {
+    const captureFullPage = vi.fn().mockResolvedValue({
+      ok: true,
+      sha256: "deadbeef",
+      byteLength: 512,
+      label: "capture",
+    });
+    const browser = mockBrowser({
+      pageIncludes: vi.fn(async (text: string) =>
+        "pay taxes paypal payment".includes(text.toLowerCase()),
+      ),
+      inspectDocumentPurchase: vi.fn().mockResolvedValue({
+        visibleMainText: "Official Record 202008880",
+        visibleMainControls: ["View"],
+        rowPriceText: null,
+      }),
+      captureFullPage,
+    });
+    const result = await acquireIndexHits({
+      jobId: "job-1",
+      portalId: "bastrop-aumentum",
+      hits: [
+        {
+          recordingRef: "202008880",
+          documentType: "DEED",
+          recordingDate: null,
+          parties: "A",
+          detailUrl: "https://portal/doc/1",
+        },
+      ],
+      browser,
+    });
+    expect(result.kind).toBe("acquired");
+    expect(captureFullPage).toHaveBeenCalled();
+    if (result.kind === "acquired") {
+      expect(result.summary.acquired).toBe(1);
+    }
+  });
+
+  it("does not capture a document that has Add to cart on the document surface", async () => {
+    const captureFullPage = vi.fn();
+    const browser = mockBrowser({
+      inspectDocumentPurchase: vi.fn().mockResolvedValue({
+        visibleMainText: "Official Record 202008880",
+        visibleMainControls: ["Add to cart"],
+        rowPriceText: null,
+      }),
+      captureFullPage,
+    });
+    const result = await acquireIndexHits({
+      jobId: "job-1",
+      portalId: "bastrop-aumentum",
+      hits: [
+        {
+          recordingRef: "202008880",
+          documentType: "DEED",
+          recordingDate: null,
+          parties: "A",
+          detailUrl: "https://portal/doc/1",
+        },
+      ],
+      browser,
+    });
+    expect(result.kind).toBe("needs-human");
+    expect(captureFullPage).not.toHaveBeenCalled();
+  });
+
   it("captures detail pages when no purchase wall", async () => {
     const browser = mockBrowser();
     const result = await acquireIndexHits({
@@ -72,7 +145,11 @@ describe("acquireIndexHits", () => {
 
   it("routes purchase wall to awaiting-purchase when over threshold", async () => {
     const browser = mockBrowser({
-      pageIncludes: vi.fn().mockResolvedValue(true),
+      inspectDocumentPurchase: vi.fn().mockResolvedValue({
+        visibleMainText: "Purchase this document",
+        visibleMainControls: ["Add to cart"],
+        rowPriceText: "$3.50",
+      }),
     });
     const hits = Array.from({ length: 20 }, (_, i) => ({
       recordingRef: `${i}`,
@@ -95,9 +172,15 @@ describe("acquireIndexHits", () => {
     }
   });
 
-  it("routes fee-approved purchase walls to human clerk without re-pausing", async () => {
+  it("routes fee-approved purchase walls to human clerk and does not checkout", async () => {
+    const captureFullPage = vi.fn();
     const browser = mockBrowser({
-      pageIncludes: vi.fn().mockResolvedValue(true),
+      inspectDocumentPurchase: vi.fn().mockResolvedValue({
+        visibleMainText: "Purchase this document",
+        visibleMainControls: ["Add to cart"],
+        rowPriceText: "$3.50",
+      }),
+      captureFullPage,
     });
     const result = await acquireIndexHits({
       jobId: "job-1",
@@ -115,8 +198,9 @@ describe("acquireIndexHits", () => {
       purchaseApproved: true,
     });
     expect(result.kind).toBe("needs-human");
+    expect(captureFullPage).not.toHaveBeenCalled();
     if (result.kind === "needs-human") {
-      expect(result.reason).toContain("approved county fees");
+      expect(result.reason).toContain("does not drive checkout");
     }
   });
 });

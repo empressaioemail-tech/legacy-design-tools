@@ -11,6 +11,7 @@
   "include": ["src"],
   "references": [
     { "path": "../codes-sources" },
-    { "path": "../db" }
+    { "path": "../db" },
+    { "path": "../icc-notice" }
   ]
 }

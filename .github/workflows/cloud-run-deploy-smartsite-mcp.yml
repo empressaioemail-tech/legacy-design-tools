@@ -121,6 +121,33 @@ jobs:
             echo "::warning::First deploy for $SVC: default URL may route traffic until shift-traffic."
           fi
 
+          # DATABASE_URL binds DEPLOYMENT_DATABASE_URL_DIRECT, not
+          # DEPLOYMENT_DATABASE_URL. The Neon pooler injected
+          # SET default_transaction_read_only = on for this database on
+          # 2026-08-31, killing every write while reads stayed green.
+          # A hand-applied fix was reverted by this workflow the same day
+          # (--set-secrets is authoritative-replace) and broke customer
+          # login for ~10 hours before anyone noticed. REVERT to
+          # DEPLOYMENT_DATABASE_URL only when Neon explains the injection
+          # and the pooler is restored. Running unpooled is a cost, not a
+          # resting state. See doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md
+          # --min-instances=1: this service is what Claude talks to, so a cold
+          # start is a customer-visible failure rather than a slow page.
+          # MEASURED 2026-09-01: eight cold starts in one day, with request
+          # latencies of 81s, 65s, 58s and 47s against a warm path under 4.3s.
+          # No MCP host waits that long, so the first call of a cold session
+          # renders Claude's own "Unable to reach Smart Site" card. That string
+          # is in neither our panel HTML nor our server source; it is the host
+          # giving up. The panel resource, the tools and /health were all
+          # verified healthy in the same window, so warmth was the only
+          # variable.
+          #
+          # This must live HERE rather than in a `gcloud run services update`,
+          # because a workflow deploy is authoritative-replace and would revert
+          # a manually set value on the next deploy. And per the cortex-api
+          # guard: `services update --min-instances` only writes the TEMPLATE,
+          # so verify autoscaling.knative.dev/minScale on the SERVING REVISION,
+          # not the service. Do not set this back to 0.
           gcloud run deploy "$SVC" \
             --region="$RGN" \
             --image="${IMAGE}" \
@@ -129,14 +156,14 @@ jobs:
             --port=8080 \
             --cpu=1 \
             --memory=512Mi \
-            --min-instances=0 \
+            --min-instances=1 \
             --max-instances=5 \
             --concurrency=40 \
             --timeout=120 \
             --service-account="${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --set-env-vars="NODE_ENV=production,WORKOS_ISSUER=https://happy-asteroid-26.authkit.app,WORKOS_JWKS_URI=https://happy-asteroid-26.authkit.app/oauth2/jwks,SMARTSITE_MCP_PUBLIC_URL=https://mcp.smartsite.cloud,SMARTSITE_MCP_RESOURCE=https://mcp.smartsite.cloud/mcp,CORTEX_API_BASE_URL=https://cortex-api-tds7av26va-uc.a.run.app" \
-            --set-secrets="DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,WORKOS_CLIENT_ID=WORKOS_CLIENT_ID:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest"
+            --set-env-vars="NODE_ENV=production,WORKOS_ISSUER=https://happy-asteroid-26.authkit.app,WORKOS_JWKS_URI=https://happy-asteroid-26.authkit.app/oauth2/jwks,SMARTSITE_MCP_PUBLIC_URL=https://mcp.smartsite.cloud,SMARTSITE_MCP_RESOURCE=https://mcp.smartsite.cloud/mcp,CORTEX_API_BASE_URL=https://cortex-api-tds7av26va-uc.a.run.app,HAUSKA_MCP_BASE_URL=https://hauska-mcp-server-h7gvu7rgcq-uc.a.run.app,HAUSKA_ENGINE_API_URL=https://hauska-engine-api-h7gvu7rgcq-uc.a.run.app" \
+            --set-secrets="DATABASE_URL=DEPLOYMENT_DATABASE_URL_DIRECT:latest,WORKOS_CLIENT_ID=WORKOS_CLIENT_ID:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest,HAUSKA_MCP_SERVICE_KEY=HAUSKA_MCP_KEY:latest,HAUSKA_ENGINE_API_KEY=HAUSKA_ENGINE_API_KEY:latest"
 
       - name: Show canary smoke URL
         run: |
@@ -148,6 +175,36 @@ jobs:
           HOST="${HOST#http://}"
           echo "Canary tag URL: https://canary---${HOST}/health"
 
+      # P-279 post-deploy credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY HERE: the deploy is what creates the new revision, and the tag list is what a deploy
+      # leaves lying around. This first run catches the tags that were already stale
+      # before this deploy; the post-shift run below catches the ones this deploy creates.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the verdict is read from the check's OWN JSON report, never from its process exit
+      # code. A missing module, a syntax error, an uncaught exception, a usage error or an
+      # unreadable service all leave stdout without that JSON and read "did-not-run" — never
+      # "violation". scripts/p279-tagged-revision-check.mjs is the single table both call sites
+      # read; there is no second copy of a case statement to drift. Its non-zero exit fails this
+      # step (GitHub's default `bash -e`).
+      - name: Tagged-revision credential check (P-279)
+        run: |
+          node scripts/p279-tagged-revision-check.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"
+
   shift-traffic:
     name: Shift traffic to smartsite-mcp canary
     if: github.event_name == 'workflow_dispatch' && inputs.action == 'shift-traffic'
@@ -156,6 +213,21 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # P-362. This job calls a repo script (scripts/p279-tagged-revision-check.mjs), so the
+      # repo must exist on the runner. It did not in cloud-run-deploy.yml, and the missing
+      # module's exit 1 was reported as a credential violation.
+      #
+      # WHICH COMMIT: for a workflow_dispatch run `github.sha` is the head of the ref the run was
+      # dispatched against, and the workflow file itself is read from that same commit, so the
+      # script and the workflow are the same revision by construction. It is NOT necessarily the
+      # revision whose image is being shifted: `image_tag` is an operator input that defaults to
+      # `latest`, so the workflow cannot know the image's commit from inside the run. The
+      # guarantee bought here is workflow <-> script, which is the one this check needs.
+      - name: Checkout (the commit this workflow was dispatched from)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Validate required secrets
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -185,9 +257,51 @@ jobs:
           BASE_URL=$(gcloud run services describe "${{ env.CLOUD_RUN_SERVICE }}" \
             --region="${{ env.GCP_REGION }}" \
             --format='value(status.url)')
-          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")
-          echo "GET ${BASE_URL}/health -> HTTP ${STATUS}"
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Production /health returned HTTP ${STATUS} after traffic shift"
+          BODY_FILE=$(mktemp)
+          HTTP=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" "${BASE_URL}/health")
+          echo "GET ${BASE_URL}/health -> HTTP ${HTTP}"
+          cat "$BODY_FILE"; echo
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::Production /health returned HTTP ${HTTP} after traffic shift"
             exit 1
           fi
+          # /health answers 200 with status "degraded" when auth or cortex is
+          # unconfigured, and a degraded server 503s every /mcp call. HTTP 200
+          # alone is not a pass. Fields are read by name, never by position.
+          if ! HEALTH_STATUS=$(jq -r '.status // "missing"' "$BODY_FILE"); then
+            echo "::error::Production /health body is not JSON after traffic shift"
+            exit 1
+          fi
+          if [ "$HEALTH_STATUS" != "ok" ]; then
+            echo "::error::Production /health status is '${HEALTH_STATUS}' after traffic shift (authConfigured=$(jq -r '.authConfigured' "$BODY_FILE"), cortexConfigured=$(jq -r '.cortexConfigured' "$BODY_FILE"), revision=$(jq -r '.revision' "$BODY_FILE"))"
+            exit 1
+          fi
+          echo "Production /health status ok (revision $(jq -r '.revision' "$BODY_FILE"))"
+
+      # P-279 post-shift credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY AFTER THE SHIFT, SECOND RUN: at canary time the OLD revision is still serving, so a credential ADDED by
+      # this deploy is invisible to the comparison. The serving revision changes at the
+      # shift, which is the moment the comparison becomes complete — and the moment
+      # the stale tags become provably stale.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the same single table as the canary run above. The verdict is read from the check's
+      # OWN JSON report, never from its process exit code, so a check that could not run reads
+      # "did-not-run" and never "violation".
+      - name: Tagged-revision credential check (P-279) [after traffic shift]
+        run: |
+          node scripts/p279-tagged-revision-check.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"

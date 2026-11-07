@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { isIccSource } from "@workspace/icc-notice";
 import { db, reasoningAtoms, type ReasoningSourceLink } from "@workspace/db";
 import type { WebCodeFetchResult } from "../webCodeFetch/types";
 import type { WebCodeReviewTarget } from "../webCodeFetch/types";
@@ -6,6 +7,24 @@ import { reasoningAtomId, jurisdictionReasoningAtomId } from "./ids";
 import { mergeReasoningSources, sourceSetChanged } from "./sources";
 import { capReasoningSnippet, reasoningSummaryFromFetch } from "./snippet";
 import type { ReasoningAtomRecord, ReasoningVerificationState } from "./types";
+import {
+  guardReasoningText,
+  logIccTextRefused,
+  type IccGuardLogger,
+} from "../iccIngestGuard";
+
+/** G-309 ingest guard for reasoning_atoms text; logs a count-only event. */
+function guardText(
+  text: { snippet: string | null; reasoning: string | null },
+  identity: Parameters<typeof guardReasoningText>[1],
+  source: string,
+  logger: IccGuardLogger | undefined,
+): { snippet: string | null; reasoning: string | null } {
+  const { values, refused } = guardReasoningText(text, identity);
+  // Count only rows that actually had a snippet to refuse.
+  if (refused && text.snippet != null) logIccTextRefused(logger, source, 1);
+  return { snippet: values.snippet ?? null, reasoning: text.reasoning };
+}
 
 export function webResultToSourceLink(result: WebCodeFetchResult): ReasoningSourceLink {
   return {
@@ -55,6 +74,7 @@ export async function upsertReasoningAtomFromWebFetch(args: {
   target: WebCodeReviewTarget;
   result: WebCodeFetchResult;
   verifyBeforePromote?: boolean;
+  logger?: IccGuardLogger;
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, result, verifyBeforePromote = false } = args;
   const id = jurisdictionReasoningAtomId(jurisdictionKey, target.editionSlug, target.codeRef);
@@ -98,6 +118,18 @@ export async function upsertReasoningAtomFromWebFetch(args: {
       { priorGrounded },
     );
 
+    const text = guardText(
+      {
+        snippet: snippet ?? existing[0].snippet,
+        reasoning:
+          incomingVerificationState === "verified" || verificationState === "verified"
+            ? reasoning
+            : existing[0].reasoning,
+      },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
+      "persist.upsertReasoningAtomFromWebFetch.update",
+      args.logger,
+    );
     const [row] = await db
       .update(reasoningAtoms)
       .set({
@@ -106,11 +138,8 @@ export async function upsertReasoningAtomFromWebFetch(args: {
           Math.max(Number(existing[0].assertedConfidence), assertedConfidence),
         ),
         verificationState,
-        snippet: snippet ?? existing[0].snippet,
-        reasoning:
-          incomingVerificationState === "verified" || verificationState === "verified"
-            ? reasoning
-            : existing[0].reasoning,
+        snippet: text.snippet,
+        reasoning: text.reasoning,
         updatedAt: now,
         sourceSetVersion: nextSourceSetVersion,
         calibrationStale:
@@ -121,6 +150,12 @@ export async function upsertReasoningAtomFromWebFetch(args: {
     return mapRow(row!);
   }
 
+  const insertText = guardText(
+    { snippet, reasoning },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
+    "persist.upsertReasoningAtomFromWebFetch.insert",
+    args.logger,
+  );
   const [row] = await db
     .insert(reasoningAtoms)
     .values({
@@ -130,10 +165,10 @@ export async function upsertReasoningAtomFromWebFetch(args: {
       edition: target.edition,
       editionSlug: target.editionSlug,
       sources: [incomingSource],
-      reasoning,
+      reasoning: insertText.reasoning,
       assertedConfidence: String(assertedConfidence),
       verificationState: incomingVerificationState,
-      snippet,
+      snippet: insertText.snippet,
       displayMode: "deeplink",
       accessPolicy: "platform-internal",
       sourceSetVersion: 1,
@@ -151,6 +186,7 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
   target: WebCodeReviewTarget;
   corpusSourceUrl: string;
   corpusAtomId: string;
+  logger?: IccGuardLogger;
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, corpusSourceUrl, corpusAtomId } = args;
   const id = jurisdictionReasoningAtomId(jurisdictionKey, target.editionSlug, target.codeRef);
@@ -175,11 +211,17 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
     const priorSources = (existing[0].sources as ReasoningSourceLink[]) ?? [];
     const mergedSources = mergeReasoningSources(priorSources, incomingSource);
     const sourcesDrifted = sourceSetChanged(priorSources, mergedSources);
+    const text = guardText(
+      { snippet: null, reasoning },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
+      "persist.upsertReasoningAtomCorpusOverlay.update",
+      args.logger,
+    );
     const [row] = await db
       .update(reasoningAtoms)
       .set({
         sources: mergedSources,
-        reasoning,
+        reasoning: text.reasoning,
         updatedAt: now,
         sourceSetVersion: sourcesDrifted
           ? Number(existing[0].sourceSetVersion ?? 1) + 1
@@ -192,6 +234,12 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
     return mapRow(row!);
   }
 
+  const insertText = guardText(
+    { snippet: null, reasoning },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
+    "persist.upsertReasoningAtomCorpusOverlay.insert",
+    args.logger,
+  );
   const [row] = await db
     .insert(reasoningAtoms)
     .values({
@@ -201,7 +249,7 @@ export async function upsertReasoningAtomCorpusOverlay(args: {
       edition: target.edition,
       editionSlug: target.editionSlug,
       sources: [incomingSource],
-      reasoning,
+      reasoning: insertText.reasoning,
       assertedConfidence: "0.75",
       verificationState: "verified",
       snippet: null,
@@ -222,6 +270,7 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
   target: WebCodeReviewTarget;
   deeplinkUrl: string;
   sourceName?: string;
+  logger?: IccGuardLogger;
 }): Promise<ReasoningAtomRecord> {
   const { jurisdictionKey, target, deeplinkUrl } = args;
   const sourceName = args.sourceName ?? "nfpa";
@@ -247,12 +296,18 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
     const priorSources = (existing[0].sources as ReasoningSourceLink[]) ?? [];
     const mergedSources = mergeReasoningSources(priorSources, incomingSource);
     const sourcesDrifted = sourceSetChanged(priorSources, mergedSources);
+    const text = guardText(
+      { snippet: null, reasoning },
+      { jurisdictionKey, edition: target.edition, sources: mergedSources },
+      "persist.upsertReasoningAtomDeeplinkOnly.update",
+      args.logger,
+    );
     const [row] = await db
       .update(reasoningAtoms)
       .set({
         sources: mergedSources,
-        reasoning,
-        snippet: null,
+        reasoning: text.reasoning,
+        snippet: text.snippet,
         assertedConfidence: "0.5",
         verificationState: "verified",
         displayMode: "deeplink",
@@ -268,6 +323,12 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
     return mapRow(row!);
   }
 
+  const insertText = guardText(
+    { snippet: null, reasoning },
+    { jurisdictionKey, edition: target.edition, sources: [incomingSource] },
+    "persist.upsertReasoningAtomDeeplinkOnly.insert",
+    args.logger,
+  );
   const [row] = await db
     .insert(reasoningAtoms)
     .values({
@@ -277,10 +338,10 @@ export async function upsertReasoningAtomDeeplinkOnly(args: {
       edition: target.edition,
       editionSlug: target.editionSlug,
       sources: [incomingSource],
-      reasoning,
+      reasoning: insertText.reasoning,
       assertedConfidence: "0.5",
       verificationState: "verified",
-      snippet: null,
+      snippet: insertText.snippet,
       displayMode: "deeplink",
       accessPolicy: "platform-internal",
       sourceSetVersion: 1,
@@ -331,7 +392,21 @@ export async function countReasoningAtomsForJurisdiction(
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * G-309: ICC content comes only through Code Connect. A reasoning_atoms row
+ * whose source is ICC (iccsafe.org host or an ICC-named source) was scraped
+ * before that rule; it keeps its citation (code ref + source link) but never
+ * returns its stored snippet or reasoning text.
+ */
+export function reasoningRowIsIcc(row: {
+  sources?: unknown;
+}): boolean {
+  const sources = Array.isArray(row.sources) ? row.sources : [];
+  return sources.some((s) => isIccSource(s as { url?: unknown; sourceName?: unknown }));
+}
+
 function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {
+  const icc = reasoningRowIsIcc(row);
   return {
     id: row.id,
     jurisdictionKey: row.jurisdictionKey,
@@ -339,10 +414,10 @@ function mapRow(row: typeof reasoningAtoms.$inferSelect): ReasoningAtomRecord {
     edition: row.edition,
     editionSlug: row.editionSlug,
     sources: (row.sources as ReasoningSourceLink[]) ?? [],
-    reasoning: row.reasoning,
+    reasoning: icc ? null : row.reasoning,
     assertedConfidence: Number(row.assertedConfidence),
     verificationState: row.verificationState as ReasoningVerificationState,
-    snippet: row.snippet,
+    snippet: icc ? null : row.snippet,
     displayMode: row.displayMode as ReasoningAtomRecord["displayMode"],
     calibratedConfidence:
       row.calibratedConfidence != null

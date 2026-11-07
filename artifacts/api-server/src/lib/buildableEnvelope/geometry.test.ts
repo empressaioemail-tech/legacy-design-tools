@@ -8,11 +8,13 @@ import { describe, it, expect } from "vitest";
 import {
   insetPerEdge,
   ringAreaSqFt,
+  ringContainsPoint,
   projectRing,
   feetToMeters,
   metersToFeet,
   geometryCorrectnessGate,
   stripReversalSpikes,
+  BOOLEAN_RETRY_GRID_M,
   type Ring,
 } from "./geometry";
 import {
@@ -394,15 +396,36 @@ describe("insetPerEdge — P60b false-empty regressions (digitized/curved rings)
     assertGatePass(ring, res.ring!, feet);
   });
 
-  it("REGRESSION: real Simsbrook 48453:280239, as-is per-edge setbacks -> ~3,798 sqft", () => {
+  /**
+   * RESTATED at P-235, from ~3,798 sqft to ~3,243 sqft. Read the reason before
+   * "restoring" the old number.
+   *
+   * The 3,740..3,860 bound was asserted against what this function produced at
+   * the time, and what it produced was wrong: the per-edge forbidden region was
+   * a bare rectangle with no join at ring vertices, so at every REFLEX joint of
+   * this curved frontage the rectangles splayed apart and left the buildable
+   * region running back to the property line. Audited by pure trigonometry
+   * (point-to-segment distance on a 3 cm grid, no boolean op, so it shares no
+   * machinery with the code under test): of the old 3,797.1 sqft envelope,
+   * 555.1 sqft lay INSIDE a setback and the worst vertex sat 25.00 ft inside
+   * the 25 ft front setback — i.e. ON the front property line. The same audit
+   * of the current output finds 1.1 sqft (the inscribed-arc residual) and a
+   * worst intrusion of 0.03 ft. 3,797.1 - 555.1 = 3,242.0, which is the figure
+   * below.
+   *
+   * The authority for the new number is the ordinance rule itself (no buildable
+   * area within d feet of boundary edge d applies to), not this function's
+   * output. `setbackJoinCoverage.test.ts` holds that rule as a standing check.
+   */
+  it("REGRESSION: real Simsbrook 48453:280239, as-is per-edge setbacks -> ~3,243 sqft", () => {
     const proj = projectRing(SIMSBROOK_280239)!;
     expect(proj.points.length).toBe(11);
     const feet = simsbrookAsIsFeet();
     const res = insetPerEdge(SIMSBROOK_280239, feet);
     expect(res.empty, res.emptyReason).toBe(false);
     expect(res.ring).not.toBeNull();
-    expect(res.areaSqFt).toBeGreaterThan(3_740);
-    expect(res.areaSqFt).toBeLessThan(3_860);
+    expect(res.areaSqFt).toBeGreaterThan(3_200);
+    expect(res.areaSqFt).toBeLessThan(3_290);
     assertGatePass(SIMSBROOK_280239, res.ring!, feet);
   });
 
@@ -500,5 +523,192 @@ describe("insetPerEdge — throw-safety (WDLL 2 / R0.1)", () => {
     expect(res.ring).toBeNull();
     expect(res.emptyReason).toMatch(/non-finite/i);
     expect(res.emptyKind).toBe("invalid-input");
+  });
+});
+
+/**
+ * P-372. The served ring for Kyle 48209:145880 (151 Fender Dr, Kyle TX 78640,
+ * R-1-A), read live 2026-09-19 from the county-GIS parcel the route itself
+ * serves (`scratch/ring-145880.json`: provider txgio, vintage
+ * stratmap25-landparcels_48209_hays_202503). Four distinct vertices, closed,
+ * no duplicate, positive area — a VALID ring, and the one whose clip threw.
+ *
+ * The per-edge feet are the route's own: `labelEdges` labels this ring from its
+ * shape (signal "shape", no road reference at the sample point), giving
+ * front=index 3 and the R-1-A table 25/10/15/10 in PROJECTED (CCW) edge order
+ * as [10, 15, 10, 25] — exactly what `repro-out.json` recorded from the live
+ * payload's own setbacks.
+ */
+const PARCEL_KYLE_145880: Ring = [
+  [-97.88512793899997, 30.00097732100005],
+  [-97.88554503899996, 30.000857747000055],
+  [-97.88559389199997, 30.000997176000055],
+  [-97.88518406699995, 30.001120211000057],
+  [-97.88512793899997, 30.00097732100005],
+];
+const KYLE_R1A_FEET = [10, 15, 10, 25];
+
+/**
+ * The buildable area of Kyle's parcel as an INDEPENDENT instrument sees it:
+ * `_scratch/analyze4.cjs` rasterised the membership definition the strips stand
+ * for — `{p : dist(p, edge_i) <= d_i}` unioned over edges — on a 2 cm grid
+ * (7,219,884 cells, 694.68 m² parcel, 537.636 m² forbidden) and put the buildable
+ * region at 310.536 m². It shares no machinery with polygon-clipping. This is the
+ * number the repaired answer is graded against, not the library's own output.
+ */
+const KYLE_BUILDABLE_ORACLE_M2 = 310.536;
+/** `conservationEpsilonM2`'s absolute floor (m²). */
+const CONSERVATION_EPSILON_M2 = 0.5;
+
+/** Shift a lng/lat ring by metres east/north in the Kyle frame. */
+function shiftKyleRing(ring: Ring, eastM: number, northM: number): Ring {
+  const mPerDegLat = (Math.PI / 180) * 6_378_137;
+  const mPerDegLng = mPerDegLat * Math.cos((30.000988113750054 * Math.PI) / 180);
+  return ring.map(([lng, lat]): [number, number] => [
+    lng! + eastM / mPerDegLng,
+    lat! + northM / mPerDegLat,
+  ]);
+}
+
+describe("insetPerEdge — P-372 parcel-minus-strips clip (Kyle 48209:145880)", () => {
+  it("REGRESSION: the clip that threw on the as-constructed operands draws on the quantised retry", () => {
+    const res = insetPerEdge(PARCEL_KYLE_145880, KYLE_R1A_FEET);
+    expect(res.empty, res.emptyReason).toBe(false);
+    expect(res.ring).not.toBeNull();
+    // The repair is disclosed, not silent, and names the failure it recovered from.
+    expect(res.clipRepair).toBeDefined();
+    expect(res.clipRepair!.gridM).toBe(BOOLEAN_RETRY_GRID_M);
+    expect(res.clipRepair!.firstError).toMatch(
+      /parcel-minus-strips difference threw/,
+    );
+    expect(res.clipRepair!.firstError).toMatch(/Unable to complete output ring/);
+    assertGatePass(PARCEL_KYLE_145880, res.ring!, KYLE_R1A_FEET);
+  });
+
+  it("the repair is BOUNDED: the area it induces stays inside the conservation epsilon of the raster oracle", () => {
+    const res = insetPerEdge(PARCEL_KYLE_145880, KYLE_R1A_FEET);
+    const m2 = res.areaSqFt / (FT_PER_M * FT_PER_M);
+    const error = Math.abs(m2 - KYLE_BUILDABLE_ORACLE_M2);
+    // Measured 1.5e-5 m² of 0.5 m² allowed; the assertion is the contract, the
+    // measurement is what makes it a check rather than a hope.
+    expect(error).toBeLessThan(CONSERVATION_EPSILON_M2);
+    expect(res.areaSqFt).toBeGreaterThan(3341);
+    expect(res.areaSqFt).toBeLessThan(3344);
+    expect(res.parcelAreaSqFt).toBeCloseTo(7_477, -1);
+  });
+
+  it("FALSIFIER (repair beyond the tolerance): a 0.3 m displacement is rejected by the gate, not served", () => {
+    // The other direction of the tolerance above. A repair that moved the ring
+    // 0.3 m east would break the exclusion rule by 5.8 m² against a 3.47 m²
+    // epsilon — the gate must refuse it. This is the same gate the repaired
+    // answer passed, so the check is shown working in both directions.
+    const res = insetPerEdge(PARCEL_KYLE_145880, KYLE_R1A_FEET);
+    const displaced = geometryCorrectnessGate(
+      PARCEL_KYLE_145880,
+      shiftKyleRing(res.ring!, 0.3, 0),
+      KYLE_R1A_FEET,
+    );
+    expect(displaced.pass).toBe(false);
+    expect(displaced.reasons.some((r) => /overlaps forbidden setback strips/i.test(r))).toBe(
+      true,
+    );
+  });
+
+  it("FALSIFIER: a parcel ring that crosses itself declines at the source, never as a clip failure", () => {
+    // Measured before the fix: this ring's clip threw on BOTH operand sets and
+    // the payload declined as a clip failure — blaming the library for a ring
+    // that is itself the defect. It must be named at the source instead.
+    const res = insetPerEdge(SELF_INTERSECT_BOWTIE, [10, 10, 10, 10]);
+    expect(res.empty).toBe(true);
+    expect(res.ring).toBeNull();
+    expect(res.emptyKind).toBe("invalid-input");
+    expect(res.emptyReason).toMatch(/self-intersects/i);
+    expect(res.emptyReason).toMatch(/served polygon/i);
+    expect(res.emptyReason).not.toMatch(/clip failed/i);
+  });
+
+  it("parcels that already derived take NO repair and no reprojection drift", () => {
+    const simsbrook = insetPerEdge(
+      SIMSBROOK_280239,
+      simsbrookAsIsFeet(),
+    );
+    expect(simsbrook.empty, simsbrook.emptyReason).toBe(false);
+    expect(simsbrook.clipRepair).toBeUndefined();
+    const spring = insetPerEdge(
+      PARCEL_714_SPRING_33512,
+      projectRing(PARCEL_714_SPRING_33512)!.points.map(() => 15),
+    );
+    expect(spring.clipRepair).toBeUndefined();
+  });
+});
+
+describe("ringContainsPoint (P-339/P-366 residual: the point the identity already answers for)", () => {
+  // A 1-degree square, closed (first vertex repeated). The test point is well
+  // inside it; every probe below moves exactly one thing.
+  const square: Ring = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [0, 0],
+  ];
+  const inside = { latitude: 0.5, longitude: 0.5 };
+
+  it("true inside, false outside, and a point past every edge is outside", () => {
+    expect(ringContainsPoint(square, inside)).toBe(true);
+    expect(ringContainsPoint(square, { latitude: 2, longitude: 2 })).toBe(false);
+    expect(ringContainsPoint(square, { latitude: 0.5, longitude: -0.5 })).toBe(false);
+    expect(ringContainsPoint(square, { latitude: -0.5, longitude: 0.5 })).toBe(false);
+  });
+
+  it("a closed ring and the same ring open agree (the repeated first vertex is not a crossing)", () => {
+    const open = square.slice(0, -1);
+    expect(ringContainsPoint(open, inside)).toBe(ringContainsPoint(square, inside));
+    expect(ringContainsPoint(open, inside)).toBe(true);
+  });
+
+  it("vertex order does not matter (a reversed ring answers the same)", () => {
+    const reversed = [...square].reverse() as Ring;
+    expect(ringContainsPoint(reversed, inside)).toBe(true);
+    expect(ringContainsPoint(reversed, { latitude: 2, longitude: 2 })).toBe(false);
+  });
+
+  it("accepts a lng/lat tuple as well as a {latitude, longitude} point", () => {
+    expect(ringContainsPoint(square, [0.5, 0.5])).toBe(true);
+    expect(ringContainsPoint(square, [2, 2])).toBe(false);
+  });
+
+  it("THE COUNTY-LINE CASE: a point inside BOTH of two overlapping rings answers true for each", () => {
+    // Two counties' parcel geometries overlap at the line: the Travis parcel's
+    // record point lies inside its own ring AND inside a Hays parcel's ring
+    // (measured on 48453:352594). Neither ring can be read as evidence against
+    // the other from geometry alone, which is why the identity decides.
+    const travis: Ring = [
+      [-97.83, 30.09],
+      [-97.82, 30.09],
+      [-97.82, 30.11],
+      [-97.83, 30.11],
+      [-97.83, 30.09],
+    ];
+    const haysOverlap: Ring = [
+      [-97.828, 30.099],
+      [-97.818, 30.099],
+      [-97.818, 30.101],
+      [-97.828, 30.101],
+      [-97.828, 30.099],
+    ];
+    const recordPoint = { latitude: 30.1003, longitude: -97.82734 };
+    expect(ringContainsPoint(travis, recordPoint)).toBe(true);
+    expect(ringContainsPoint(haysOverlap, recordPoint)).toBe(true);
+  });
+
+  it("degenerate and unusable rings answer false rather than throwing", () => {
+    expect(ringContainsPoint(null, inside)).toBe(false);
+    expect(ringContainsPoint(undefined, inside)).toBe(false);
+    expect(ringContainsPoint([], inside)).toBe(false);
+    expect(ringContainsPoint([[0, 0], [1, 1]], inside)).toBe(false);
+    expect(
+      ringContainsPoint(square, { latitude: Number.NaN, longitude: 0.5 }),
+    ).toBe(false);
   });
 });

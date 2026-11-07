@@ -41,6 +41,7 @@ import {
   runRailScore,
   scoreableRailKeys,
   unspecifiedRails,
+  retiredDenominatorRails,
   type MeasureContext,
   type RailScoreQueryable,
 } from "../lib/railScoring";
@@ -93,6 +94,7 @@ countyRailScoreRouter.get("/score/registry", (_req: Request, res: Response) => {
   res.json({
     scoreable: scoreableRailKeys(),
     unspecified: unspecifiedRails(),
+    retiredDenominator: retiredDenominatorRails(),
     servedAt: new Date().toISOString(),
   });
 });

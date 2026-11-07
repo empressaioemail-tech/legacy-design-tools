@@ -11,8 +11,9 @@
 #      they reference roles and search_path and would just add noise.
 #   3. Rewrite every `public.` qualifier to the @@SCHEMA@@ sentinel so the
 #      test harness can sed it to the per-test schema name at run time.
-#   4. Restore `public.vector(...)` — the pgvector extension's `vector`
-#      type lives in the public schema and must NOT be re-qualified.
+#   4. Restore `public.vector(...)` and `public.geometry(...)` — the pgvector
+#      and postgis extensions' own types live in the public schema and must
+#      NOT be re-qualified to the per-test schema (TXGIO-GEOM-FIX).
 #
 # Usage:
 #   pnpm --filter @workspace/db run test:fixture:schema
@@ -47,7 +48,7 @@ pg_dump \
   --no-comments \
   --schema=public \
   | grep -vE '^(SET |SELECT pg_catalog\.set_config|CREATE SCHEMA |\\restrict |\\unrestrict |--$|-- (PostgreSQL|Dumped))' \
-  | sed -E 's/\bpublic\./@@SCHEMA@@./g; s/@@SCHEMA@@\.vector\(/public.vector(/g' \
+  | sed -E 's/\bpublic\./@@SCHEMA@@./g; s/@@SCHEMA@@\.vector\(/public.vector(/g; s/@@SCHEMA@@\.geometry\(/public.geometry(/g' \
   > "$OUT.tmp"
 
 mv "$OUT.tmp" "$OUT"

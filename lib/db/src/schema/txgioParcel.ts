@@ -2,12 +2,31 @@ import {
   pgTable,
   text,
   integer,
+  boolean,
   jsonb,
   doublePrecision,
   timestamp,
   primaryKey,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
+
+/**
+ * PostGIS `geometry(Geometry,4326)` -- drizzle-orm/pg-core has no built-in
+ * geometry type. Untyped at the TS level (nothing in this codebase reads it
+ * through drizzle's typed select; every consumer of `geom` goes through raw
+ * SQL, per `lib/cad-ingest/src/txgio/ingest.ts`'s own geom-derivation UPDATE)
+ * -- this declaration exists so the column is TRACKED (visible to
+ * drizzle-kit schema diffing and to anyone reading this file to understand
+ * the table's real shape), per PARCEL-TXGIO-REACQ's own finding that `geom`
+ * previously existed live with zero tracked migration and zero schema
+ * declaration, populated entirely by an uncodified manual process.
+ */
+const geometryColumn = customType<{ data: string; default: false }>({
+  dataType() {
+    return "geometry(Geometry,4326)";
+  },
+});
 
 /**
  * Self-hosted parcel GEOMETRY store — TxGIO/StratMap statewide Land
@@ -85,8 +104,74 @@ export const txgioParcel = pgTable(
      * table lookup on multi-city counties. NULL when no polygon matched.
      */
     zoningJurisdiction: text("zoning_jurisdiction"),
+    /**
+     * TRUE when `zoning_district` was read from a published value carrying a
+     * declared INTERIM qualifier (P-259b, operator ruling 2026-09-17) — Austin's
+     * `I-<base>` family, where the interim designation is granted on annexation
+     * until permanent zoning is established and the base district's standards
+     * apply by ordinance. `zoning_district` holds the BASE district ("I-SF-2-NP"
+     * stamps `SF-2`); this column is the disclosure that the zoning itself is
+     * interim, which is a different fact from "stably zoned SF-2".
+     *
+     * FALSE when a district was stamped from a value with no interim qualifier,
+     * including every layer that configures none. NULL when NOTHING was stamped
+     * (`zoning_district` NULL, or a feature skipped for carrying no CAD
+     * account), so NULL means "no stamp" and never "stamped, interim unknown".
+     *
+     * Written by the stamp's batched UPDATE (`zoning-stamp-db.ts`); migration
+     * 0103 backfills FALSE on rows already stamped before the column existed.
+     * NOTHING READS IT TODAY — no route, no MCP payload, no PDF, no router. It
+     * exists so the fact is recoverable from the store rather than only from a
+     * run log.
+     */
+    zoningDistrictInterim: boolean("zoning_district_interim"),
+    /**
+     * CityKey of the ZONING_LAYERS entry whose OWN feature declared this parcel
+     * has no district (Burnet stage 3 Bug 2: a parcel-id-matched city feature
+     * carrying a blank code, e.g. Horseshoe Bay 69366/106280). Written ONLY on
+     * that path (`zoning-stamp-db.ts`'s no-district-on-layer branch), alongside
+     * `zoning_district` and `zoning_jurisdiction` staying NULL on the same row.
+     *
+     * A SEPARATE column from `zoning_jurisdiction` on purpose: that column's
+     * existing contract (migration 0062) is "NULL means outside every wired
+     * layer", read by several other consumers (hauska-factory's
+     * `parcel-r5-zoning.mjs`, `zoning-layer-completeness.mjs`, the `ctx-w2`
+     * coverage scripts; hauska-engine's `rail-keys.ts`) that would be given a
+     * false "this parcel has a jurisdiction" signal if the no-district case
+     * started setting `zoning_jurisdiction` with a NULL `zoning_district`. This
+     * column is purely additive: every row this migration does not touch stays
+     * NULL, including every row with a non-NULL `zoning_jurisdiction`.
+     *
+     * Exists so hauska-factory's gate 1 (load-reconciliation-gate) can count a
+     * registered city's declared no-district population from stored rows,
+     * which `zoning_jurisdiction` alone cannot distinguish from "outside every
+     * wired layer" (migration 0112).
+     */
+    zoningNoDistrictLayer: text("zoning_no_district_layer"),
+    /**
+     * The city layer's own GEOGRAPHIC SUB-AREA for this parcel, read from the SAME feature whose
+     * code was stamped into `zoning_district` (migration 0113, OPS-24 Burnet per-parcel setbacks,
+     * 2026-10-13). Written ONLY for a layer whose ZONING_LAYERS entry sets `subareaField` --
+     * today Horseshoe Bay, whose standards for one district code differ by the ordinance's
+     * geographic zone, and whose layer carries that zone as `SUBDIVISION` (PROPER, SOUTH,
+     * PENINSULA, ...). Read by lib/adapters' per-parcel setback resolver
+     * (burnet-parcel-setbacks.ts), which maps it to a zone through an explicit reviewed table.
+     * NULL on every other row (no such layer field, nothing stamped, or not re-stamped since 0113),
+     * and NULL means "zone unknown" -- the resolver declines SETBACK_ZONE_UNRESOLVED, never guesses.
+     */
+    zoningSubarea: text("zoning_subarea"),
     /** GeoJSON geometry (Polygon | MultiPolygon), WGS84. */
     geometry: jsonb("geometry").notNull(),
+    /**
+     * PostGIS-native mirror of `geometry`, derived by
+     * `upsertTxgioParcels`'s own geom-sync UPDATE (never written directly).
+     * Nullable at rest only during the brief window between a batch's
+     * insert and that same batch's geom-sync UPDATE within one flush call
+     * -- never nullable after a completed apply. Backs
+     * `txgio_parcel_geom_gist_idx` for spatial queries `geometry`'s jsonb
+     * shape cannot serve efficiently.
+     */
+    geom: geometryColumn("geom"),
     /** Feature bbox, WGS84. */
     westLng: doublePrecision("west_lng").notNull(),
     southLat: doublePrecision("south_lat").notNull(),

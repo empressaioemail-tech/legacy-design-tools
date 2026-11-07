@@ -57,7 +57,7 @@ git worktree list
 
 Single-commit fixups on existing branches. When fixing CI failures, agents add fixup commits on top of the sprint branch (don't squash). The merge cascade later subsumes the history into main.
 
-Don't merge PRs yourself. The orchestrating user (typically Empressa) coordinates merges via GitHub UI. Agents push commits and idle.
+Agents may merge their own PRs. The old "don't merge yourself, the orchestrating user coordinates via GitHub UI" rule predated the seat system (`_catalog/seat_register.json` in doc_repo) and was a direct response to a real merge collision between concurrently-working agents sharing state. Seats give each lane its own isolated worktree/branch, which closes the gap that made self-merge risky. Before merging: confirm CI is green (`gh pr checks`) and the PR's mergeable/mergeStateStatus is clean, then merge (`gh pr merge --merge`) and confirm the result (`gh pr view --json state,mergedAt,mergeCommit`). If anything about the PR's state is ambiguous rather than cleanly green, leave it for the orchestrating user instead of forcing it.
 
 ---
 
@@ -185,3 +185,4 @@ When a multi-sprint suite (V1, future Vn) lands as a coordinated set:
 - **2026-05-25** — `docs/local-dev-windows.md` + `scripts/verify-local-pipeline.ps1`: canonical Windows path for `dev:local` (Neon + GCS ADC + Vite :20295). GLB 500 on Windows was Replit object-storage sidecar without `GOOGLE_APPLICATION_CREDENTIALS`; use `dev:local` not api-server `dev` proxy for BIM/Studio.
 - **2026-05-26** — Placid client collateral export (`sprint/placid-collateral`): primary Deliver → Client materials PDF path via `artifacts/api-server/README-collateral.md`. Signed asset URLs (`COLLATERAL_SIGNING_SECRET`); `VITE_CANVA_AUTOFILL=0` hides Canva autofill UI. Local QA: `dev:local` + migration `0025_add_collateral.sql`, not `pnpm run dev` proxy.
 - **2026-05-26** — Studio prod flip: code path is complete; production needs `RENDERS_PROD_ENABLED=true` + mnml secrets (`docs/studio-prod-enable.md`, `scripts/enable-studio-cloud-run.ps1`). Kickoff may omit `glbUrl` — api resolves engagement GLB (V1-5 `resolveEngagementGlbSignedUrl`).
+- **2026-09-05** — Relaxed "don't merge PRs yourself" (Worktree discipline). That rule was a response to a real collision from concurrently-working agents sharing state, put in place before the seat system existed. The seat register (`_catalog/seat_register.json`, isolated per-lane worktrees/branches) now closes that gap, so agents may merge their own PRs after confirming CI is green and the merge is clean — operator ruling, confirmed explicitly: "I don't mind the agents merging as long as we come out clean in the end."

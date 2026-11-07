@@ -1,0 +1,12 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - artifacts/smartsite-mcp/Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p555
+      - .
+images:
+  - us-central1-docker.pkg.dev/legacy-design-tools-prod/apps/smartsite-mcp:p555
+timeout: 1200s

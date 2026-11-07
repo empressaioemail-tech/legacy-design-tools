@@ -18,7 +18,7 @@
     "eval": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
+    "@anthropic-ai/sdk": "^1.4.0",
     "@workspace/briefing-engine": "workspace:*",
     "@workspace/codes": "workspace:*",
     "@workspace/db": "workspace:*",

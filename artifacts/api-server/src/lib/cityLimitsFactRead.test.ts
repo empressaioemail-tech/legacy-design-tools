@@ -46,6 +46,8 @@ describe("loadCityLimitsFact", () => {
     expect(fact.etjStatus).toBe("unresolved");
     expect(fact.source).toBe("tx_city_boundary");
     expect(fact.basis).toContain("geo_id=4805000");
+    // Card F: the point the containment was evaluated at travels with the fact.
+    expect(fact.queryPoint).toEqual(IN_CITY);
   });
 
   it("fixture unincorporated does not invent a city or ETJ ring", async () => {
@@ -77,6 +79,21 @@ describe("loadCityLimitsFact", () => {
     const fact = await loadCityLimitsFact(null);
     expect(fact.status).toBe("unmeasured");
     expect(fact.basis).toContain("query point");
+    expect(fact.queryPoint).toBeNull();
+  });
+
+  it("the 0,0 bake sentinel is not a query point: unmeasured with queryPoint null (the three unstamped golds of 2026-08-28)", async () => {
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN });
+    const fact = await loadCityLimitsFact({ longitude: 0, latitude: 0 });
+    expect(fact.status).toBe("unmeasured");
+    expect(fact.queryPoint).toBeNull();
+  });
+
+  it("unincorporated and empty-index facts carry the point they were evaluated at", async () => {
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN });
+    expect((await loadCityLimitsFact(RURAL)).queryPoint).toEqual(RURAL);
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
+    expect((await loadCityLimitsFact(IN_CITY)).queryPoint).toEqual(IN_CITY);
   });
 
   it("does not treat a 2-mile offset as ETJ", async () => {

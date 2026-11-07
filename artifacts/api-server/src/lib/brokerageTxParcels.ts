@@ -61,13 +61,16 @@
 
 import {
   arcgisEnvelopeQueryGeoJson,
+  arcgisPointQuery,
   arcgisPointQueryGeoJson,
+  arcgisWhereQueryGeoJson,
   type ArcGisGeoJsonFeatureCollection,
 } from "@workspace/adapters/arcgis";
 import { AdapterRunError } from "@workspace/adapters/types";
 import { tileKey, getTxParcelTile, putTxParcelTile } from "./brokerageGisCache";
 import {
   queryTxgioParcelsGeoJson,
+  queryTxgioParcelByPropId,
   countyStoreContainsPoint,
   TXGIO_PARCEL_DISCLAIMER,
   type TxgioStoreDb,
@@ -147,6 +150,29 @@ export interface TxParcelCounty {
    * `txgioParcelStore.ts` from the store's own `prop_id` column).
    */
   rawPropId?: (props: Record<string, unknown>) => string | null;
+  /**
+   * The county service's OWN field name(s) for the parcel identifier
+   * `rawPropId` above reads — used to build an ArcGIS `where` clause that
+   * resolves a parcel by IDENTITY (P-373), not by a point. Ordered:
+   * the first field that answers wins. Only "arcgis" counties need it
+   * (a store county is keyed by `txgio_parcel.prop_id` directly).
+   */
+  propIdFields?: readonly string[];
+  /**
+   * How a request reaches this county. "point-and-fips" (default): by a
+   * point/bbox (nearest-centroid and point-in-polygon routing, the situs
+   * candidate sets) AND by a parcel node id's FIPS. "fips-only": by node-id
+   * FIPS alone (the buildable-envelope identity hop and the parcel
+   * fetch-by-prop-id), never by a point. Used for a county onboarded to the
+   * one-door reader whose generous bbox would otherwise pull a live
+   * neighbour's border parcels into its store by centroid distance.
+   */
+  routing?: "point-and-fips" | "fips-only";
+}
+
+/** True when a point/bbox may route to this county (see `TxParcelCounty.routing`). */
+function pointRouted(county: TxParcelCounty): boolean {
+  return county.routing !== "fips-only";
 }
 
 function str(v: unknown): string | null {
@@ -334,6 +360,7 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
     // prop_id_text is the same Bastrop prop id as text — a valid fallback,
     // not a different id space (unlike geo_id/QuickRefID above).
     rawPropId: (p) => str(p.prop_id) ?? str(p.prop_id_text),
+    propIdFields: ["prop_id", "prop_id_text"],
   },
   {
     name: "Hays",
@@ -444,6 +471,37 @@ export const TX_PARCEL_COUNTIES: readonly TxParcelCounty[] = [
       }),
     // Node id keys on the current Prop_ID only (OLDPROPID is superseded).
     rawPropId: (p) => str(p.Prop_ID),
+    // P-373: the live Caldwell CAD service is the ONLY source of Caldwell
+    // parcel GEOMETRY (the store holds its situs rows with no polygon —
+    // the county's known geometry gap), so identity resolution needs a
+    // `where` on the service's own field. Probed 2026-09-19: Prop_ID is
+    // an integer field, so the unquoted literal form answers first.
+    propIdFields: ["Prop_ID"],
+  },
+  {
+    name: "Burnet",
+    fips: "48053",
+    source: "txgio-store",
+    // ONE DOOR (burnet_publish_without_bake item 5). Burnet is published
+    // through the one-door reader with no bake; its geometry is in prod
+    // `txgio_parcel` (59,785 rows / 49,243 distinct props, every row with
+    // geom). This entry lets the buildable-envelope identity hop
+    // (`parcel-source-absent-in-county` before) fetch a Burnet parcel by
+    // prop id. It is FIPS-ONLY on purpose: measured 2026-10-15, 14,708
+    // Travis and 1,682 Williamson parcels inside Burnet's bbox sit nearer
+    // Burnet's mass centroid than their own, so point routing would hand
+    // those live-county parcels to the Burnet store. Point routing for
+    // Burnet waits for point-in-polygon pre-resolution to cover it.
+    routing: "fips-only",
+    serviceUrl:
+      "https://data.geographic.texas.gov/0fa04328-872e-481c-b453-126a74777593/resources/stratmap25-landparcels_48053_lp.zip",
+    // Bbox from prod txgio_parcel (min/max over all Burnet rows:
+    // [-98.4594, 30.4262, -97.8275, 31.0349]), padded. Parcel-MASS centroid
+    // (mean of per-row bbox centers). Neither is used for routing while the
+    // entry is fips-only; they are recorded for when it is not.
+    bbox: { westLng: -98.47, southLat: 30.41, eastLng: -97.82, northLat: 31.05 },
+    centroid: { latitude: 30.6849, longitude: -98.2484 },
+    normalizeProps: (p) => p,
   },
 ];
 
@@ -486,6 +544,7 @@ export function resolveTxParcelCounty(input: {
   let best: TxParcelCounty | null = null;
   let bestDist = Infinity;
   for (const county of TX_PARCEL_COUNTIES) {
+    if (!pointRouted(county)) continue;
     if (!bboxContains(county.bbox, lat, lng)) continue;
     const dLat = lat - county.centroid.latitude;
     const dLng = lng - county.centroid.longitude;
@@ -506,15 +565,108 @@ export function resolveTxParcelCounty(input: {
  *   - `county` set, `resolvedBy: "pip-tightest"` : several store counties
  *     reported containment (should not happen for real, non-overlapping
  *     parcels); the tightest containing parcel's county wins.
- *   - `county` set, `resolvedBy: "centroid-fallback"` : NO store county
- *     contains the point (a genuine gap / ROW, or a live-ArcGIS county) —
- *     fall back to the existing nearest-centroid router so the live-ArcGIS
- *     counties and the Cotality fall-through keep working unchanged.
+ *   - `county` set, `resolvedBy: "centroid-fallback"` : NO candidate
+ *     county's fabric was MEASURED to contain the point (a genuine gap /
+ *     ROW, a live-ArcGIS county that answered "not mine", or a probe that
+ *     did not answer at all) — fall back to the existing nearest-centroid
+ *     router so the live-ArcGIS counties and the Cotality fall-through keep
+ *     working unchanged. The label says the county was chosen by proximity,
+ *     never by containment.
  *   - `county` null                          : not a supported county at all.
  */
 export interface PipCountyResolution {
   county: TxParcelCounty | null;
-  resolvedBy: "pip" | "pip-tightest" | "centroid-fallback" | "none";
+  resolvedBy: "pip" | "pip-tightest" | "live-pip" | "centroid-fallback" | "none";
+}
+
+/**
+ * The answer to "does this county's fabric contain the point?" — THREE
+ * values, never two (P-382).
+ *
+ *   - `contains`          : the layer ANSWERED and a parcel covers the point.
+ *   - `does-not-contain`  : the layer ANSWERED and no parcel covers the point.
+ *                           (Also the layer's own declared empty coverage:
+ *                           it answered "nothing here".)
+ *   - `unknown`           : the layer did NOT answer. `reason` NAMES the
+ *                           county and the upstream failure that stopped it.
+ *
+ * P-373 collapsed `unknown` into `does-not-contain` by catching every throw
+ * and returning `false`. Because the caller read a bare boolean, "this county
+ * is down" arrived as "this county does not own the point" — and with two
+ * candidate counties, one erroring and one genuinely containing, the errored
+ * county's `false` left exactly one `true` and the point was routed with
+ * `resolvedBy: "live-pip"` to a county that was never asked. A measurement that
+ * did not happen is not a negative; that is what this type makes
+ * unrepresentable, and why the caller never sees a boolean again.
+ */
+export type ArcGisContainment =
+  | { state: "contains" }
+  | { state: "does-not-contain" }
+  | { state: "unknown"; reason: string };
+
+/**
+ * Does a LIVE county's own ArcGIS parcel layer contain the point?
+ * (P-373, made three-valued by P-382.) The live mirror of
+ * {@link countyStoreContainsPoint}: one bounded point-intersect query with
+ * geometry switched OFF, so it costs one small read and answers containment
+ * only.
+ *
+ * Only a HELD point on a county line where the errored county might own the
+ * point is worth a refusal, so this does not throw and does not refuse by
+ * itself: it returns the third value with the failure named, and
+ * {@link resolvePointCountyByPip} — the only caller — declines to earn
+ * `live-pip` while any candidate is `unknown`.
+ *
+ * A MISS is not a throw: the adapter answers a non-intersecting point with
+ * zero features, which is the `does-not-contain` branch below. A thrown
+ * `AdapterRunError` coded `no-coverage` (the adapters' deterministic
+ * "this layer does not apply here" verdict) is likewise an ANSWER about the
+ * point, so it maps to `does-not-contain` too; every other throw is an
+ * `unknown`. Folding `no-coverage` into `unknown` instead would make a live
+ * county unrouteable on every genuine gap/ROW — the opposite defect.
+ */
+export async function countyArcGisContainsPoint(input: {
+  county: TxParcelCounty;
+  latitude: number;
+  longitude: number;
+  fetchImpl?: typeof fetch;
+}): Promise<ArcGisContainment> {
+  const propIdField = input.county.propIdFields?.[0];
+  try {
+    const res = await arcgisPointQuery({
+      serviceUrl: input.county.serviceUrl,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      outFields: propIdField ?? "OBJECTID",
+      returnGeometry: false,
+      resultRecordCount: 1,
+      upstreamLabel: txCountyProviderLabel(input.county),
+      fetchImpl: input.fetchImpl,
+    });
+    return res.features.length > 0
+      ? { state: "contains" }
+      : { state: "does-not-contain" };
+  } catch (err) {
+    if (err instanceof AdapterRunError && err.code === "no-coverage") {
+      return { state: "does-not-contain" };
+    }
+    return {
+      state: "unknown",
+      reason: `${txCountyProviderLabel(input.county)} containment probe did not answer (${describeProbeFailure(err)})`,
+    };
+  }
+}
+
+/**
+ * One-line, operator-actionable description of why a probe failed: the
+ * adapter's own error code when there is one (so `network-error` reads
+ * differently from `timeout`), plus the upstream's message.
+ */
+function describeProbeFailure(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof AdapterRunError) return `${err.code}: ${message}`;
+  const name = err instanceof Error ? err.name : "Error";
+  return `${name}: ${message}`;
 }
 
 /**
@@ -536,25 +688,37 @@ export interface PipCountyResolution {
  *      contains the point IS the authoritative county.
  *   3. Exactly one containing county -> route there (`pip`). Several (only
  *      for overlapping parcels, not real fabric) -> the tightest containing
- *      parcel's county (`pip-tightest`). NONE contain it (a genuine gap/ROW,
- *      or the point is only in a live-ArcGIS county's bbox) -> fall back to
- *      the nearest-centroid {@link resolveTxParcelCounty} (`centroid-fallback`)
- *      so the live-ArcGIS pin-query and Cotality fall-through are unchanged.
+ *      parcel's county (`pip-tightest`).
+ *   4. NO store county contains it -> ask each LIVE contract county whose
+ *      bbox contains the point whether its own fabric contains it
+ *      ({@link countyArcGisContainsPoint}, P-373). Exactly one `contains`
+ *      and NO `unknown` -> route there (`live-pip`). Several -> refuse to
+ *      choose (a named refuse beats guessing a neighbour). A probe that did
+ *      not answer is not a "no" (P-382): `live-pip` is withheld rather than
+ *      awarded to the one county that happened to answer.
+ *   5. Still nothing (a genuine gap/ROW, a live county that answered "not
+ *      mine", or a live candidate that never answered) -> fall back to the
+ *      nearest-centroid {@link resolveTxParcelCounty} (`centroid-fallback`)
+ *      so the pre-F4j behavior is unchanged where nothing MEASURED owns the
+ *      point.
  *
  * This NEVER makes routing looser (commitment #1): a point that no store
- * parcel contains is NOT force-routed to a store county — it falls back to
- * the exact prior behavior, and a point in a genuine gap honestly declines
- * downstream. It only makes MORE points route to the county that actually
- * owns them.
+ * OR live county contains is NOT force-routed anywhere — it falls back to
+ * the nearest-centroid router, exactly as before, and a point in a genuine
+ * gap honestly declines downstream. It only makes MORE points route to the
+ * county that actually owns them.
  *
  * Perf: bounded to the 2-3 candidate store counties on a straddle, each a
- * single-cell indexed query returning a handful of rows. No full-county
- * scan. Probes run concurrently.
+ * single-cell indexed query returning a handful of rows, plus (only when
+ * no store county contains the point) one small geometry-free point query
+ * per containing live county — 1-2 counties today. No full-county scan.
+ * Probes run concurrently.
  */
 export async function resolvePointCountyByPip(input: {
   latitude: number;
   longitude: number;
   database?: TxgioStoreDb;
+  fetchImpl?: typeof fetch;
 }): Promise<PipCountyResolution> {
   const { latitude, longitude } = input;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -589,9 +753,55 @@ export async function resolvePointCountyByPip(input: {
     }
   }
 
-  // No store county's parcel contains the point (genuine gap/ROW, or the
-  // point is only inside a live-ArcGIS county's bbox). Fall back to the
-  // existing nearest-centroid router — behavior identical to pre-F4j.
+  // No STORE county's parcel contains the point. Before the nearest-
+  // centroid router gets a vote, ask the LIVE contract counties whose
+  // bbox contains the point whether their OWN fabric contains it
+  // (P-373). A store-tagged county is not the only county a point can be
+  // in: Caldwell serves live CAD geometry while its `txgio_parcel` rows
+  // carry no polygon, so a Caldwell point on the Hays bbox edge used to
+  // fall through to the centroid router (Hays is nearer to the point than
+  // Lockhart is) and came back `no-coverage` — the county that actually
+  // owns the parcel was never asked.
+  const liveCandidates = countiesContainingPoint(latitude, longitude).filter(
+    (c) => c.source !== "txgio-store",
+  );
+  if (liveCandidates.length > 0) {
+    const probes = await Promise.all(
+      liveCandidates.map(async (county) => ({
+        county,
+        containment: await countyArcGisContainsPoint({
+          latitude,
+          longitude,
+          county,
+          fetchImpl: input.fetchImpl,
+        }),
+      })),
+    );
+    const containing = probes.filter((p) => p.containment.state === "contains");
+    const unknown = probes.filter((p) => p.containment.state === "unknown");
+    // `live-pip` is EARNED only by a COMPLETE measurement: exactly one
+    // candidate's fabric contains the point and every other candidate
+    // ANSWERED. A probe that did not answer is not a "no" (P-382), so with
+    // any `unknown` in the set the point is not routed by live fabric — it
+    // falls through to the same nearest-centroid router it used before
+    // P-373, whose own `resolvedBy` label declares that the county was
+    // picked by proximity and not by containment.
+    if (containing.length === 1 && unknown.length === 0) {
+      return { county: containing[0]!.county, resolvedBy: "live-pip" };
+    }
+    // Several live fabrics report containment (overlapping county-line
+    // parcels, or one county's fabric spilling over the line). Which one
+    // owns the point is NOT determinable from bbox + a containment flag,
+    // so DECLINE to choose rather than guess a neighbour: the caller
+    // serves its own named no-coverage decline.
+    if (containing.length > 1) {
+      return { county: null, resolvedBy: "none" };
+    }
+  }
+
+  // No store OR live county's parcel contains the point (genuine gap/ROW).
+  // Fall back to the existing nearest-centroid router — behavior identical
+  // to pre-F4j.
   const fallback = resolveTxParcelCounty({ latitude, longitude });
   return {
     county: fallback,
@@ -616,7 +826,38 @@ export function storeCountiesContainingPoint(
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
   return TX_PARCEL_COUNTIES.filter(
     (c) =>
-      c.source === "txgio-store" && bboxContains(c.bbox, latitude, longitude),
+      c.source === "txgio-store" &&
+      pointRouted(c) &&
+      bboxContains(c.bbox, latitude, longitude),
+  );
+}
+
+/**
+ * EVERY supported county whose routing bbox contains the point, whatever
+ * its parcel SOURCE — the candidate set for an address/identity resolve
+ * that must reach a live-ArcGIS county too (P-373).
+ *
+ * The routing TAG is not evidence about what the Store holds: Bastrop is
+ * still live-ArcGIS in this table while 74k rows sit in `txgio_parcel`,
+ * and Caldwell's store rows carry `situs_address` but no polygon. The
+ * situs/address INDEX is the store table (statewide), so a resolve that
+ * reads it must consider every containing county, not just the
+ * store-tagged ones — otherwise a Caldwell address' situs is never
+ * consulted and the address falls to a geocode whose point lands in
+ * another county (the P-373 `no-parcel` class).
+ *
+ * Bboxes are generous and overlap at county lines, so this set is
+ * deliberately a SUPERSET: callers use it to QUERY the index and then
+ * require a single answer (see `resolveParcelBySitusDisambiguated`), never
+ * to pick a county by proximity.
+ */
+export function countiesContainingPoint(
+  latitude: number,
+  longitude: number,
+): TxParcelCounty[] {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+  return TX_PARCEL_COUNTIES.filter(
+    (c) => pointRouted(c) && bboxContains(c.bbox, latitude, longitude),
   );
 }
 
@@ -627,7 +868,7 @@ export function storeCountiesContainingPoint(
  * (2 counties today), so a full-store situs query is cheap and correct.
  */
 export function allStoreCounties(): TxParcelCounty[] {
-  return TX_PARCEL_COUNTIES.filter((c) => c.source === "txgio-store");
+  return TX_PARCEL_COUNTIES.filter((c) => c.source === "txgio-store" && pointRouted(c));
 }
 
 export function txCountyProviderLabel(county: TxParcelCounty): string {
@@ -693,7 +934,13 @@ export function normalizeTxCountyFeatures(
 export interface TxCountyParcelsResult {
   geojson: ArcGisGeoJsonFeatureCollection;
   featureCount: number;
-  queryMode: "pin" | "bbox";
+  /**
+   * How the features were selected: `"pin"` (a point intersect),
+   * `"bbox"` (a viewport), or `"identity"` (a `where` clause on the
+   * parcel's OWN appraisal id — P-373's resolve-by-identity read, which
+   * asks for one known parcel rather than "whatever is here").
+   */
+  queryMode: "pin" | "bbox" | "identity";
   truncated?: boolean;
 }
 
@@ -804,4 +1051,79 @@ export async function queryTxCountyParcelsGeoJson(input: {
   }
 
   return result;
+}
+
+/**
+ * Resolve ONE parcel by its IDENTITY — the county's own appraisal prop id —
+ * from whichever source that county serves (P-373).
+ *
+ * WHY THIS EXISTS. Two of the three P-373 parcels are unreachable by point:
+ * a Caldwell address' situs index answers the parcel (`48055:40428`) while
+ * the fuzziest point for the same address sits in a NEIGHBOUR (`35983`), and
+ * Caldwell's `txgio_parcel` rows carry `situs_address` but NO polygon (the
+ * county's known geometry gap) — so the store can name the parcel but cannot
+ * draw it. The county's own CAD service can do both, and it is the same
+ * authority the map already reads live. This function is the one place that
+ * turns `{fips, propId}` into a polygon, store-backed or live.
+ *
+ * Returns `null` when the parcel is genuinely absent from that county — a
+ * true miss the caller may fall through on. An UPSTREAM failure is never
+ * swallowed into a null: the first real error is rethrown so a serving
+ * surface reports it instead of silently answering "no parcel".
+ */
+export async function queryTxCountyParcelByPropId(input: {
+  county: TxParcelCounty;
+  propId: string;
+  fetchImpl?: typeof fetch;
+}): Promise<TxCountyParcelsResult | null> {
+  const { county } = input;
+  const propId = input.propId.trim();
+  if (!propId) return null;
+
+  if (county.source === "txgio-store") {
+    return await queryTxgioParcelByPropId({
+      countyFips: county.fips,
+      countyName: county.name,
+      propId,
+    });
+  }
+
+  const label = txCountyProviderLabel(county);
+  const fields = county.propIdFields ?? [];
+  let firstError: unknown = null;
+  for (const field of fields) {
+    // The prop id's literal TYPE is a property of the county's own schema
+    // (Caldwell's Prop_ID is an integer; Bastrop's prop_id_text is a
+    // string), so try the bare form then the quoted one and let the
+    // service reject the wrong one rather than guessing per county.
+    for (const literal of [propId, `'${propId}'`]) {
+      let upstream: ArcGisGeoJsonFeatureCollection;
+      try {
+        upstream = await arcgisWhereQueryGeoJson({
+          serviceUrl: county.serviceUrl,
+          where: `${field}=${literal}`,
+          outFields: "*",
+          upstreamLabel: label,
+          fetchImpl: input.fetchImpl,
+        });
+      } catch (err) {
+        firstError ??= err;
+        continue;
+      }
+      if (upstream.features.length === 0) continue;
+      const features = normalizeTxCountyFeatures(
+        county,
+        upstream.features,
+        new Date().toISOString(),
+      );
+      if (features.length === 0) continue;
+      return {
+        geojson: { type: "FeatureCollection", features },
+        featureCount: features.length,
+        queryMode: "identity",
+      };
+    }
+  }
+  if (firstError) throw firstError;
+  return null;
 }

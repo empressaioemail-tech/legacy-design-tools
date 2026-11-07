@@ -1,0 +1,3555 @@
+{
+  "generated_by": "lib/adapters/scripts/build-burnet-parcel-standards.mjs",
+  "source": "doc_repo/_inbox/2026-10-13_burnet_B3_groundtruth_browser_packE.csv (pack E; Marble Falls from library.municode.com, Horseshoe Bay from ecode360.com Ch. 14 Art. 14.02) via horseshoe-bay-tx-zone-standards.json for Horseshoe Bay.",
+  "status": "Per-PARCEL standards read by burnet-parcel-setbacks.ts. Not a SETBACK_TABLES entry: a district-code-only caller still gets the register's named refusal for these districts.",
+  "marble_falls": {
+    "lake_note_verbatim": "All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement.",
+    "pointer_rows": {
+      "37": "DR pointer row (Table 4.2.2 sends DR to Table 4.2.6.A)",
+      "38": "DN/DT Apartment / Loft pointer row (Table 4.2.2 note 9 sends apartments and lofts to Sec. 4.3.1 -- i.e. the Table 4.3.1.B row, which is used)"
+    },
+    "districts": {
+      "FR": {
+        "district_code": "FR",
+        "rows": [
+          {
+            "id": "MF-FR-0",
+            "pack_e_row": 0,
+            "label": "Farm and Ranch (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "275'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 90,
+                "text": "90'"
+              },
+              "side": {
+                "value": 50,
+                "text": "50'"
+              },
+              "rear": {
+                "value": 150,
+                "text": "150'"
+              },
+              "street_side": {
+                "value": 75,
+                "text": "75'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 10,
+                "text": "10%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-FR-1",
+            "pack_e_row": 1,
+            "label": "Farm and Ranch Cluster (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "200'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 90,
+                "text": "90'"
+              },
+              "side": {
+                "value": 45,
+                "text": "45'"
+              },
+              "rear": {
+                "value": 125,
+                "text": "125'"
+              },
+              "street_side": {
+                "value": 55,
+                "text": "55'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 15,
+                "text": "15%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-FR-2",
+            "pack_e_row": 2,
+            "label": "Conservation (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "160'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 75,
+                "text": "75'"
+              },
+              "side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "rear": {
+                "value": 90,
+                "text": "90'"
+              },
+              "street_side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 20,
+                "text": "20%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-FR-3",
+            "pack_e_row": 3,
+            "label": "Manufactured Home Subdivision",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "160'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 75,
+                "text": "75'"
+              },
+              "side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "rear": {
+                "value": 90,
+                "text": "90'"
+              },
+              "street_side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 20,
+                "text": "20%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes."
+            ]
+          },
+          {
+            "id": "MF-FR-4",
+            "pack_e_row": 4,
+            "label": "Manufactured Home Park",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 40,
+                "text": "40%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 8 = Allowed only with approval of a Conditional Use Permit."
+            ]
+          },
+          {
+            "id": "MF-FR-5",
+            "pack_e_row": 5,
+            "label": "Tiny House Development",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 40,
+                "text": "40%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 6 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development. | building_type: note 8 = Allowed only with approval of a Conditional Use Permit."
+            ]
+          },
+          {
+            "id": "MF-FR-79",
+            "pack_e_row": 79,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "125'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 55,
+                "text": "55'"
+              },
+              "side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "rear": {
+                "value": 60,
+                "text": "60'"
+              },
+              "street_side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 25,
+                "text": "25%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          }
+        ]
+      },
+      "RE": {
+        "district_code": "RE",
+        "rows": [
+          {
+            "id": "MF-RE-6",
+            "pack_e_row": 6,
+            "label": "Estate (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "110'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 50,
+                "text": "50'"
+              },
+              "side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "rear": {
+                "value": 75,
+                "text": "75'"
+              },
+              "street_side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 30,
+                "text": "30%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-RE-7",
+            "pack_e_row": 7,
+            "label": "Estate Cluster (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "90'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 45,
+                "text": "45'"
+              },
+              "side": {
+                "value": 20,
+                "text": "20'"
+              },
+              "rear": {
+                "value": 50,
+                "text": "50'"
+              },
+              "street_side": {
+                "value": 30,
+                "text": "30'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 35,
+                "text": "35%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-RE-79",
+            "pack_e_row": 79,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "125'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 55,
+                "text": "55'"
+              },
+              "side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "rear": {
+                "value": 60,
+                "text": "60'"
+              },
+              "street_side": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 25,
+                "text": "25%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          }
+        ]
+      },
+      "NR": {
+        "district_code": "NR",
+        "rows": [
+          {
+            "id": "MF-NR-8",
+            "pack_e_row": 8,
+            "label": "Suburban (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "65'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 30,
+                "text": "30'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 20,
+                "text": "20'"
+              },
+              "street_side": {
+                "value": 20,
+                "text": "20'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 45,
+                "text": "45%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): garage_setback: note 15 = Can be reduced to 25 feet if parking pods are provided for the subdivision, or wider streets are provided to accommodate on-street parking as approved by the director. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-NR-9",
+            "pack_e_row": 9,
+            "label": "Neighborhood (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "45'/55'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 12 = Lot widths within a development of at least 20 homes may be reduced to 40 feet in developments of 20 units or more, for no more than 25% of the lots within the development or subdivision, inclusive of all phases. 40-foot lots will be required to provide parking pods within the development, approved by the director. | min_lot_width: note 11 = Reserved. | garage_setback: note 15 = Can be reduced to 25 feet if parking pods are provided for the subdivision, or wider streets are provided to accommodate on-street parking as approved by the director. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-NR-10",
+            "pack_e_row": 10,
+            "label": "Neighborhood (Rear-Loaded) (Single-Family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "38'/ 48'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-NR-11",
+            "pack_e_row": 11,
+            "label": "Single-Family Zero Lot Line",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "45' / 60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": null,
+                "text": "0'/10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 10 = Single-Family Zero Lot Line developments must also comply with the standards of Subsection 4.2.10, Single-Family Zero Lot Line Development. | side: note 11 = Reserved. | min_lot_width: note 12 = Lot widths within a development of at least 20 homes may be reduced to 40 feet in developments of 20 units or more, for no more than 25% of the lots within the development or subdivision, inclusive of all phases. 40-foot lots will be required to provide parking pods within the development, approved by the director. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-NR-12",
+            "pack_e_row": 12,
+            "label": "Cottage",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "30'/40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 10,
+                "text": "10'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 10,
+                "text": "10'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 7 = Allowed only in conjunction with a Master Planned Community. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-NR-13",
+            "pack_e_row": 13,
+            "label": "Manufactured Home Subdivision",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "46'/56'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 6 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development. | min_lot_width: note 1 = The second number is the lot width for corner lots."
+            ]
+          },
+          {
+            "id": "MF-NR-14",
+            "pack_e_row": 14,
+            "label": "Manufactured Home Park",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 6 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development."
+            ]
+          },
+          {
+            "id": "MF-NR-15",
+            "pack_e_row": 15,
+            "label": "Tiny House Development",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 6 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development."
+            ]
+          },
+          {
+            "id": "MF-NR-80",
+            "pack_e_row": 80,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "80'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 30,
+                "text": "30'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 20,
+                "text": "20'"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): coverage: note 7 = Maximum lot coverage may be increased by 10% if additional landscaping is provided on the adjacent right-of-way(s)."
+            ]
+          }
+        ]
+      },
+      "TR": {
+        "district_code": "TR",
+        "rows": [
+          {
+            "id": "MF-TR-16",
+            "pack_e_row": 16,
+            "label": "Neighborhood (Single-family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'/60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-17",
+            "pack_e_row": 17,
+            "label": "Neighborhood (Rear-Loaded) (Single-family Detached)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "42'/52'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-18",
+            "pack_e_row": 18,
+            "label": "Single-Family Attached",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'/60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-19",
+            "pack_e_row": 19,
+            "label": "Single-Family Attached (Rear-Loaded)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "42'/52'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | side: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-20",
+            "pack_e_row": 20,
+            "label": "Single-Family Zero Lot Line",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'/ 65'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": null,
+                "text": "0'/10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 10 = Single-Family Zero Lot Line developments must also comply with the standards of Subsection 4.2.10, Single-Family Zero Lot Line Development. | side: note 11 = Reserved. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-21",
+            "pack_e_row": 21,
+            "label": "Duplex",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'/60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 1 = The second number is the lot width for corner lots."
+            ]
+          },
+          {
+            "id": "MF-TR-22",
+            "pack_e_row": 22,
+            "label": "Townhouse (Front-Loaded Single-Entry)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "24'/34'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 20,
+                "text": "20'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 65,
+                "text": "65%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | min_lot_width: note 1 = The second number is the lot width for corner lots."
+            ]
+          },
+          {
+            "id": "MF-TR-23",
+            "pack_e_row": 23,
+            "label": "Townhouse (Rear-Loaded)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "24'/34'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 10,
+                "text": "10'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | side: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-TR-24",
+            "pack_e_row": 24,
+            "label": "Tiny House Development",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 6 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development."
+            ]
+          },
+          {
+            "id": "MF-TR-25",
+            "pack_e_row": 25,
+            "label": "Triplex",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-TR-26",
+            "pack_e_row": 26,
+            "label": "Quadplex",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-TR-27",
+            "pack_e_row": 27,
+            "label": "Apartment",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 20,
+                "text": "20'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 8 = Allowed only with approval of a Conditional Use Permit. | building_type: note 9 = Apartments and lofts are subject to the standards set out in Section 4.3.1, Nonresidential and Mixed-Use Lot and Building Standards, Section 4.3.2, Nonresidential, Mixed-Use and Apartment Design Standards, and Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts, as may be applicable."
+            ]
+          },
+          {
+            "id": "MF-TR-80",
+            "pack_e_row": 80,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "80'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 30,
+                "text": "30'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 20,
+                "text": "20'"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): coverage: note 7 = Maximum lot coverage may be increased by 10% if additional landscaping is provided on the adjacent right-of-way(s)."
+            ]
+          }
+        ]
+      },
+      "MR": {
+        "district_code": "MR",
+        "rows": [
+          {
+            "id": "MF-MR-28",
+            "pack_e_row": 28,
+            "label": "Manufactured Home Subdivision",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "46'/56'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 8 = Allowed only with approval of a Conditional Use Permit. | min_lot_width: note 1 = The second number is the lot width for corner lots."
+            ]
+          },
+          {
+            "id": "MF-MR-29",
+            "pack_e_row": 29,
+            "label": "Manufactured Home Park",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 8 = Allowed only with approval of a Conditional Use Permit."
+            ]
+          },
+          {
+            "id": "MF-MR-30",
+            "pack_e_row": 30,
+            "label": "Tiny House Development",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 50,
+                "text": "50%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 5 = Manufactured Home Subdivisions and Parks must also comply with Section 4.2.3, Manufactured Homes. | building_type: note 8 = Allowed only with approval of a Conditional Use Permit."
+            ]
+          },
+          {
+            "id": "MF-MR-31",
+            "pack_e_row": 31,
+            "label": "Townhouse (Front-Loaded Single-Entry)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "24'/34'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 20,
+                "text": "20'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 65,
+                "text": "65%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 4 = The second number is the side setback for the side attached to an adjacent unit. | min_lot_width: note 1 = The second number is the lot width for corner lots."
+            ]
+          },
+          {
+            "id": "MF-MR-32",
+            "pack_e_row": 32,
+            "label": "Townhouse (Rear-Loaded)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "24'/34'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 10,
+                "text": "10'"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | side: note 4 = The second number is the side setback for the side attached to an adjacent unit. | min_lot_width: note 1 = The second number is the lot width for corner lots. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-MR-33",
+            "pack_e_row": 33,
+            "label": "Triplex",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-MR-34",
+            "pack_e_row": 34,
+            "label": "Quadplex",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-MR-35",
+            "pack_e_row": 35,
+            "label": "Apartment (5-14 units/ac.)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 20,
+                "text": "20'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-MR-36",
+            "pack_e_row": 36,
+            "label": "Apartment (15-24 units/ac.)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "60'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 25,
+                "text": "25'"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 45,
+                "text": "45'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": []
+          },
+          {
+            "id": "MF-MR-80",
+            "pack_e_row": 80,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "80'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 30,
+                "text": "30'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 20,
+                "text": "20'"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): coverage: note 7 = Maximum lot coverage may be increased by 10% if additional landscaping is provided on the adjacent right-of-way(s)."
+            ]
+          }
+        ]
+      },
+      "DR": {
+        "district_code": "DR",
+        "rows": [
+          {
+            "id": "MF-DR-40",
+            "pack_e_row": 40,
+            "label": "Cottage | Min. Lot Width 30'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              30,
+              40
+            ],
+            "min_lot_width_printed": "30'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 10,
+                "text": "10'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): garage_access_setback: note 5 = Garage access must be taken from a rear alley. | min_dwelling_unit_size: note 8 = Maximum Cottage unit size is 899 square feet."
+            ]
+          },
+          {
+            "id": "MF-DR-41",
+            "pack_e_row": 41,
+            "label": "Cottage | Min. Lot Width 40'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              40,
+              50
+            ],
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 10,
+                "text": "10'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 11 = Corner lots must be at least 50' wide. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley. | min_dwelling_unit_size: note 8 = Maximum Cottage unit size is 899 square feet."
+            ]
+          },
+          {
+            "id": "MF-DR-42",
+            "pack_e_row": 42,
+            "label": "Cottage | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley. | min_dwelling_unit_size: note 8 = Maximum Cottage unit size is 899 square feet."
+            ]
+          },
+          {
+            "id": "MF-DR-43",
+            "pack_e_row": 43,
+            "label": "Single-Family Detached | Min. Lot Width 30'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              30,
+              40
+            ],
+            "min_lot_width_printed": "30'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 1 = Single-family detached, single-family zero lot line or single-family attached development on 30-foot lots is only allowed on 30-foot lots that existed on the effective date of these regulations. | garage_access_setback: note 5 = Garage access must be taken from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-DR-44",
+            "pack_e_row": 44,
+            "label": "Single-Family Detached | Min. Lot Width 40'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              40,
+              50
+            ],
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 11 = Corner lots must be at least 50' wide. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-45",
+            "pack_e_row": 45,
+            "label": "Single-Family Detached | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-46",
+            "pack_e_row": 46,
+            "label": "Single-Family Zero Lot Line | Min. Lot Width 30'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              30,
+              40
+            ],
+            "min_lot_width_printed": "30'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "0'/10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 9 = Single-Family Zero Lot Line developments must also comply with the standards of Subsection 4.2.10, Single-Family Zero Lot Line Development. | side: note 10 = For Single-Family Zero Lot Line development, one interior side lot line minimum setback may be 0' and the opposite interior side lot line must be a minimum of 10' in conformance with the approved subdivision plat for the development. | min_lot_width: note 1 = Single-family detached, single-family zero lot line or single-family attached development on 30-foot lots is only allowed on 30-foot lots that existed on the effective date of these regulations. | garage_access_setback: note 5 = Garage access must be taken from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-DR-47",
+            "pack_e_row": 47,
+            "label": "Single-Family Zero Lot Line | Min. Lot Width 40'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              40,
+              50
+            ],
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "0'/10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 9 = Single-Family Zero Lot Line developments must also comply with the standards of Subsection 4.2.10, Single-Family Zero Lot Line Development. | side: note 10 = For Single-Family Zero Lot Line development, one interior side lot line minimum setback may be 0' and the opposite interior side lot line must be a minimum of 10' in conformance with the approved subdivision plat for the development. | min_lot_width: note 11 = Corner lots must be at least 50' wide. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-48",
+            "pack_e_row": 48,
+            "label": "Single-Family Zero Lot Line | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "0'/10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 9 = Single-Family Zero Lot Line developments must also comply with the standards of Subsection 4.2.10, Single-Family Zero Lot Line Development. | side: note 10 = For Single-Family Zero Lot Line development, one interior side lot line minimum setback may be 0' and the opposite interior side lot line must be a minimum of 10' in conformance with the approved subdivision plat for the development. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-49",
+            "pack_e_row": 49,
+            "label": "Single-Family Attached | Min. Lot Width 30'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              30,
+              40
+            ],
+            "min_lot_width_printed": "30'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "0' /5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 4 = The first number is the side setback for the side attached to an adjacent unit. | min_lot_width: note 1 = Single-family detached, single-family zero lot line or single-family attached development on 30-foot lots is only allowed on 30-foot lots that existed on the effective date of these regulations. | garage_access_setback: note 5 = Garage access must be taken from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-DR-50",
+            "pack_e_row": 50,
+            "label": "Single-Family Attached | Min. Lot Width 40'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              40,
+              50
+            ],
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 7.5,
+                "text": "7.5'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): min_lot_width: note 11 = Corner lots must be at least 50' wide. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-51",
+            "pack_e_row": 51,
+            "label": "Single-Family Attached | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": null,
+                "text": "0' / 5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 4 = The first number is the side setback for the side attached to an adjacent unit. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-52",
+            "pack_e_row": 52,
+            "label": "Duplex | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-53",
+            "pack_e_row": 53,
+            "label": "Townhouse | Min. Lot Width 22' /32'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              22,
+              null
+            ],
+            "min_lot_width_printed": "22' /32'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 5,
+                "text": "5'"
+              },
+              "side": {
+                "value": null,
+                "text": "0' / 5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 4 = The first number is the side setback for the side attached to an adjacent unit. | min_lot_width: note 2 = New townhouse development on a minimum of 22 foot lots is only allowed as rear-loaded units as set out in Table 4.3.6.C, Downtown Residential Illustrative Lot Configurations. | min_lot_width: note 3 = The second number is the lot width for corner lots. | garage_access_setback: note 5 = Garage access must be taken from a rear alley."
+            ]
+          },
+          {
+            "id": "MF-DR-54",
+            "pack_e_row": 54,
+            "label": "Triplex | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 6 = Allowed only with approval of a Conditional Use Permit as set out in Section 11.3.4, Conditional Use Permits. | garage_access_setback: note 13 = Triplex, Quadplex, and apartment parking, including garages, must be direct accessed from within the site, not the street, except that when an alley is present, direct access may be taken from the alley."
+            ]
+          },
+          {
+            "id": "MF-DR-55",
+            "pack_e_row": 55,
+            "label": "Quadplex | Min. Lot Width 50'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              50,
+              null
+            ],
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 6 = Allowed only with approval of a Conditional Use Permit as set out in Section 11.3.4, Conditional Use Permits. | garage_access_setback: note 13 = Triplex, Quadplex, and apartment parking, including garages, must be direct accessed from within the site, not the street, except that when an alley is present, direct access may be taken from the alley."
+            ]
+          },
+          {
+            "id": "MF-DR-56",
+            "pack_e_row": 56,
+            "label": "Apartment | Min. Lot Width 100'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              100,
+              null
+            ],
+            "min_lot_width_printed": "100'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "max_height": {
+                "value": 40,
+                "text": "40'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 6 = Allowed only with approval of a Conditional Use Permit as set out in Section 11.3.4, Conditional Use Permits. | building_type: note 7 = Apartments are subject to the standards set out in Section 4.3.1, Nonresidential and Mixed-Use Lot and Building Standards, and Section 4.3.2, Nonresidential, Mixed-Use and Apartment Design Standards, as may be applicable. | garage_access_setback: note 12 = Garage access may be reduced to 7.5' when accessed from an alley."
+            ]
+          },
+          {
+            "id": "MF-DR-57",
+            "pack_e_row": 57,
+            "label": "Tiny House Development | Min. Lot Width 40'",
+            "use": "residential",
+            "lot_width_tier_ft": [
+              40,
+              null
+            ],
+            "min_lot_width_printed": "40'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.6.A",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 15,
+                "text": "15'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "60%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 6 = Allowed only with approval of a Conditional Use Permit as set out in Section 11.3.4, Conditional Use Permits. | building_type: note 14 = Tiny House Developments must also comply with the standards of Section 4.2.4, Tiny House Development. | min_dwelling_unit_size: note 15 = Maximum Tiny House size is 599 square feet."
+            ]
+          },
+          {
+            "id": "MF-DR-80",
+            "pack_e_row": 80,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "80'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 30,
+                "text": "30'"
+              },
+              "side": {
+                "value": 15,
+                "text": "15'"
+              },
+              "rear": {
+                "value": 20,
+                "text": "20'"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): coverage: note 7 = Maximum lot coverage may be increased by 10% if additional landscaping is provided on the adjacent right-of-way(s)."
+            ]
+          }
+        ]
+      },
+      "NC": {
+        "district_code": "NC",
+        "rows": [
+          {
+            "id": "MF-NC-73",
+            "pack_e_row": 73,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'/10' -- 5' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'/10' -- 15' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "35'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": {
+              "rule": "Table 4.3.1.B note 1",
+              "verbatim": "All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement.",
+              "adjacent": {
+                "side": {
+                  "value": null,
+                  "text": "the side adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; any other side: 5'"
+                },
+                "rear": {
+                  "value": null,
+                  "text": "a rear adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; otherwise: 15'"
+                }
+              }
+            },
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | rear: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | row: note 3 = See Section 4.3.3, Special Design Standards for Neighborhood Commercial (NC) District."
+            ]
+          }
+        ]
+      },
+      "GC": {
+        "district_code": "GC",
+        "rows": [
+          {
+            "id": "MF-GC-74",
+            "pack_e_row": 74,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "50'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 25,
+                "text": "25'"
+              },
+              "side": {
+                "value": 5,
+                "text": "5'/10' -- 5' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'/10' -- 15' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "street_side": {
+                "value": 25,
+                "text": "25'"
+              },
+              "max_height": {
+                "value": 45,
+                "text": "45'"
+              },
+              "max_lot_coverage": {
+                "value": 75,
+                "text": "75%"
+              }
+            },
+            "lake": {
+              "rule": "Table 4.3.1.B note 1",
+              "verbatim": "All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement.",
+              "adjacent": {
+                "side": {
+                  "value": null,
+                  "text": "the side adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; any other side: 5'"
+                },
+                "rear": {
+                  "value": null,
+                  "text": "a rear adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; otherwise: 15'"
+                }
+              }
+            },
+            "notes": [
+              "Footnotes (pack E, verbatim): side: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | rear: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement."
+            ]
+          }
+        ]
+      },
+      "DN": {
+        "district_code": "DN",
+        "rows": [
+          {
+            "id": "MF-DN-75",
+            "pack_e_row": 75,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "25'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B; Sec. 4.3.4.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 0,
+                "text": "0' -- note 5: \"Buildings in the DN district are required to be built to front and side property lines abutting a street, except as provided in Subsection 4.3.4.B\" (a build-to line at the property line)"
+              },
+              "side": {
+                "value": 0,
+                "text": "0'/10' -- 0' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "rear": {
+                "value": 0,
+                "text": "0'/10' -- 0' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "street_side": {
+                "value": 0,
+                "text": "0'"
+              },
+              "max_height": {
+                "value": 60,
+                "text": "60'"
+              },
+              "max_lot_coverage": {
+                "value": null,
+                "text": "N/A"
+              }
+            },
+            "lake": {
+              "rule": "Table 4.3.1.B note 1",
+              "verbatim": "All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement.",
+              "adjacent": {
+                "side": {
+                  "value": null,
+                  "text": "the side adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; any other side: 0'"
+                },
+                "rear": {
+                  "value": null,
+                  "text": "a rear adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; otherwise: 0'"
+                },
+                "notes": [
+                  "Sec. 4.3.4.B.3.c (verbatim, pack E): \"The front build-to requirement shall not be applicable to properties directly adjacent to Lake Marble Falls.\""
+                ]
+              }
+            },
+            "notes": [
+              "Footnotes (pack E, verbatim): front: note 5 = Buildings in the DN district are required to be built to front and side property lines abutting a street, except as provided in Subsection 4.3.4.B, Special Setbacks in the Downtown (DN) and Downtown Transition (DT) Districts. | side: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | rear: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | height: note 4 = Rooftop amenities are not counted towards the maximum building height provided the amenity does not occupy more than 50% of the roof area and is set back from the parapet edge or building façade on at least three sides. | build_to_line: note 2 = See Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts. | row: note 2 = See Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts."
+            ]
+          },
+          {
+            "id": "MF-DN-39",
+            "pack_e_row": 39,
+            "label": "Townhouse (Rear-Loaded)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "20'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 0,
+                "text": "0'/10' -- note 14: \"Townhouses in the Downtown (DN) District are required to be built-to the front property line\" (a build-to line at 0 ft)"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 60,
+                "text": "60'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | building_type: note 13 = Townhouses in the Downtown (DN) and Downtown Transition (DT) Districts are subject to the standards set out in Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts. | front: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | side: note 4 = The second number is the side setback for the side attached to an adjacent unit. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          }
+        ]
+      },
+      "DT": {
+        "district_code": "DT",
+        "rows": [
+          {
+            "id": "MF-DT-76",
+            "pack_e_row": 76,
+            "label": "Nonresidential and Mixed-Use Development (Table 4.3.1.B row)",
+            "use": "nonresidential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "25'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.3.1.B; Sec. 4.3.4.B",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": 0,
+                "text": "0' -- note 6: \"Buildings in the DT district are required to be built within 10 feet of the front property line, except as provided in Subsection 4.3.4.B ... The setback line may be averaged along the entire block.\" (0 ft minimum; build-to within 10 ft)"
+              },
+              "side": {
+                "value": 0,
+                "text": "0'/10' -- 0' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "rear": {
+                "value": 10,
+                "text": "10' -- 10' where not adjacent to Lake Marble Falls (Table 4.3.1.B note 1)"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 60,
+                "text": "60'"
+              },
+              "max_lot_coverage": {
+                "value": null,
+                "text": "N/A"
+              }
+            },
+            "lake": {
+              "rule": "Table 4.3.1.B note 1",
+              "verbatim": "All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement.",
+              "adjacent": {
+                "side": {
+                  "value": null,
+                  "text": "the side adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; any other side: 0'"
+                },
+                "rear": {
+                  "value": null,
+                  "text": "a rear adjacent to Lake Marble Falls: 10 feet (or the edge of the boardwalk) per note 1; otherwise: 10'"
+                },
+                "notes": [
+                  "Sec. 4.3.4.B.3.c (verbatim, pack E): \"The front build-to requirement shall not be applicable to properties directly adjacent to Lake Marble Falls.\""
+                ]
+              }
+            },
+            "notes": [
+              "Footnotes (pack E, verbatim): front: note 6 = Buildings in the DT district are required to be built within 10 feet of the front property line, except as provided in Subsection 4.3.4.B, Special Setbacks in the Downtown (DN) and Downtown Transition (DT) Districts. The setback line may be averaged along the entire block. | side: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | rear: note 1 = All properties in the NC, GC, DN, and DT districts adjacent to Lake Marble Falls shall provide a minimum 10-foot boardwalk and public access easement along the water's edge. Side and rear setbacks adjacent to the lake shall be increased to 10 feet (or the edge of the boardwalk) in the DN and DT districts to accommodate the boardwalk and public access easement. Side and rear setbacks adjacent to the lake may/must be decreased/increased to 10 feet (or the edge of the boardwalk) in the NC and GC districts to allow construction up to the boardwalk and public access easement. | height: note 4 = Rooftop amenities are not counted towards the maximum building height provided the amenity does not occupy more than 50% of the roof area and is set back from the parapet edge or building façade on at least three sides. | build_to_line: note 2 = See Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts. | row: note 2 = See Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts."
+            ]
+          },
+          {
+            "id": "MF-DT-39",
+            "pack_e_row": 39,
+            "label": "Townhouse (Rear-Loaded)",
+            "use": "residential",
+            "lot_width_tier_ft": null,
+            "min_lot_width_printed": "20'",
+            "citation": "Marble Falls Code of Ordinances, App. B Development Code, Art. 4, Table 4.2.2",
+            "page_url": "https://library.municode.com/tx/marble_falls/codes/code_of_ordinances?nodeId=COOR_APXBDECO_ART4GEDERE",
+            "fields": {
+              "front": {
+                "value": null,
+                "text": "0'/10' -- note 14: \"townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line\" (a build-to line, not a minimum setback)"
+              },
+              "side": {
+                "value": null,
+                "text": "5'/0'"
+              },
+              "rear": {
+                "value": 15,
+                "text": "15'"
+              },
+              "street_side": {
+                "value": 10,
+                "text": "10'"
+              },
+              "max_height": {
+                "value": 60,
+                "text": "60'"
+              },
+              "max_lot_coverage": {
+                "value": 70,
+                "text": "70%"
+              }
+            },
+            "lake": null,
+            "notes": [
+              "Footnotes (pack E, verbatim): building_type: note 3 = Rear-loaded means that parking must be located at the rear of the site and access must be taken from an alleyway at the rear of the property. Does not require an enclosed or covered garage. | building_type: note 13 = Townhouses in the Downtown (DN) and Downtown Transition (DT) Districts are subject to the standards set out in Section 4.3.4, Special Design Standards for Downtown (DN) and Downtown Transition (DT) Districts. | front: note 14 = Townhouses in the Downtown (DN) District are required to be built-to the front property line and townhouses in the Downtown Transition (DT) District are required to be built within ten (10) feet of the front property line. | side: note 4 = The second number is the side setback for the side attached to an adjacent unit. | garage_setback: note 2 = The second number is the garage setback for lots taking direct access from a rear alley."
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "horseshoe_bay": {
+    "subdivisions": [
+      {
+        "subdivision": "APPLEHEAD ISLAND",
+        "zone": "1",
+        "status": "name-match",
+        "section": "§ 14.02.404",
+        "basis": "name match: 'Zone 1 (Applehead Island)'"
+      },
+      {
+        "subdivision": "APPLEHEAD",
+        "zone": "2",
+        "status": "name-match",
+        "section": "§ 14.02.405",
+        "basis": "name match: 'Zone 2 (Applehead)'"
+      },
+      {
+        "subdivision": "BAY COUNTRY",
+        "zone": "5",
+        "status": "name-match",
+        "section": "§ 14.02.407",
+        "basis": "name match: 'Zone 5 (Bay Country)'"
+      },
+      {
+        "subdivision": "PECAN CREEK",
+        "zone": "6",
+        "status": "name-match",
+        "section": "§ 14.02.408",
+        "basis": "name match: 'Zone 6 (Pecan Creek)'"
+      },
+      {
+        "subdivision": "PENINSULA",
+        "zone": "7",
+        "status": "name-match",
+        "section": "§ 14.02.409",
+        "basis": "name match: 'Zone 7 (Peninsula)'"
+      },
+      {
+        "subdivision": "MATERN ISLAND",
+        "zone": "8",
+        "status": "name-match",
+        "section": "§ 14.02.410",
+        "basis": "name match: 'Zone 8 (Matern Island)'"
+      },
+      {
+        "subdivision": "ESCONDIDO",
+        "zone": "9",
+        "status": "name-match",
+        "section": "§ 14.02.411",
+        "basis": "name match: 'Zone 9 (Escondido)'"
+      },
+      {
+        "subdivision": "SIENA CREEK",
+        "zone": "10",
+        "status": "name-match",
+        "section": "§ 14.02.412",
+        "basis": "name match: 'Zone 10 (Siena Creek)'"
+      },
+      {
+        "subdivision": "THE TRAILS",
+        "zone": "11",
+        "status": "name-match",
+        "section": "§ 14.02.413",
+        "basis": "name match: 'Zone 11 (The Trails)'"
+      },
+      {
+        "subdivision": "SUMMIT ROCK",
+        "zone": "12",
+        "status": "name-match",
+        "section": "§ 14.02.414",
+        "basis": "name match: 'Zone 12 (Summit Rock)'"
+      },
+      {
+        "subdivision": "CAPROCK",
+        "zone": "13",
+        "status": "name-match",
+        "section": "§ 14.02.416",
+        "basis": "name match: 'Zone 13 (Caprock)' (no feature carries it today; the moratorium tract is coded WEST/PROPER)"
+      },
+      {
+        "subdivision": "AIRPORT",
+        "zone": "15",
+        "status": "name-match",
+        "section": "§ 14.02.418",
+        "basis": "name match: 'Zone 15 (Airport)'"
+      },
+      {
+        "subdivision": "THE HILLS",
+        "zone": "17",
+        "status": "name-match",
+        "section": "§ 14.02.420",
+        "basis": "name match: 'Zone 17 (The Hills)'"
+      },
+      {
+        "subdivision": "THE PARKS AT HORSESHOE BAY",
+        "zone": "18",
+        "status": "name-match",
+        "section": "§ 14.02.421",
+        "basis": "name match: 'Zone 18 (The Parks at Horseshoe Bay)'"
+      },
+      {
+        "subdivision": "SOUTH",
+        "zone": "4B",
+        "status": "name-match",
+        "section": "§ 14.02.406",
+        "basis": "Pack E's own row label: 'Zone 4B Horseshoe Bay South' (§ 14.02.406, M-1 row). Every Burnet SOUTH feature's legal description is a HORSESHOE BAY SOUTH (S5221) or HORSESHOE BAY (S5220) plat or an acreage abstract."
+      },
+      {
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "status": "inferred",
+        "section": "§ 14.02.406",
+        "basis": "INFERRED, NOT A NAME MATCH. § 14.02.406 is the section for 'Zones 3, 4A & 4B (Horseshoe Bay)'. The layer's 17-value SUBDIVISION domain gives 14 values that are the ordinance's names for Zones 1, 2, 5-13, 15, 17 and 18, plus three Horseshoe Bay values: SOUTH (= Zone 4B, the ordinance's own 'Horseshoe Bay South'), WEST and PROPER. Every Burnet PROPER feature (517, read 2026-10-13) is on a HORSESHOE BAY (S5220) or HORSESHOE BAY NORTH (S5222) plat, JONATHAN COVE (S5226), SPRING-FED LAKESIDE TOWNHOMES (S7953) or an acreage abstract (A0248). PROPER is therefore read as Zone 3 and/or Zone 4A -- which of the two is not stated in pack E, so a PROPER parcel is served ONLY for a code whose § 14.02.406 text is the same entry for both ('Zones 3 and 4A' / 'Zones 3 and 4'). Pack F task 2 asks for the ordinance's own subdivision list per zone, which confirms or overturns this."
+      }
+    ],
+    "unmapped_subdivisions": [
+      {
+        "subdivision": "WEST",
+        "basis": "Not mapped. The only place pack E names 'Horseshoe Bay West' is Zone 13 (Caprock)'s moratorium tract ('Tract BBB-2A of Horseshoe Bay West Plat No. W15.67', § 14.02.416), so WEST is not one zone; its 4 Burnet features (R-1 x2, A-1 x2) are acreage abstracts with no plat name. Declines SETBACK_ZONE_UNMAPPED until pack F task 2."
+      }
+    ],
+    "combos": [
+      {
+        "zoning": "R-1",
+        "subdivision": "PENINSULA",
+        "zone": "7",
+        "kind": "standard",
+        "pack_e_row": 89,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.409",
+        "page_url": "https://ecode360.com/39031224",
+        "zone_scope": "Zone 7 (Peninsula): all land within Zone 7 classified as R-1",
+        "fields": {
+          "front": {
+            "value": 15,
+            "text": "minimum depth of fifteen (15) feet from the front lot line to the closest structural projection, including porches, but not including eaves, overhangs, planters or fireplaces"
+          },
+          "side": {
+            "value": 15,
+            "text": "total side yards of not less than thirty (30) feet with not less than fifteen (15) feet on any one (1) side [reviewed: 'total side yards of not less than thirty (30) feet with not less than fifteen (15) feet on any one (1) side': every side is at least 15 ft, and 15 + 15 = 30 meets the total, so the per-side minimum is 15 ft on each side.]"
+          },
+          "rear": {
+            "value": 15,
+            "text": "at least fifteen (15) feet from the rear lot line to the nearest building line (\"Except as provided below\")"
+          },
+          "street_side": {
+            "value": 15,
+            "text": "minimum setback of fifteen (15) feet from the side street line"
+          },
+          "max_height": {
+            "value": 45,
+            "text": "No structure shall exceed forty-five feet (45') above the highest natural contour line of the applicable lot"
+          },
+          "max_lot_coverage": {
+            "value": 60,
+            "text": "No more than sixty percent (60%) of the total landmass, as it exists at the time of development, will be used for the dwelling and other structures."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.' § 14.02.409 (verbatim, pack E): 'Structures on any shoreline lots may be located at the shoreline of Lake Lyndon B. Johnson, provided they are constructed a minimum of one foot (1') above the floodplain elevation for such lot, as shown on the FEMA federal insurance rate map (FIRM).'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": "'Except as specified to the contrary on an approved plat, which specification will control, the following will apply' (§ 14.02.409)",
+        "notes": [
+          "Introduced by: 'Except as specified to the contrary on an approved plat, which specification will control, the following will apply'. LAKE: 'Structures on any shoreline lots may be located at the shoreline of Lake Lyndon B. Johnson, provided they are constructed a minimum of one foot (1') above the floodplain elevation for such lot, as shown on the FEMA federal insurance rate map (FIRM).' Min. dwelling 4000 sq ft. 3-car garage min 750 sq ft."
+        ]
+      },
+      {
+        "zoning": "R-1",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 98,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3 and 4A classified as R-1",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "minimum depth of twenty-five (25) feet from the front lot line to the closest structural projection, including porches, but not including eaves, overhangs, planters, or fireplaces"
+          },
+          "side": {
+            "value": null,
+            "text": "total side yards of not less than fifteen (15) feet with not less than five (5) feet on one (1) side, except that lots located on Lighthouse Drive shall provide total side yards with not less than five (5) feet on each side"
+          },
+          "rear": {
+            "value": 15,
+            "text": "at least fifteen (15) feet from the rear lot line to the nearest building line"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "minimum setback of twenty-five (25) feet from the side street line"
+          },
+          "max_height": {
+            "value": null,
+            "text": "thirty-two (32) feet above the highest natural contour of the applicable lot, except that the maximum building height for lots contiguous with the shoreline shall be thirty-five (35) feet above the highest natural contour of the applicable lot"
+          },
+          "max_lot_coverage": {
+            "value": 50,
+            "text": "No more than fifty percent (50%) of the total lot area shall be used for the dwelling and other structures."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": {
+          "not_adjacent": 32,
+          "adjacent": 35
+        },
+        "street_side_lot": {
+          "field": "side",
+          "street": "LIGHTHOUSE",
+          "on_street": {
+            "value": 5,
+            "text": "'lots located on Lighthouse Drive shall provide total side yards with not less than five (5) feet on each side' -> 5 ft on each side (situs on Lighthouse Drive)"
+          },
+          "otherwise": {
+            "value": null,
+            "text": "'total side yards of not less than fifteen (15) feet with not less than five (5) feet on one (1) side, except that lots located on Lighthouse Drive shall provide total side yards with not less than five (5) feet on each side' (a total across both sides, not one per-side number; the situs is not on Lighthouse Drive)"
+          }
+        },
+        "plat_clause": "'Except as specified to the contrary on an approved plat, which specification shall control, the following shall apply' (§ 14.02.406)",
+        "notes": [
+          "Introduced by: 'Except as specified to the contrary on an approved plat, which specification shall control, the following shall apply'. Heading covers Zones 3 and 4A; Zone 4B R-1 has its own floor-area/masonry sentence in the same subsection. Min. dwelling: 2400/1800/1400 sq ft depending on golf/shoreline/second-row/Area 1-2; Zone 4B R-1 1200 sq ft ground floor. LAKE: §14.02.402(b)(15)(U) 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.' Zones 3/4A/4B: Side yard setback - reverse corner lots. In the case of a reverse corner lot, there shall be a side yard setback on the street side of the corner lot of not less than the front yard requirements for the lots in the rear of such corner lot."
+        ]
+      },
+      {
+        "zoning": "GH",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 99,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3 and 4A classified as GH",
+        "fields": {
+          "front": {
+            "value": 20,
+            "text": "minimum depth of 20 feet from the front lot line to the closest structural projection, including porches, but not including eaves, overhangs, planters or fireplaces"
+          },
+          "side": {
+            "value": 5,
+            "text": "total side yards of not less than 5 feet on each side of the lot"
+          },
+          "rear": {
+            "value": 15,
+            "text": "at least 15 feet from the rear lot line to the nearest building line"
+          },
+          "street_side": {
+            "value": 15,
+            "text": "minimum setback of 15 feet from the side street line"
+          },
+          "max_height": {
+            "value": 32,
+            "text": "32 feet above the highest natural contour of the applicable lot"
+          },
+          "max_lot_coverage": {
+            "value": null,
+            "text": "NOT SPECIFIED"
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": null,
+        "notes": [
+          "Min. dwelling 1400 sq ft; golf course lots 1800 sq ft. Side yard setback - reverse corner lots. In the case of a reverse corner lot, there shall be a side yard setback on the street side of the corner lot of not less than the front yard requirements for the lots in the rear of such corner lot."
+        ]
+      },
+      {
+        "zoning": "R-2",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 100,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3 and 4A classified as R-2",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "minimum depth of twenty-five (25) feet from the front lot line to the nearest structural projection, including porches, but not including eaves, overhangs, planters or fireplaces"
+          },
+          "side": {
+            "value": 5,
+            "text": "at least five (5) feet in depth from all side lot lines to the building line of any structure"
+          },
+          "rear": {
+            "value": 15,
+            "text": "at least fifteen (15) feet from the rear lot line to the nearest building line, excepting fences, walls and hedges when constructed as provided for in the preceding provisions"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "minimum setback of twenty-five (25) feet from the side street line"
+          },
+          "max_height": {
+            "value": 32,
+            "text": "thirty-two (32) feet above the highest natural contour of the applicable lot"
+          },
+          "max_lot_coverage": {
+            "value": 50,
+            "text": "No more than fifty percent (50%) of the total lot area shall be covered by dwellings and other structures."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": "'Except as specified to the contrary on an approved plat, which specifications shall control, the following shall apply' (§ 14.02.406)",
+        "notes": [
+          "Introduced by: 'Except as specified to the contrary on an approved plat, which specifications shall control, the following shall apply'. Min. 950 sq ft per unit (750 in Area 1/2; 1200 golf/shoreline/second row). §14.02.402(b)(13): R-2 lot with existing duplex replatted into two lots considered one lot for zoning purposes. Side yard setback - reverse corner lots. In the case of a reverse corner lot, there shall be a side yard setback on the street side of the corner lot of not less than the front yard requirements for the lots in the rear of such corner lot."
+        ]
+      },
+      {
+        "zoning": "R-4",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 101,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land (except the 25 lots in subsection (g)) within Zones 3 and 4A classified as R-4",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "minimum depth of twenty-five (25) feet from the front lot line to the closest structural projection, including porches, but not including eaves, overhangs, planters, or fireplaces"
+          },
+          "side": {
+            "value": 5,
+            "text": "at least five (5) feet in depth from all side lot lines to the building line of any structure"
+          },
+          "rear": {
+            "value": 15,
+            "text": "at least fifteen (15) feet from the rear lot line to the nearest building line"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "minimum setback of twenty-five (25) feet wide from the side street line"
+          },
+          "max_height": {
+            "value": 32,
+            "text": "thirty-two (32) feet above the highest natural contour of the applicable lot"
+          },
+          "max_lot_coverage": {
+            "value": 50,
+            "text": "no more than fifty percent (50%) of the total lot area shall be used for the dwelling and other structures."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": "'Except where there is specifically called out on an approved plat, which specification shall control, the following shall apply' (§ 14.02.406)",
+        "notes": [
+          "Introduced by: 'Except where there is specifically called out on an approved plat, which specification shall control, the following shall apply'. Min. dwelling 1,500 sq ft; option up to 20% of units at 750 sq ft. No parking within setback areas adjacent to streets. Side yard setback - reverse corner lots. In the case of a reverse corner lot, there shall be a side yard setback on the street side of the corner lot of not less than the front yard requirements for the lots in the rear of such corner lot.",
+          "Pack E row(s) 102 (the 25 listed Zone 3 R-4 lots) state the same setbacks, height and coverage; only the minimum dwelling size differs."
+        ]
+      },
+      {
+        "zoning": "R-6",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 104,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3 and 4 classified as R-6",
+        "fields": {
+          "front": {
+            "value": 20,
+            "text": "front setback lines shall be twenty (20) feet"
+          },
+          "side": {
+            "value": 5,
+            "text": "Same as in the R-4 area: at least five (5) feet in depth from all side lot lines to the building line of any structure"
+          },
+          "rear": {
+            "value": 15,
+            "text": "rear setback lines shall be fifteen (15) feet"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "Same as in the R-4 area: minimum setback of twenty-five (25) feet wide from the side street line"
+          },
+          "max_height": {
+            "value": 32,
+            "text": "thirty-two (32) feet above the highest natural contour of the applicable lot; provided that in the case of a multiple dwelling complex containing more than twenty (20) dwelling units, a maximum of three (3) stories is allowed. [reviewed: 'thirty-two (32) feet above the highest natural contour of the applicable lot; provided that in the case of a multiple dwelling complex containing more than twenty (20) dwelling units, a maximum of three (3) stories is allowed': 32 ft is the height; the more-than-20-unit proviso is carried as a note.]"
+          },
+          "max_lot_coverage": {
+            "value": 60,
+            "text": "no more than sixty percent (60%) of the total lot area shall be covered by the dwelling units and other structures."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": "R-6 is 'Same as in the R-4 area except that front setback lines shall be twenty (20) feet and rear setback lines shall be fifteen (15) feet', and the R-4 yard paragraph opens 'Except where there is specifically called out on an approved plat, which specification shall control' (§ 14.02.406)",
+        "notes": [
+          "Verbatim yard rule: 'Same as in the R-4 area except that front setback lines shall be twenty (20) feet and rear setback lines shall be fifteen (15) feet.' Side and corner values are carried from the Zones 3/4A R-4 text. Min. unit: apartments 1,200 sq ft (20% option 750); townhouses 1200; cottages 1400; golf course lots 1800.",
+          "Height proviso (verbatim): 'in the case of a multiple dwelling complex containing more than twenty (20) dwelling units, a maximum of three (3) stories is allowed.'"
+        ]
+      },
+      {
+        "zoning": "C-2",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "alternatives",
+        "note": "Which of these applies is the lot's identity against the § 14.02.417 editor's-note tracts; it is not evaluated from data.",
+        "alternatives": [
+          {
+            "condition": "any C-2 lot in Zones 3/4A that is not one of the § 14.02.417 PD-authorized tracts below: § 14.02.406 states no setbacks for C-2",
+            "pack_e_row": 106,
+            "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+            "page_url": "https://ecode360.com/39030878",
+            "fields": {
+              "front": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "side": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "rear": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "street_side": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "max_height": {
+                "value": null,
+                "text": "thirty-five (35) feet above the highest natural contour of the applicable lot, except clubhouses which shall be limited to thirty-two (32) feet"
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "Building area shall not exceed sixty percent (60%) of the area of the lot."
+              }
+            },
+            "notes": [
+              "No setbacks stated for C-2 in this section. §14.02.402(b)(6) separation: nonresidential main structures, except those classified C-2 and on larger than one-half (1/2) acre lots, separated by not less than ten feet (10') unless approved firewall."
+            ]
+          },
+          {
+            "condition": "Tract J-7 of Horseshoe Bay Plat No. 28.49 (§ 14.02.417 PD authorization)",
+            "pack_e_row": 131,
+            "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.417 (editor's note)",
+            "page_url": "https://ecode360.com/39031768",
+            "fields": {
+              "front": {
+                "value": null,
+                "text": "Building setbacks: Three (3) fifteen (15) foot areas as depicted in the Concept Plan."
+              },
+              "side": {
+                "value": null,
+                "text": "Building setbacks: Three (3) fifteen (15) foot areas as depicted in the Concept Plan."
+              },
+              "rear": {
+                "value": null,
+                "text": "Building setbacks: Three (3) fifteen (15) foot areas as depicted in the Concept Plan."
+              },
+              "street_side": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "max_height": {
+                "value": 35,
+                "text": "Thirty-five (35) feet above grade."
+              },
+              "max_lot_coverage": {
+                "value": 60,
+                "text": "Building area shall not exceed sixty percent (60%) of the area of the lot."
+              }
+            },
+            "notes": [
+              "PD authorizations 'have been assigned to the individual tracts (lots) in Zone 4A Horseshoe Bay'."
+            ]
+          },
+          {
+            "condition": "Lot 28043-C of Horseshoe Bay Plat No. 28.52 (§ 14.02.417 PD authorization)",
+            "pack_e_row": 132,
+            "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.417 (editor's note)",
+            "page_url": "https://ecode360.com/39031768",
+            "fields": {
+              "front": {
+                "value": 20,
+                "text": "the front yard setback shall be twenty (20) feet"
+              },
+              "side": {
+                "value": null,
+                "text": "Setbacks shall be a minimum often (10) feet"
+              },
+              "rear": {
+                "value": null,
+                "text": "Setbacks shall be a minimum often (10) feet"
+              },
+              "street_side": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "max_height": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "max_lot_coverage": {
+                "value": 80,
+                "text": "Building area shall not exceed eighty percent (80%) of the area of the lot."
+              }
+            },
+            "notes": [
+              "PD authorizations 'have been assigned to the individual tracts (lots) in Zone 4A Horseshoe Bay'. 'often' is copied as printed (likely 'of ten'). Lot 28043-C building height 'a maximum of one story'."
+            ]
+          },
+          {
+            "condition": "6.10 acres of Tract AAA-2A, Horseshoe Bay Plat No. 64.3, Members Club Complex (§ 14.02.417 PD authorization)",
+            "pack_e_row": 133,
+            "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.417 (editor's note)",
+            "page_url": "https://ecode360.com/39031768",
+            "fields": {
+              "front": {
+                "value": 0,
+                "text": "None required."
+              },
+              "side": {
+                "value": 0,
+                "text": "None required."
+              },
+              "rear": {
+                "value": 0,
+                "text": "None required."
+              },
+              "street_side": {
+                "value": null,
+                "text": "NOT SPECIFIED"
+              },
+              "max_height": {
+                "value": 45,
+                "text": "Maximum building height of forty-five (45) feet above grade."
+              },
+              "max_lot_coverage": {
+                "value": 85,
+                "text": "Building area shall not exceed eighty five percent (85%) of the area of the lot."
+              }
+            },
+            "notes": [
+              "PD authorizations 'have been assigned to the individual tracts (lots) in Zone 4A Horseshoe Bay'. 'Developer shall have the right to build beyond the 825'foot contour line of Lake Lyndon B. Johnson, subject to other legal requirements.'"
+            ]
+          }
+        ]
+      },
+      {
+        "zoning": "A-1",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 107,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3 and 4 classified as A-1",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "Front: 25'"
+          },
+          "side": {
+            "value": null,
+            "text": "10' except a minimum of 40' for any side(s) that adjoins residential classifications."
+          },
+          "rear": {
+            "value": 25,
+            "text": "Rear: 25'"
+          },
+          "street_side": {
+            "value": null,
+            "text": "NOT SPECIFIED"
+          },
+          "max_height": {
+            "value": null,
+            "text": "NOT SPECIFIED"
+          },
+          "max_lot_coverage": {
+            "value": null,
+            "text": "Lot coverage (percentage) subject to approval."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": null,
+        "notes": [
+          "Height NOT SPECIFIED in A-1 text."
+        ]
+      },
+      {
+        "zoning": "GUI",
+        "subdivision": "PROPER",
+        "zone": "3/4A",
+        "kind": "standard",
+        "pack_e_row": 109,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.406",
+        "page_url": "https://ecode360.com/39030878",
+        "zone_scope": "Zones 3, 4A & 4B (Horseshoe Bay): all land within Zones 3, 4A and 4B classified as GUI",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "Streets: 25'"
+          },
+          "side": {
+            "value": null,
+            "text": "Side: 10'.*"
+          },
+          "rear": {
+            "value": null,
+            "text": "Rear: 10'.*"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "Streets: 25'"
+          },
+          "max_height": {
+            "value": null,
+            "text": "NOT SPECIFIED"
+          },
+          "max_lot_coverage": {
+            "value": null,
+            "text": "Lot coverage (maximum percentage): Subject to approval."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": null,
+        "notes": [
+          "Height NOT SPECIFIED in GUI text.",
+          "Footnote (verbatim): *A minimum of ten (10) feet except a minimum of twenty-five (25) feet for any side or rear that adjoins residential classifications."
+        ]
+      },
+      {
+        "zoning": "A-1",
+        "subdivision": "SUMMIT ROCK",
+        "zone": "12",
+        "kind": "standard",
+        "pack_e_row": 155,
+        "citation": "Horseshoe Bay Code of Ordinances, Code of Ordinances Ch. 14 Zoning, Art. 14.02, § 14.02.414",
+        "page_url": "https://ecode360.com/39031440",
+        "zone_scope": "Zone 12 (Summit Rock): A-1 Recreation",
+        "fields": {
+          "front": {
+            "value": 25,
+            "text": "Streets: 25'"
+          },
+          "side": {
+            "value": null,
+            "text": "10' except a minimum of 40' for any sides(s) that adjoin residential classifications"
+          },
+          "rear": {
+            "value": 25,
+            "text": "Rear: 25'"
+          },
+          "street_side": {
+            "value": 25,
+            "text": "Streets: 25'"
+          },
+          "max_height": {
+            "value": null,
+            "text": "NOT SPECIFIED"
+          },
+          "max_lot_coverage": {
+            "value": null,
+            "text": "Lot coverage (percentage) subject to approval by the city."
+          }
+        },
+        "waterfront_rear": {
+          "value": 0,
+          "text": "§ 14.02.402(b)(15)(U) (verbatim, pack E): 'Rear setbacks for waterfront lots are zero (0) feet, where no setbacks are shown on the plats for those lots.'"
+        },
+        "shoreline_height": null,
+        "street_side_lot": null,
+        "plat_clause": null,
+        "notes": [
+          "Height NOT SPECIFIED in A-1 text."
+        ]
+      },
+      {
+        "zoning": "R-1",
+        "subdivision": "SOUTH",
+        "zone": "4B",
+        "kind": "pending",
+        "pending": "No R-1 yard text for Zone 4B (Horseshoe Bay South) in pack E: § 14.02.406's R-1 yards are headed 'Zones 3 and 4A'; for Zone 4B pack E records only a floor-area/masonry sentence. Pack F task 3 asks for South R-1."
+      },
+      {
+        "zoning": "MH-1",
+        "subdivision": "SOUTH",
+        "zone": "4B",
+        "kind": "pending",
+        "pending": "MH-1 is not named anywhere in pack E. Pack E's Zone 4B 'M-1 Manufactured Home' text is not mapped to MH-1 (the layer carries a separate M-1 code; no fuzzy match). Pack F task 3 asks for MH-1."
+      },
+      {
+        "zoning": "A-1",
+        "subdivision": "SOUTH",
+        "zone": "4B",
+        "kind": "pending",
+        "pending": "§ 14.02.406's A-1 text covers 'all land within Zones 3 and 4 classified as A-1'; whether 'Zone 4' includes Zone 4B is not stated (the same section names 4A and 4B separately elsewhere, e.g. GUI 'Zones 3, 4A and 4B'). Pack F task 2 (zone definitions) settles it."
+      }
+    ]
+  }
+}

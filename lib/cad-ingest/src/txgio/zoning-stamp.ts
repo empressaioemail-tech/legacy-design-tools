@@ -22,15 +22,23 @@
  * parcel whose representative point falls in NO zoning polygon (outside the
  * city, or an un-zoned pocket) is left unstamped (null) — the honest
  * conservative-fallback path, never a guessed district.
+ *
+ * Same rule, one step further out (P-259): a parcel that lands in a polygon
+ * whose published value has no base district in this city's vocabulary
+ * (`parse.kind: "unrecognised"`) is reported as its own bucket, stamped with
+ * the published value verbatim rather than with a truncated prefix.
  */
 
 import {
   bboxOfGeometry,
   bboxesIntersect,
+  normalizeDigitId,
   pointInGeometry,
+  trueInteriorPoint,
   type GeoBbox,
   type GeoJsonGeometry,
 } from "./geo";
+import type { BaseCodeParse } from "./zoning-base-code";
 
 /** One zoning polygon plus its raw district code, ready for indexed PIP. */
 export interface ZoningPolygon {
@@ -40,6 +48,33 @@ export interface ZoningPolygon {
   description?: string | null;
   geometry: GeoJsonGeometry;
   bbox: GeoBbox;
+  /**
+   * OPTIONAL (P-259). Set only for a layer whose config carries
+   * `baseCodeParse` — the parse of the published value this polygon came from.
+   * `parse.kind` decides what `code` means:
+   *  - `base` — `code` is the resolved base district.
+   *  - `planned-development` — `code` is the published PUD/PDD/PD/PC value.
+   *  - `unrecognised` — `code` is the published value VERBATIM, and it is
+   *    still what gets stamped: the raw value is a fact about the parcel and
+   *    the router has a designed decline path for a code it cannot resolve,
+   *    whereas writing NULL would assert "no zoning on record". What is never
+   *    written is a truncated prefix (for "CS-1-MU-…" that would be CS, a
+   *    different district with its own row). The polygon is kept in the index
+   *    so a parcel inside it is not miscounted as "outside the city", and the
+   *    stamp summary counts it in `parcelsUnrecognised`.
+   *
+   * `parse.interim` (P-259b) is carried unchanged and is what the writer reads
+   * to set `txgio_parcel.zoning_district_interim` — a declared interim qualifier
+   * (`I-<base>`) means the base district's standards apply by ordinance while
+   * the zoning itself is interim. It is TRUE for a resolved interim base AND for
+   * an interim value that resolved to nothing, so an unresolved `I-XYZ` is
+   * disclosed as interim rather than folded into the generic unrecognised set.
+   * It never changes `code`: "I-SF-2-NP" still stamps SF-2, exactly its base.
+   * Absent for every other layer, where the published code IS the district.
+   */
+  parse?: BaseCodeParse;
+  /** The layer's `subareaField` value on this polygon (Horseshoe Bay SUBDIVISION); absent otherwise. */
+  subarea?: string | null;
 }
 
 /**
@@ -50,7 +85,13 @@ export interface ZoningPolygon {
  * holds the query point.
  */
 export function buildZoningIndex(
-  features: Array<{ code: string | null | undefined; description?: string | null; geometry: GeoJsonGeometry | null | undefined }>,
+  features: Array<{
+    code: string | null | undefined;
+    description?: string | null;
+    geometry: GeoJsonGeometry | null | undefined;
+    parse?: BaseCodeParse;
+    subarea?: string | null;
+  }>,
 ): ZoningPolygon[] {
   const out: ZoningPolygon[] = [];
   for (const f of features) {
@@ -59,7 +100,14 @@ export function buildZoningIndex(
     if (!f.geometry) continue;
     const bbox = bboxOfGeometry(f.geometry);
     if (!bbox) continue;
-    out.push({ code, description: f.description ?? null, geometry: f.geometry, bbox });
+    out.push({
+      code,
+      description: f.description ?? null,
+      geometry: f.geometry,
+      bbox,
+      parse: f.parse,
+      ...(f.subarea !== undefined ? { subarea: f.subarea } : {}),
+    });
   }
   return out;
 }
@@ -179,12 +227,17 @@ export function representativePoint(
  * the point is in no zoning polygon. Bbox pre-filter then even-odd ray-cast
  * (`pointInGeometry`). First containing polygon wins (zoning layers do not
  * overlap; on the rare shared boundary the first is as correct as any).
+ *
+ * `parse` (P-259) is carried straight off the polygon so the caller can tell a
+ * real district from a published value this city's vocabulary does not carry:
+ * the latter is stamped VERBATIM and counted apart (never a truncated prefix,
+ * never a silent null).
  */
 export function zoningCodeAtPoint(
   index: ZoningPolygon[],
   longitude: number,
   latitude: number,
-): { code: string; description?: string | null } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse; subarea?: string | null } | null {
   const pointBbox: GeoBbox = {
     westLng: longitude,
     southLat: latitude,
@@ -194,40 +247,220 @@ export function zoningCodeAtPoint(
   for (const poly of index) {
     if (!bboxesIntersect(poly.bbox, pointBbox)) continue;
     if (pointInGeometry(longitude, latitude, poly.geometry)) {
-      return { code: poly.code, description: poly.description };
+      return {
+        code: poly.code,
+        description: poly.description,
+        parse: poly.parse,
+        ...(poly.subarea !== undefined ? { subarea: poly.subarea } : {}),
+      };
     }
   }
   return null;
 }
 
 /**
+ * True when the matched zoning polygon's published value carried a DECLARED
+ * interim qualifier (P-259b) — Austin's `I-<base>` family. The stamped district
+ * is the base district, which is what the ordinance gives it; the extra fact is
+ * that the zoning is INTERIM (granted on annexation until permanent zoning is
+ * established), which is not the same as stably-zoned `SF-2` and is disclosed
+ * separately on the parcel row rather than in `zoning_district`.
+ *
+ * Reads `parse.interim` and nothing else, so it is true for an interim value
+ * that resolved to a base, an interim planned-development value, and an
+ * unresolved interim value alike.
+ */
+export function isInterimDistrict(
+  hit: { parse?: BaseCodeParse } | null | undefined,
+): boolean {
+  return hit?.parse?.interim === true;
+}
+
+/**
  * Stamp one parcel: compute its representative point, PIP the zoning index.
- * On a centroid miss (centroid outside its own ring), retry with the ring's
- * first vertex before giving up. Returns the matched code (+ description) or
- * null (leave the parcel unstamped).
+ *
+ * BUG FIX (2026-10-09, Burnet stage 3 §3 Bug 1 — Marble Falls sample #41,
+ * prop_id 112953): `representativePoint` above is a bare centroid — it does
+ * NOT check that the centroid actually lands inside the parcel's own ring
+ * before returning it (only a zero-area/collinear ring gets a fallback).
+ * For a deeply non-convex parcel (a thin, winding road right-of-way is the
+ * measured case: 1,065 of Burnet's 59,785 parcel features have their
+ * centroid outside their own polygon) that unchecked centroid can land
+ * anywhere, including well outside the parcel — and when it happens to fall
+ * inside a NEIGHBOURING zoning polygon, the parcel was stamped with the
+ * neighbour's district. The PRE-FIX fallback for a centroid that hit no
+ * zoning polygon at all made this worse: it swept the ring's own vertices
+ * and stamped whichever one FIRST happened to PIP into any polygon — a
+ * ring vertex sits ON a boundary that can be shared with a neighbour, and
+ * the even-odd ray cast has no reason to prefer "this parcel's own
+ * district" when a shared-boundary point is numerically inside the
+ * neighbour's ring.
+ *
+ * Verified live against prop_id 112953's real production geometry
+ * (48053:112953): the bare centroid is OUTSIDE the parcel's own ring and
+ * lands DIRECTLY inside the neighbouring Marble Falls "MR" polygon on the
+ * very first try — the old vertex-sweep fallback was never even reached for
+ * this sample; the bug is the missing inside-check on the fast path, not
+ * the vertex sweep alone. (If the vertex sweep HAD run, its first hit for
+ * this geometry is a different wrong answer, "ENZ.4" — i.e. the sweep is
+ * its own, separate instance of the same class of bug, which is why it is
+ * removed rather than kept as a second-stage fallback.)
+ *
+ * Fix: the FAST path is unchanged byte-for-byte when it already works — the
+ * centroid is tried first, and used exactly as before whenever it is both
+ * inside the parcel's own ring AND lands in a zoning polygon (this is true
+ * for the overwhelming majority of parcels, so this function's cost is
+ * unchanged for them). Only when the centroid is missing, outside the
+ * parcel's own ring, or inside the ring but in no zoning polygon does this
+ * function reach for `trueInteriorPoint` (geo.ts) — a point PROVEN strictly
+ * inside the parcel (scanline search, holes/MultiPolygon-aware, never a
+ * vertex, never outside) — and try THAT point against the zoning index
+ * instead of sweeping boundary vertices. If neither point lands in a
+ * zoning polygon, the parcel is honestly left unmatched (null), exactly the
+ * conservative-fallback contract this module has always had.
  */
 export function stampParcelZoning(
   index: ZoningPolygon[],
   parcelGeometry: GeoJsonGeometry,
-): { code: string; description?: string | null } | null {
+): { code: string; description?: string | null; parse?: BaseCodeParse; subarea?: string | null } | null {
   const centroid = representativePoint(parcelGeometry);
-  if (centroid) {
+  if (centroid && pointInGeometry(centroid.longitude, centroid.latitude, parcelGeometry)) {
     const hit = zoningCodeAtPoint(index, centroid.longitude, centroid.latitude);
     if (hit) return hit;
   }
-  // Centroid missed — sweep ring vertices (partial-geometry / flag-lot class:
-  // centroid on null fragment but zoned sub-ring has district on record).
-  const ring = largestRing(parcelGeometry);
-  if (ring && ring.length > 0) {
-    const seen = new Set<string>();
-    for (const coord of ring) {
-      if (!coord || coord.length < 2) continue;
-      const key = `${coord[0]!.toFixed(8)},${coord[1]!.toFixed(8)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const hit = zoningCodeAtPoint(index, coord[0]!, coord[1]!);
-      if (hit) return hit;
-    }
+  // Centroid missing, outside the parcel's own ring, or inside but no
+  // zoning polygon underneath it — try a point GUARANTEED inside the
+  // parcel (never a shared boundary vertex) before giving up.
+  const interior = trueInteriorPoint(parcelGeometry);
+  if (interior) {
+    const hit = zoningCodeAtPoint(index, interior.longitude, interior.latitude);
+    if (hit) return hit;
   }
   return null;
+}
+
+/**
+ * One parcel-shaped zoning layer's own feature for a given CAD parcel id
+ * (Burnet stage 3 §3 Bug 2 — Horseshoe Bay sample #30/#40).
+ *
+ * `code: null` means the layer's OWN feature for this exact parcel carries
+ * a blank/no district on its code field — a DECLARED fact (the register's
+ * own CA/vacant-land rows), never to be filled in from a point lookup that
+ * might land in a neighbour's polygon on a misaligned shared boundary.
+ *
+ * `geometry` is the matched feature's OWN geometry, carried through so the
+ * caller (`stampCountyZoning`) can require it to actually contain the
+ * parcel's interior point before trusting the id match at all — see the
+ * cross-county finding below. `null` only for a feature whose geometry
+ * could not be converted at fetch time (never trusted as a match then).
+ */
+export interface ParcelIdZoningEntry {
+  code: string | null;
+  description?: string | null;
+  parse?: BaseCodeParse;
+  geometry: GeoJsonGeometry | null;
+  /** The feature's `subareaField` value (Horseshoe Bay SUBDIVISION); absent for a layer without one. */
+  subarea?: string | null;
+}
+
+/**
+ * Build a parcel-id -> own-feature index for a layer whose features ARE
+ * the city's parcel fabric (Horseshoe Bay's `Zoning Parcels` layer: one
+ * feature per CAD parcel, carrying both the parcel's own `PROP_ID` and its
+ * zoning code). Keyed by the SAME normalized id `--prop-ids-file` uses
+ * (`normalizeDigitId`, geo.ts) so a lookup by `txgio_parcel.prop_id` and a
+ * lookup by this layer's own id field agree on leading zeros.
+ *
+ * Deliberately NOT built from `buildZoningIndex`'s output: that function
+ * drops every feature with a blank `code` (so a parcel's own blank-coded
+ * feature would simply not exist in the PIP index), which is exactly the
+ * loss bug 2 is about. This index keeps every feature that carries a
+ * parcel id, blank code included — the blank IS the fact a caller needs to
+ * read before ever falling back to a point lookup.
+ *
+ * CROSS-COUNTY DISCRIMINATOR (found 2026-10-10 reviewing this fix):
+ * Horseshoe Bay straddles Burnet and Llano, and this ONE layer carries
+ * BOTH counties' CAD parcels under a numeric `PROP_ID` space that overlaps
+ * between the two CADs. `discriminatorAcceptValues`, when supplied, means
+ * "a feature whose `parcelIdDiscriminator` value is NOT in this set is
+ * ABSENT for the id join" — it is skipped before anything else, including
+ * before ambiguity detection, so a Llano feature that happens to share a
+ * Burnet parcel's id does not make that id "ambiguous"; it simply never
+ * entered the Burnet-side index. Measured countywide on the UNFILTERED
+ * join: of 6,729 parcels matched by id, only 2,053 (30%) geometrically
+ * agreed with the joined feature; the rest were cross-county numeric
+ * collisions (examples up to ~60 km away), 2,242 of them UNINCORPORATED
+ * Burnet parcels that would have been wrongly given an HSB code.
+ *
+ * AMBIGUOUS IDS ARE EXCLUDED, NEVER GUESSED (found live, 2026-10-09,
+ * BEFORE the discriminator above was added — kept as a second, independent
+ * safety net for a true same-side duplicate the discriminator does not
+ * resolve): a parcel id repeated across MORE THAN ONE surviving (post-
+ * discriminator) feature is EXCLUDED from this index entirely — not "keep
+ * the first" — so a caller for that id gets back `undefined` and falls
+ * through to the point lookup exactly as it would for an id absent from
+ * the layer. "Keep the first" was tried and measured wrong before the
+ * discriminator existed: `PROP_ID=20598` is on two features at opposite
+ * ends of the city (OBJECTID 1947, `county="GLL"`, "R-1"; OBJECTID 16134,
+ * `county="GBU"`, "C-2"), and ArcGIS returns 1947 FIRST, so "keep the
+ * first" would have silently stamped the wrong, cross-county district.
+ * With the discriminator now filtering to `county="GBU"` first, 20598
+ * resolves cleanly to OBJECTID 16134 alone — the ambiguity-exclusion path
+ * below is for when 2+ features survive the discriminator filter (or when
+ * no discriminator is configured for a layer at all, e.g. Marble Falls,
+ * where this function is simply never called).
+ */
+export function buildParcelIdIndex(
+  features: Array<{
+    parcelId?: string | null;
+    code: string | null | undefined;
+    description?: string | null;
+    parse?: BaseCodeParse;
+    geometry?: GeoJsonGeometry | null;
+    parcelIdDiscriminator?: string | null;
+    subarea?: string | null;
+  }>,
+  opts?: {
+    /**
+     * When supplied, a feature whose `parcelIdDiscriminator` is not in
+     * this list is treated as if it were not on the layer at all for the
+     * id join (see the cross-county note above). `undefined` (the
+     * default) applies no filter — every feature with a parcel id is a
+     * candidate, byte-identical to this function's pre-discriminator
+     * behavior.
+     */
+    discriminatorAcceptValues?: readonly string[];
+  },
+): Map<string, ParcelIdZoningEntry> {
+  const accept = opts?.discriminatorAcceptValues;
+  const out = new Map<string, ParcelIdZoningEntry>();
+  const ambiguous = new Set<string>();
+  for (const f of features) {
+    if (!f.parcelId) continue;
+    if (accept && (f.parcelIdDiscriminator === null || f.parcelIdDiscriminator === undefined || !accept.includes(f.parcelIdDiscriminator))) {
+      // Not on the accepted side (e.g. a Llano feature on Horseshoe Bay's
+      // layer) -- absent for the id join, never counted toward ambiguity.
+      continue;
+    }
+    const id = normalizeDigitId(f.parcelId);
+    if (!id || ambiguous.has(id)) continue;
+    if (out.has(id)) {
+      // Second sighting of this id (AFTER the discriminator filter above):
+      // it no longer identifies ONE feature on the accepted side. Drop it
+      // from the resolvable map and remember it as ambiguous so a THIRD
+      // sighting does not re-add it.
+      out.delete(id);
+      ambiguous.add(id);
+      continue;
+    }
+    const code = typeof f.code === "string" ? f.code.trim() : "";
+    out.set(id, {
+      code: code.length > 0 ? code : null,
+      description: f.description ?? null,
+      parse: f.parse,
+      geometry: f.geometry ?? null,
+      ...(f.subarea !== undefined ? { subarea: f.subarea } : {}),
+    });
+  }
+  return out;
 }

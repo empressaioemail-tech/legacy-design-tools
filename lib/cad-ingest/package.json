@@ -8,28 +8,38 @@
     "./txgio-geo": "./src/txgio/geo.ts",
     "./zoning-layers": "./src/txgio/zoning-layers.ts",
     "./boundary": "./src/boundary/containment.ts",
-    "./city-limits": "./src/boundary/cityLimitsFact.ts"
+    "./city-limits": "./src/boundary/cityLimitsFact.ts",
+    "./etj": "./src/boundary/etjFact.ts",
+    "./area-share": "./src/boundary/areaShare.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "cad-ingest": "tsx src/cli.ts",
+    "cad-backfill-published-identifiers": "tsx src/published-identifier-backfill-cli.ts",
     "cad-vintage-crosswalk": "tsx src/vintage-crosswalk-cli.ts",
     "cad-vintage-fallback": "tsx src/vintage-fallback-cli.ts",
+    "williamson-ag-valuation-reconcile": "tsx src/williamson-ag-valuation-cli.ts",
     "txgio-ingest": "tsx src/txgio/cli.ts",
+    "txgio-parcel-release": "tsx src/txgio/parcel-release-cli.ts",
     "stratmap-landuse": "tsx src/txgio/landuse-cli.ts",
     "zoning-stamp": "tsx src/txgio/zoning-cli.ts",
     "permits-ingest": "tsx src/permits/cli.ts",
     "address-ingest": "tsx src/address/cli.ts",
     "boundary-ingest": "tsx src/boundary/cli.ts",
-    "nfhl-ingest": "tsx src/nfhl/cli.ts"
+    "etj-ingest": "tsx src/boundary/etjCli.ts",
+    "etj-verify": "tsx src/boundary/etjCli.ts --verify",
+    "nfhl-ingest": "tsx src/nfhl/cli.ts",
+    "city-area-share-measure": "tsx src/boundary/cityAreaShareMeasureCli.ts"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "@workspace/adapters": "workspace:*",
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "^8.20.0",
+    "polygon-clipping": "^0.15.7",
     "shapefile": "^0.6.6",
     "yauzl": "^3.2.0"
   },

@@ -11,6 +11,7 @@ import {
 import { runAumentumIndexSearch } from "./aumentumIndexSearch.js";
 import { runPublicsearchRecipe } from "./publicsearchSearch.js";
 import { runPortalReachabilityRecipe } from "./portalReachability.js";
+import { runCountyGovernmentRecordsSearch } from "./countyGovernmentRecordsSearch.js";
 import {
   runTylerSelfServiceSearch,
   tylerSurfaceFromPortal,
@@ -21,13 +22,28 @@ import type {
   RecordsRecipeDefinition,
   RecordsRecipeResult,
 } from "./types.js";
+import {
+  fetchRobotsTxt,
+  robotsTxtScopeRecord,
+} from "../robotsTxt.js";
 
 const AUMENTUM_SEARCH_PORTAL_IDS = new Set([
   "bastrop-aumentum",
   "travis-tccsearch",
 ]);
-const TYLER_SEARCH_PORTAL_IDS = new Set(["williamson-tylerhost", "hays-erss"]);
+const TYLER_SEARCH_PORTAL_IDS = new Set([
+  "williamson-tylerhost",
+  "hays-erss",
+  // P-113: McLennan is the same Tyler self-service DOCSEARCH product as
+  // Hays, verified live 2026-09-03 (reachable headless, unlike Williamson
+  // TylerHost's 403-to-bots).
+  "mclennan-online-records",
+]);
 const PUBLICSEARCH_PORTAL_IDS = new Set(["williamson-publicsearch"]);
+// P-113: Caldwell's real vendor (verified live 2026-09-03) requires login
+// before any search — its own recipe fails closed to needs-human rather than
+// falling through to the bare reachability scaffold.
+const COUNTY_GOV_RECORDS_PORTAL_IDS = new Set(["caldwell-clerk-web"]);
 
 function recipeForPortalConfig(
   portal: P85PortalConfig,
@@ -57,6 +73,9 @@ async function runRecipeForPortalConfig(
   }
   if (PUBLICSEARCH_PORTAL_IDS.has(portal.portalId)) {
     return runPublicsearchRecipe(ctx, portal, browser);
+  }
+  if (COUNTY_GOV_RECORDS_PORTAL_IDS.has(portal.portalId)) {
+    return runCountyGovernmentRecordsSearch(ctx, portal, browser);
   }
   return runPortalReachabilityRecipe(ctx, portal, browser);
 }
@@ -88,9 +107,25 @@ export function resolvePortalIdForJob(
   return P85_DEFAULT_PORTAL_BY_COUNTY[countyFips] ?? null;
 }
 
+function attachRobotsTxtToResult(
+  result: RecordsRecipeResult,
+  robotsTxt: Record<string, unknown>,
+): RecordsRecipeResult {
+  return {
+    ...result,
+    scopeSearched: {
+      ...(result.scopeSearched ?? {}),
+      robotsTxt,
+    },
+  };
+}
+
 export async function runRecipeForJob(
   ctx: RecordsRecipeContext,
   browser: RecordsRecipeBrowser,
+  options?: {
+    fetchRobotsTxtFn?: typeof fetchRobotsTxt;
+  },
 ): Promise<RecordsRecipeResult> {
   const portal = portalConfigById(ctx.portalId);
   const recipe = recipeForPortal(ctx.portalId);
@@ -108,7 +143,13 @@ export async function runRecipeForJob(
       errorMessage: `Portal ${ctx.portalId} is not registered for countyFips=${ctx.countyFips}`,
     };
   }
-  return recipe.run(ctx, browser);
+
+  const fetchRobots = options?.fetchRobotsTxtFn ?? fetchRobotsTxt;
+  const robotsTxtResult = await fetchRobots(portal.entryUrl);
+  const robotsTxtRecord = robotsTxtScopeRecord(robotsTxtResult);
+
+  const recipeResult = await recipe.run(ctx, browser);
+  return attachRobotsTxtToResult(recipeResult, robotsTxtRecord);
 }
 
 export type { RecordsRecipeContext, RecordsRecipeResult, RecordsRecipeBrowser };

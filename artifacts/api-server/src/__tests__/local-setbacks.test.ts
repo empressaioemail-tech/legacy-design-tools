@@ -63,6 +63,7 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
       "side_ft",
       "side_corner_ft",
       "max_height_ft",
+      "max_height_ft_not_specified",
       "max_lot_coverage_pct",
       "max_impervious_pct",
       "citation_url",
@@ -86,6 +87,9 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
       max_lot_coverage_pct: 30,
       max_impervious_pct: 40,
     });
+    // P-299: the projection grew a field, and it must say that a SERVED number
+    // is not an absence (this test is what noticed the new key arriving).
+    expect(rr1.max_height_ft_not_specified).toBe(false);
     expect(typeof rr1.citation_url).toBe("string");
     expect(rr1.citation_url.length).toBeGreaterThan(0);
   });
@@ -127,13 +131,17 @@ describe("GET /api/local/setbacks/:jurisdictionKey", () => {
     // Direct ZONECODE rows extracted from the City's Development Code are
     // served with per-value provenance; unresolved district codes remain
     // explicitly listed as gaps in the table note.
+    // P-258 lane-c (2026-09-16): 8 -> 27 rows. The 19 added rows come from the
+    // current edition (ORD-2026-08, effective 2026-06-16) and cover the
+    // conventional-residential, neighborhood-density, character and special
+    // districts; the Chapter 9 legacy codes and CD-1 remain explicit gaps.
     const res = await request(getApp()).get(
       "/api/local/setbacks/san-marcos-tx",
     );
     expect(res.status).toBe(200);
     expect(res.body.jurisdictionKey).toBe("san-marcos-tx");
     expect(Array.isArray(res.body.districts)).toBe(true);
-    expect(res.body.districts).toHaveLength(8);
+    expect(res.body.districts).toHaveLength(27);
     expect(res.body.districts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

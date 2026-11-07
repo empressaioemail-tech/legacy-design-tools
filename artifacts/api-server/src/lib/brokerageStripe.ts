@@ -9,14 +9,50 @@
  *   STRIPE_MAX_PRICE_ID
  */
 
+import { adMatchFromStripeMetadata } from "./peAdMatch";
+import { subscriptionItemsAmount } from "./peStripeBillingLifecycle";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, brokerageWallets, type PeSubscriptionTier } from "@workspace/db";
+import {
+  db,
+  brokerageWallets,
+  type PeBillingInterval,
+  type PeSubscriptionTier,
+} from "@workspace/db";
 import { logger } from "./logger";
 import { setSubscriptionEntitlement } from "./brokerageEntitlement";
 import { createPePropertyUnlock } from "./peEntitlement";
-import { setPeAccessTierFromStripe } from "./peIdentity";
+import {
+  commitPeStripeEntitlementChange,
+  recordPeStripeWebhookOutcome,
+} from "./peStripeWebhookLedger";
 import { claimInstallHistoryForUser } from "./brokerageInstallClaim";
+import {
+  emitLifecycleFromStripeWebhook,
+  emitPaidFromStripeWebhook,
+} from "./peLifecycleHooks";
+import {
+  planCancelledIdempotencyKey,
+  planEndedUnpaidIdempotencyKey,
+  paymentFailedIdempotencyKey,
+} from "./peLifecycleOutbox";
+import {
+  invoicePaymentFailedShouldEmit,
+  peStatusRetainsPaidEntitlement,
+  peSubscriptionEndLifecycleEvent,
+  peSubscriptionUpdatedShouldEmitPlanStarted,
+  planStartedIdempotencyKey,
+  stripeSubscriptionIdFromInvoice,
+} from "./peStripeBillingLifecycle";
+import { peBillingIntervalFromPriceItems } from "./pePaywallStripe";
+import {
+  configuredExtraSeatPriceId,
+  configuredTeamPriceIds,
+  extractStripePriceItems,
+  parseMetadataSeats,
+  resolveTeamSeatsPurchased,
+  type StripePriceItem,
+} from "./peTeamSeatsFromStripe";
 
 /** 30-day unlock bound (LOCKED 2026-08-10 ladder: "$15, 30 days — not forever"). */
 const PE_UNLOCK_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -43,16 +79,47 @@ export function stripeMaxPriceId(): string | null {
 
 export type SubscriptionCheckoutTier = "pro" | "max";
 
+/**
+ * Raised when the legacy install-scoped (retired browser-extension) checkout
+ * cannot proceed because its Stripe price id is unconfigured. Mirrors
+ * `PeCheckoutConfigError` in `pePaywallStripe.ts` (routes map both to 503
+ * `checkout_unavailable`) — kept as a separate class rather than imported
+ * from there to avoid a circular import (`pePaywallStripe.ts` already
+ * imports from this file).
+ */
+export class BrokerageCheckoutConfigError extends Error {
+  readonly missing: string;
+  constructor(missing: string) {
+    super(`checkout unavailable: ${missing} is not configured`);
+    this.name = "BrokerageCheckoutConfigError";
+    this.missing = missing;
+  }
+}
+
 function stripePriceIdForTier(tier: SubscriptionCheckoutTier): string | null {
   return tier === "max" ? stripeMaxPriceId() : stripeProPriceId();
 }
 
+/**
+ * FAIL CLOSED. This seam served the retired browser extension's Pro/Max
+ * tiers only (operator ruling 2026-09: the extension has been retired for
+ * months and is not coming back — see OPS-16 A-061). A price id must match
+ * ONE of the two configured tier prices EXACTLY to resolve; anything else —
+ * including a Max subscriber whose price id no longer matches a stale or
+ * unset STRIPE_MAX_PRICE_ID — returns null rather than silently downgrading
+ * to "pro". The prior behaviour ("if it isn't Max, it's Pro") never checked
+ * the price id against STRIPE_PRO_PRICE_ID at all, so ANY unrecognized price
+ * id — a Max mismatch, a foreign product, a typo — resolved to Pro
+ * entitlement. Callers MUST treat null as a refusal, never a default.
+ */
 export function subscriptionTierFromPriceId(
   priceId: string | null | undefined,
-): SubscriptionCheckoutTier {
+): SubscriptionCheckoutTier | null {
   const maxId = stripeMaxPriceId();
+  const proId = stripeProPriceId();
   if (maxId && priceId === maxId) return "max";
-  return "pro";
+  if (proId && priceId === proId) return "pro";
+  return null;
 }
 
 export function stripeWebhookPath(): string {
@@ -139,6 +206,38 @@ export async function stripePostForm(
   return json;
 }
 
+/**
+ * Exported so `pePaywallStripe.ts` and `peSubscriptionStripe.ts` can reuse the
+ * same signed HTTP call.
+ *
+ * `extraHeaders` is optional and additive (never overrides `Authorization`).
+ * Its one purpose today is letting a single call pin `Stripe-Version`
+ * explicitly (P-129) without changing this function's default behaviour for
+ * every other caller, none of which pins a version. Do not use this to widen
+ * the pin repo-wide by accident -- a caller that wants the account default
+ * simply omits the argument, exactly as before.
+ */
+export async function stripeGet(
+  path: string,
+  extraHeaders?: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const secret = process.env.STRIPE_SECRET_KEY!.trim();
+  const res = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${secret}`, ...extraHeaders },
+  });
+  const json = (await res.json()) as Record<string, unknown> & {
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      (json.error as { message?: string } | undefined)?.message ??
+        `Stripe ${path} failed (${res.status})`,
+    );
+  }
+  return json;
+}
+
 async function getOrCreateStripeCustomer(installId: string): Promise<string> {
   const row = await ensureWalletRow(installId);
   if (row.stripeCustomerId) return row.stripeCustomerId;
@@ -164,11 +263,13 @@ export async function createSubscriptionCheckoutSession(input: {
   const priceId = stripePriceIdForTier(input.tier);
   const publishableKey = stripePublishableKey();
 
-  if (!isStripeConfigured() || !priceId) {
+  if (!isStripeConfigured()) {
+    // Keyless dev/smoke path ONLY — no STRIPE_SECRET_KEY at all. A deployment
+    // holding a real key (test or live) never lands here.
     const sessionId = `sim_cs_${input.installId.slice(0, 8)}_${Date.now()}`;
     logger.info(
       { installId: input.installId.slice(0, 8), tier: input.tier },
-      "stripe: simulated checkout (no STRIPE_SECRET_KEY or price id)",
+      "stripe: simulated checkout (no STRIPE_SECRET_KEY)",
     );
     const sep = input.successUrl.includes("?") ? "&" : "?";
     return {
@@ -178,6 +279,23 @@ export async function createSubscriptionCheckoutSession(input: {
       publishableKey: null,
       note: `Stripe credentials not configured — simulated ${input.tier} checkout session`,
     };
+  }
+
+  if (!priceId) {
+    // FAIL CLOSED. A real Stripe key IS configured but this tier's price id
+    // is not — the prior behaviour returned a fake "simulated" session here,
+    // indistinguishable to the caller from a genuine one, under a key that
+    // could be live. This seam served only the retired browser extension's
+    // Pro/Max tiers (extension retired, not coming back — OPS-16 A-061), so
+    // there is no live product this refusal could ever wrongly block; refuse
+    // loudly rather than hand back a checkout session that does nothing.
+    logger.error(
+      { installId: input.installId.slice(0, 8), tier: input.tier },
+      "stripe: checkout requested for a tier with no configured price id — refusing",
+    );
+    throw new BrokerageCheckoutConfigError(
+      input.tier === "max" ? "STRIPE_MAX_PRICE_ID" : "STRIPE_PRO_PRICE_ID",
+    );
   }
 
   const customerId = await getOrCreateStripeCustomer(input.installId);
@@ -218,6 +336,50 @@ export async function createProCheckoutSession(input: {
   return createSubscriptionCheckoutSession({ ...input, tier: "pro" });
 }
 
+/**
+ * THE ONE Stripe Customer Portal call in this codebase (A-062).
+ *
+ * Every portal session — the install-scoped extension seam below and the PE
+ * user-scoped route in `pePaywallStripe.ts` — reaches Stripe through this
+ * function and nothing else. The two seams differ only in HOW THEY RESOLVE A
+ * CUSTOMER, which is the part that must not be shared: the install seam may
+ * create a customer for an install that has none, and the PE route must never
+ * create one (A-062 acceptance item 2). Sharing the HTTP call and splitting
+ * the resolution is the whole point; a second `/billing_portal/sessions`
+ * poster would be a second thing to keep correct.
+ *
+ * `customerId` is a RESOLVED value. This function never looks one up, never
+ * creates one, and never accepts an empty string — an unresolved customer is
+ * the caller's refusal to make, not this function's to paper over.
+ */
+export async function createStripePortalSessionForCustomer(input: {
+  customerId: string;
+  returnUrl: string;
+}): Promise<{ mode: "live"; portalUrl: string }> {
+  const customerId = input.customerId.trim();
+  if (!customerId) {
+    // Fail closed. A blank customer id posted to Stripe is an error at best
+    // and somebody else's portal at worst.
+    throw new Error("Stripe portal session requires a resolved customer id");
+  }
+  const session = await stripePostForm("/billing_portal/sessions", {
+    customer: customerId,
+    return_url: input.returnUrl,
+  });
+
+  // NOT `String(session.url)`. That was the shipped shape and it could not
+  // fail: `String(undefined)` is the seven-character string "undefined",
+  // which is truthy, so the guard below never fired and a Stripe response
+  // carrying no url redirected the customer to a page named "undefined".
+  // Read the field, require it to be a non-empty string, and refuse.
+  const rawUrl = session.url;
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) {
+    throw new Error("Stripe portal session missing url");
+  }
+
+  return { mode: "live", portalUrl: rawUrl };
+}
+
 export async function createBillingPortalSession(input: {
   installId: string;
   returnUrl: string;
@@ -235,15 +397,10 @@ export async function createBillingPortalSession(input: {
   const customerId =
     row.stripeCustomerId ?? (await getOrCreateStripeCustomer(input.installId));
 
-  const session = await stripePostForm("/billing_portal/sessions", {
-    customer: customerId,
-    return_url: input.returnUrl,
+  return createStripePortalSessionForCustomer({
+    customerId,
+    returnUrl: input.returnUrl,
   });
-
-  const portalUrl = String(session.url);
-  if (!portalUrl) throw new Error("Stripe portal session missing url");
-
-  return { mode: "live", portalUrl };
 }
 
 /** Keyless demo path — activates Pro without Stripe keys (smoke / local). */
@@ -281,6 +438,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
   checkoutKind: string | null;
   parcelNodeId: string | null;
   subscriptionTierRaw: string | null;
+  seatsPurchased: number | null;
 } {
   const meta = obj.metadata;
   if (!meta || typeof meta !== "object") {
@@ -289,6 +447,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       checkoutKind: null,
       parcelNodeId: null,
       subscriptionTierRaw: null,
+      seatsPurchased: null,
     };
   }
   const record = meta as Record<string, unknown>;
@@ -302,6 +461,7 @@ function peMetadataFromObject(obj: Record<string, unknown>): {
       typeof record.subscription_tier === "string"
         ? record.subscription_tier
         : null,
+    seatsPurchased: parseMetadataSeats(record.seats_purchased),
   };
 }
 
@@ -341,6 +501,57 @@ function resolvePeGrantTier(meta: {
  * positive `total_details.amount_discount` on the session object the
  * webhook payload already carries — no extra Stripe API round-trip needed.
  */
+function stripeEventLivemode(
+  event: { livemode?: boolean },
+  obj: Record<string, unknown>,
+): boolean {
+  if (typeof event.livemode === "boolean") return event.livemode;
+  if (typeof obj.livemode === "boolean") return obj.livemode;
+  return false;
+}
+
+function stripeCheckoutSessionId(obj: Record<string, unknown>): string | null {
+  if (typeof obj.id !== "string") return null;
+  if (obj.object === "checkout.session") return obj.id;
+  return null;
+}
+
+function stripeAmountTotalCents(obj: Record<string, unknown>): number | null {
+  return typeof obj.amount_total === "number" ? obj.amount_total : null;
+}
+
+function requireStripeEventId(eventId: string | undefined): string | null {
+  const id = eventId?.trim();
+  return id ? id : null;
+}
+
+async function applyPeEntitlementFromWebhook(input: {
+  stripeEventId: string;
+  eventType: string;
+  obj: Record<string, unknown>;
+  livemode: boolean;
+  ownerUserId: string;
+  outcome: string;
+  entitlement: Parameters<typeof commitPeStripeEntitlementChange>[1];
+}): Promise<"applied" | "duplicate"> {
+  return commitPeStripeEntitlementChange(
+    {
+      stripeEventId: input.stripeEventId,
+      eventType: input.eventType,
+      checkoutSessionId: stripeCheckoutSessionId(input.obj),
+      amountTotalCents: stripeAmountTotalCents(input.obj),
+      currency:
+        typeof input.obj.currency === "string"
+          ? input.obj.currency.toUpperCase()
+          : null,
+      livemode: input.livemode,
+      ownerUserId: input.ownerUserId,
+      outcome: input.outcome,
+    },
+    input.entitlement,
+  );
+}
+
 function checkoutSessionHadDiscount(obj: Record<string, unknown>): boolean {
   const totalDetails = obj.total_details as
     | { amount_discount?: number }
@@ -367,8 +578,13 @@ export async function handleStripeWebhook(
   }
 
   let event: {
+    id?: string;
     type: string;
-    data: { object: Record<string, unknown> };
+    livemode?: boolean;
+    data: {
+      object: Record<string, unknown>;
+      previous_attributes?: Record<string, unknown>;
+    };
   };
 
   try {
@@ -409,6 +625,19 @@ export async function handleStripeWebhook(
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
       }
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `unlock:${peMeta.peUserId}:${peMeta.parcelNodeId ?? "none"}`,
+        kind: "unlock",
+        plan: "unlock",
+        billing: "none",
+        value: stripeAmount(obj) ?? 15,
+        currency: stripeCurrency(obj),
+        // Visitor match keys captured at checkout creation (peAdMatch.ts):
+        // the webhook has no browser request of its own.
+        adMatch: adMatchFromStripeMetadata(obj.metadata),
+        transactionId: stripeCheckoutSessionId(obj),
+      });
       return {
         handled: true,
         eventType: "pe_property_unlock",
@@ -424,10 +653,28 @@ export async function handleStripeWebhook(
     // vs full-price is recorded in `entitlement_source` for the pinned
     // `/entitlement` contract's `source` field.
     if (peMeta.peUserId) {
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
       const grantTier = resolvePeGrantTier(peMeta);
       if (!grantTier) {
-        // FAIL CLOSED: an unknown subscription_tier grants nothing. The
-        // non-2xx response makes Stripe retry and surfaces the miss.
+        const ledger = await recordPeStripeWebhookOutcome({
+          stripeEventId,
+          eventType: type,
+          checkoutSessionId: stripeCheckoutSessionId(obj),
+          amountTotalCents: stripeAmountTotalCents(obj),
+          currency:
+            typeof obj.currency === "string"
+              ? obj.currency.toUpperCase()
+              : null,
+          livemode: stripeEventLivemode(event, obj),
+          ownerUserId: peMeta.peUserId,
+          outcome: `refused:unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        });
+        if (ledger === "duplicate") {
+          return { handled: true, eventType: "duplicate_replay", peUserId: peMeta.peUserId };
+        }
         logger.error(
           {
             peUserId: peMeta.peUserId,
@@ -444,16 +691,59 @@ export async function handleStripeWebhook(
       const source = checkoutSessionHadDiscount(obj)
         ? "stripe_promo"
         : "stripe_sub";
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: "paid",
-        subscriptionTier: grantTier,
-        source,
-        stripeCustomerId: customerId,
+      // P-98: the interval rides with the tier write that was already here.
+      // No new write path, and both facts come from one read of the items.
+      const billing = await peGrantBillingFacts({
+        grantTier,
+        obj,
+        metadataSeats: peMeta.seatsPurchased,
+        subscriptionId,
       });
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: "pe_subscription_active",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: "paid",
+          subscriptionTier: grantTier,
+          source,
+          stripeCustomerId: customerId,
+          seatsPurchased: billing.seatsPurchased,
+          billingInterval: billing.billingInterval,
+        },
+      });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          installId,
+          peUserId: peMeta.peUserId,
+        };
+      }
       if (installId) {
         await claimInstallHistoryForUser(installId, peMeta.peUserId);
       }
+      await emitPaidFromStripeWebhook({
+        userId: peMeta.peUserId,
+        stripeEventId: event.id ?? `plan:${peMeta.peUserId}:${grantTier}`,
+        kind: "plan",
+        plan: grantTier,
+        billing: billing.billingInterval === "year" ? "annual" : billing.billingInterval === "month" ? "monthly" : "none",
+        value: stripeAmount(obj),
+        currency: stripeCurrency(obj),
+        adMatch: adMatchFromStripeMetadata(obj.metadata),
+        transactionId: stripeCheckoutSessionId(obj),
+        lifecycleEvent: "e5_plan_started",
+        idempotencyKey: planStartedIdempotencyKey({
+          stripeEventId: event.id ?? `plan:${peMeta.peUserId}:${grantTier}`,
+          subscriptionId,
+          activation: true,
+        }),
+      });
       return {
         handled: true,
         eventType: "pe_subscription_active",
@@ -467,6 +757,16 @@ export async function handleStripeWebhook(
         subscriptionId,
         obj,
       );
+      if (!tier) {
+        // FAIL CLOSED: an unrecognized price id must never grant "pro" by
+        // default. The non-2xx response makes Stripe retry and surfaces the
+        // miss, matching the PE grant-tier refusal above.
+        logger.error(
+          { installId, subscriptionId },
+          "stripe: legacy install-scoped checkout completed with unrecognized price id — refusing to grant",
+        );
+        return { handled: false, reason: "unknown_subscription_tier" };
+      }
 
       await setSubscriptionEntitlement({
         installId,
@@ -487,10 +787,30 @@ export async function handleStripeWebhook(
     // 2026-08 ladder work a PE user stayed "paid" forever after one payment.
     const peMeta = peMetadataFromObject(obj);
     if (peMeta.peUserId) {
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
       const status = typeof obj.status === "string" ? obj.status : "";
-      const active = status === "active" || status === "trialing";
+      const retainsPaid = peStatusRetainsPaidEntitlement(status);
       const grantTier = resolvePeGrantTier(peMeta);
-      if (active && !grantTier) {
+      if (retainsPaid && !grantTier) {
+        const ledger = await recordPeStripeWebhookOutcome({
+          stripeEventId,
+          eventType: type,
+          checkoutSessionId: null,
+          amountTotalCents: stripeAmountTotalCents(obj),
+          currency:
+            typeof obj.currency === "string"
+              ? obj.currency.toUpperCase()
+              : null,
+          livemode: stripeEventLivemode(event, obj),
+          ownerUserId: peMeta.peUserId,
+          outcome: `refused:unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
+        });
+        if (ledger === "duplicate") {
+          return { handled: true, eventType: "duplicate_replay", peUserId: peMeta.peUserId };
+        }
         logger.error(
           { peUserId: peMeta.peUserId, subscriptionTier: peMeta.subscriptionTierRaw },
           "stripe: PE subscription active with unknown subscription_tier — refusing to grant",
@@ -500,16 +820,108 @@ export async function handleStripeWebhook(
           reason: `unknown_subscription_tier:${peMeta.subscriptionTierRaw ?? "absent"}`,
         };
       }
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: active ? "paid" : "free",
-        subscriptionTier: active ? grantTier : null,
-        source: "stripe_sub",
-        stripeCustomerId: typeof obj.customer === "string" ? obj.customer : null,
+      // P-98: re-derived on EVERY update, including back to null. A plan
+      // change from monthly to annual is exactly this event, so carrying a
+      // previous value forward when this payload does not prove it would
+      // leave a stale "month" on an annual subscriber — and the rail would
+      // then upsell annual billing to someone who already bought it. Same
+      // rule the seat count follows: never omit the column on update.
+      const billing = retainsPaid
+        ? await peGrantBillingFacts({
+            grantTier,
+            obj,
+            metadataSeats: peMeta.seatsPurchased,
+            subscriptionId: typeof obj.id === "string" ? obj.id : null,
+          })
+        : { seatsPurchased: null, billingInterval: null };
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: retainsPaid ? "pe_subscription_active" : "pe_churned",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: retainsPaid ? "paid" : "free",
+          subscriptionTier: retainsPaid ? grantTier : null,
+          source: "stripe_sub",
+          stripeCustomerId:
+            typeof obj.customer === "string" ? obj.customer : null,
+          seatsPurchased: billing.seatsPurchased,
+          billingInterval: billing.billingInterval,
+        },
       });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          peUserId: peMeta.peUserId,
+        };
+      }
+      const subscriptionId =
+        typeof obj.id === "string" ? obj.id : null;
+      const previousAttributes = event.data.previous_attributes;
+      if (retainsPaid && grantTier) {
+        const prevStatus =
+          typeof previousAttributes?.status === "string"
+            ? previousAttributes.status
+            : null;
+        if (
+          peSubscriptionUpdatedShouldEmitPlanStarted({
+            previousAttributes,
+            currentStatus: status,
+            currentSubscription: obj,
+          })
+        ) {
+          await emitPaidFromStripeWebhook({
+            userId: peMeta.peUserId,
+            stripeEventId,
+            kind: "plan",
+            plan: grantTier,
+            billing:
+              billing.billingInterval === "year"
+                ? "annual"
+                : billing.billingInterval === "month"
+                  ? "monthly"
+                  : "none",
+            // A subscription object carries no amount_total; without this the
+            // Purchase went to Meta with no value (Meta requires value +
+            // currency on Purchase). Sum of the items' unit_amount x quantity.
+            value: stripeAmount(obj) ?? subscriptionItemsAmount(obj),
+            currency: stripeCurrency(obj),
+            transactionId: typeof obj.id === "string" ? obj.id : null,
+            lifecycleEvent: "e5_plan_started",
+            idempotencyKey: planStartedIdempotencyKey({
+              stripeEventId,
+              subscriptionId,
+              activation: prevStatus === "incomplete",
+            }),
+          });
+        }
+      } else if (!retainsPaid) {
+        const endEvent = peSubscriptionEndLifecycleEvent(obj);
+        if (endEvent === "plan_ended_unpaid") {
+          await emitLifecycleFromStripeWebhook({
+            userId: peMeta.peUserId,
+            event: "plan_ended_unpaid",
+            idempotencyKey: planEndedUnpaidIdempotencyKey(stripeEventId),
+            plan: "free",
+            billing: "none",
+          });
+        } else if (endEvent === "plan_cancelled") {
+          await emitLifecycleFromStripeWebhook({
+            userId: peMeta.peUserId,
+            event: "plan_cancelled",
+            idempotencyKey: planCancelledIdempotencyKey(stripeEventId),
+            plan: "free",
+            billing: "none",
+          });
+        }
+      }
       return {
         handled: true,
-        eventType: active ? "pe_subscription_active" : "pe_churned",
+        eventType: retainsPaid ? "pe_subscription_active" : "pe_churned",
         peUserId: peMeta.peUserId,
       };
     }
@@ -519,15 +931,25 @@ export async function handleStripeWebhook(
     const active = status === "active" || status === "trialing";
     if (installId) {
       const subId = typeof obj.id === "string" ? obj.id : null;
-      const { tier } = active
-        ? await resolveSubscriptionTierFromStripe(subId, obj)
-        : { tier: "pro" as const };
+      let tier: SubscriptionCheckoutTier | null = null;
+      if (active) {
+        tier = (await resolveSubscriptionTierFromStripe(subId, obj)).tier;
+        if (!tier) {
+          // FAIL CLOSED: same rule as checkout.session.completed above —
+          // never default an unrecognized price id to "pro".
+          logger.error(
+            { installId, subscriptionId: subId },
+            "stripe: legacy install-scoped subscription active with unrecognized price id — refusing to grant",
+          );
+          return { handled: false, reason: "unknown_subscription_tier" };
+        }
+      }
       await setSubscriptionEntitlement({
         installId,
         stripeCustomerId:
           typeof obj.customer === "string" ? obj.customer : null,
         stripeSubscriptionId: subId,
-        subscriptionTier: active ? tier : "free",
+        subscriptionTier: active ? tier! : "free",
         subscriptionStatus: active
           ? (status as "active" | "trialing")
           : "churned",
@@ -544,12 +966,49 @@ export async function handleStripeWebhook(
   if (type === "customer.subscription.deleted") {
     const peMeta = peMetadataFromObject(obj);
     if (peMeta.peUserId) {
-      await setPeAccessTierFromStripe({
-        userId: peMeta.peUserId,
-        tier: "free",
-        subscriptionTier: null,
-        source: "stripe_sub",
+      const stripeEventId = requireStripeEventId(event.id);
+      if (!stripeEventId) {
+        return { handled: false, reason: "missing_stripe_event_id" };
+      }
+      const apply = await applyPeEntitlementFromWebhook({
+        stripeEventId,
+        eventType: type,
+        obj,
+        livemode: stripeEventLivemode(event, obj),
+        ownerUserId: peMeta.peUserId,
+        outcome: "pe_churned",
+        entitlement: {
+          userId: peMeta.peUserId,
+          tier: "free",
+          subscriptionTier: null,
+          source: "stripe_sub",
+        },
       });
+      if (apply === "duplicate") {
+        return {
+          handled: true,
+          eventType: "duplicate_replay",
+          peUserId: peMeta.peUserId,
+        };
+      }
+      const endEvent = peSubscriptionEndLifecycleEvent(obj);
+      if (endEvent === "plan_ended_unpaid") {
+        await emitLifecycleFromStripeWebhook({
+          userId: peMeta.peUserId,
+          event: "plan_ended_unpaid",
+          idempotencyKey: planEndedUnpaidIdempotencyKey(stripeEventId),
+          plan: "free",
+          billing: "none",
+        });
+      } else {
+        await emitLifecycleFromStripeWebhook({
+          userId: peMeta.peUserId,
+          event: "plan_cancelled",
+          idempotencyKey: planCancelledIdempotencyKey(stripeEventId),
+          plan: "free",
+          billing: "none",
+        });
+      }
       return { handled: true, eventType: "pe_churned", peUserId: peMeta.peUserId };
     }
 
@@ -563,6 +1022,47 @@ export async function handleStripeWebhook(
       });
     }
     return { handled: true, eventType: "churned", installId };
+  }
+
+  if (type === "invoice.payment_failed") {
+    const invoiceId = typeof obj.id === "string" ? obj.id : null;
+    const subId = stripeSubscriptionIdFromInvoice(obj);
+    if (!invoiceId || !subId) {
+      return {
+        handled: false,
+        reason: "ignored_invoice_payment_failed_non_subscription",
+      };
+    }
+    let sub: Record<string, unknown> = {};
+    try {
+      sub = await fetchStripeSubscription(subId);
+    } catch (err) {
+      logger.warn({ err, subId }, "stripe: invoice.payment_failed subscription fetch failed");
+      return { handled: false, reason: "subscription_fetch_failed" };
+    }
+    const peMeta = peMetadataFromObject(sub);
+    if (!peMeta.peUserId) {
+      return { handled: false, reason: "ignored_invoice_payment_failed_no_pe_user" };
+    }
+    const subStatus = typeof sub.status === "string" ? sub.status : null;
+    if (
+      !invoicePaymentFailedShouldEmit({
+        invoice: obj,
+        subscriptionStatus: subStatus,
+      })
+    ) {
+      return { handled: true, eventType: "invoice_payment_failed_no_emit" };
+    }
+    await emitLifecycleFromStripeWebhook({
+      userId: peMeta.peUserId,
+      event: "payment_failed",
+      idempotencyKey: paymentFailedIdempotencyKey(invoiceId),
+    });
+    return {
+      handled: true,
+      eventType: "pe_payment_failed",
+      peUserId: peMeta.peUserId,
+    };
   }
 
   return { handled: false, reason: `ignored_event_type:${type}` };
@@ -588,6 +1088,73 @@ function periodEndFromStripe(obj: Record<string, unknown>): Date | null {
   return null;
 }
 
+/**
+ * The billed price items behind a PE grant, read ONCE.
+ *
+ * A `checkout.session.completed` payload does not carry `line_items` —
+ * Stripe never expands them on a webhook — so for a brand-new subscription
+ * the items have to be fetched. That fetch already existed here for Team
+ * seats; P-98 widens its condition from "team only" to "any PE subscription
+ * grant whose payload carries no items", because the billing interval is
+ * derived from the same items and, without the widening, every new Solo and
+ * Studio subscriber would store a null interval — starving the exact rung
+ * (`annual_upgrade`) the column was added to feed.
+ *
+ * Widening cannot change the seat count: {@link resolveTeamSeatsPurchased}
+ * returns null on its first line for any non-team grant, with or without
+ * items. It costs at most one extra Stripe call per new subscription.
+ *
+ * A failed fetch returns no items, and every caller reads that as unknown.
+ */
+async function peBilledPriceItems(input: {
+  obj: Record<string, unknown>;
+  subscriptionId: string | null;
+}): Promise<StripePriceItem[]> {
+  const inline = extractStripePriceItems(input.obj);
+  if (inline.length > 0) return inline;
+  if (!input.subscriptionId || !isStripeConfigured()) return [];
+  try {
+    const sub = await fetchStripeSubscription(input.subscriptionId);
+    return extractStripePriceItems(sub);
+  } catch (err) {
+    logger.warn(
+      { err, subscriptionId: input.subscriptionId },
+      "stripe: PE subscription items fetch failed",
+    );
+    return [];
+  }
+}
+
+/**
+ * Seat count and billing interval for a PE grant, both derived from the SAME
+ * reading of the billed items so the two facts can never disagree about what
+ * was on the subscription. Either may be null, and null means unknown.
+ */
+async function peGrantBillingFacts(input: {
+  grantTier: PeSubscriptionTier | null;
+  obj: Record<string, unknown>;
+  metadataSeats: number | null;
+  subscriptionId: string | null;
+}): Promise<{
+  seatsPurchased: number | null;
+  billingInterval: PeBillingInterval | null;
+}> {
+  const items = await peBilledPriceItems({
+    obj: input.obj,
+    subscriptionId: input.subscriptionId,
+  });
+  return {
+    seatsPurchased: resolveTeamSeatsPurchased({
+      grantTier: input.grantTier,
+      metadataSeats: input.metadataSeats,
+      items,
+      teamPriceIds: configuredTeamPriceIds(),
+      extraSeatPriceId: configuredExtraSeatPriceId(),
+    }),
+    billingInterval: peBillingIntervalFromPriceItems(items),
+  };
+}
+
 async function fetchStripeSubscription(
   subscriptionId: string,
 ): Promise<Record<string, unknown>> {
@@ -607,9 +1174,10 @@ async function fetchStripeSubscription(
   return json;
 }
 
+/** FAIL CLOSED: returns null (never a default tier) on anything unrecognized. */
 function tierFromStripeObject(
   obj: Record<string, unknown>,
-): SubscriptionCheckoutTier {
+): SubscriptionCheckoutTier | null {
   const metaTier = (obj.metadata as Record<string, unknown> | undefined)
     ?.subscription_tier;
   if (metaTier === "max" || metaTier === "pro") return metaTier;
@@ -630,10 +1198,11 @@ function tierFromStripeObject(
   return subscriptionTierFromPriceId(priceId);
 }
 
+/** FAIL CLOSED: `tier: null` means unresolved — the caller must refuse, never default. */
 async function resolveSubscriptionTierFromStripe(
   subscriptionId: string | null,
   obj?: Record<string, unknown>,
-): Promise<{ tier: SubscriptionCheckoutTier; periodEnd: Date | null }> {
+): Promise<{ tier: SubscriptionCheckoutTier | null; periodEnd: Date | null }> {
   let source = obj;
   if (subscriptionId) {
     try {
@@ -642,7 +1211,7 @@ async function resolveSubscriptionTierFromStripe(
       logger.warn({ err, subscriptionId }, "stripe: subscription fetch failed");
     }
   }
-  const tier = source ? tierFromStripeObject(source) : "pro";
+  const tier = source ? tierFromStripeObject(source) : null;
   const periodEnd = source ? periodEndFromStripe(source) : null;
   return { tier, periodEnd };
 }
@@ -667,11 +1236,26 @@ async function installIdFromStripeSubscription(
 }
 
 /** Minimal Stripe webhook signature verification (v1). */
+function stripeAmount(obj: Record<string, unknown>): number | undefined {
+  const cents =
+    typeof obj.amount_total === "number"
+      ? obj.amount_total
+      : typeof obj.amount_paid === "number"
+        ? obj.amount_paid
+        : null;
+  if (cents === null) return undefined;
+  return cents / 100;
+}
+
+function stripeCurrency(obj: Record<string, unknown>): string {
+  return typeof obj.currency === "string" ? obj.currency.toUpperCase() : "USD";
+}
+
 function parseStripeEvent(
   rawBody: Buffer,
   signatureHeader: string,
   secret: string,
-): { type: string; data: { object: Record<string, unknown> } } {
+): { id?: string; type: string; data: { object: Record<string, unknown> } } {
   const parts = signatureHeader.split(",").map((p) => p.trim());
   const tPart = parts.find((p) => p.startsWith("t="));
   const v1Parts = parts.filter((p) => p.startsWith("v1="));
@@ -694,7 +1278,9 @@ function parseStripeEvent(
   if (!valid) throw new Error("stripe_signature_mismatch");
 
   const parsed = JSON.parse(rawBody.toString("utf8")) as {
+    id?: string;
     type: string;
+    livemode?: boolean;
     data: { object: Record<string, unknown> };
   };
   return parsed;

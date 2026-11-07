@@ -1485,6 +1485,16 @@ function SetbackPanel({
  * malformed (mirrors `formatFederalSummaryMarkdown`). Exported so the
  * format is unit-testable without rendering the component.
  */
+/**
+ * A height the code does not state arrives as null on the wire (P-299) — the
+ * corpus's 999 sentinel is resolved at the route, not rendered. Never print it
+ * as a number: "999 ft" is not a limit this code states, and an empty string
+ * would read like a missing field rather than a stated absence.
+ */
+function formatMaxHeightFt(maxHeightFt: number | null): string {
+  return maxHeightFt == null ? "not stated" : `${maxHeightFt} ft`;
+}
+
 export function formatSetbackSummaryMarkdown({
   jurisdictionDisplayName,
   district,
@@ -1498,7 +1508,7 @@ export function formatSetbackSummaryMarkdown({
     `front ${district.front_ft} ft`,
     `rear ${district.rear_ft} ft`,
     `side ${district.side_ft} ft`,
-    `height ${district.max_height_ft} ft`,
+    `height ${formatMaxHeightFt(district.max_height_ft)}`,
     `max coverage ${district.max_lot_coverage_pct}%`,
   ].join(", ");
   const snapshot = formatSnapshotDate(snapshotDate);
@@ -1519,7 +1529,7 @@ function SetbacksGrid({ district }: { district: LocalSetbackDistrict }) {
       <Stat label="Rear" value={`${district.rear_ft} ft`} />
       <Stat label="Side" value={`${district.side_ft} ft`} />
       <Stat label="Side (corner)" value={`${district.side_corner_ft} ft`} />
-      <Stat label="Max height" value={`${district.max_height_ft} ft`} />
+      <Stat label="Max height" value={formatMaxHeightFt(district.max_height_ft)} />
       <Stat
         label="Max lot coverage"
         value={`${district.max_lot_coverage_pct}%`}

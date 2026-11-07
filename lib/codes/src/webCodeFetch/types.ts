@@ -4,10 +4,46 @@
 
 export const WEBSEARCH_ATOM_PREFIX = "websearch:";
 
+/**
+ * G-309 item 5: ICC Digital Codes (iccsafe.org and every subdomain) is never
+ * fetched. Content is licensed through Code Connect only; we link, not scrape.
+ */
+export function isIccHost(hostname: string): boolean {
+  return hostname.trim().toLowerCase().includes("iccsafe");
+}
+
+/**
+ * G-309 (A15): mirrors such as up.codes republish ICC I-Code text. Any URL on a
+ * mirror whose path names an ICC model-code title is refused. A city ordinance
+ * or a non-ICC book on the same host is unaffected.
+ */
+const ICC_BOOK_SEGMENT =
+  /^(?:(?:ibc|irc|ifc|ipmc|iecc|ipc|imc|ifgc|iebc|ispsc|igcc|iwuic|izc|ipsdc|iccpc|ifgs|icc)(?:[-_.\d].*)?|international-.*code.*)$/i;
+
+export function isIccMirrorUrl(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  if (host.includes("iccsafe")) return true;
+  if (host !== "up.codes" && !host.endsWith(".up.codes")) return false;
+  const segs = u.pathname.split("/").filter(Boolean);
+  // /viewer/{jurisdiction}/{book}/... : test every segment after the viewer root.
+  return segs.slice(1).some((seg) => {
+    try {
+      return ICC_BOOK_SEGMENT.test(decodeURIComponent(seg));
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Authoritative hosts the fetcher may contact. */
 export const WEB_CODE_ALLOWLIST_HOSTS = [
   "floridabuilding.org",
-  "codes.iccsafe.org",
   "www.nfpa.org",
   "nfpa.org",
   "up.codes",

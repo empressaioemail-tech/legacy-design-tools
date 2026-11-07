@@ -1,6 +1,12 @@
+import { LISTED_TOOLS } from "../src/constants.js";
 import { describe, expect, it } from "vitest";
 
-import { createSmartsiteMcpApp } from "../src/app.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
+import { createSmartsiteMcpApp, serverImplementation } from "../src/app.js";
+import { registerTools } from "../src/tools.js";
 import { SMARTSITE_MCP_TOOLS } from "../src/constants.js";
 import { withHttpServer } from "./http-helper.js";
 
@@ -39,23 +45,23 @@ describe("smartsite-mcp HTTP surface", () => {
     });
   });
 
-  it("GET /llms.txt lists exactly eight tools", async () => {
+  it("GET /llms.txt lists exactly the listed tools", async () => {
     await withHttpServer(app, async (base) => {
       const res = await fetch(`${base}/llms.txt`);
       expect(res.status).toBe(200);
       const text = await res.text();
-      expect(text).toContain("Tools (exactly eight):");
-      for (const tool of SMARTSITE_MCP_TOOLS) {
+      expect(text).toContain(`Tools (${LISTED_TOOLS.length}):`);
+      for (const tool of LISTED_TOOLS) {
         expect(text).toContain(tool.name);
       }
       const toolNameMatches = text.match(/`([a-z_]+)`/g) ?? [];
       const listedNames = toolNameMatches.map((m) => m.replace(/`/g, ""));
-      const catalogNames = SMARTSITE_MCP_TOOLS.map((t) => t.name);
+      const catalogNames = LISTED_TOOLS.map((t) => t.name);
       expect(
         listedNames.filter((n) =>
           catalogNames.includes(n as (typeof catalogNames)[number]),
         ),
-      ).toHaveLength(8);
+      ).toHaveLength(LISTED_TOOLS.length);
     });
   });
 
@@ -94,5 +100,72 @@ describe("smartsite-mcp HTTP surface", () => {
       expect(body.reason).toBe("missing_bearer");
       expect(res.headers.get("www-authenticate")).toContain("Bearer");
     });
+  });
+});
+
+describe("connector card identity (P-91 QA 2026-08-30)", () => {
+  const app = createSmartsiteMcpApp({
+    authConfig: {
+      workosClientId: "client_test",
+      workosIssuer: "https://happy-asteroid-26.authkit.app",
+      jwksUri: "https://happy-asteroid-26.authkit.app/oauth2/jwks",
+      devMode: false,
+    },
+  });
+
+  it("GET / and GET /favicon.ico send a browser to the product, never Cannot GET", async () => {
+    await withHttpServer(app, async (base) => {
+      const root = await fetch(`${base}/`, { redirect: "manual" });
+      expect(root.status).toBe(302);
+      expect(root.headers.get("location")).toBe("https://smartsite.cloud");
+      const ico = await fetch(`${base}/favicon.ico`, { redirect: "manual" });
+      expect(ico.status).toBe(302);
+      expect(ico.headers.get("location")).toBe("https://smartsite.cloud/favicon.ico");
+    });
+  });
+
+  it("initialize announces the Smart Site icons and website to a real client", async () => {
+    const server = new McpServer(serverImplementation());
+    registerTools(server);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "probe", version: "0" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const info = client.getServerVersion() as
+      | { name: string; websiteUrl?: string; icons?: Array<{ src: string; mimeType?: string }> }
+      | undefined;
+    expect(info?.name).toBe("Smart Site");
+    expect(info?.websiteUrl).toBe("https://smartsite.cloud");
+    const icons = info?.icons ?? [];
+    expect(icons.length).toBeGreaterThanOrEqual(1);
+    expect(icons[0]).toMatchObject({
+      src: "https://smartsite.cloud/apple-touch-icon.png",
+      mimeType: "image/png",
+    });
+    for (const icon of icons) expect(icon.src).toMatch(/^https:\/\/smartsite\.cloud\//);
+    await client.close();
+    await server.close();
+  });
+});
+
+describe("GET /files/feasibility/:token (fix register B3/C3)", () => {
+  it("refuses a forged link with 403 and an unsigned server with 403, without calling the engine", async () => {
+    const app = createSmartsiteMcpApp({
+      authConfig: { issuer: "https://example.authkit.app", audience: "https://mcp.smartsite.cloud/mcp", jwksUrl: "https://example.authkit.app/oauth2/jwks", resourceUrl: "https://mcp.smartsite.cloud/mcp" } as never,
+    });
+    const prev = process.env.SMARTSITE_FILE_LINK_SECRET;
+    try {
+      delete process.env.SMARTSITE_FILE_LINK_SECRET;
+      await withHttpServer(app, async (base) => {
+        expect((await fetch(`${base}/files/feasibility/abc.def`)).status).toBe(403);
+      });
+      process.env.SMARTSITE_FILE_LINK_SECRET = "s";
+      await withHttpServer(app, async (base) => {
+        expect((await fetch(`${base}/files/feasibility/abc.def`)).status).toBe(403);
+      });
+    } finally {
+      if (prev === undefined) delete process.env.SMARTSITE_FILE_LINK_SECRET;
+      else process.env.SMARTSITE_FILE_LINK_SECRET = prev;
+    }
   });
 });

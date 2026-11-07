@@ -1,0 +1,467 @@
+/**
+ * Per-parcel flood READ from parcel_record (the record's first consumer).
+ *
+ * Decision doc_repo:_decisions/2026-09-02_step7_consumer_c_then_b.md: the two
+ * GTM-live reports -- "Smart Site X-ray" and "Flood and Drainage" (one generator
+ * in code, buildR1Brief in r1BriefCompose.ts; the naming split is a GTM framing,
+ * not two code paths -- confirmed against doc_repo's own glossary) -- read
+ * parcel_record directly. This module is the flood rail's read path. There is no
+ * "drainage" rail in parcel_record's rail set; the drainage section is untouched.
+ *
+ * REPOINTED (P-152, `_dispatches/2026-09-11_p152-reader_dispatch.md`): this
+ * module no longer opens its own connection to the Factory store.
+ * `factoryQueryableFromEnv` below is a `ParcelRecordQueryable`-shaped
+ * adapter over the SAME `parcelRecordReaderClient.ts` HTTP client
+ * `parcelRecordCellRead.ts` uses for the Hauska retrieval service's
+ * `GET /property-nodes/:id/record` -- this was a genuinely separate direct
+ * connection to FACTORY_DATABASE_URL_RO (a "third store" by this module's
+ * own original doc, distinct from its sibling reader) discovered and
+ * repointed in the same lane. `interpretFloodCellRow`'s interpretation
+ * logic and `loadParcelRecordFloodFact`'s public contract are UNCHANGED.
+ * `FACTORY_DATABASE_URL_RO` is no longer read anywhere in this repo (R-8).
+ *
+ * Was: A THIRD store, FACTORY_DATABASE_URL_RO, never DATABASE_URL
+ * (deployment), ATOMS_DATABASE_URL (flood-hazard-fact atoms,
+ * floodHazardFactRead.ts's own store), or FACTORY_DATABASE_URL (the writer
+ * credential every Factory job uses). SELECT-only, TWO ways
+ * (PARCEL-RO-ROLE, 2026-09-02): the credential authenticated as
+ * `parcel_record_ro`, a Postgres role granted SELECT alone on
+ * parcel_record / parcel_record_cell / parcel_record_companion_row.
+ *
+ * Cell-state vocabulary mirrors parcel_record's own five states exactly (never
+ * translated here): value / absent-verified / not-applicable / unaccounted /
+ * refused (doc_repo:_decisions/2026-09-01_every_parcel_starts_with_a_full_record.md).
+ * The conversion of "unaccounted" to the customer-facing phrase "not-verified"
+ * belongs at the serve boundary (r1BriefCompose.ts), not here -- this module's
+ * job is a faithful read of source truth, matching the "conversion belongs at
+ * the serve boundary" architecture in
+ * doc_repo:_decisions/2026-09-01_serve_path_never_emits_pipeline_state.md.
+ *
+ * parcelNodeId identity: "{fips}:{normalizeCadPropId(propId)}" (parcelNodeId.ts)
+ * is the SAME county_fips:prop_id shape as parcel_record.place_key, verified live
+ * against all six program counties (zero leading-zero prop_ids exist today, so
+ * there is no current case where the two systems' ids diverge -- documented as a
+ * verified-for-current-data fact, not a structural guarantee).
+ */
+
+import { parseParcelNodeId } from "./parcelNodeId";
+import { fetchParcelRecord } from "./parcelRecordReaderClient.js";
+
+export const PARCEL_RECORD_FLOOD_SOURCE = "parcel_record" as const;
+export const FLOOD_RAIL_KEY = "flood" as const;
+
+export interface ParcelRecordQueryable {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }>;
+}
+
+/**
+ * One flood companion row (card F1, `2026-10-12_whole_parcel_flood_design.md`
+ * §3.B). The OLD single-point payload (`{zone, floodway, bfe, dfirmId,
+ * method}`) and the NEW whole-parcel payload (adds `subtype`, `isSfha`,
+ * `areaShare`, `overlap`) both parse into this same shape: a field the old
+ * payload never carried reads as `null` (areaShare, subtype) or its
+ * documented default (`overlap: "single"`, `isSfha: null` meaning "not
+ * stated -- the caller falls back to the zone-letter rule, never guessed
+ * here").
+ */
+export type ParcelRecordFloodZoneRow = {
+  zone: string | null;
+  subtype: string | null;
+  /** `null` only for the old payload, which carries no SFHA_TF flag. */
+  isSfha: boolean | null;
+  floodway: boolean;
+  baseFloodElevation: number | null;
+  dfirmId: string | null;
+  /** 0..1, or `null` for the old single-point payload (one row, whole parcel). */
+  areaShare: number | null;
+  /** Verbatim from the row's own payload; defaults to "single" when absent (the old payload's only row). */
+  overlap: "single" | "partial" | "sliver";
+  method: string | null;
+  sourceVintage: string | null;
+};
+
+export type ParcelRecordFloodValue = {
+  state: "value";
+  source: typeof PARCEL_RECORD_FLOOD_SOURCE;
+  placeKey: string;
+  /** Row 0 -- the largest-share zone. Kept for compatibility; a new reader should use `zones`. */
+  floodZone: string | null;
+  floodway: boolean;
+  baseFloodElevation: number | null;
+  method: string | null;
+  sourceVintage: string | null;
+  /** EVERY companion row for this parcel, row 0 first (the largest share). Never truncated to one. */
+  zones: ParcelRecordFloodZoneRow[];
+};
+
+export type ParcelRecordFloodAbsentVerified = {
+  state: "absent-verified";
+  source: typeof PARCEL_RECORD_FLOOD_SOURCE;
+  placeKey: string;
+  basis: Record<string, unknown> | null;
+};
+
+export type ParcelRecordFloodNotApplicable = {
+  state: "not-applicable";
+  source: typeof PARCEL_RECORD_FLOOD_SOURCE;
+  placeKey: string;
+  reason: string | null;
+};
+
+/** Nothing has looked yet. Honest and countable, per the parcel_record contract -- never rendered as a fabricated absence. */
+export type ParcelRecordFloodUnaccounted = {
+  state: "unaccounted";
+  source: typeof PARCEL_RECORD_FLOOD_SOURCE;
+  placeKey: string;
+};
+
+export type ParcelRecordFloodRefusal = {
+  state: "refused";
+  code:
+    | "invalid-parcel-node-id"
+    | "cell-miss"
+    | "factory-store-not-configured"
+    | "malformed-cell";
+  source: typeof PARCEL_RECORD_FLOOD_SOURCE;
+  placeKey: string | null;
+  reason: string;
+};
+
+export type ParcelRecordFloodRead =
+  | ParcelRecordFloodValue
+  | ParcelRecordFloodAbsentVerified
+  | ParcelRecordFloodNotApplicable
+  | ParcelRecordFloodUnaccounted
+  | ParcelRecordFloodRefusal;
+
+type CellRow = { cell_state: unknown; row_index: number | null; payload: unknown };
+
+/**
+ * EVERY companion row for (place_key, rail_key), not just row_index=0
+ * (card F2, `2026-10-12_whole_parcel_flood_design.md` §3.C). The LEFT JOIN
+ * still yields exactly one row (cr.* null) when `parcel_record_cell` exists
+ * but has no companion rows -- the same "kind=value but no payload" shape
+ * `interpretFloodCellRow` already refuses as malformed-cell.
+ */
+const SELECT_FLOOD_CELL = `
+SELECT c.cell_state, cr.row_index, cr.payload
+  FROM parcel_record_cell c
+  LEFT JOIN parcel_record_companion_row cr
+    ON cr.place_key = c.place_key AND cr.rail_key = c.rail_key
+ WHERE c.place_key = $1 AND c.rail_key = $2
+ ORDER BY cr.row_index ASC
+`;
+
+let injectedQueryable: ParcelRecordQueryable | null | undefined;
+
+/** Test seam. `null` means store not configured. `undefined` (reset) means env. */
+export function setParcelRecordQueryableForTests(
+  queryable: ParcelRecordQueryable | null,
+): void {
+  injectedQueryable = queryable;
+}
+
+export function resetParcelRecordQueryableForTests(): void {
+  injectedQueryable = undefined;
+}
+
+/**
+ * A query that cannot be answered -- the upstream fetch failed, or the
+ * parcel is crosswalk-ambiguous -- THROWS, matching what a real Postgres
+ * connection failure already did here before P-152 (this module's own
+ * `loadParcelRecordFloodFact` does not wrap its query call in a try/catch).
+ */
+function factoryQueryableFromEnv(): ParcelRecordQueryable | null {
+  const key =
+    process.env.HAUSKA_RETRIEVAL_API_KEY?.trim() || process.env.RETRIEVAL_API_KEY?.trim();
+  if (!key) return null;
+  return {
+    async query<T extends Record<string, unknown> = Record<string, unknown>>(
+      _text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
+      const [placeKey, railKey] = params as [string, string];
+      const record = await fetchParcelRecord(placeKey);
+      if (record === null) {
+        throw new Error(
+          `parcel_record flood cell read via the retrieval service failed for ${placeKey}/${railKey}`,
+        );
+      }
+      if (record.refused) {
+        throw new Error(
+          `parcel_record refuses ${placeKey} (${record.refused.reason}); cannot serve flood`,
+        );
+      }
+      const rail = record.rails[railKey];
+      if (!rail || rail.cell === null) return { rows: [] as unknown as T[] };
+      // EVERY companion row, in the order the retrieval service returns them
+      // (row_index order) -- not just companions[0]. Mirrors the LEFT JOIN
+      // shape below: zero companions still yields one row so a kind=value
+      // cell with no payload is still visible to interpretFloodCellRow.
+      const companions = rail.companions as Array<{ payload?: unknown } | undefined>;
+      if (companions.length === 0) {
+        return { rows: [{ cell_state: rail.cell, row_index: null, payload: null }] as unknown as T[] };
+      }
+      return {
+        rows: companions.map((c, i) => ({
+          cell_state: rail.cell,
+          row_index: i,
+          payload: c?.payload ?? null,
+        })) as unknown as T[],
+      };
+    },
+  };
+}
+
+function resolveQueryable(): ParcelRecordQueryable | null {
+  if (injectedQueryable !== undefined) return injectedQueryable;
+  return factoryQueryableFromEnv();
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function asNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** A single companion row's payload, old or new shape, into the typed row (card F1/F2). Never guesses a field the payload does not carry. */
+function parseZoneRow(payload: Record<string, unknown>): ParcelRecordFloodZoneRow {
+  const overlap =
+    payload.overlap === "partial" || payload.overlap === "sliver" ? payload.overlap : "single";
+  return {
+    zone: asNullableString(payload.zone),
+    subtype: asNullableString(payload.subtype),
+    isSfha: typeof payload.isSfha === "boolean" ? payload.isSfha : null,
+    floodway: payload.floodway === true,
+    baseFloodElevation: asNullableNumber(payload.bfe),
+    dfirmId: asNullableString(payload.dfirmId),
+    areaShare: asNullableNumber(payload.areaShare),
+    overlap,
+    method: asNullableString(payload.method),
+    sourceVintage: asNullableString(payload.sourceVintage),
+  };
+}
+
+/**
+ * Interpret EVERY already-fetched companion row for one cell (card F2:
+ * read every row, not `[0]`). Pure. Tests drive this with fixtures so every
+ * cell kind -- and a re-read with several companion rows -- is observed
+ * without a store. `rows` share one `cell_state` (one parcel_record_cell
+ * row); only the `value` kind has more than one companion row to speak of.
+ */
+export function interpretFloodCellRow(
+  placeKey: string,
+  rowList: ReadonlyArray<CellRow>,
+): ParcelRecordFloodRead {
+  if (rowList.length === 0) {
+    return {
+      state: "refused",
+      code: "cell-miss",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason: `No parcel_record_cell row for ${placeKey} rail flood. This parcel is not in parcel_record -- not a flood determination.`,
+    };
+  }
+  const cellState = asRecord(rowList[0].cell_state);
+  const kind = cellState?.kind;
+  if (typeof kind !== "string") {
+    return {
+      state: "refused",
+      code: "malformed-cell",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason: `parcel_record_cell for ${placeKey} rail flood has a malformed cell_state. Refusing rather than inventing a zone.`,
+    };
+  }
+  if (kind === "unaccounted") {
+    return { state: "unaccounted", source: PARCEL_RECORD_FLOOD_SOURCE, placeKey };
+  }
+  if (kind === "not-applicable") {
+    return {
+      state: "not-applicable",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason: asNullableString(cellState?.reason),
+    };
+  }
+  if (kind === "refused") {
+    return {
+      state: "refused",
+      code: "malformed-cell",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason:
+        asNullableString(cellState?.reason) ??
+        `parcel_record itself refused flood for ${placeKey}.`,
+    };
+  }
+  if (kind === "absent-verified") {
+    return {
+      state: "absent-verified",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      basis: asRecord(cellState?.basis),
+    };
+  }
+  if (kind === "value") {
+    // EVERY companion row, row_index ascending (row 0 = largest share, per
+    // the writer's own contract -- card F1 §3.B). A row whose payload did
+    // not parse to an object is dropped, not inserted as a fabricated zone;
+    // zero survivors is the same malformed-cell refusal the old single-row
+    // code gave for a missing payload.
+    const sorted = [...rowList].sort((a, b) => (a.row_index ?? 0) - (b.row_index ?? 0));
+    const zones: ParcelRecordFloodZoneRow[] = [];
+    for (const r of sorted) {
+      const payload = asRecord(r.payload);
+      if (payload) zones.push(parseZoneRow(payload));
+    }
+    if (zones.length === 0) {
+      return {
+        state: "refused",
+        code: "malformed-cell",
+        source: PARCEL_RECORD_FLOOD_SOURCE,
+        placeKey,
+        reason: `parcel_record_cell for ${placeKey} rail flood is kind=value but its companion row payload is missing or malformed. Refusing rather than inventing a zone.`,
+      };
+    }
+    const primary = zones[0];
+    return {
+      state: "value",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      floodZone: primary.zone,
+      floodway: primary.floodway,
+      baseFloodElevation: primary.baseFloodElevation,
+      method: primary.method,
+      sourceVintage: primary.sourceVintage,
+      zones,
+    };
+  }
+  return {
+    state: "refused",
+    code: "malformed-cell",
+    source: PARCEL_RECORD_FLOOD_SOURCE,
+    placeKey,
+    reason: `parcel_record_cell for ${placeKey} rail flood has an unrecognized kind "${kind}". Refusing rather than inventing a zone.`,
+  };
+}
+
+export async function loadParcelRecordFloodFact(
+  parcelNodeId: string,
+): Promise<ParcelRecordFloodRead> {
+  const parsed = parseParcelNodeId(parcelNodeId);
+  if (!parsed) {
+    return {
+      state: "refused",
+      code: "invalid-parcel-node-id",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey: null,
+      reason: `"${parcelNodeId}" is not a valid parcel node id (county_fips:prop_id). Refusing rather than guessing a place_key.`,
+    };
+  }
+  const placeKey = `${parsed.countyFips}:${parsed.propId}`;
+  const factory = resolveQueryable();
+  if (!factory) {
+    return {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason:
+        "parcel_record is read via the Hauska retrieval service (P-152); no RETRIEVAL_API_KEY/HAUSKA_RETRIEVAL_API_KEY is configured in this process. Refusing rather than emitting a silent null.",
+    };
+  }
+  let result: { rows: CellRow[] };
+  try {
+    result = await factory.query<CellRow>(SELECT_FLOOD_CELL, [placeKey, FLOOD_RAIL_KEY]);
+  } catch (err) {
+    // LIVE FINDING (P-152, 2026-09-11): same class of gap as
+    // parcelRecordCellRead.ts's loadParcelRecordCell -- never wrapped
+    // because a live Postgres connection essentially never threw
+    // mid-query; an HTTP call to another service fails far more
+    // routinely. A declared refusal, never a crash, never a fabricated
+    // absence: this is honestly "the read failed", not "no such row".
+    return {
+      state: "refused",
+      code: "factory-store-not-configured",
+      source: PARCEL_RECORD_FLOOD_SOURCE,
+      placeKey,
+      reason: `parcel_record flood cell read via the retrieval service failed for ${placeKey}: ${err instanceof Error ? err.message : String(err)}. Refusing rather than crashing or fabricating an absence.`,
+    };
+  }
+  // EVERY companion row -- card F2. interpretFloodCellRow sorts by row_index
+  // itself; this just hands over everything the store returned.
+  return interpretFloodCellRow(placeKey, result.rows);
+}
+
+/**
+ * In-memory parcel_record for tests. Refuses any query that is not this
+ * SELECT, and any write.
+ *
+ * `payload` (singular) is the pre-F2 single-row fixture shape, kept so
+ * every existing test keeps working unchanged. `payloads` (plural) is the
+ * new multi-row fixture shape (card F2) -- pass an array of companion row
+ * payloads, row 0 first. Passing both is refused as ambiguous; passing
+ * neither (an absent-verified/not-applicable/unaccounted/refused fixture)
+ * yields zero companion rows, matching a real LEFT JOIN with no match.
+ */
+export function memoryParcelRecordFlood(
+  rows: ReadonlyArray<{
+    placeKey: string;
+    cellState: Record<string, unknown>;
+    payload?: Record<string, unknown> | null;
+    payloads?: ReadonlyArray<Record<string, unknown>>;
+  }>,
+): ParcelRecordQueryable {
+  return {
+    async query<T extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
+      if (/INSERT|UPDATE|DELETE/i.test(text)) {
+        throw new Error(
+          "memoryParcelRecordFlood: refusing a write -- this module is SELECT-only",
+        );
+      }
+      if (!text.includes("FROM parcel_record_cell") || !text.includes("rail_key")) {
+        throw new Error(
+          "memoryParcelRecordFlood: refusing a query that is not the flood cell SELECT",
+        );
+      }
+      const placeKey = params?.[0];
+      const railKey = params?.[1];
+      if (railKey !== FLOOD_RAIL_KEY) {
+        throw new Error(`memoryParcelRecordFlood: expected rail_key flood, got ${String(railKey)}`);
+      }
+      const hit = rows.find((r) => r.placeKey === placeKey);
+      if (!hit) return { rows: [] as T[] };
+      if (hit.payload !== undefined && hit.payloads !== undefined) {
+        throw new Error(
+          "memoryParcelRecordFlood: fixture carries both payload and payloads -- pick one",
+        );
+      }
+      const payloads = hit.payloads ?? (hit.payload != null ? [hit.payload] : []);
+      if (payloads.length === 0) {
+        // Mirrors a real LEFT JOIN with no companion match: one row, cr.* null.
+        return { rows: [{ cell_state: hit.cellState, row_index: null, payload: null }] as unknown as T[] };
+      }
+      return {
+        rows: payloads.map((payload, i) => ({
+          cell_state: hit.cellState,
+          row_index: i,
+          payload,
+        })) as unknown as T[],
+      };
+    },
+  };
+}

@@ -23,6 +23,49 @@ below and `doc_repo/90_runbooks/cloud_run_canary_deploy.md`.
 
 ---
 
+## Post-deploy credential check (P-279) — tagged revisions
+
+Every `deploy-canary` and every `shift-traffic` dispatch runs
+`scripts/check-tagged-revision-env.mjs` against the service it just touched (the
+`Tagged-revision credential check (P-279)` steps in
+[`cloud-run-deploy.yml`](../.github/workflows/cloud-run-deploy.yml) and
+[`cloud-run-deploy-smartsite-mcp.yml`](../.github/workflows/cloud-run-deploy-smartsite-mcp.yml)).
+It FAILS the job when a traffic tag points at a revision that is missing an auth
+or secret variable the SERVING revision carries, and it names the tag, the
+revision and the missing variable names.
+
+Exit codes: `0` pass · `1` FAIL · `2` REFUSE. A REFUSE — the service or its
+revisions could not be read — fails the job too. A check that cannot read what it
+needs must never read as green.
+
+It runs **twice on purpose**: at canary time the OLD revision is still serving, so
+a credential ADDED by the new revision is invisible to the comparison until traffic
+shifts. The shift is where this class is created, so the shift is where it is read.
+
+It mutates nothing. Removing or repointing a tag is an operator decision.
+
+Run it by hand for any covered service (read-only, no writes):
+
+```bash
+node scripts/check-tagged-revision-env.mjs \
+  --project legacy-design-tools-prod --region us-central1 --service cortex-api
+
+node scripts/check-tagged-revision-env.mjs \
+  --project legacy-design-tools-prod --region us-central1 --service smartsite-mcp
+```
+
+Measured 2026-09-17 in `legacy-design-tools-prod`: `cortex-api` carried 15 failing
+tags (17 tags on old revisions) and `smartsite-mcp` 30. The check names them; it
+does not remove them.
+
+The file is a byte-identical copy of `hauska-engine`'s canonical
+`tools/check-tagged-revision-env.mjs`. The `P-279 canonical divergence` job in
+[`pr-checks.yml`](../.github/workflows/pr-checks.yml) refuses when the two diverge,
+and `P-279 tagged-revision env predicate` runs the offline fixture set. Change both
+copies together.
+
+---
+
 ## GCP-side prerequisites
 
 Run once, before the first deploy. Replace `<PROJECT_NUMBER>` with the actual
@@ -353,13 +396,8 @@ Manager. `Class = config` → Cloud Run env var.
 | `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | config | hard required at boot | `lib/integrations-anthropic-ai/src/client.ts` | Workflow sets `https://api.anthropic.com` — confirm before first deploy. |
 | `SESSION_SECRET` | secret | yes | Secret Manager | Required by `sessionMiddleware`. Recon's `process.env.*` grep missed this — surfaced post-deploy-doc-authoring. |
 | `BIM_MODEL_SHARED_SECRET` | secret | required for upload flow | `routes/bimModels.ts` | HMAC secret for BIM model uploads. Generated fresh during Phase 1A setup (no value existed in Replit). Same value will need to be configured on the Revit Connector side when BIM upload integration is wired end-to-end. |
-| `AIR_FINDING_LLM_MODE` | config | optional | `lib/finding-engine/src/engine.ts` | Default `mock`. `grok` requires `XAI_API_KEY`. `anthropic` is legacy and requires the AI Integrations env. |
-| `XAI_API_KEY` | secret | conditional | `lib/integrations-xai-grok/src/client.ts` | Required when `AIR_FINDING_LLM_MODE=grok`. |
-| `XAI_BASE_URL` | config | optional | `lib/integrations-xai-grok/src/client.ts` | Default `https://api.x.ai/v1`. |
-| `XAI_FINDING_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for plan-review findings. Default `grok-3-mini`. |
-| `XAI_MODEL` | config | optional | `lib/finding-engine/src/grokGenerator.ts` | Fallback model id when `XAI_FINDING_MODEL` unset. |
-| `BRIEFING_LLM_MODE` | config | required | `lib/briefing-engine/src/engine.ts` | Required — no implicit default. Unset or unknown values throw at boot; `mock` must be requested explicitly. `grok` requires `XAI_API_KEY`. `anthropic` requires AI Integrations env. AI chat stays Anthropic regardless. Property Brief brokerage routes (`/api/brokerage/v1/*`) use the same client via `briefingLlmClient.ts` — set `grok` for production extension summaries. |
-| `XAI_BRIEFING_MODEL` | config | optional | `lib/briefing-engine/src/grokGenerator.ts` | Overrides `XAI_MODEL` for parcel briefings and brokerage brief/research Grok calls. Default `grok-3-mini`. |
+| `AIR_FINDING_LLM_MODE` | config | optional | `lib/finding-engine/src/engine.ts` | Default `mock`. `anthropic` requires the AI Integrations env (`claude-opus-5-5`). `grok` is rejected at boot with a config error (G-309 A20: code-citing paths use Anthropic only). Prod sets `anthropic`. |
+| `BRIEFING_LLM_MODE` | config | required | `lib/briefing-engine/src/engine.ts` | Required — no implicit default. Unset or unknown values throw at boot; `mock` must be requested explicitly. `anthropic` requires AI Integrations env. `grok` is rejected at boot with a config error (G-309 A20). AI chat stays Anthropic regardless. Property Brief brokerage routes (`/api/brokerage/v1/*`) use the same client via `briefingLlmClient.ts` — set `anthropic` for production extension summaries. |
 | `BROKERAGE_API_KEYS` | secret | optional operator keys | `artifacts/api-server/src/middlewares/brokerageAuth.ts` | Comma-separated operator/MCP keys (`operator` tier). Not required for Chrome Web Store installs. |
 | `BROKERAGE_EXTENSION_PUBLIC_KEY` | secret | required for Chrome Web Store zero-config | `artifacts/api-server/src/middlewares/brokerageAuth.ts`, `lib/brokerageExtensionPublic.ts` | Mounted via `cloud-run-deploy.yml` `--set-secrets`. Rate-limited Layer-1 brief/research only. |
 | `BROKERAGE_FEDERAL_DATA_DIR` | config | optional | `artifacts/api-server/src/lib/brokerageFederalDataPaths.ts` | Runtime path for OZ + SPDPID files. Docker image ships bundled CI fixtures here; live data via ingest job + GCS (see `BROKERAGE_FEDERAL_DATA_GCS_PREFIX`). |

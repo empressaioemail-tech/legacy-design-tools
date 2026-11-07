@@ -2,9 +2,15 @@
  * Live smoke: Track 2/3 federal GIS layers on cortex-api canary.
  * Usage: BROKERAGE_EXTENSION_PUBLIC_KEY=... node scripts/_federal-layers-canary-smoke.mjs [baseUrl] [installId]
  */
-const BASE =
-  process.argv[2]?.trim() ||
-  "https://canary---cortex-api-tds7av26va-uc.a.run.app";
+// D-25: no default base URL (the Cloud Run canary host is dead). Name it, or refuse.
+const BASE = process.argv[2]?.trim();
+if (!BASE) {
+  console.error(
+    "base URL required (argv[2]) and there is no default (D-25). Usage:\n" +
+      "  BROKERAGE_EXTENSION_PUBLIC_KEY=... node scripts/_federal-layers-canary-smoke.mjs <baseUrl> [installId]",
+  );
+  process.exit(1);
+}
 const INSTALL =
   process.argv[3]?.trim() ||
   process.env.BROKERAGE_SMOKE_INSTALL_ID?.trim() ||

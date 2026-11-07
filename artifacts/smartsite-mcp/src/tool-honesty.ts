@@ -1,34 +1,63 @@
-/** External-safe entitlement shape — never echo cortex userId/tenantId blobs. */
-export type ExternalEntitlementSummary = {
-  entitled: boolean;
-  subscriptionTier?: string;
+import { SMARTSITE_PLANS_URL } from "./entitlement.js";
+import type { EntitlementGateRefusal } from "./entitlement.js";
+import { envelopeBasisHuman, envelopeHuman } from "@empressaio/atom-contract/display";
+import {
+  DERIVED_FIGURES_POLICY,
+  VOCABULARY,
+  WIRE_DISPOSITION_DISPLAY_TEXT,
+  type VocabularyEntry,
+} from "./vocabulary.js";
+
+const PUNCTUATION_ONLY_SITUS_RE = /^[\s,.\-;:'"`]+$/;
+
+export function isPunctuationOnlySitusLabel(value: unknown): boolean {
+  if (value == null) return true;
+  const s = String(value).trim();
+  return s === "" || PUNCTUATION_ONLY_SITUS_RE.test(s);
+}
+
+const CRM_STATUSES = ["New", "Watching", "Chasing", "Passed"] as const;
+export type ExternalCrmStatus = (typeof CRM_STATUSES)[number];
+
+const STUB_RAILS = [
+  "situs",
+  "zoning",
+  "landUse",
+  "flood",
+  "drainage",
+  "envelope",
+] as const;
+
+export type ExternalStubRails = {
+  situs: string;
+  zoning: string;
+  landUse: string;
+  flood: string;
+  drainage: string;
+  envelope: string;
 };
 
-export function stripEntitlementForExternal(
-  raw: unknown,
-): ExternalEntitlementSummary {
-  if (!raw || typeof raw !== "object") {
-    return { entitled: false };
-  }
-  const record = raw as Record<string, unknown>;
-  const subscriptionTier =
-    typeof record.subscriptionTier === "string"
-      ? record.subscriptionTier
-      : undefined;
-  const property =
-    record.property && typeof record.property === "object"
-      ? (record.property as Record<string, unknown>)
-      : null;
-  const unlocked = property?.unlocked === true;
-  const tierEntitled =
-    record.tier === "paid" ||
-    record.authenticated === true ||
-    subscriptionTier === "studio" ||
-    subscriptionTier === "team" ||
-    subscriptionTier === "pro";
+function asCrmStatus(value: unknown): ExternalCrmStatus | null {
+  return typeof value === "string" &&
+    (CRM_STATUSES as readonly string[]).includes(value)
+    ? (value as ExternalCrmStatus)
+    : null;
+}
+
+function asStub(value: unknown): ExternalStubRails {
+  const rec =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const rail = (key: (typeof STUB_RAILS)[number]) =>
+    typeof rec[key] === "string" ? rec[key] : "unread";
   return {
-    entitled: unlocked || tierEntitled,
-    ...(subscriptionTier ? { subscriptionTier } : {}),
+    situs: rail("situs"),
+    zoning: rail("zoning"),
+    landUse: rail("landUse"),
+    flood: rail("flood"),
+    drainage: rail("drainage"),
+    envelope: rail("envelope"),
   };
 }
 
@@ -36,7 +65,11 @@ export function stripEntitlementForExternal(
 export type ExternalSavedPropertySummary = {
   id: string;
   parcelNodeId: string;
-  label: string | null;
+  label: string;
+  situs: "present" | "unknown";
+  stub: ExternalStubRails;
+  status: ExternalCrmStatus | null;
+  note: string | null;
   updatedAt: string;
 };
 
@@ -54,27 +87,37 @@ export function stripSavedPropertiesForExternal(
     const parcelNodeId =
       typeof record.parcelNodeId === "string" ? record.parcelNodeId : "";
     if (!id || !parcelNodeId) continue;
-    const label =
-      typeof record.label === "string"
-        ? record.label
-        : record.label === null
-          ? null
-          : null;
+    const storedLabel =
+      typeof record.label === "string" ? record.label : null;
+    const situsUnknown = isPunctuationOnlySitusLabel(storedLabel);
+    const label = situsUnknown ? parcelNodeId : storedLabel!.trim();
     const updatedAt =
       typeof record.updatedAt === "string"
         ? record.updatedAt
         : record.updatedAt != null
           ? String(record.updatedAt)
           : "";
-    rows.push({ id, parcelNodeId, label, updatedAt });
+    const status = asCrmStatus(record.crmStatus ?? record.status);
+    const note = typeof record.note === "string" ? record.note : null;
+    rows.push({
+      id,
+      parcelNodeId,
+      label,
+      situs: situsUnknown ? "unknown" : "present",
+      stub: asStub(record.stub),
+      status,
+      note,
+      updatedAt,
+    });
   }
   return rows;
 }
 
 export type RunReportHonestyFields = {
-  reportKind: "R1-baked-snapshot";
+  /** ONE DOOR `on` (WP-L): `R1-one-door` when every fact came from the reader; no baked-snapshot label then. */
+  reportKind: "R1-baked-snapshot" | "R1-one-door";
   /** How the MCP server delivered the report (sync read). Distinct from cortex `mode`. */
-  reportReadMode: "baked-snapshot-read";
+  reportReadMode: "baked-snapshot-read" | "parcel-record-reader-read";
   async: false;
   parcelNodeId: string;
 };
@@ -86,6 +129,7 @@ export type RunReportEnvelope = RunReportHonestyFields &
 export function buildRunReportEnvelope(
   parcelNodeId: string,
   cortexBodyText: string,
+  canSeeOwner = false,
 ): RunReportEnvelope {
   const honesty: RunReportHonestyFields = {
     reportKind: "R1-baked-snapshot",
@@ -96,9 +140,13 @@ export function buildRunReportEnvelope(
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if ((parsed as Record<string, unknown>).oneDoorMode === "on") {
+        honesty.reportKind = "R1-one-door";
+        honesty.reportReadMode = "parcel-record-reader-read";
+      }
       return {
         ...honesty,
-        ...normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+        ...normalizeR1BodyForExternal(parsed as Record<string, unknown>, canSeeOwner),
       };
     }
   } catch {
@@ -107,10 +155,111 @@ export function buildRunReportEnvelope(
   return { ...honesty, brief: cortexBodyText };
 }
 
+/**
+ * H1 wire half (P-91 v2, 2026-08-30). Every non-OK body this server emits
+ * carries a machine-readable `status` and `reason` so the panel can paint a
+ * declared line instead of the empty copy. `upstreamStatus` is the HTTP
+ * status of the upstream response, or `"unmeasured"` where the boundary
+ * that produced the text did not carry it (the export proxy).
+ */
+export type DeclaredUpstreamErrorBody = {
+  status: "error";
+  reason: string;
+  upstreamStatus: number | "unmeasured";
+} & Record<string, unknown>;
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * Wrap an upstream non-OK (cortex, or Hauska via the export proxy) as a
+ * declared error. For run_report this also means no reportKind,
+ * reportReadMode, or async: those describe a read that happened, and none
+ * did. A JSON object body travels under its own keys; `status: "error"`
+ * always wins, and an upstream `status` field moves to `upstreamBodyStatus`
+ * (one key, one meaning: `upstreamStatus` is only ever the HTTP status).
+ * `reason` is the upstream `reason` when it is a non-empty string, else the
+ * upstream `error` code when that is, else `upstream_error`; a non-string
+ * upstream `reason` is kept under `upstreamBodyReason`, never dropped.
+ * Non-JSON and non-object bodies are `upstream_non_json` with the text
+ * under `brief`.
+ */
+export function declareUpstreamNonOk(
+  upstreamStatus: number | "unmeasured",
+  bodyText: string,
+): DeclaredUpstreamErrorBody {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const {
+      status: upstreamBodyStatus,
+      reason: upstreamReason,
+      ...rest
+    } = parsed as Record<string, unknown>;
+    const reason = nonEmptyString(upstreamReason)
+      ? upstreamReason
+      : nonEmptyString(rest.error)
+        ? rest.error
+        : "upstream_error";
+    return {
+      ...rest,
+      ...(upstreamBodyStatus !== undefined ? { upstreamBodyStatus } : {}),
+      ...(upstreamReason !== undefined && !nonEmptyString(upstreamReason)
+        ? { upstreamBodyReason: upstreamReason }
+        : {}),
+      status: "error",
+      reason,
+      upstreamStatus,
+    };
+  }
+  return {
+    status: "error",
+    reason: "upstream_non_json",
+    upstreamStatus,
+    brief: bodyText,
+  };
+}
+
+/**
+ * P-91 v3 item 1. `present | refused | absent | unread` is what
+ * artifacts/api-server's own R1BriefSectionDisposition type carries today
+ * (r1BriefCompose.ts) and is the only shape `buildR1Brief` emits: no code
+ * path there returns `unknown`, and WDLL item 5 names `absent-verified` as
+ * explicitly withheld at section level pending a positive typed result no
+ * section carries yet. `unknown` and `absent-verified` are added to THIS
+ * union anyway, so that if a section ever DOES carry one of them -- today,
+ * from a future cortex change, or from any other producer this MCP server
+ * proxies -- `sectionDisposition` below preserves it instead of silently
+ * strengthening it into `absent` (the defect this item closes: a claimed
+ * state this union could not name was discarded and re-derived, and the
+ * re-derivation is always a claim strength the wire never made). Widening
+ * the union is a promise about what THIS SERVER can say, not a claim about
+ * what cortex sends today.
+ */
 export type ExternalBriefSectionDisposition =
   | "present"
   | "refused"
-  | "absent";
+  | "absent"
+  | "unread"
+  | "unknown"
+  | "absent-verified";
+
+const EXTERNAL_BRIEF_SECTION_DISPOSITIONS: readonly ExternalBriefSectionDisposition[] =
+  ["present", "refused", "absent", "unread", "unknown", "absent-verified"];
+
+function asExplicitDisposition(
+  value: unknown,
+): ExternalBriefSectionDisposition | null {
+  return typeof value === "string" &&
+    (EXTERNAL_BRIEF_SECTION_DISPOSITIONS as readonly string[]).includes(value)
+    ? (value as ExternalBriefSectionDisposition)
+    : null;
+}
 
 export type ExternalBriefSection = {
   id?: string;
@@ -118,59 +267,470 @@ export type ExternalBriefSection = {
   data: unknown;
   refusal?: unknown;
   disposition: ExternalBriefSectionDisposition;
+  /** V3 (P-91 v3). The exact string next to the machine code, so a caller never has to translate `disposition` itself. */
+  dispositionDisplayText: string;
   agentGuidance?: string | null;
   [key: string]: unknown;
 };
 
-function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
+function derivedSectionDisposition(
+  section: Record<string, unknown>,
+): Exclude<ExternalBriefSectionDisposition, "unread"> {
   if (section.refusal != null) return "refused";
   if (section.data !== null && section.data !== undefined) return "present";
   return "absent";
 }
 
 /**
+ * F7 (P-91 v2). A section that carries an explicit disposition keeps it,
+ * with its `reason`: cortex emits drainage as `unread` until the facet
+ * exists, and rewriting that to `absent` would turn "not read" into "read,
+ * nothing there". The wire may weaken a claim, never strengthen one: the
+ * one claim it rewrites is `present` without data, which the section does
+ * not support, and that falls to the derived state (refused if a refusal
+ * rides along, else absent). A missing or unrecognised disposition derives.
+ *
+ * P-91 v3 item 1. `claimed` now recognises `unknown` and `absent-verified`
+ * (see the union's own comment above): neither is `present`, so both fall
+ * straight through the one downgrade check below and are RETURNED AS
+ * CLAIMED, never re-derived. That is the fix -- this function's body did
+ * not otherwise need to change, because the strengthening lived entirely in
+ * `asExplicitDisposition` rejecting a state it had no member for.
+ */
+function sectionDisposition(section: Record<string, unknown>): ExternalBriefSectionDisposition {
+  const derived = derivedSectionDisposition(section);
+  const claimed = asExplicitDisposition(section.disposition);
+  if (claimed === null) return derived;
+  if (claimed === "present" && derived !== "present") return derived;
+  return claimed;
+}
+
+/**
+ * P-91 v3 item 1 follow-up. The check the defect card asked for: the stub
+ * rail and the node section disposition for one facet, on one parcel, are
+ * two SEPARATE wire reads (get_smart_site depth "stub" and depth "node" are
+ * two different tool calls; on cortex's own side, artifacts/api-server's
+ * assembleStubBody and assembleNodeBriefBody each call
+ * loadBakedNodeFacetSnapshot / loadFloodHazardFactAtom independently -- see
+ * artifacts/api-server/src/routes/propertyExplorer.ts), so a race, a cache,
+ * or a divergence introduced by a future change to either read path can
+ * make them disagree even though the transform between them is shared code
+ * today. That is what this function is checking: agreement across two
+ * independently-fetched reads, not internal consistency within one payload
+ * a single producer could fabricate both halves of.
+ *
+ * The expected relationship is NOT equality, and this is the correction to
+ * the defect card's own framing: per api-server's
+ * railStateFromSectionDisposition (src/lib/smartSiteStub.ts, read from the
+ * write path, not inferred from output), a node section with no
+ * determination (`absent`) is DESIGNED to read as `unknown` at stub depth.
+ * That pairing -- confirmed for all five brief-backed facets: zoning,
+ * land-use, flood, drainage and setbacks-envelope share the one
+ * `railStateFromSectionDisposition` projection end to end -- is the
+ * intended, shared derivation, not the strengthening bug item 1 fixes
+ * above. A check that expected `unknown` at stub to equal `unknown` at node
+ * would fail on every healthy parcel with an absent facet; that is not this
+ * check. `unknown` and `absent-verified` are still listed on the node side
+ * of the table below even though no section carries them today (same
+ * forward posture as the union widening above): if a section ever DOES
+ * claim one, the table states plainly what the stub rail is expected to
+ * say next to it.
+ *
+ * `situs` is deliberately excluded: it is not one of api-server's five
+ * R1BriefSectionId facets (composeSitusLabel is a label compose, not a
+ * disposition), so it has no node-depth disposition to agree with.
+ */
+export const STUB_RAIL_FOR_NODE_DISPOSITION: Record<
+  ExternalBriefSectionDisposition,
+  string
+> = {
+  present: "present",
+  refused: "refused",
+  unread: "unread",
+  absent: "unknown",
+  unknown: "unknown",
+  "absent-verified": "absent-verified",
+};
+
+/** Stub rail key -> node section id, for the five facets both depths carry. */
+export const STUB_RAIL_TO_NODE_SECTION_ID: Record<
+  "zoning" | "landUse" | "flood" | "drainage" | "envelope",
+  string
+> = {
+  zoning: "zoning",
+  landUse: "land-use",
+  flood: "flood",
+  drainage: "drainage",
+  envelope: "setbacks-envelope",
+};
+
+/**
+ * True when a stub rail's word is what api-server's own projection says it
+ * should be, given the node section's disposition for the same facet. Two
+ * independently-fetched inputs in, one boolean out; see the comment on
+ * STUB_RAIL_FOR_NODE_DISPOSITION above for why the relationship is a
+ * mapping and not equality.
+ */
+export function stubRailAgreesWithNodeDisposition(
+  stubRailValue: string,
+  nodeDisposition: ExternalBriefSectionDisposition,
+): boolean {
+  return STUB_RAIL_FOR_NODE_DISPOSITION[nodeDisposition] === stubRailValue;
+}
+
+/**
+ * V4 (P-91 v3). What not to invent, per facet. Keyed by the real section
+ * ids read out of the wire and this package's own tests (zoning, land-use,
+ * flood, drainage, setbacks-envelope); an id outside this map still gets a
+ * generic instruction rather than none, so the mechanism cannot go starved
+ * just because a new facet id ships before this map is updated.
+ */
+const FACET_TOPIC: Record<string, string> = {
+  zoning: "a zoning district, jurisdiction, or permitted-use table",
+  "land-use": "a land-use code or description",
+  flood: "a flood zone, SFHA status, or base flood elevation",
+  drainage: "drainage infrastructure, capacity, or a compliance state",
+  "setbacks-envelope": "a setback distance or a buildable-envelope polygon",
+};
+const GENERIC_FACET_TOPIC = "a value for this facet";
+
+/**
+ * V4 (P-91 v3). Facet-scoped agentGuidance on every non-present section.
+ * Previously shipped on exactly one facet (setbacks-envelope, refused
+ * only) as a hand-written sentence; this generalizes the same instruction
+ * shape to every facet and every non-present disposition. The disposition
+ * word in the sentence is read off WIRE_DISPOSITION_DISPLAY_TEXT, the same
+ * table dispositionDisplayText is read from below, so the two can never
+ * disagree about what state this section is in.
+ */
+function facetGuidance(
+  id: string | undefined,
+  disposition: ExternalBriefSectionDisposition,
+): string {
+  const topic = (id && FACET_TOPIC[id]) ?? GENERIC_FACET_TOPIC;
+  const state = WIRE_DISPOSITION_DISPLAY_TEXT[disposition].toLowerCase();
+  return `This facet is ${state} for this parcel on this call. Do not invent ${topic}.`;
+}
+
+function isHttpCitation(value: unknown): value is string {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
+}
+
+function presentCitationDishonest(rail: Record<string, unknown>): boolean {
+  if (rail.state !== "present") return false;
+  const citations = Array.isArray(rail.citations)
+    ? rail.citations.filter(isHttpCitation)
+    : [];
+  return citations.length === 0 && rail.citationsDegraded !== true;
+}
+
+/**
+ * V3 (P-91 v3). `reasonDisplayText` next to an overlay's raw `reason`, read
+ * through envelopeHuman — the exact function the panel itself calls — so
+ * the text the model reads in the tool result and the text the panel paints
+ * can never be two different sentences. This is the direct fix for the
+ * live-session finding: `reason: "atom_path_pending"` traveled to the model
+ * with no display string attached, because envelopeHuman was wired to the
+ * panel only. The raw `reason` is left untouched (additive).
+ *
+ * V6 (P-91 v3). Where `state` is "unknown", `finding` is explicit `null`
+ * (this file's own convention for SectionRefusal: a missing field is null,
+ * never a default), never the overlay's `label`. A finding-shaped label
+ * ("No pipeline within 500 ft") on an unknown-state overlay is a caption
+ * about what was NOT checked, not a result; no consumer that reads
+ * `finding` before treating a value as a result can mistake one for the
+ * other. Scoped to "unknown" only, per the v3 build plan: every other state
+ * already prints an unambiguous state word next to its label.
+ *
+ * P-153. `basisDisplayText` is `reasonDisplayText`'s exact sibling for a
+ * `state: "present"` overlay's `basis` (read through `envelopeBasisHuman`,
+ * the panel's own function, same pairing as `reason`/envelopeHuman above).
+ * A present envelope overlay carries `basis`, never `reason` — see
+ * parcelDrawStub.ts's `envelopeOverlay` — so the two display-text keys never
+ * collide on one overlay in practice, but the attachment is independent
+ * either way (each keyed off its own raw field, additive only).
+ */
+function honestOverlay(overlay: Record<string, unknown>): Record<string, unknown> {
+  const reason = typeof overlay.reason === "string" ? overlay.reason : undefined;
+  const withReason: Record<string, unknown> =
+    reason !== undefined
+      ? { ...overlay, reasonDisplayText: envelopeHuman(reason) ?? reason }
+      : overlay;
+  const basis = typeof overlay.basis === "string" ? overlay.basis : undefined;
+  const withBasis: Record<string, unknown> =
+    basis !== undefined
+      ? { ...withReason, basisDisplayText: envelopeBasisHuman(basis) ?? basis }
+      : withReason;
+  if (withBasis.state === "unknown") {
+    return { ...withBasis, finding: null };
+  }
+  return withBasis;
+}
+
+/**
+ * Pass cortex `draw` through. Omit on unlabeled unknown hatch, seed float,
+ * or a present flood/landUse rail with empty citations and no
+ * citationsDegraded (P-91 item 9). Fail closed: a bad stub is not a silent
+ * empty ring, and present without a citation is not silently complete.
+ */
+export function sanitizeExternalDraw(raw: unknown): unknown | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const draw = raw as Record<string, unknown>;
+  const overlays = draw.overlays;
+  if (Array.isArray(overlays)) {
+    for (const item of overlays) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const overlay = item as Record<string, unknown>;
+      const label = typeof overlay.label === "string" ? overlay.label.trim() : "";
+      if (
+        overlay.state === "unknown" &&
+        overlay.draw === "hatch-interior" &&
+        !label
+      ) {
+        return undefined;
+      }
+      if (overlay.id === "flood" && presentCitationDishonest(overlay)) {
+        return undefined;
+      }
+    }
+  }
+  const attrs =
+    draw.attrs && typeof draw.attrs === "object" && !Array.isArray(draw.attrs)
+      ? (draw.attrs as Record<string, unknown>)
+      : null;
+  const landUse =
+    attrs?.landUse &&
+    typeof attrs.landUse === "object" &&
+    !Array.isArray(attrs.landUse)
+      ? (attrs.landUse as Record<string, unknown>)
+      : null;
+  if (landUse && presentCitationDishonest(landUse)) {
+    return undefined;
+  }
+  const blob = JSON.stringify(draw);
+  if (
+    blob.includes("calibratedConfidence") ||
+    blob.includes('"estimate":0.7') ||
+    blob.includes('"estimate":0.9')
+  ) {
+    return undefined;
+  }
+  // V3/V6: rebuild overlays (reasonDisplayText, unknown-state finding split)
+  // only on the surviving path; every omission check above still reads the
+  // raw, unmapped overlays. V5: the derived-figures deny travels on every
+  // draw that reaches the wire, not as a convention but as a payload field.
+  const honestOverlays = Array.isArray(overlays)
+    ? overlays.map((item) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? honestOverlay(item as Record<string, unknown>)
+          : item,
+      )
+    : undefined;
+  return {
+    ...draw,
+    ...(honestOverlays ? { overlays: honestOverlays } : {}),
+    derivedFigures: DERIVED_FIGURES_POLICY,
+  };
+}
+
+/**
+ * P-220. `ownerFact` (ownerName, ownerMailingAddress, exemptionFlags) is a
+ * Studio/Team-gated read this server's own tool descriptions promise never
+ * ships at any depth -- but `/research/brief` is a single shared upstream
+ * response and this package composes get_smart_site and run_report from it
+ * verbatim, so a caller whose account-wide tier and per-parcel property
+ * unlock both fail to grant it must never see it here regardless of what
+ * upstream sent. Defense in depth, mirroring brokerageNodeFacets.ts's own
+ * belt-and-suspenders posture on the facets path (`sanitizeNodeFacetPayload`)
+ * rather than trusting the upstream gate alone. Replaces the whole value
+ * with a typed refusal -- never a bare delete -- so a consumer sees a
+ * declared state, the same honesty convention every other facet in this
+ * file follows. `exemptionFlags` lives inside `ownerFact` and is removed
+ * with it; nothing else in the body is touched, so `taxYear` on
+ * `structuralFact` / `valueHistoryFact` and every valuation rail survive.
+ */
+export const OWNER_FACT_NOT_CARRIED_FOR_CALLER = {
+  state: "refused",
+  code: "studio-gated",
+  source: "owner-fact",
+  reason:
+    "owner-fact is Studio or Team only, or requires an active property unlock on this parcel. This tool does not carry owner data at any depth without one of those.",
+} as const;
+
+export function stripOwnerFactForCaller<T extends Record<string, unknown>>(
+  body: T,
+  canSeeOwner: boolean,
+): T {
+  if (canSeeOwner || !("ownerFact" in body)) return body;
+  return { ...body, ownerFact: OWNER_FACT_NOT_CARRIED_FOR_CALLER };
+}
+
+/**
+ * P-246. Defense in depth, mirroring stripOwnerFactForCaller's own posture
+ * just above: upstream (api-server's propertyExplorer.ts / brokerageNode
+ * Facets.ts) now gates every dollar key on every valueHistoryFact entry
+ * with the same grantsCadRollValuation/grantsOwnerCoGatedFields predicate
+ * this file's own `canSeeOwner` already carries, but this package composes
+ * get_smart_site and run_report from that same upstream response verbatim,
+ * so a caller whose tier and per-parcel unlock both fail to grant it must
+ * never see a raw dollar figure here even if a future upstream regression
+ * reopens the gap P-246 found live. Not a new tier check -- reuses the
+ * identical `canSeeOwner` boolean already threaded through this file for
+ * ownerFact. taxYear/viaCrosswalk and the entry itself are never dropped;
+ * each dollar key gets a typed refusal, never a bare delete.
+ */
+const VALUE_HISTORY_DOLLAR_KEYS = [
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+] as const;
+
+export const VALUE_HISTORY_DOLLAR_NOT_CARRIED_FOR_CALLER = {
+  state: "refused",
+  code: "studio-gated",
+  reason:
+    "County tax-assessed valuation (market/land/improvement/assessed value) is Studio or Team only. Anonymous, free, Solo, unlock, and identified-only callers receive no dollar value.",
+} as const;
+
+export function stripValueHistoryDollarsForCaller<
+  T extends Record<string, unknown>,
+>(body: T, canSeeOwner: boolean): T {
+  if (canSeeOwner) return body;
+  const vh = body.valueHistoryFact;
+  if (!vh || typeof vh !== "object" || Array.isArray(vh)) return body;
+  const vhRecord = vh as Record<string, unknown>;
+  if (vhRecord.state !== "present" || !Array.isArray(vhRecord.entries)) {
+    return body;
+  }
+  const entries = vhRecord.entries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return entry;
+    }
+    const gated: Record<string, unknown> = { ...entry };
+    for (const key of VALUE_HISTORY_DOLLAR_KEYS) {
+      if (key in gated) gated[key] = VALUE_HISTORY_DOLLAR_NOT_CARRIED_FOR_CALLER;
+    }
+    return gated;
+  });
+  return { ...body, valueHistoryFact: { ...vhRecord, entries } };
+}
+
+/**
+ * ONE DOOR `on` (WP-L). The reader's gated rails (LDT #813's list). Defense in
+ * depth only, mirroring stripOwnerFactForCaller: the reader already projects
+ * these for the end user's entitlement, and a caller this server does not
+ * grant owner data never receives a gated VALUE from the `facts` map even if
+ * an upstream regression sends one. The reader's words are kept.
+ */
+export const ONE_DOOR_GATED_RAILS = [
+  "owner",
+  "exemptionCodes",
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+  "valueHistory",
+  "salesHistory",
+] as const;
+
+export const ONE_DOOR_PLAN_GATED_GUARD_WORDS = "Included in Studio";
+
+export function stripOneDoorGatedFactsForCaller<T extends Record<string, unknown>>(
+  body: T,
+  canSeeOwner: boolean,
+): T {
+  if (canSeeOwner) return body;
+  const facts = body.facts;
+  if (!facts || typeof facts !== "object" || Array.isArray(facts)) return body;
+  const next: Record<string, unknown> = { ...(facts as Record<string, unknown>) };
+  let changed = false;
+  for (const rail of ONE_DOOR_GATED_RAILS) {
+    const fact = next[rail];
+    if (!fact || typeof fact !== "object" || Array.isArray(fact)) continue;
+    const rec = fact as Record<string, unknown>;
+    if (rec.state !== "value" && !("value" in rec)) continue;
+    const { value: _dropped, ...rest } = rec;
+    // Guard copy of the reader's default plan-gated phrase (spec §2); only
+    // ever seen if the reader failed to project this rail itself.
+    next[rail] = { ...rest, state: "plan-gated", words: ONE_DOOR_PLAN_GATED_GUARD_WORDS };
+    changed = true;
+  }
+  return changed ? { ...body, facts: next } : body;
+}
+
+/** ONE DOOR `on`: the reader's words on a section, when it carries them. */
+function oneDoorWords(section: Record<string, unknown>): string | null {
+  const od = section.oneDoor;
+  if (!od || typeof od !== "object" || Array.isArray(od)) return null;
+  const rec = od as Record<string, unknown>;
+  if (rec.state === "value") return null;
+  return typeof rec.words === "string" && rec.words.trim() ? rec.words : null;
+}
+
+/**
  * Ensures MCP clients never see bare null section data without a disposition.
  * Mirrors flood SS-W16 honesty for setbacks-envelope refusals on the wire.
+ * `draw` is optional; invalid stubs are omitted (fail closed).
  */
 export function normalizeR1BodyForExternal(
   body: Record<string, unknown>,
+  canSeeOwner = false,
 ): Record<string, unknown> {
-  const brief = body.brief;
+  const draw = sanitizeExternalDraw(body.draw);
+  const withDraw: Record<string, unknown> = stripOneDoorGatedFactsForCaller(
+    stripValueHistoryDollarsForCaller(
+      stripOwnerFactForCaller({ ...body }, canSeeOwner),
+      canSeeOwner,
+    ),
+    canSeeOwner,
+  );
+  delete withDraw.draw;
+  if (draw) withDraw.draw = draw;
+  const brief = withDraw.brief;
   if (!brief || typeof brief !== "object" || Array.isArray(brief)) {
-    return body;
+    return withDraw;
   }
   const briefRecord = brief as Record<string, unknown>;
   const sections = briefRecord.sections;
   if (!Array.isArray(sections)) {
-    return body;
+    return withDraw;
   }
   const normalizedSections: ExternalBriefSection[] = sections.map((raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       return {
         data: raw,
         disposition: "absent",
+        dispositionDisplayText: WIRE_DISPOSITION_DISPLAY_TEXT.absent,
+        agentGuidance: facetGuidance(undefined, "absent"),
       };
     }
     const section = raw as Record<string, unknown>;
     const disposition = sectionDisposition(section);
+    const id = typeof section.id === "string" ? section.id : undefined;
+    // ONE DOOR on (WP-L): the reader's words are the display text, verbatim.
+    const readerWords = oneDoorWords(section);
+    // V4: every non-present facet gets guidance, not only setbacks-envelope
+    // refused. A wire-supplied agentGuidance always wins (never overwritten).
     const agentGuidance =
       typeof section.agentGuidance === "string"
         ? section.agentGuidance
-        : disposition === "refused" &&
-            section.id === "setbacks-envelope" &&
-            section.refusal &&
-            typeof section.refusal === "object"
-          ? "Setbacks and buildable envelope are refused on this read path. Do not invent distances or polygons."
-          : undefined;
+        : readerWords
+          ? `The record says: "${readerWords}". Say that, and do not invent ${(id && FACET_TOPIC[id]) ?? GENERIC_FACET_TOPIC}.`
+          : disposition !== "present"
+            ? facetGuidance(id, disposition)
+            : undefined;
     return {
       ...section,
       data: section.data ?? null,
       disposition,
+      // V3: the exact display string beside the machine code, additive.
+      dispositionDisplayText: readerWords ?? WIRE_DISPOSITION_DISPLAY_TEXT[disposition],
       ...(agentGuidance ? { agentGuidance } : {}),
     } as ExternalBriefSection;
   });
   return {
-    ...body,
+    ...withDraw,
     brief: {
       ...briefRecord,
       sections: normalizedSections,
@@ -178,17 +738,568 @@ export function normalizeR1BodyForExternal(
   };
 }
 
+export type GetSmartSiteMissReason =
+  | "parcel_not_found"
+  | "baked_snapshot_not_found"
+  /**
+   * P-206 (2026-09-16). The node's record carries an EARNED retirement, so
+   * the serve declines it deliberately. This is NOT `parcel_not_found` and
+   * the two must never collapse into each other again: `parcel_not_found` is
+   * an affirmative claim that no parcel was ever on file, and this is the
+   * positive, checked claim that the parcel's record was looked for and is
+   * gone. Measured live on production before this existed: `48209:84629`
+   * (retired, per P-180's own store read) and `48209:999999` (a fabricated
+   * id) both reached the customer as `parcel_not_found` with
+   * `parcelExists: false`.
+   */
+  | "record_retired";
+
+/**
+ * P-206. The retirement the serve declined for, carried through as the
+ * declared verification basis rather than reduced to a token.
+ *
+ * Structurally what `artifacts/api-server`'s `Tier1RecordRetirement` declares.
+ * This artifact cannot import that one, so the fields that matter are
+ * validated here on the same discipline (`isEarnedRecordRetirement`): a
+ * half-formed object is DROPPED, never passed along to stand in for a
+ * retirement that was not actually earned.
+ */
+export type GetSmartSiteRetirement = {
+  status: "retired";
+  verdict: "absent-verified";
+  authority: string;
+  scopeSearched: string;
+  asOf: string;
+  basis: string;
+  lastSeenTaxYear: number | null;
+};
+
+function readGetSmartSiteRetirement(
+  value: unknown,
+): GetSmartSiteRetirement | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  if (r.status !== "retired" || r.verdict !== "absent-verified") return null;
+  for (const field of ["authority", "scopeSearched", "asOf", "basis"] as const) {
+    const v = r[field];
+    if (typeof v !== "string" || v.trim() === "") return null;
+  }
+  if (r.lastSeenTaxYear !== null && typeof r.lastSeenTaxYear !== "number") {
+    return null;
+  }
+  return {
+    status: "retired",
+    verdict: "absent-verified",
+    authority: r.authority as string,
+    scopeSearched: r.scopeSearched as string,
+    asOf: r.asOf as string,
+    basis: r.basis as string,
+    lastSeenTaxYear: r.lastSeenTaxYear as number | null,
+  };
+}
+
+export type GetSmartSiteRefusal = {
+  parcelNodeId: string;
+  reason: "upgrade_required";
+};
+
+/**
+ * Result text for a cortex non-OK that the host forwards to the panel.
+ * `reason` always travels on a miss; `parcelExists` is `"unmeasured"`
+ * when cortex did not say, never a fabricated boolean.
+ */
+export type GetSmartSiteNonOkResult =
+  | {
+      parcels: [];
+      notFound: [string];
+      reason: GetSmartSiteMissReason;
+      parcelExists: boolean | "unmeasured";
+      /** P-206: present only on `record_retired`, and only when well-formed. */
+      retirement?: GetSmartSiteRetirement;
+    }
+  | { parcels: []; notFound: []; refused: GetSmartSiteRefusal[] };
+
+/**
+ * P-91 build plan, wire contract 4.1. A cortex non-OK on research/brief
+ * becomes a declared result (the caller sets isError false and the host
+ * forwards it to the panel) in exactly the named cases; anything else
+ * returns null and the caller passes the body through with isError true.
+ *
+ * 404 rows apply to a single id only: cortex never 404s an array (per-id
+ * notFound rides inside a 200), so a 404 on an array is unexpected and is
+ * not turned into per-id absences. A 402 on an array refuses every id.
+ * The upstream message copy is not carried; the state is the reason.
+ */
+export function mapGetSmartSiteNonOk(
+  httpStatus: number,
+  cortexBodyText: string,
+  parcelNodeIds: readonly string[],
+): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cortexBodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (parcelNodeIds.length === 0) return null;
+
+  if (httpStatus === 402 && body.error === "upgrade_required") {
+    const refused: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [],
+      refused: parcelNodeIds.map((parcelNodeId) => ({
+        parcelNodeId,
+        reason: "upgrade_required",
+      })),
+    };
+    return JSON.stringify(refused);
+  }
+
+  if (httpStatus !== 404 || parcelNodeIds.length !== 1) return null;
+  const id = parcelNodeIds[0]!;
+
+  if (body.error === "record_retired") {
+    // P-206 (2026-09-16). `parcelExists` is `"unmeasured"`, NOT `false`. The
+    // serve answered about the RECORD -- this node's record is retired -- and
+    // said nothing about whether a parcel row exists for the account, so this
+    // response carries no evidence either way. `false` here was the defect:
+    // it turned a deliberate, verified absence into "no parcel ever existed".
+    const retirement = readGetSmartSiteRetirement(body.retirement);
+    const retired: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "record_retired",
+      parcelExists: "unmeasured",
+      ...(retirement ? { retirement } : {}),
+    };
+    return JSON.stringify(retired);
+  }
+
+  if (body.error === "parcel_not_found") {
+    const absent: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "parcel_not_found",
+      parcelExists: false,
+    };
+    return JSON.stringify(absent);
+  }
+
+  if (body.error === "baked_snapshot_not_found") {
+    const unbaked: GetSmartSiteNonOkResult = {
+      parcels: [],
+      notFound: [id],
+      reason: "baked_snapshot_not_found",
+      parcelExists:
+        typeof body.parcelExists === "boolean" ? body.parcelExists : "unmeasured",
+    };
+    return JSON.stringify(unbaked);
+  }
+
+  return null;
+}
+
+/**
+ * OPS-16 A-101. `create_screen` / `add_to_screen` have no local Studio
+ * predicate — the api-server screens gate (`peStudioGate.ts`,
+ * `requirePeStudioScreens`) is the SOLE gate, so the MCP never grows a
+ * second, driftable copy of `subscriptionTierGrantsStudio` (three already
+ * exist; a fourth in this file would be exactly the mistake A-087 named).
+ * This does not re-decide the tier: it reshapes the route's OWN declared 402
+ * body into the same purpose-built `upgrade_required` envelope
+ * `export_instrument`'s local Studio gate already returns
+ * (entitlement.ts's `EntitlementGateRefusal`), so a caller sees one
+ * consistent shape for "you need to upgrade" no matter which gate refused.
+ *
+ * Strict on purpose (every field checked, not just `reason`): if the 402
+ * body is not shaped exactly as `requirePeStudioScreens` always sends it,
+ * this returns null and the caller falls back to the generic
+ * `declareUpstreamNonOk` envelope rather than fabricating a message, tier,
+ * or subscriptionTier this function did not actually read off the wire.
+ */
+export function mapScreensGateNonOk(
+  httpStatus: number,
+  bodyText: string,
+): EntitlementGateRefusal | null {
+  if (httpStatus !== 402) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.error !== "upgrade_required" || body.reason !== "studio_screens") {
+    return null;
+  }
+  const message = nonEmptyString(body.message) ? (body.message as string) : null;
+  const tier = body.tier === "free" || body.tier === "paid" ? body.tier : null;
+  if (!message || !tier) return null;
+  const subscriptionTier =
+    body.subscriptionTier === "solo" ||
+    body.subscriptionTier === "studio" ||
+    body.subscriptionTier === "team"
+      ? body.subscriptionTier
+      : null;
+  return { status: "upgrade_required", reason: "studio_screens", tier, subscriptionTier, message, plansUrl: SMARTSITE_PLANS_URL };
+}
+
+/**
+ * Batch node rows keep per-parcel brief honesty; stubs pass through.
+ *
+ * `canSeeOwner` for a batch (an array `parcelNodeId`, `stub-or-batch` mode
+ * with node-depth rows) is account-wide only (Studio|Team), never a
+ * per-parcel property-unlock lookup: the unlock table is a per-parcel async
+ * read and this function is a pure text transform. A caller holding an
+ * unlock on one parcel in a batch is under-served here (that parcel's owner
+ * row reads refused rather than granted) rather than over-served -- the
+ * conservative direction for a P1 privacy strip. The single-node path below
+ * carries the real per-parcel check; run_report (always single-parcel) does
+ * too. Known narrowness, not silently dropped.
+ */
+export function normalizeGetSmartSiteResponseText(
+  cortexBodyText: string,
+  mode: "single-node" | "stub-or-batch",
+  canSeeOwner = false,
+): string {
+  if (mode === "single-node") {
+    return normalizeR1ResponseText(cortexBodyText, canSeeOwner);
+  }
+  try {
+    const parsed: unknown = JSON.parse(cortexBodyText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return cortexBodyText;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (!Array.isArray(record.parcels)) return cortexBodyText;
+    return JSON.stringify({
+      ...record,
+      parcels: record.parcels.map((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+        const parcel = row as Record<string, unknown>;
+        if (!parcel.brief) return parcel;
+        return normalizeR1BodyForExternal(parcel, canSeeOwner);
+      }),
+    });
+  } catch {
+    return cortexBodyText;
+  }
+}
+
+/** Brokerage-internal names that must never appear in ask_the_map error text. */
+export const ASK_THE_MAP_INTERNAL_FIELD_NAMES = [
+  "workspaceDid",
+  "personaBucket",
+  "starterPromptId",
+  "mls_id",
+  "presentationMode",
+] as const;
+
+const ASK_THE_MAP_INTERNAL_FIELD_SET = new Set<string>(
+  ASK_THE_MAP_INTERNAL_FIELD_NAMES,
+);
+
+export function askTheMapArgsLeakInternalFields(
+  args: Record<string, unknown>,
+): boolean {
+  return ASK_THE_MAP_INTERNAL_FIELD_NAMES.some((name) =>
+    Object.prototype.hasOwnProperty.call(args, name),
+  );
+}
+
+function stripInternalFieldTokens(value: string): string {
+  let out = value;
+  for (const token of ASK_THE_MAP_INTERNAL_FIELD_NAMES) {
+    out = out.split(token).join("");
+  }
+  return out
+    .replace(/\s+OR\s+OR\s+/g, " OR ")
+    .replace(/\s+OR\s+,/g, ",")
+    .replace(/,\s+OR\s+/g, ", ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*$/g, "")
+    .replace(/^\s*,\s*/g, "")
+    .trim();
+}
+
+function sanitizeAskTheMapJsonValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return stripInternalFieldTokens(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (item) =>
+          typeof item !== "string" || !ASK_THE_MAP_INTERNAL_FIELD_SET.has(item),
+      )
+      .map((item) => sanitizeAskTheMapJsonValue(item));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      if (ASK_THE_MAP_INTERNAL_FIELD_SET.has(key)) continue;
+      out[key] = sanitizeAskTheMapJsonValue(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * P-91 item 10. Strip brokerage-internal field names from MCP and cortex
+ * validation errors. Last line is a substring scrub so a nested string cannot
+ * keep a token the walk missed.
+ */
+export function sanitizeAskTheMapErrorBody(body: string): string {
+  let sanitized: string;
+  try {
+    sanitized = JSON.stringify(sanitizeAskTheMapJsonValue(JSON.parse(body)));
+  } catch {
+    sanitized = stripInternalFieldTokens(body);
+  }
+  if (ASK_THE_MAP_INTERNAL_FIELD_NAMES.some((token) => sanitized.includes(token))) {
+    return stripInternalFieldTokens(sanitized);
+  }
+  return sanitized;
+}
+
 /** Parse cortex R1 JSON and normalize for get_smart_site / run_report. */
-export function normalizeR1ResponseText(cortexBodyText: string): string {
+export function normalizeR1ResponseText(
+  cortexBodyText: string,
+  canSeeOwner = false,
+): string {
   try {
     const parsed: unknown = JSON.parse(cortexBodyText);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return JSON.stringify(
-        normalizeR1BodyForExternal(parsed as Record<string, unknown>),
+        normalizeR1BodyForExternal(parsed as Record<string, unknown>, canSeeOwner),
       );
     }
   } catch {
     // pass through non-JSON errors
   }
   return cortexBodyText;
+}
+
+/**
+ * P-91 v3 Q1. Mirrors RadiusSearchRefuse["code"] /
+ * StreetSearchRefuse["code"] in artifacts/api-server/src/lib/
+ * txgioRadiusSearch.ts / txgioStreetSearch.ts (read 2026-08-31). Not
+ * imported: this package has no workspace dependency on api-server (HTTP
+ * boundary only — see cortex-client.ts); it is a separate deployed
+ * service, not a library. If either source union grows a member, this one
+ * goes stale until updated by hand; declarePlaceSearchRefusal below fails
+ * closed on that drift (returns null, so the caller falls through to the
+ * ordinary declared-error path) rather than inventing a refusal shape for
+ * a code it does not recognise.
+ */
+export type RadiusSearchRefusalCode =
+  | "radius_invalid"
+  | "radius_exceeds_max"
+  | "radius_unbounded";
+
+export type StreetSearchRefusalCode =
+  | "bare_street_unbounded"
+  | "bare_street_not_a_street";
+
+/**
+ * P-106 constraint-search refusals. Same posture as the five above: the
+ * producer looked at the request and answered honestly. `constraint_rail_
+ * unmeasured` is the one that carries a number, and that number is the whole
+ * point of the refusal, so `detail` is preserved on the way through rather
+ * than dropped into the message string.
+ */
+export type ConstraintSearchRefusalCode =
+  | "constraint_bound_missing"
+  | "constraint_county_out_of_scope"
+  | "constraint_single_address"
+  | "constraint_filters_missing"
+  | "constraint_rail_unknown"
+  | "constraint_op_unsupported"
+  | "constraint_cap_invalid"
+  | "constraint_rail_unmeasured"
+  | "constraint_projection_missing";
+
+export type PlaceSearchRefusalCode =
+  | RadiusSearchRefusalCode
+  | StreetSearchRefusalCode
+  | ConstraintSearchRefusalCode;
+
+const PLACE_SEARCH_REFUSAL_CODES: readonly PlaceSearchRefusalCode[] = [
+  "radius_invalid",
+  "radius_exceeds_max",
+  "radius_unbounded",
+  "bare_street_unbounded",
+  "bare_street_not_a_street",
+  "constraint_bound_missing",
+  "constraint_county_out_of_scope",
+  "constraint_single_address",
+  "constraint_filters_missing",
+  "constraint_rail_unknown",
+  "constraint_op_unsupported",
+  "constraint_cap_invalid",
+  "constraint_rail_unmeasured",
+  "constraint_projection_missing",
+];
+
+function isPlaceSearchRefusalCode(
+  value: unknown,
+): value is PlaceSearchRefusalCode {
+  return (
+    typeof value === "string" &&
+    (PLACE_SEARCH_REFUSAL_CODES as readonly string[]).includes(value)
+  );
+}
+
+export type DeclaredPlaceSearchRefusal = {
+  status: "refused";
+  reason: PlaceSearchRefusalCode;
+  message: string;
+  reasonDisplayText: string;
+  /**
+   * The producer's own structured evidence for the refusal, passed through
+   * verbatim when present. `constraint_rail_unmeasured` carries the measured
+   * percentage here; a refusal that names a threshold and hides the number it
+   * was measured against is an assertion, not a determination.
+   */
+  detail?: Record<string, unknown>;
+};
+
+/**
+ * The display text for one of the five closed place-search refusal codes,
+ * read from VOCABULARY (vocabulary.ts) — the one table both the wire and
+ * the panel read from, per that file's own stated design. Throws rather
+ * than falling back to the raw token: per vocabulary.ts's own
+ * requireString convention, a closed code with no display row is a defect
+ * in this package, not a value to paper over with the machine token
+ * standing in for its own translation. `vocabulary` is injectable so a
+ * test can observe that failure against a table missing one row, without
+ * mutating the real, shared VOCABULARY export.
+ */
+export function placeSearchRefusalDisplayText(
+  code: PlaceSearchRefusalCode,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): string {
+  const entry = vocabulary.find((e) => e.token === code);
+  if (!entry) {
+    throw new Error(
+      `vocabulary: no entry for place-search refusal code "${code}"`,
+    );
+  }
+  return entry.displayText;
+}
+
+/**
+ * P-91 v3 Q1. A 422 from radius-search or street-search is
+ * `{error, errorClass: "serve_refused", message}` (gtmErrorBody shape —
+ * gtmErrorClass.ts, brokeragePlaceRadiusSearch.ts,
+ * brokeragePlaceStreetSearch.ts): the producer looked at the request and
+ * answered honestly that it cannot bound the result. That is a DECLARED
+ * REFUSAL, not an upstream fault, and must never be folded into
+ * declareUpstreamNonOk's generic `status: "error"` envelope — doing so
+ * would file `radius_unbounded` next to a 502 gateway timeout under the
+ * same word, which is exactly the defect this function exists to not
+ * repeat (see the P-91 v3 Q1 build brief).
+ *
+ * Returns null for anything that is not one of the five closed codes
+ * (wrong errorClass, missing or empty message, or an unrecognised code) so
+ * the caller falls through to the ordinary declared-error path instead of
+ * inventing a refusal shape for a body that was never one.
+ */
+export function declarePlaceSearchRefusal(
+  bodyText: string,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): DeclaredPlaceSearchRefusal | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const body = parsed as Record<string, unknown>;
+  if (body.errorClass !== "serve_refused") return null;
+  if (!isPlaceSearchRefusalCode(body.error)) return null;
+  if (typeof body.message !== "string" || body.message.length === 0) {
+    return null;
+  }
+  const detail =
+    body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)
+      ? (body.detail as Record<string, unknown>)
+      : undefined;
+  return {
+    status: "refused",
+    reason: body.error,
+    message: body.message,
+    reasonDisplayText: placeSearchRefusalDisplayText(body.error, vocabulary),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's missClass display text, read from the
+ * same shared VOCABULARY table placeSearchRefusalDisplayText reads from
+ * above, so the machine token and the human word can never drift apart.
+ * Throws rather than falling back to the raw token (same convention as
+ * placeSearchRefusalDisplayText and vocabulary.ts's own requireString): a
+ * closed missClass with no display row is a defect in this package, not a
+ * value to paper over. Only `out_of_coverage` is looked up through this
+ * path today — `no-hit` and `located-unbound` ship unenriched, as they
+ * always have, and this function is never called for them.
+ */
+export function missClassDisplayText(
+  missClass: string,
+  vocabulary: readonly VocabularyEntry[] = VOCABULARY,
+): string {
+  const entry = vocabulary.find((e) => e.token === missClass);
+  if (!entry) {
+    throw new Error(`vocabulary: no entry for missClass "${missClass}"`);
+  }
+  return entry.displayText;
+}
+
+/**
+ * P-107 (OPS-16 A-072). find_parcel's out-of-coverage agentGuidance: names
+ * what Smart Site covers today rather than leaving the caller with only a
+ * negative ("out_of_coverage" alone reads no better than "no-hit" did — the
+ * defect the card exists to fix names the SAME collapse for the guidance
+ * text, not just the machine token).
+ *
+ * Mirrors COVERED_STATE_CODE in artifacts/api-server/src/lib/
+ * txgioAddressNormalize.ts (read 2026-09-04): the situs / rooftop store is
+ * Texas-only today. Not imported — this package has no workspace
+ * dependency on api-server (HTTP boundary only, same convention documented
+ * on PlaceSearchRefusalCode above). If api-server's covered-state set ever
+ * grows past one state, this sentence goes stale until updated by hand.
+ *
+ * Deliberately does not enumerate counties (masters 06/08's coverage
+ * posture: state coverage broadens continuously, and a per-county claim
+ * goes stale on the next county landed); state-level is also the actual
+ * granularity this detection operates at.
+ */
+export function outOfCoverageAgentGuidance(outOfCoverageState?: string): string {
+  const parsedAs =
+    typeof outOfCoverageState === "string" && outOfCoverageState.length > 0
+      ? ` This query parsed as state "${outOfCoverageState}".`
+      : "";
+  return (
+    "Smart Site's parcel data covers Texas today; coverage is expanding over " +
+    "time and this is not a permanent boundary." +
+    parsedAs +
+    " This is not a claim that the address does not exist or that the " +
+    "parcel is unverified — only that Smart Site has not reached this " +
+    "place yet. Do not report it to the user as a miss or a bad address; " +
+    "say plainly that this place is outside Smart Site's coverage today."
+  );
 }

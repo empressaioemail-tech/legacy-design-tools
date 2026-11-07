@@ -596,7 +596,8 @@ export function DevAtomsProbe() {
                       </td>
                       <td className="px-2 py-1">{r.sectionTitle ?? "—"}</td>
                       <td className="px-2 py-1 text-xs opacity-90">
-                        {r.bodyPreview}
+                        {r.bodyPreview ??
+                          (r.citationOnly ? "Citation only" : null)}
                       </td>
                       <td className="whitespace-nowrap px-2 py-1 text-xs">
                         <span className="font-mono opacity-70">

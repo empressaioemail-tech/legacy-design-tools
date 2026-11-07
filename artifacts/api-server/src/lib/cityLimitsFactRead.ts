@@ -5,6 +5,12 @@
  * polygons only. ETJ is `etjStatus: unresolved` — this module has no
  * buffer, offset, or guessed-municipality path.
  *
+ * P-296 (2026-09-17): this module still reads no ETJ. The serve wrapper
+ * (`cityLimitsFactServeCutover.ts`) overlays the ETJ determination from
+ * `tx_etj_boundary` onto the wire this module builds, so the served
+ * `etjStatus` is a real read while the city-limits answer itself is
+ * unchanged. A direct `loadCityLimitsFact` call still says `unresolved`.
+ *
  * Empty table or missing usable query point is `unmeasured`, never
  * unincorporated. Unincorporated is only legal when the index is
  * populated and the point sits outside every polygon.
@@ -37,6 +43,17 @@ export type CityLimitsQueryPoint = {
 export type CityLimitsIndexInjection = {
   tablePopulated: boolean;
   entries: CityBoundaryIndexEntry[];
+};
+
+/**
+ * The served city-limits fact: the containment result plus the WGS84 point it
+ * was evaluated at (null when there was no usable point). CTX card F
+ * (2026-08-28): the zoning verdict derives incorporation from this wire and
+ * the Factory walk re-derives containment from the same point against its own
+ * copy of the incorporated-place polygons, so the point travels with the fact.
+ */
+export type CityLimitsFactWire = CityLimitsFact & {
+  queryPoint: CityLimitsQueryPoint | null;
 };
 
 type CityLimitsRow = {
@@ -167,40 +184,53 @@ async function loadBboxCandidates(
 export async function loadCityLimitsFact(
   point: CityLimitsQueryPoint | null,
   db?: CityLimitsDb,
-): Promise<CityLimitsFact> {
+): Promise<CityLimitsFactWire> {
   const usable = point
     ? usableCityLimitsQueryPoint(point.longitude, point.latitude)
     : null;
   if (!usable) {
-    return unmeasuredCityLimitsFact(
-      "no usable parcel query point; city limits are unmeasured",
-    );
+    return {
+      ...unmeasuredCityLimitsFact(
+        "no usable parcel query point; city limits are unmeasured",
+      ),
+      queryPoint: null,
+    };
   }
+  const queryPoint = { longitude: usable.longitude, latitude: usable.latitude };
 
   if (injectedIndex !== undefined) {
     if (injectedIndex === null || !injectedIndex.tablePopulated) {
-      return unmeasuredCityLimitsFact(
-        "tx_city_boundary index is empty; city limits are unmeasured, not unincorporated",
-      );
+      return {
+        ...unmeasuredCityLimitsFact(
+          "tx_city_boundary index is empty; city limits are unmeasured, not unincorporated",
+        ),
+        queryPoint,
+      };
     }
     if (injectedIndex.entries.length === 0) {
-      return unincorporatedOutsidePopulatedIndex();
+      return { ...unincorporatedOutsidePopulatedIndex(), queryPoint };
     }
-    return cityLimitsFactFromContainment(
-      resolveCityContainmentAtPoint(
-        usable.longitude,
-        usable.latitude,
-        injectedIndex.entries,
+    return {
+      ...cityLimitsFactFromContainment(
+        resolveCityContainmentAtPoint(
+          usable.longitude,
+          usable.latitude,
+          injectedIndex.entries,
+        ),
       ),
-    );
+      queryPoint,
+    };
   }
 
   const store = db ?? (await deploymentDb());
   const populated = await tableIsPopulated(store);
   if (!populated) {
-    return unmeasuredCityLimitsFact(
-      "tx_city_boundary has zero rows; city limits are unmeasured, not unincorporated",
-    );
+    return {
+      ...unmeasuredCityLimitsFact(
+        "tx_city_boundary has zero rows; city limits are unmeasured, not unincorporated",
+      ),
+      queryPoint,
+    };
   }
 
   const entries = await loadBboxCandidates(
@@ -209,9 +239,12 @@ export async function loadCityLimitsFact(
     usable.latitude,
   );
   if (entries.length === 0) {
-    return unincorporatedOutsidePopulatedIndex();
+    return { ...unincorporatedOutsidePopulatedIndex(), queryPoint };
   }
-  return cityLimitsFactFromContainment(
-    resolveCityContainmentAtPoint(usable.longitude, usable.latitude, entries),
-  );
+  return {
+    ...cityLimitsFactFromContainment(
+      resolveCityContainmentAtPoint(usable.longitude, usable.latitude, entries),
+    ),
+    queryPoint,
+  };
 }

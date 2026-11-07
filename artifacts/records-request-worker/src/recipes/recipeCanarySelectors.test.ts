@@ -16,6 +16,11 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
     pageIncludes: vi.fn().mockResolvedValue(false),
     currentUrl: vi.fn().mockResolvedValue("https://example.test/"),
     extractResultRows: vi.fn().mockResolvedValue([]),
+    inspectDocumentPurchase: vi.fn().mockResolvedValue({
+      visibleMainText: "",
+      visibleMainControls: [],
+      rowPriceText: null,
+    }),
     ...overrides,
   };
 }
@@ -23,7 +28,7 @@ function mockBrowser(overrides: Partial<RecordsRecipeBrowser> = {}): RecordsReci
 describe("recipeCanarySelectors", () => {
   it("registers versioned probes for index-search portals", () => {
     const probe = canaryProbeForPortal("hays-erss");
-    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v1");
+    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v2");
     expect(probe?.driftSelectors.length).toBeGreaterThan(0);
   });
 
@@ -38,7 +43,7 @@ describe("recipeCanarySelectors", () => {
     const result = await checkRecipeCanarySelectors("hays-erss", browser);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.recipeVersion).toBe("p85-tyler-self-service-v1");
+      expect(result.recipeVersion).toBe("p85-tyler-self-service-v2");
     }
   });
 
@@ -69,5 +74,26 @@ describe("recipeCanarySelectors", () => {
     if (!result.ok) {
       expect(result.reason).toContain("down");
     }
+  });
+
+  it("P-113: registers McLennan under the shared Tyler self-service probe (scaffold retired)", () => {
+    const probe = canaryProbeForPortal("mclennan-online-records");
+    expect(probe?.probeId).toBe("tyler-self-service-v2");
+    expect(probe?.recipeVersion).toBe("p85-tyler-self-service-v2");
+  });
+
+  it("P-113: registers Caldwell under its own CountyGovernmentRecords probe (scaffold retired)", async () => {
+    const probe = canaryProbeForPortal("caldwell-clerk-web");
+    expect(probe?.probeId).toBe("caldwell-countygovernmentrecords-v1");
+    expect(probe?.recipeVersion).toBe("p85-caldwell-countygovernmentrecords-v1");
+
+    const browser = mockBrowser({
+      click: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false })
+        .mockResolvedValueOnce({ ok: true }),
+    });
+    const result = await checkRecipeCanarySelectors("caldwell-clerk-web", browser);
+    expect(result.ok).toBe(true);
   });
 });

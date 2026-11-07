@@ -21,6 +21,26 @@ import {
   resetFloodHazardAtomQueryableForTests,
   setFloodHazardAtomQueryableForTests,
 } from "../lib/floodHazardFactRead";
+import {
+  memoryBoundaryEdgeFactAtoms,
+  resetBoundaryEdgeFactAtomQueryableForTests,
+  setBoundaryEdgeFactAtomQueryableForTests,
+} from "../lib/boundaryEdgeFactRead";
+import {
+  memoryPipelineFactAtoms,
+  resetPipelineFactAtomQueryableForTests,
+  setPipelineFactAtomQueryableForTests,
+} from "../lib/pipelineFactRead";
+import {
+  memoryWellFactAtoms,
+  resetWellFactAtomQueryableForTests,
+  setWellFactAtomQueryableForTests,
+} from "../lib/wellFactRead";
+import {
+  memorySpecialDistrictFactAtoms,
+  resetSpecialDistrictFactAtomQueryableForTests,
+  setSpecialDistrictFactAtomQueryableForTests,
+} from "../lib/specialDistrictFactRead";
 
 vi.mock("@workspace/db", async () => {
   const actual =
@@ -62,6 +82,12 @@ function exchangeAuth(req: Test): Test {
 describe("PE entitlement gate", () => {
   beforeEach(async () => {
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
+    setBoundaryEdgeFactAtomQueryableForTests(memoryBoundaryEdgeFactAtoms([]));
+    setPipelineFactAtomQueryableForTests(memoryPipelineFactAtoms([]));
+    setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
+    setSpecialDistrictFactAtomQueryableForTests(
+      memorySpecialDistrictFactAtoms([]),
+    );
     await db.insert(users).values([
       { id: USER_FREE, displayName: "Free User" },
       { id: USER_PAID, displayName: "Paid User" },
@@ -82,6 +108,10 @@ describe("PE entitlement gate", () => {
 
   afterEach(() => {
     resetFloodHazardAtomQueryableForTests();
+    resetBoundaryEdgeFactAtomQueryableForTests();
+    resetPipelineFactAtomQueryableForTests();
+    resetWellFactAtomQueryableForTests();
+    resetSpecialDistrictFactAtomQueryableForTests();
   });
 
   it("anonymous GET entitlement shows unauthenticated free tier", async () => {
@@ -133,10 +163,13 @@ describe("PE entitlement gate", () => {
         .send({ parcelNodeId: BAKED_NODE_ID }),
       USER_FREE,
     );
-    // The dev-role bypass clears the 402 gate. The honest 404 is expected
-    // because this test has not seeded a snapshot in this case.
+    // The dev-role bypass clears the 402 gate. State constructed here: no
+    // txgio_parcel row for BAKED_NODE_ID and no snapshot, so the P-91 miss
+    // split answers the honest 404 for an ABSENT parcel (parcel_not_found),
+    // not the unbaked one.
     expect(res.status).toBe(404);
-    expect(res.body.error).toBe("baked_snapshot_not_found");
+    expect(res.body.error).toBe("parcel_not_found");
+    expect(res.body.parcelNodeId).toBe(BAKED_NODE_ID);
   });
 
   it("authed paid user receives a cited baked R1 brief and manifest", async () => {
@@ -220,16 +253,50 @@ describe("PE entitlement gate", () => {
     expect(floodSection).toBeDefined();
     expect(floodSection.data).toBeNull();
     expect(floodSection.refusal.state).toBe("refused");
-    expect(floodSection.refusal.code).toBe("unrecognised-producer");
+    /**
+     * P-297 (2026-09-16, operator ruling A-193) CHANGED WHICH REFUSAL THIS IS.
+     * This assertion used to require code "unrecognised-producer" -- the guard
+     * that refuses to cite a RETIRED instrument on the baked/atom path. 48055
+     * is slated for `flood`, so the rail is no longer served from that path at
+     * all: it is served from the parcel's own cell, and this suite configures
+     * no parcel-record store, so the ruled answer is a declared refusal naming
+     * the unreadable store. The retired citation still never appears (asserted
+     * above) and the section still carries a legible refusal rather than going
+     * silently blank, which is what this test exists for.
+     */
+    expect(floodSection.refusal.code).toBe("factory-store-not-configured");
+    expect(String(floodSection.refusal.reason)).toMatch(/retrieval|store|configured/i);
 
     const envelopeSection = res.body.brief.sections.find(
       (section: { id: string }) => section.id === "setbacks-envelope",
     );
     expect(envelopeSection.data).toBeNull();
-    expect(envelopeSection.refusal.code).toBe("baked-envelope-not-served");
+    // Same P-297 substitution as the flood section above: `setbackFrontFt` is
+    // slated in 48055, so the rail is served from the parcel's own cell rather
+    // than from the baked envelope, and with no parcel-record store configured
+    // in this suite the declared refusal names that. The envelope is still
+    // stripped from the wire and still refused, never silently blank.
+    expect(envelopeSection.refusal.code).toBe("parcel-record-store-not-configured");
 
     // Disclosure may be empty when envelope is stripped; brief still 200 cited.
     expect(Array.isArray(res.body.brief.disclosure)).toBe(true);
+
+    // P-87 WDLL 22/26: draw is on the brief; empty edge prefix does not invent a ring.
+    expect(res.body.draw).toMatchObject({
+      node: BAKED_NODE_ID,
+      kind: "parcel",
+      confidence: "seed",
+      url: `https://smartsite.cloud/p/${BAKED_NODE_ID}`,
+    });
+    expect(res.body.draw.ring).toBeUndefined();
+    expect(res.body.draw.attrs).not.toHaveProperty("setbacks");
+    expect(
+      res.body.draw.overlays.find((overlay: { id: string }) => overlay.id === "boundary"),
+    ).toMatchObject({
+      state: "unknown",
+      draw: "hatch-interior",
+      label: "Parcel boundary unmeasured",
+    });
 
     const manifest = await asUser(
       request(getApp()).get(

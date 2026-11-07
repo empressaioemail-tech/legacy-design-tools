@@ -100,6 +100,37 @@ describe("labelEdges — point signal (MEDIUM)", () => {
     const midY = (a.y + b.y) / 2;
     expect(midY).toBeGreaterThan(0); // northern edge (nearest the point)
   });
+
+  it("accepts a point offset within the trust floor on a small lot", () => {
+    // 100ft x 200ft lot: its own span is ~61 m, so the 250 m floor governs and
+    // an ordinary coarse-ish geocode offset still names the front edge.
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLng = ((Math.PI / 180) * 6_378_137 * Math.cos((LAT0 * Math.PI) / 180));
+    const result = labelEdges({
+      ring,
+      road: null,
+      refPoint: { lng: LNG0 + feetToMeters(650) / mPerDegLng, lat: LAT0 },
+    })!;
+    expect(result.signal).toBe("point");
+  });
+
+  it("REFUSES a reference point 3.5 km away instead of inventing a frontage (P-393)", () => {
+    // The measured 2026-09-21 production case: the geocode ladder answered a
+    // street query with the 76708 postcode centroid, 3,512 m from parcel
+    // 48309:103015, and the front edge was still taken from it — a 4.8M sqft
+    // tract drawn with a 5 ft side setback across its street frontage.
+    const ring = rectRing(LNG0, LAT0);
+    const mPerDegLat = (Math.PI / 180) * 6_378_137;
+    const farLat = LAT0 + 3512 / mPerDegLat;
+    const result = labelEdges({
+      ring,
+      road: null,
+      refPoint: { lng: LNG0, lat: farLat },
+    })!;
+    expect(result.signal).toBe("shape"); // honest absence, not a fabricated front
+    expect(result.confidence).toBeLessThan(0.5);
+    expect(result.note).toMatch(/too far from this parcel/);
+  });
 });
 
 describe("labelEdges — shape fallback (LOW confidence, flagged)", () => {

@@ -43,9 +43,13 @@ export interface CreateAnthropicClientOptions {
 export function createAnthropicClient(
   opts: CreateAnthropicClientOptions = {},
 ): Anthropic {
+  const workspaceId = process.env.AI_INTEGRATIONS_ANTHROPIC_WORKSPACE_ID?.trim();
   return new Anthropic({
     apiKey: opts.apiKey ?? process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY!,
     baseURL: opts.baseURL ?? process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL!,
+    ...(workspaceId
+      ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } }
+      : {}),
     ...(opts.fetcher ? { fetch: opts.fetcher } : {}),
   });
 }

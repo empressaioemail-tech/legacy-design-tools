@@ -3,9 +3,9 @@
 Playwright Cloud Run worker for clerk portal records search.
 
 - **Williamson default:** `williamson-publicsearch` (TylerHost returns HTTP 403 to headless bots).
-- **Tyler counties (Hays, Williamson TylerHost):** disclaimer → owner-name search → results capture with SHA-256.
+- **Tyler counties (Hays, Williamson TylerHost, McLennan):** disclaimer → owner-name search → results capture with SHA-256. McLennan is the same Tyler self-service DOCSEARCH product as Hays (verified live 2026-09-03, reachable headless unlike Williamson TylerHost) but its combined name field id (`field_BothNamesID`) differs from Hays' (`field_GrantorGrantee`) — see `TYLER_MCLENNAN_SEARCH_INPUT_SELECTORS`.
 - **Aumentum counties (Bastrop, Travis tccsearch):** SearchTerms → grantor / legal / subdivision queries → per-query results capture with SHA-256.
-- **Other counties:** reachability scaffold until search recipes land.
+- **Caldwell (CountyGovernmentRecords.com):** a different Tyler Technologies product than the ERSS/self-service counties, verified live 2026-09-03. The splash page's only action routes straight to a login page — "Users of this site must register to conduct document searches," with no anonymous search path. The recipe reaches the real portal, acknowledges the splash, and fails closed to `needs-human`/`login-required` (same tri-state contract as every other county); it does not register or hold a login credential (NO PRIVILEGED DATA).
 
 ## Job contract
 
@@ -74,8 +74,8 @@ gcloud run jobs execute records-request-worker \
 | williamson-tylerhost  | 48491  | index-search  |
 | williamson-publicsearch | 48491 | index-search (default) |
 | hays-erss             | 48209  | index-search  |
-| caldwell-clerk-web    | 48055  | scaffold      |
-| mclennan-online-records | 48309 | scaffold      |
+| caldwell-clerk-web    | 48055  | index-search (fails closed to needs-human/login-required — real portal has no anonymous search path, verified live 2026-09-03) |
+| mclennan-online-records | 48309 | index-search (P-113, verified live 2026-09-03) |
 
 Index-search recipes require `searchTerms.ownerName` on the job payload (cortex enriches at enqueue from TxGIO). Login walls route to `needs-human`.
 

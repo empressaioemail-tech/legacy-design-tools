@@ -110,7 +110,7 @@ Contract for `hauska-brief-extension` consuming cortex-api PB-301 encumbrance pa
 
 ## LLM surfaces
 
-After upload, `POST /brief` and `POST /research/chat` include uploaded clause excerpts in the Grok context (private restrictions block). `privateRestrictions` on the brief payload mirrors engagement briefing shape.
+After upload, `POST /brief` and `POST /research/chat` include uploaded clause excerpts in the LLM (Anthropic) context (private restrictions block). `privateRestrictions` on the brief payload mirrors engagement briefing shape.
 
 ## Architect engagement path (unchanged)
 

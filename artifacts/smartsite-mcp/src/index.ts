@@ -1,14 +1,56 @@
 import dotenv from "dotenv";
 
-import { createSmartsiteMcpApp } from "./app.js";
-import { isAuthConfigured, loadAuthConfig } from "./auth.js";
 import { SERVER_NAME } from "./constants.js";
+import {
+  MAPBOX_CARD_TOKEN_ENV_NAME,
+  MapboxCardTokenError,
+  requireMapboxCardToken,
+} from "./mapbox-card-token.js";
+import {
+  PARCEL_TILES_ORIGIN_ENV_NAME,
+  ParcelTilesOriginError,
+  requireParcelTilesOrigin,
+} from "./parcel-tiles-origin.js";
 
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT ?? "8080", 10);
 
+/** P-446: refuse to boot without parcel tile origin (D-42), not at page-build time only. */
+export function assertParcelTilesOriginConfigured(): void {
+  requireParcelTilesOrigin();
+}
+
+/** P-462: refuse to boot without a public Mapbox card token. No Esri fallback. */
+export function assertMapboxCardTokenConfigured(): void {
+  requireMapboxCardToken();
+}
+
 async function main(): Promise<void> {
+  try {
+    assertParcelTilesOriginConfigured();
+    assertMapboxCardTokenConfigured();
+  } catch (err) {
+    if (err instanceof ParcelTilesOriginError || err instanceof MapboxCardTokenError) {
+      console.error(
+        JSON.stringify({
+          event: "smartsite_mcp_boot_refused",
+          refusal: err.refusal,
+          message: err.message,
+          env: err instanceof MapboxCardTokenError ? MAPBOX_CARD_TOKEN_ENV_NAME : PARCEL_TILES_ORIGIN_ENV_NAME,
+        }),
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
+  if (process.argv.includes("--print-app-html")) {
+    const { buildAppHtml } = await import("./mcp-app.js");
+    process.stdout.write(buildAppHtml());
+    process.exit(0);
+  }
+  const { createSmartsiteMcpApp } = await import("./app.js");
+  const { isAuthConfigured, loadAuthConfig } = await import("./auth.js");
   const authConfig = loadAuthConfig();
   const app = createSmartsiteMcpApp({ authConfig });
 

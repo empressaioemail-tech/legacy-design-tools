@@ -29,6 +29,17 @@
  *  - owner: first owner row per property wins, except a
  *    `primaryowner=1` row (WCAD) replaces a non-primary one.
  *  - exemptions: `ExemptionList` split on `|`/`,`/`;`, uppercased.
+ *  - published identifiers: `QuickRefID` and `PropertyNumber` are read
+ *    alongside `PropertyID` and kept verbatim. Orion publishes all three
+ *    in adjacent columns and this parser used to read only the first,
+ *    which is how a county whose GIS publisher keys parcels on the
+ *    QuickRefID number ended up with two identifiers sharing one
+ *    bare-numeric column (Hays 48209; see
+ *    lib/db/drizzle/0099_cad_property_published_identifiers.sql). Both
+ *    are NULLABLE and honestly null: the WCAD Socrata shape carries
+ *    neither column, `HeaderIndex.get` returns "" for a column that is
+ *    not there, and `textOrNull` turns that into null rather than an
+ *    empty string. Nothing is derived from `PropertyID`.
  *  - property_use_code: the Texas PTAD state category code (A1, E1,
  *    D1, ...) from the record-3 Land file's `StateCode` column, keyed
  *    on PropertyID. A property has one land row per land segment; the
@@ -317,6 +328,12 @@ export async function* parseOrionExport(
       livingAreaSqft: squareFootage ?? segment?.mainAreaSqft ?? null,
       landAcres: explicitAcresOrNull(header.get(row, "legalacres")),
       propertyUseCode: land.get(propId) ?? null,
+      // Read verbatim, never normalized and never derived from PropertyID.
+      // A publisher that does not carry the column yields "" from
+      // HeaderIndex.get, which textOrNull turns into null -- the honest
+      // "this export did not publish it", distinct from a published blank.
+      quickRefId: textOrNull(header.get(row, "quickrefid")),
+      propertyNumber: textOrNull(header.get(row, "propertynumber")),
     };
     if (opts.limit !== undefined && counters.rowsParsed >= opts.limit) break;
   }

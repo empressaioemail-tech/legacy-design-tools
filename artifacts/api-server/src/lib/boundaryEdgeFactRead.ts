@@ -26,6 +26,12 @@
  */
 
 import pg from "pg";
+import {
+  serveBoundaryEdgeSetback,
+  type BoundaryEdgeSetbackServe,
+} from "./setbackProvenanceDisposition";
+
+export type { BoundaryEdgeSetbackServe };
 
 const PADDED_SUFFIX = ".00000000";
 export const BOUNDARY_EDGE_ENTITY_TYPE = "property-boundary-edge" as const;
@@ -124,9 +130,11 @@ export type BoundaryEdgeItem = {
   parcelNeighborPropId: string | null;
   facingRoad: BoundaryFacingRoad | null;
   frontBasis: string | null;
-  setback: unknown;
+  setback: BoundaryEdgeSetbackServe;
   interior: BoundaryInterior | null;
   propertyLineTags: BoundaryPropertyLineTags | null;
+  status: string | null;
+  sourceAdapter: string | null;
 };
 
 export type BoundaryEdgeFactPresent = {
@@ -141,7 +149,7 @@ export type BoundaryEdgeFactPresent = {
   parcelNeighborPropId: string | null;
   facingRoad: BoundaryFacingRoad | null;
   frontBasis: string | null;
-  setback: unknown;
+  setback: BoundaryEdgeSetbackServe;
   interior: BoundaryInterior | null;
   propertyLineTags: BoundaryPropertyLineTags | null;
   edges: BoundaryEdgeItem[];
@@ -323,9 +331,11 @@ function presentEdgeFromRow(
     parcelNeighborPropId: asNullableString(rec.parcelNeighborPropId),
     facingRoad: asFacingRoad(rec.facingRoad),
     frontBasis: asNullableString(rec.frontBasis),
-    setback: rec.setback ?? null,
+    setback: serveBoundaryEdgeSetback(rec.setback),
     interior: asInterior(rec.interior),
     propertyLineTags: asPropertyLineTags(rec.propertyLineTags),
+    status: asNullableString(rec.status),
+    sourceAdapter: asNullableString(rec.sourceAdapter),
   };
 }
 
@@ -372,6 +382,7 @@ function presentFromItems(
     parcelNeighborPropId: lead.parcelNeighborPropId,
     facingRoad: lead.facingRoad,
     frontBasis: lead.frontBasis,
+    // Already classified at presentEdgeFromRow. Do not recopy raw body.setback.
     setback: lead.setback,
     interior: lead.interior,
     propertyLineTags: lead.propertyLineTags,
@@ -410,6 +421,7 @@ export function interpretBoundaryEdgeFactRows(
   const integerPresent: BoundaryEdgeItem[] = [];
   const paddedPresent: BoundaryEdgeItem[] = [];
   const bodyByEntityId = new Map<string, Record<string, unknown>>();
+  let retiredDropped = 0;
 
   for (const row of hits) {
     const rec = asRecord(row.body);
@@ -424,9 +436,21 @@ export function interpretBoundaryEdgeFactRows(
         reason: parsed.malformed,
       };
     }
+    if ((parsed.status ?? "").trim() === "retired") {
+      retiredDropped += 1;
+      continue;
+    }
     const prefix = prefixOfEntityId(row.entity_id, tried);
     if (prefix === tried[0]) integerPresent.push(parsed);
     else paddedPresent.push(parsed);
+  }
+
+  if (
+    integerPresent.length === 0 &&
+    paddedPresent.length === 0 &&
+    retiredDropped > 0
+  ) {
+    return presentFromItems([], bodyByEntityId, tried);
   }
 
   if (integerPresent.length > 0 && paddedPresent.length > 0) {

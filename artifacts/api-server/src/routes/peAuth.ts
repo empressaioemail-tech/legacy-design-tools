@@ -7,75 +7,53 @@
  * WDLL items 13, 16 — user-aware session; no fake OAuth on Cortex side.
  */
 
-import { createHash, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
-import { DEFAULT_TENANT_ID, SESSION_COOKIE } from "../middlewares/session";
-import { mintSessionToken } from "../lib/sessionToken";
-import { upsertPeOidcIdentity, getPeAccessTier } from "../lib/peIdentity";
-import { installIdFromRequest } from "../lib/brokerageInstallId";
-import { claimInstallHistoryForUser } from "../lib/brokerageInstallClaim";
+import { upsertPeOidcIdentity } from "../lib/peIdentity";
+import { completePeSignIn } from "../lib/peSignInCompletion";
+import { verifyPeExchangeAuth } from "../lib/peExchangeAuth";
 import { logger } from "../lib/logger";
+import { normalizeAdMatch } from "../lib/peAdMatch";
 
 const router: IRouter = Router();
 
 const ExchangeBodySchema = z.object({
+  /**
+   * "microsoft" is still accepted here ONLY because the MCP connector's
+   * login page (hauska-map api/_lib/mcp-login-page.ts) and existing
+   * Microsoft-created accounts sign in through this exchange. The app no
+   * longer offers Microsoft (T1 ruling 2, 2026-10-22), and a Microsoft
+   * identity is never trusted for email linking (peIdentityEmailVerified).
+   */
   provider: z.enum(["google", "microsoft"]),
   subject: z.string().min(1).max(256),
   email: z.string().email().optional(),
+  /**
+   * T1-A: the IdP's own verified-email claim (Google ID token
+   * `email_verified`), forwarded by the BFF. Only a true value lets this
+   * identity link to an existing account with the same verified email.
+   * Absent (every BFF build before T1-A) means unverified: no linking.
+   */
+  emailVerified: z.boolean().optional(),
   displayName: z.string().max(256).optional(),
   /** Anonymous pre-auth install to claim (WDLL 2026-08-05 item 6). Header takes precedence when both present. */
   installId: z.string().min(8).max(256).optional(),
+  /**
+   * First-touch campaign set, forwarded by the BFF from the sealed OIDC
+   * state (hauska-map `api/_lib/campaign.ts`). Absent when the visitor
+   * arrived with no parameters; absence is `ss_src_direct` downstream.
+   */
+  campaign: z.string().max(512).optional(),
+  /**
+   * The signing-in browser's Meta match keys (hauska-map
+   * api/_lib/meta-signin-handoff.ts metaMatchForCortex). Shape-validated by
+   * normalizeAdMatch; a malformed value is dropped, never a 400.
+   */
+  metaMatch: z.unknown().optional(),
 });
 
-function exchangeSecret(): string | null {
-  const secret =
-    process.env["PE_SESSION_EXCHANGE_SECRET"]?.trim() ||
-    process.env["SESSION_SECRET"]?.trim();
-  return secret || null;
-}
-
-function timingSafeStringEqual(a: string, b: string): boolean {
-  const ha = createHash("sha256").update(a, "utf8").digest();
-  const hb = createHash("sha256").update(b, "utf8").digest();
-  return timingSafeEqual(ha, hb);
-}
-
-function verifyExchangeAuth(req: Request): boolean {
-  const secret = exchangeSecret();
-  if (!secret) return false;
-  const auth = req.headers.authorization;
-  if (typeof auth === "string" && auth.startsWith("Bearer ")) {
-    return timingSafeStringEqual(auth.slice(7), secret);
-  }
-  const header = req.headers["x-pe-exchange-secret"];
-  if (typeof header === "string") {
-    return timingSafeStringEqual(header, secret);
-  }
-  return false;
-}
-
-function applicantSession(userId: string) {
-  return {
-    audience: "user" as const,
-    tenantId: DEFAULT_TENANT_ID,
-    requestor: { kind: "user" as const, id: userId },
-  };
-}
-
-function setSessionCookie(res: Response, token: string): void {
-  const secure = process.env["NODE_ENV"] === "production";
-  res.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure,
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: "/",
-  });
-}
-
 router.post("/auth/session-exchange", async (req: Request, res: Response) => {
-  if (!verifyExchangeAuth(req)) {
+  if (!verifyPeExchangeAuth(req)) {
     res.status(401).json({ error: "exchange_unauthorized" });
     return;
   }
@@ -86,36 +64,12 @@ router.post("/auth/session-exchange", async (req: Request, res: Response) => {
   }
   try {
     const identity = await upsertPeOidcIdentity(parsed.data);
-    const token = mintSessionToken(applicantSession(identity.userId));
-    const tier = await getPeAccessTier(identity.userId);
-    setSessionCookie(res, token);
-
-    // Anonymous claim (WDLL 2026-08-05 item 6): the header wins over a body
-    // field so the BFF's own install-id plumbing (X-Hauska-Install-Id) is
-    // authoritative when both are present. Claim failures (e.g. the install
-    // was already claimed by a different user) never fail sign-in — this is
-    // best-effort data recovery, not an auth precondition.
-    const installId = installIdFromRequest(req) ?? parsed.data.installId ?? null;
-    let claimedInstallHistory = false;
-    if (installId) {
-      const claim = await claimInstallHistoryForUser(installId, identity.userId);
-      claimedInstallHistory = claim.ok && claim.claimed;
-      if (!claim.ok) {
-        logger.info(
-          { installId, userId: identity.userId, claimedBy: claim.claimedBy },
-          "pe session-exchange: install already claimed by a different user",
-        );
-      }
-    }
-
-    res.status(identity.isNewUser ? 201 : 200).json({
-      token,
-      userId: identity.userId,
-      email: identity.email,
-      displayName: identity.displayName,
-      entitlement: { tier },
-      claimedInstallHistory,
+    const body = await completePeSignIn(req, res, identity, {
+      ...(parsed.data.installId ? { installId: parsed.data.installId } : {}),
+      ...(parsed.data.campaign ? { campaign: parsed.data.campaign } : {}),
+      adMatch: normalizeAdMatch(parsed.data.metaMatch),
     });
+    res.status(identity.isNewUser ? 201 : 200).json(body);
   } catch (err) {
     logger.error({ err }, "pe session-exchange failed");
     res.status(500).json({ error: "session_exchange_failed" });

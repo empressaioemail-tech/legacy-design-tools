@@ -1,0 +1,88 @@
+name: Neon pooler read-only canary
+
+# WHY. On 2026-08-31 the Neon pooler injected `SET default_transaction_read_only = on`
+# for one database. Every write across cortex-api and smartsite-mcp failed while READS
+# STAYED GREEN, so /health answered ok and nothing alerted. It recurred twice more the
+# same day via deploys that reverted the mitigation. Over thirteen hours undetected in
+# total, and every minute of it invisible.
+#
+# The Neon console cannot see this: its operations log holds zero entries for the
+# production endpoint across a window CONTAINING the incident, because that API tracks
+# compute lifecycle, not proxy-level session injection. Silence there meant nothing.
+# This job exists to turn that silence into a signal.
+#
+# WHAT FAILS WHEN IT FIRES: this job exits non-zero, which is a red run and a
+# notification. That is the alert. If this workflow is ever made non-blocking or its
+# failure ignored, it becomes the dormant control it was built to replace.
+#
+# IT PROBES THE POOLER WE ARE NOT USING. Production runs UNPOOLED on
+# DEPLOYMENT_DATABASE_URL_DIRECT. This checks DEPLOYMENT_DATABASE_URL, the pooled
+# endpoint, so "is it safe to go back" becomes measured instead of guessed. The script
+# REFUSES a non-pooled uri rather than producing a comfortable meaningless green.
+
+on:
+  schedule:
+    # Every 10 minutes. The 2026-08-31 episodes lasted hours, so this cadence is well
+    # inside the shortest one. GitHub delays scheduled runs under load and does not
+    # guarantee the interval; that is acceptable here because we are detecting a
+    # persistent condition, not a transient spike. It is NOT acceptable to read a
+    # delayed run as a passing run.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# Never let two overlapping runs race; the newest reading is the one that matters.
+concurrency:
+  group: neon-pooler-canary
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  canary:
+    name: Is the pooled endpoint injecting read-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The predicate is verified BEFORE it is trusted. A broken predicate would
+      # otherwise pass everything and manufacture exactly the false silence this
+      # canary exists to end. This step failing is a real failure, not noise.
+      - name: Self-test the predicate (must reject the incident, not just accept health)
+        run: node scripts/_neon-pooler-readonly-canary.mjs --selftest
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Probe the POOLED endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID secret is required}"
+          # `::add-mask::` keeps the connection string out of the run log, the same
+          # handling the deploy workflow uses for this secret.
+          URL=$(gcloud secrets versions access latest \
+            --secret=DEPLOYMENT_DATABASE_URL \
+            --project="$GCP_PROJECT_ID")
+          echo "::add-mask::$URL"
+          DEPLOYMENT_DATABASE_URL="$URL" node scripts/_neon-pooler-readonly-canary.mjs
+
+      - name: What to do when this job is red
+        if: failure()
+        run: |
+          echo "::error::Neon pooler canary FAILED. Do NOT revert production to the pooled endpoint."
+          echo "Production is unaffected while both services bind DEPLOYMENT_DATABASE_URL_DIRECT."
+          echo "Confirm that binding before assuming safety:"
+          echo "  gcloud run revisions describe <rev> --region us-central1 --project <proj> --format json"
+          echo "  then read spec.containers[0].env DATABASE_URL secretKeyRef BY FIELD NAME."
+          echo "Background: doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md"

@@ -87,9 +87,6 @@ export type ModelRoutingTier = "high" | "low";
 export interface ConsequenceGatedRouteDecision {
   stratum: ConsequenceStratum;
   modelTier: ModelRoutingTier;
-  /** Grok model id for this stratum — asserted routing, not earned. */
-  grokModel: string;
-  ensembleEnabled: boolean;
   routingProvenance: "asserted";
   label: string;
 }
@@ -100,27 +97,9 @@ const HIGH_STRATA = new Set<ConsequenceStratum>([
   "essential",
 ]);
 
-export function resolveHighConsequenceGrokModel(): string {
-  return (
-    process.env.XAI_FINDING_HIGH_MODEL?.trim() ||
-    process.env.XAI_MODEL?.trim() ||
-    "grok-3"
-  );
-}
-
-export function resolveLowConsequenceGrokModel(): string {
-  return (
-    process.env.XAI_FINDING_LOW_MODEL?.trim() ||
-    process.env.XAI_FINDING_MODEL?.trim() ||
-    process.env.XAI_MODEL?.trim() ||
-    "grok-3-mini"
-  );
-}
-
-export function resolveConsequenceEnsembleEnabled(): boolean {
-  const raw = (process.env.AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE ?? "").toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
-}
+// G-309 A20: the tier no longer selects a model (every code-citing call
+// uses CODE_CITING_ANTHROPIC_MODEL from @workspace/briefing-engine) and
+// there is no ensemble; AIR_FINDING_ENSEMBLE_HIGH_CONSEQUENCE is ignored.
 
 /**
  * Route finding generation to high or low model tier based on F2
@@ -131,19 +110,13 @@ export function resolveConsequenceGatedRoute(
 ): ConsequenceGatedRouteDecision {
   const stratum = maxConsequenceStratum(sections);
   const high = HIGH_STRATA.has(stratum);
-  const ensembleEnabled = high && resolveConsequenceEnsembleEnabled();
-  const grokModel = high
-    ? resolveHighConsequenceGrokModel()
-    : resolveLowConsequenceGrokModel();
 
   return {
     stratum,
     modelTier: high ? "high" : "low",
-    grokModel,
-    ensembleEnabled,
     routingProvenance: "asserted",
     label: high
-      ? `Asserted routing — high-consequence stratum (${stratum})${ensembleEnabled ? ", ensemble" : ""}`
+      ? `Asserted routing — high-consequence stratum (${stratum})`
       : `Asserted routing — routine stratum`,
   };
 }

@@ -108,9 +108,19 @@ export async function* fetchAddressFeatures(
       opts.limit !== undefined ? opts.limit - total : ADDRESS_PAGE_SIZE;
     if (remaining <= 0) return;
     const want = Math.min(ADDRESS_PAGE_SIZE, remaining);
+    // orderByFields pins resultOffset paging to a stable server-side
+    // sort. Without it, offset-based paging over an unordered result set
+    // is not guaranteed stable page-to-page (the server is free to
+    // return rows in whatever order its own scan produces, which can
+    // shift between calls), which can silently skip or repeat features
+    // across a multi-page crawl. `objectid` is the field name as
+    // documented live against this exact layer (see parse.ts's schema
+    // comment) — lowercase, matching the service's own field, not the
+    // store's camelCase column.
     const url =
       `${layer}/query?where=${where}` +
-      `&outFields=*&resultOffset=${offset}&resultRecordCount=${want}` +
+      `&outFields=*&orderByFields=${encodeURIComponent("objectid ASC")}` +
+      `&resultOffset=${offset}&resultRecordCount=${want}` +
       `&returnGeometry=true&outSR=4326&f=geojson`;
     const page = (await fetchJson(url)) as {
       features?: unknown[];

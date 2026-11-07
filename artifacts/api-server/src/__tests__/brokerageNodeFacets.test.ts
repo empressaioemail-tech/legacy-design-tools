@@ -79,6 +79,31 @@ import {
   resetOwnerFactAtomQueryableForTests,
   setOwnerFactAtomQueryableForTests,
 } from "../lib/ownerFactRead";
+import {
+  memoryParcelRecordStore,
+  resetParcelRecordQueryableForTests,
+  setParcelRecordQueryableForTests,
+} from "../lib/parcelRecordCellRead";
+// P-297: flood routes through parcelRecordFactRead.ts, which keeps its OWN
+// injected-queryable seam (same function names, deliberately a separate
+// module-level variable). Alias them so a test can set one without clearing
+// the other.
+import {
+  memoryParcelRecordFlood,
+  resetParcelRecordQueryableForTests as resetParcelRecordFloodQueryableForTests,
+  setParcelRecordQueryableForTests as setParcelRecordFloodQueryableForTests,
+} from "../lib/parcelRecordFactRead";
+import {
+  SETBACK_FRONT_FT_RAIL_KEY,
+  SETBACK_SIDE_FT_RAIL_KEY,
+  SETBACK_REAR_FT_RAIL_KEY,
+  SETBACK_CORNER_FT_RAIL_KEY,
+} from "../lib/setbacksFactFromParcelRecord";
+import {
+  ZONING_DISTRICT_RAIL_KEY,
+  ZONING_JURISDICTION_KEY_RAIL_KEY,
+  ZONING_PROVENANCE_RAIL_KEY,
+} from "../lib/zoningFactFromParcelRecord";
 import { mintSessionToken } from "../lib/sessionToken";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 import {
@@ -416,20 +441,36 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(TIER2_ADAPTER_KEY).toBe("node-facets:tier2");
   });
 
-  it("the route source wires floodHazardFact from atoms and keeps flood: null", () => {
+  it("the route source wires floodHazardFact through the PARCEL-FLOOD-CUTOVER serve cutover and keeps flood: null", () => {
+    // F-01, PARCEL-FLOOD-CUTOVER (2026-09-03): the route now calls
+    // loadFloodHazardFactForServe (floodHazardFactServeCutover.ts),
+    // mirroring wells/specialDistricts/cityLimits' own PARCEL-B-SLATE1
+    // cutovers -- checks the rail allowlist and delegates to
+    // loadFloodHazardFactAtom unchanged when not slated+passing. The next
+    // test asserts THAT module's own wiring still lands on atoms.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
     expect(routeSrc).toMatch(
-      /from\s+["']\.\.\/lib\/floodHazardFactRead["']/,
+      /from\s+["']\.\.\/lib\/floodHazardFactServeCutover["']/,
     );
-    expect(routeSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(routeSrc).toMatch(/loadFloodHazardFactForServe/);
     expect(routeSrc).toMatch(/floodHazardFact/);
     // SS-W16 floor: the CI gate requires these two markers in this file.
     expect(routeSrc).toMatch(/flood:\s*null;/);
     expect(routeSrc).toMatch(/flood:\s*null,/);
     expect(routeSrc).not.toMatch(/flood:\s*p\.flood/);
+  });
+
+  it("floodHazardFactServeCutover (the PARCEL-FLOOD-CUTOVER wrapper) itself wires floodHazardFact from atoms", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "floodHazardFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/floodHazardFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadFloodHazardFactAtom/);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires landUseFact from atoms and keeps baked landUse", () => {
@@ -447,21 +488,41 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/landUseFact\s*=\s*.*baseFacts\.landUse/);
   });
 
-  it("the route source wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+  it("the route source wires specialDistrictFact through the PARCEL-B-SLATE1 serve cutover and does not read bake/CAD/mud-pid directly", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadSpecialDistrictFactForServe (specialDistrictFactServeCutover.ts),
+    // mirroring wells' own PARCEL-B-READER cutover -- checks the rail
+    // allowlist (today: legacy for every unslated pair) and delegates to
+    // loadSpecialDistrictFactAtom unchanged. The next test asserts THAT
+    // module's own wiring still lands on atoms, so this file no longer
+    // naming specialDistrictFactRead directly does not weaken the "never
+    // bake/CAD/mud-pid" guarantee -- it moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
     expect(routeSrc).toMatch(
-      /from\s+["']\.\.\/lib\/specialDistrictFactRead["']/,
+      /from\s+["']\.\.\/lib\/specialDistrictFactServeCutover["']/,
     );
-    expect(routeSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(routeSrc).toMatch(/loadSpecialDistrictFactForServe/);
     expect(routeSrc).toMatch(/specialDistrictFact/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
     expect(routeSrc).not.toMatch(
       /specialDistrictFact\s*=\s*.*place_layer_snapshots/,
     );
+  });
+
+  it("specialDistrictFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires specialDistrictFact from atoms and does not read bake/CAD/mud-pid", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "specialDistrictFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/specialDistrictFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadSpecialDistrictFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*mud-pid[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires pipelineFact from atoms and does not read bake/CAD/GIS", () => {
@@ -482,13 +543,21 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/specialDistrictFactFromCortexRoot/);
   });
 
-  it("the route source wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+  it("the route source wires wellFact through the PARCEL-B-READER serve cutover and does not read bake/CAD/GIS/texas-rrc directly", () => {
+    // F-01, PARCEL-B-READER (2026-09-02): the route now calls
+    // loadWellFactForServe (wellFactServeCutover.ts), which checks the
+    // rail allowlist (today: always 'legacy', PARCEL_RECORD_SLATE is
+    // empty) and then delegates to loadWellFactAtom unchanged. The next
+    // test asserts THAT module's own wiring still lands on atoms, so this
+    // one file's source no longer needing to name wellFactRead directly
+    // does not weaken the "never bake/CAD/GIS/texas-rrc" guarantee -- it
+    // moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
-    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactRead["']/);
-    expect(routeSrc).toMatch(/loadWellFactAtom/);
+    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/wellFactServeCutover["']/);
+    expect(routeSrc).toMatch(/loadWellFactForServe/);
     expect(routeSrc).toMatch(/wellFact/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
@@ -496,6 +565,19 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*place_layer_snapshots/);
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*texas-rrc/);
     expect(routeSrc).not.toMatch(/wellFact\s*=\s*.*tx_rrc_well/);
+  });
+
+  it("wellFactServeCutover (the PARCEL-B-READER wrapper) itself wires wellFact from atoms and does not read bake/CAD/GIS/texas-rrc", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "wellFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/wellFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadWellFactAtom/);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*texas-rrc[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/from\s+["'][^"']*tx_rrc_well[^"']*["']/i);
+    expect(wrapperSrc).not.toMatch(/place_layer_snapshots/);
   });
 
   it("the route source wires buildingFootprintFact from atoms and does not read bake/CAD/GIS", () => {
@@ -547,7 +629,10 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).toMatch(/loadOwnerFactAtom/);
     expect(routeSrc).toMatch(/ownerFact/);
     expect(routeSrc).toMatch(/authenticatedBrokerageUserId/);
-    expect(routeSrc).toMatch(/subscriptionTierGrantsStudio/);
+    // Widened 2026-09-05 (operator: "owner needs to be a part of unlock
+    // too"): the tier check alone is no longer the gate. grantsOwnerCoGatedFields
+    // (Studio|Team OR an active Property Unlock on this parcel) is.
+    expect(routeSrc).toMatch(/grantsOwnerCoGatedFields/);
     expect(routeSrc).toMatch(/resolvePeEntitlement/);
     expect(routeSrc).toMatch(/studio-gated|studioGatedOwnerFactRefusal/);
     expect(routeSrc).not.toMatch(/from\s+["'][^"']*cad_property[^"']*["']/i);
@@ -559,18 +644,40 @@ describe("brokerageNodeFacets boot-proof (no bake CLI on the boot graph)", () =>
     expect(routeSrc).not.toMatch(/stripe/i);
   });
 
-  it("the route source wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+  it("the route source wires cityLimitsFact through the PARCEL-B-SLATE1 serve cutover, not an atom or ETJ buffer", () => {
+    // F-01, PARCEL-B-SLATE1 (2026-09-02): the route now calls
+    // loadCityLimitsFactForServe (cityLimitsFactServeCutover.ts), mirroring
+    // wells' own PARCEL-B-READER cutover -- checks the rail allowlist
+    // (today: legacy for every unslated pair) and delegates to
+    // loadCityLimitsFact unchanged. The next test asserts THAT module's own
+    // wiring still lands on tx_city_boundary PIP, so this file no longer
+    // naming cityLimitsFactRead directly does not weaken the "not an atom
+    // or ETJ buffer" guarantee -- it moves one hop, verified below.
     const routeSrc = readFileSync(
       join(here, "..", "routes", "brokerageNodeFacets.ts"),
       "utf8",
     );
-    expect(routeSrc).toMatch(/from\s+["']\.\.\/lib\/cityLimitsFactRead["']/);
-    expect(routeSrc).toMatch(/loadCityLimitsFact/);
+    expect(routeSrc).toMatch(
+      /from\s+["']\.\.\/lib\/cityLimitsFactServeCutover["']/,
+    );
+    expect(routeSrc).toMatch(/loadCityLimitsFactForServe/);
     expect(routeSrc).toMatch(/cityLimitsFact/);
     expect(routeSrc).not.toMatch(/cityLimitsFact\s*=\s*.*situsCity/);
     expect(routeSrc).not.toMatch(/offset\s*2\s*miles/i);
     expect(routeSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
     expect(routeSrc).not.toMatch(/--apply/);
+  });
+
+  it("cityLimitsFactServeCutover (the PARCEL-B-SLATE1 wrapper) itself wires cityLimitsFact from tx_city_boundary PIP, not an atom or ETJ buffer", () => {
+    const wrapperSrc = readFileSync(
+      join(here, "..", "lib", "cityLimitsFactServeCutover.ts"),
+      "utf8",
+    );
+    expect(wrapperSrc).toMatch(/from\s+["']\.\/cityLimitsFactRead["']/);
+    expect(wrapperSrc).toMatch(/loadCityLimitsFact/);
+    expect(wrapperSrc).not.toMatch(/offset\s*2\s*miles/i);
+    expect(wrapperSrc).not.toMatch(/buffer(ed)?\s*(polygon|ring|miles)/i);
+    expect(wrapperSrc).not.toMatch(/--apply/);
   });
 });
 
@@ -707,6 +814,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   beforeEach(async () => {
+    // P-297: the serve decision for a slated rail is its own cell, so the cell
+    // seam is now part of every case in this file. Reset it here (and in
+    // afterEach) so a cell fixture seeded by one test cannot decide another's.
+    resetParcelRecordQueryableForTests();
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     setLandUseFactAtomQueryableForTests(memoryLandUseFactAtoms([]));
     setSpecialDistrictFactAtomQueryableForTests(
@@ -750,6 +861,8 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
   });
 
   afterEach(async () => {
+    resetParcelRecordQueryableForTests();
+    resetParcelRecordFloodQueryableForTests();
     resetFloodHazardAtomQueryableForTests();
     resetLandUseFactAtomQueryableForTests();
     resetSpecialDistrictFactAtomQueryableForTests();
@@ -798,7 +911,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
-  it("serves incorporated cityLimitsFact when the bake point sits in a fixture city", async () => {
+  it("P-297: a slated cityLimits rail is NOT decided by the containment index -- with no readable cell store it declares a refusal", async () => {
     setCityLimitsIndexForTests({
       tablePopulated: true,
       entries: buildCityBoundaryIndex([
@@ -825,14 +938,40 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    expect(res.body.cityLimitsFact.status).toBe("incorporated");
-    expect(res.body.cityLimitsFact.cityName).toBe("Bastrop");
-    expect(res.body.cityLimitsFact.geoId).toBe("4805820");
+    /**
+     * P-297 (2026-09-16, operator ruling A-193) SUPERSEDES THIS EXPECTATION.
+     * 48055 is slated for `cityLimits`, so the parcel's own cell is the served
+     * answer; city-limits containment is only the UNSLATED path (the card F
+     * block below exercises it on Anderson 48001). This suite configures no
+     * parcel-record store, so the ruled answer is a declared refusal naming the
+     * unreadable store -- typed `unmeasured` on this rail because
+     * CityLimitsFactWire has no refusal variant, which is the disclosed
+     * lossiness `cityLimitsFactFromParcelRecord` documents. The Bastrop polygon
+     * seeded above is deliberately still here: the point is that the served
+     * answer does NOT come from it.
+     */
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
     expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
-    expect(res.body.cityLimitsFact.source).toBe("tx_city_boundary");
+    expect(res.body.cityLimitsFact.basis).toMatch(
+      /parcel_record cityLimits refused \((store-not-configured|retrieval[^)]*)\)/,
+    );
   });
 
-  it("serves unincorporated + etj unresolved when the bake point misses every city", async () => {
+  it("P-297: a slated cityLimits rail serves the parcel's OWN cell (absent-verified unincorporated), not the containment index", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          {
+            placeKey: BAKED_NODE_ID,
+            railKey: "cityLimits",
+            cellState: {
+              kind: "absent-verified",
+              basis: { disposition: "unincorporated", source: "bastrop_county_tx" },
+            },
+          },
+        ],
+      }),
+    );
     setCityLimitsIndexForTests({
       tablePopulated: true,
       entries: buildCityBoundaryIndex([
@@ -859,13 +998,170 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       `/api/brokerage/v1/place/node/${encodeURIComponent(BAKED_NODE_ID)}/facets`,
     );
     expect(res.status).toBe(200);
-    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
-    expect(res.body.cityLimitsFact.etjStatus).toBe("unresolved");
+    // `source` is "tx_city_boundary" on BOTH paths (it is the producer token,
+    // CITY_LIMITS_FACT_SOURCE), so `basis` is what discriminates: it must be
+    // this parcel's cell, and the Austin polygon seeded above must not appear.
+    expect(res.body.cityLimitsFact.basis).toContain("parcel_record cityLimits");
     expect(res.body.cityLimitsFact.cityName).toBeUndefined();
   });
 
-  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded", async () => {
-    // No atom fixture: the atoms path must name the miss, not copy the snapshot.
+  // -----------------------------------------------------------------------
+  // CTX card F (2026-08-28): a parcel without a zoning stamp is served as
+  // unmeasured or as unincorporated by city-limits containment, never as
+  // unincorporated because situsCity was null. The seeded conformant row
+  // below is the production shape of the three unstamped golds (zoning null,
+  // facetCoverage.zoning false, baseFacts.situsCity null) with a real bake
+  // point. Before this card all three cases served `not-applicable` from the
+  // null situsCity; the first and third assertions failed on that code.
+  // -----------------------------------------------------------------------
+  /**
+   * P-297 (2026-09-16, operator ruling A-193) RE-POINTED THIS FIXTURE'S COUNTY.
+   * It was Travis `48453:493738`, which the code-owned slate lists for BOTH
+   * `cityLimits` and `zoningDistrict`: on a slated rail the parcel's own cell
+   * is the answer, so this block's whole subject -- the containment
+   * determination and the zoning verdict derived from it -- would no longer be
+   * the served answer for those parcels (the cell path is, and this suite
+   * configures no parcel-record store). The containment path is not gone: it
+   * is what an UNSLATED (county, rail) pair still serves, so this fixture is
+   * an unslated county (Anderson, 48001 -- the same non-program county the
+   * building-footprint tests below already use) and every assertion in the
+   * block keeps its original meaning. The slated-county counterpart of the
+   * same rule is asserted in the tests above ("serves incorporated
+   * cityLimitsFact ..."), which now see the cell path.
+   */
+  const UNSTAMPED_TRAVIS_NODE_ID = "48001:493738";
+  const unstampedConformantPayload = {
+    shapeSource: "conformant-v1",
+    baked: true,
+    source: "conformant-v1-cad-parcel-roll",
+    access: { discoverability: "catalog-listed", entitlement: "anyone-free" },
+    facets: { base: { parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID, situsAddress: "4707 SHOALWOOD AVE", apn: "493738" } },
+    facetSchemaVersion: "node-facets-tier1-conformant-v1",
+    tier: 1,
+    parcelNodeId: UNSTAMPED_TRAVIS_NODE_ID,
+    countyFips: "48001",
+    countyName: "Anderson",
+    baseFacts: {
+      apn: "493738",
+      situsAddress: "4707 SHOALWOOD AVE",
+      situsCity: null,
+      situsState: null,
+      situsZip: null,
+      landUse: null,
+      acreage: null,
+    },
+    zoning: null,
+    envelope: null,
+    facetCoverage: { baseFacts: true, landUse: false, acreage: false, zoning: false, envelope: false, tier1: "populated" },
+    provenance: {
+      parcelSource: "conformant-v1-cad-parcel-roll",
+      parcelVintage: "2026",
+      landUseSource: null,
+      landUseAddressRecovered: false,
+      roadsPending: true,
+      tierNote: "Tier 1 (deterministic).",
+      landUseGateBlocked: false,
+      zoningSource: null,
+      parcelJoin: { table: "txgio_parcel", state: "no-row", basis: "no txgio_parcel row" },
+    },
+    bakedAt: "2026-08-28T18:26:50.293Z",
+  };
+  const AUSTIN_SQUARE = buildCityBoundaryIndex([
+    {
+      geoId: "4805000",
+      cityName: "Austin",
+      gnis: "1389879",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-97.78, 30.24],
+            [-97.72, 30.24],
+            [-97.72, 30.28],
+            [-97.78, 30.28],
+            [-97.78, 30.24],
+          ],
+        ],
+      },
+    },
+  ]);
+  const seedUnstampedTravis = async (lat: string, lng: string) => {
+    await dbMod.db.insert(placeLayerSnapshots).values([
+      {
+        placeKey: placeKeyForNode(UNSTAMPED_TRAVIS_NODE_ID),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: lat,
+        lngRounded: lng,
+        payloadJson: unstampedConformantPayload,
+        contentHash: "test-hash-unstamped-travis",
+      },
+    ]);
+  };
+  const getUnstampedTravis = () =>
+    request(getApp()).get(`/api/brokerage/v1/place/node/${encodeURIComponent(UNSTAMPED_TRAVIS_NODE_ID)}/facets`);
+
+  it("card F fixture 1: null situsCity with the bake point INSIDE a populated polygon serves stamp-missing for Austin, not not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("incorporated");
+    expect(res.body.cityLimitsFact.queryPoint).toEqual({ longitude: -97.75, latitude: 30.26 });
+    expect(res.body.facets.zoning.status).toBe("absent");
+    expect(res.body.facets.zoning.verdict).toBe("stamp-missing");
+    expect(res.body.facets.zoning.authority).toBe("Austin");
+    expect(res.body.facets.zoning.derivation.place.geoId).toBe("4805000");
+    expect(res.body.facets.zoning.verdict).not.toBe("not-applicable");
+    expect(res.body.facets.facetCoverage.zoning).toBe(false);
+    // The land-use fact is NOT told zoning is not applicable.
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F fixture 2: the bake point OUTSIDE every polygon of a populated index serves not-applicable with the city-limits basis and source", async () => {
+    await seedUnstampedTravis("30.40000", "-97.90000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unincorporated");
+    expect(res.body.facets.zoning.verdict).toBe("not-applicable");
+    expect(res.body.facets.zoning.authority).toBe("none");
+    expect(res.body.facets.zoning.basis).toContain("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).toContain("county 48001 unincorporated territory is unzoned");
+    expect(res.body.facets.zoning.derivation.source).toBe("tx_city_boundary");
+    expect(res.body.facets.zoning.basis).not.toContain("shape predicate");
+    // Land use (atom-miss here) receives the containment-derived not-applicable.
+    expect(res.body.landUseFact.verdict).toBe("not-applicable");
+  });
+
+  it("card F fixture 3: an EMPTY city-limits index serves refused (P-124 CTX-LEAVES2) with the index's reason, never not-applicable", async () => {
+    await seedUnstampedTravis("30.26000", "-97.75000");
+    setCityLimitsIndexForTests({ tablePopulated: false, entries: [] });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    // cityLimitsFact.status is the underlying containment determination
+    // (CityLimitsStatus) and is unaffected by this card; facets.zoning.verdict
+    // is the served four-state contract cell (LayerAbsenceVerdict), which
+    // _decisions/2026-09-01_serve_path_never_emits_pipeline_state.md rules
+    // must never surface `unmeasured` -- the basis prose is unchanged.
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.facets.zoning.verdict).toBe("refused");
+    expect(res.body.facets.zoning.basis).toContain("unmeasured, not unincorporated");
+    expect(res.body.landUseFact.verdict).toBeUndefined();
+  });
+
+  it("card F: the 0,0 bake sentinel (the three unstamped golds as stored on 2026-08-28) serves refused (P-124 CTX-LEAVES2) for lack of a query point", async () => {
+    await seedUnstampedTravis("0.00000", "0.00000");
+    setCityLimitsIndexForTests({ tablePopulated: true, entries: AUSTIN_SQUARE });
+    const res = await getUnstampedTravis();
+    expect(res.status).toBe(200);
+    expect(res.body.cityLimitsFact.status).toBe("unmeasured");
+    expect(res.body.cityLimitsFact.queryPoint).toBeNull();
+    expect(res.body.facets.zoning.verdict).toBe("refused");
+    expect(res.body.facets.zoning.basis).toBe("no usable parcel query point; city limits are unmeasured");
+  });
+
+  it("REFUSES the snapshot flood facet even though a real in-SFHA row is seeded (P-297: the cell refuses it, not the atom reader)", async () => {
+    // No cell store and no atom fixture: neither path may copy the snapshot.
     setFloodHazardAtomQueryableForTests(memoryFloodHazardAtoms([]));
     // The seeded Tier-2 row is a genuine in-SFHA "AE" determination — the exact
     // shape that was live on this anonymous route before SS-W16. The endpoint
@@ -895,14 +1191,20 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain("FLOODWAY");
     expect(wire).not.toContain("512.4");
 
-    // Atom miss is named, never a silent null.
+    // Atom miss is named, never a silent null. P-297: flood is slated in 48055,
+    // so this rail no longer reaches the atom reader at all -- the parcel's own
+    // cell decides, and with no readable parcel_record store that is a declared
+    // refusal naming the store. Either way the SNAPSHOT value is not served.
     expect(res.body.floodHazardFact).not.toBeNull();
     expect(res.body.floodHazardFact.state).toBe("refused");
-    expect(res.body.floodHazardFact.code).toBe("atom-miss");
+    expect(res.body.floodHazardFact.code).toBe(
+      "parcel-record-store-not-configured",
+    );
     expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
+    expect(res.body.floodHazardFact.reason).toMatch(/parcel_record flood/);
     expect(res.body.floodHazardFact.tried).toEqual([
       BAKED_NODE_ID,
-      `${BAKED_NODE_ID}.00000000`,
+      BAKED_NODE_ID,
     ]);
 
     // Land-use-fact miss is named too. Cad-roll bake stays on retiredStore.
@@ -991,26 +1293,31 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body)).not.toMatch(/SHOULD NOT LEAK/);
   });
 
-  it("serves a fixture flood-hazard-fact while still refusing the snapshot bake", async () => {
-    // Divergence: snapshot is AE/FLOODWAY/512.4, atom is AO with no those tokens.
-    // If this test passed while serving the snapshot, AO would be missing and
-    // FLOODWAY would still be on the wire.
-    setFloodHazardAtomQueryableForTests(
-      memoryFloodHazardAtoms([
+  it("P-297: serves the parcel's OWN flood cell (AO) while still refusing the snapshot bake", async () => {
+    // Divergence: the snapshot bake is AE/FLOODWAY/512.4, this parcel's cell is
+    // AO with none of those tokens. If this test passed while serving the bake,
+    // AO would be missing and FLOODWAY would still be on the wire.
+    //
+    // Pre-P-297 this test seeded a flood-hazard-fact ATOM and the county verdict
+    // (unconfigured) let it through. flood is slated in 48055, so by ruling
+    // A-193 the atom reader is no longer reached on this rail at all: the cell
+    // is the answer. The atom fixture is gone deliberately -- keeping it would
+    // assert nothing.
+    setParcelRecordFloodQueryableForTests(
+      memoryParcelRecordFlood([
         {
-          entityId: `${BAKED_NODE_ID}.00000000`,
-          body: {
-            entityType: "flood-hazard-fact",
-            atomDid: "fhfact_fedcba9876543210",
-            parcelNodeId: `${BAKED_NODE_ID}.00000000`,
-            sourceTier: "fema-nfhl",
-            inSpecialFloodHazardArea: true,
-            floodZone: "AO",
-            zoneSubtype: null,
-            baseFloodElevation: null,
-            sourceAdapter: "fema-nfhl-bulk-v1",
+          placeKey: BAKED_NODE_ID,
+          cellState: {
+            kind: "value",
+            source: "tx_fema_nfhl_flood_zone",
+            vintage: "NFHL_48_20260101",
+          },
+          payload: {
+            zone: "AO",
+            floodway: false,
+            bfe: null,
+            method: "polygon-intersect",
             sourceVintage: "NFHL_48_20260101",
-            evaluatedAt: "2026-08-11T23:13:43.774Z",
           },
         },
       ]),
@@ -1027,10 +1334,11 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(res.body.floodHazardFact.source).toBe("flood-hazard-fact");
     expect(res.body.floodHazardFact.floodZone).toBe("AO");
     expect(res.body.floodHazardFact.inSpecialFloodHazardArea).toBe(true);
-    expect(res.body.floodHazardFact.boundAs).toBe(`${BAKED_NODE_ID}.00000000`);
+    expect(res.body.floodHazardFact.boundAs).toBe(BAKED_NODE_ID);
+    expect(res.body.floodHazardFact.sourceAdapter).toBe("parcel_record");
     expect(res.body.floodHazardFact.tried).toEqual([
       BAKED_NODE_ID,
-      `${BAKED_NODE_ID}.00000000`,
+      BAKED_NODE_ID,
     ]);
 
     const wire = JSON.stringify(res.body);
@@ -1041,8 +1349,15 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain('"AE"');
   });
 
-  it("gold parcel 48021:34137 dual-grammar bind yields the fixture atom", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's flood rail keeps the atom path -- 48001:34137 dual-grammar bind yields the fixture atom", async () => {
+    // P-297: the atom reader is the UNSLATED path. This test used to run on
+    // Bastrop's gold parcel 48021:34137, but flood is slated in 48021, so by the
+    // ruling that parcel no longer reads the atom at all (the slated path is
+    // covered by floodHazardFactServeCutover.test.ts and by the cell test
+    // above). Re-pointed to Anderson 48001, which is absent from
+    // PARCEL_RECORD_SLATE on every rail, so the dual-grammar atom bind it was
+    // written to cover stays covered.
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1051,10 +1366,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-gold",
+      contentHash: "test-hash-gold-48001",
     });
     setFloodHazardAtomQueryableForTests(
       memoryFloodHazardAtoms([
@@ -1259,8 +1574,12 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("gold parcel 48021:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:34137 :sd:outside is typed absence, not a fabricated MUD", async () => {
+    // P-297: specialDistricts is slated in 48021, so the Bastrop gold parcel no
+    // longer reads this atom; re-pointed to unslated Anderson 48001 so the
+    // `:sd:outside` typed-absence bind stays covered on the path that keeps it
+    // (the slated path is covered by specialDistrictFactServeCutover.test.ts).
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1269,10 +1588,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-gold-sd-outside",
+      contentHash: "test-hash-48001-sd-outside",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1285,7 +1604,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
             absence: {
               kind: "outside-tceq-source-boundaries",
               reason:
-                "Parcel geometry does not intersect any polygon in tx_special_district for county 48021.",
+                "Parcel geometry does not intersect any polygon in tx_special_district for county 48001.",
             },
             evaluatedAt: "2026-08-12T21:33:03.719Z",
           },
@@ -1310,8 +1629,9 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("Bastrop present substitute 48021:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
-    const parcel = "48021:102817";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:102817:sd:3504125 dual-grammar prefix bind yields MUD", async () => {
+    // P-297: re-pointed off slated 48021 (see the two tests above).
+    const parcel = "48001:102817";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(parcel),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1320,10 +1640,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: parcel,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-bastrop-sd",
+      contentHash: "test-hash-48001-sd",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1356,9 +1676,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     ]);
   });
 
-  it("padded gold prefix 48021:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
-    const parcel = "48021:102817";
-    const parcelPadded = "48021:102817.00000000";
+  it("P-297: an UNSLATED county's specialDistricts rail keeps the atom path -- 48001:102817.00000000:sd:3504125 dual-grammar bind yields districtId", async () => {
+    // P-297: re-pointed off slated 48021 (see the tests above).
+    const parcel = "48001:102817";
+    const parcelPadded = "48001:102817.00000000";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(parcel),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1367,10 +1688,10 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: parcel,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
       },
-      contentHash: "test-hash-bastrop-sd-padded",
+      contentHash: "test-hash-48001-sd-padded",
     });
     setSpecialDistrictFactAtomQueryableForTests(
       memorySpecialDistrictFactAtoms([
@@ -1619,8 +1940,11 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(wire).not.toContain("t4permit");
   });
 
-  it("gold 48021:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
-    const gold = "48021:34137";
+  it("P-297: an UNSLATED county's wells rail keeps the atom path -- 48001:34137 empty well-fact is atom-miss, not a fabricated :none", async () => {
+    // P-297: wells is slated in 48021, so this assertion moved to unslated
+    // Anderson 48001. The slated path (the parcel's own cell, and a refusal
+    // when there is none) is covered by wellFactServeCutover.test.ts.
+    const gold = "48001:34137";
     await dbMod.db.insert(placeLayerSnapshots).values({
       placeKey: placeKeyForNode(gold),
       adapterKey: TIER1_ADAPTER_KEY,
@@ -1629,14 +1953,14 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       payloadJson: {
         ...bakedPayload,
         parcelNodeId: gold,
-        countyFips: "48021",
-        countyName: "Bastrop",
+        countyFips: "48001",
+        countyName: "Anderson",
         baseFacts: {
           ...bakedPayload.baseFacts,
           API: "GIS-MUST-NOT-LEAK",
         },
       },
-      contentHash: "test-hash-well-gold",
+      contentHash: "test-hash-well-48001",
     });
     setWellFactAtomQueryableForTests(memoryWellFactAtoms([]));
     const res = await request(getApp()).get(
@@ -2015,6 +2339,120 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     );
   });
 
+  it("serves classified setback on the wire: road-class refused, dimensional value, placeholder unknown", async () => {
+    const gold = "48021:34137";
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+      },
+      contentHash: "test-hash-edge-setback-disposition",
+    });
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 15,
+              provenance: "road-class-setback-table",
+              atomCitation: "bastrop_tx",
+            },
+          },
+        },
+      ]),
+    );
+    const refused = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(refused.status).toBe(200);
+    expect(refused.body.boundaryEdgeFact.setback.state).toBe("refused");
+    expect(refused.body.boundaryEdgeFact.setback.basis).toMatch(
+      /retired road-class derivation/,
+    );
+    expect(refused.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "road-class-setback-table",
+    );
+    expect(refused.body.boundaryEdgeFact.setback.feet).toBeUndefined();
+    expect(refused.body.boundaryEdgeFact.edges[0].setback.state).toBe("refused");
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 30,
+              provenance: "bastrop-per-parcel-record-layer-23",
+            },
+          },
+        },
+      ]),
+    );
+    const valued = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(valued.status).toBe(200);
+    expect(valued.body.boundaryEdgeFact.setback.state).toBe("value");
+    expect(valued.body.boundaryEdgeFact.setback.feet).toBe(30);
+    expect(valued.body.boundaryEdgeFact.setback.provenance).toBe(
+      "bastrop-per-parcel-record-layer-23",
+    );
+
+    setBoundaryEdgeFactAtomQueryableForTests(
+      memoryBoundaryEdgeFactAtoms([
+        {
+          entityId: "48021:34137:boundary:2",
+          body: {
+            entityType: "property-boundary-edge",
+            parcelNodeId: gold,
+            edgeIndex: 2,
+            role: "front",
+            adjacencyKind: "ROW",
+            interior: { edgeEndpoints: [[0, 0], [30, 0]] },
+            setback: {
+              feet: 0,
+              provenance: "storage-port-proof/phase-1a",
+            },
+          },
+        },
+      ]),
+    );
+    const unknown = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.boundaryEdgeFact.setback.state).toBe("unknown");
+    expect(unknown.body.boundaryEdgeFact.setback.basis).toMatch(
+      /phase-1a storage-port proof/,
+    );
+    expect(unknown.body.boundaryEdgeFact.setback.basis).not.toContain(
+      "storage-port-proof/phase-1a",
+    );
+    expect(JSON.stringify(unknown.body.boundaryEdgeFact.setback)).not.toContain(
+      "absent-verified",
+    );
+  });
+
   it("returns tier2:null for a node with a Tier-1 row and NO Tier-2 row at all", async () => {
     // Comal has only a Tier-1 row. `tier2: null` now means exactly one thing —
     // no Tier-2 row exists — and is distinct from the refusal above.
@@ -2202,7 +2640,7 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
     expect(JSON.stringify(res.body.ownerFact)).not.toContain("FIXTURE OWNER");
   });
 
-  it("unlock-only GET with an owner atom MUST refuse ownerName", async () => {
+  it("unlock-only GET with an owner atom and an ACTIVE Property Unlock on this parcel MUST GRANT ownerName (widened 2026-09-05: owner needs to be a part of unlock too)", async () => {
     const gold = "48021:34137";
     const userId = "user_owner_fact_unlock";
     await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
@@ -2213,6 +2651,60 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       source: "stripe",
     });
     await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("present");
+    expect(res.body.ownerFact.source).toBe("owner-fact");
+    expect(res.body.ownerFact.ownerName).toBe("FIXTURE OWNER");
+  });
+
+  it("unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse — Property Unlock is per-parcel, not per-user", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_owner_fact_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-other-parcel");
+    goldOwnerFixture(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ownerFact.state).toBe("refused");
+    expect(res.body.ownerFact.code).toBe("studio-gated");
+    expect(res.body.ownerFact.ownerName).toBeUndefined();
+  });
+
+  it("an EXPIRED Property Unlock on this parcel MUST refuse — only an active unlock grants", async () => {
+    const gold = "48021:34137";
+    const userId = "user_owner_fact_unlock_expired";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+    await seedOwnerGoldSnapshot(gold, "test-hash-owner-unlock-expired");
     goldOwnerFixture(gold);
     const token = mintSessionToken({
       audience: "user",
@@ -2277,4 +2769,671 @@ describe.skipIf(!hasDb)("node-facet read endpoint (integration)", () => {
       "CAD ROLL MUST NOT LEAK",
     );
   });
+
+  // -------------------------------------------------------------------
+  // CAD tax-assessed dollar values co-gate with owner info (OPS-16 A-103
+  // item 5 / A-104). The seeded snapshot writes the four dollar fields
+  // straight into baseFacts.cadRoll in the OFFLINE-BAKED shape (the
+  // nodeFacetPatchCadRollFromCadPropertyCli.ts patch path) rather than via
+  // the live parcel_record overlay, because A-104's investigation found
+  // that path is a SECOND, independent, previously-ungated source for
+  // these fields — gating only the overlay would miss it.
+  // -------------------------------------------------------------------
+  /**
+   * P-297 (2026-09-16, operator ruling A-193): 48021 is slated for the four
+   * dollar rails, so `facets.baseFacts.cadRoll` is the parcel's OWN cell, not
+   * this fixture's baked snapshot. Deliberately different numbers from the
+   * snapshot (which says 397260/80000/317260): the assertions below can then
+   * only be satisfied by the cell, which is the point of the ruling.
+   */
+  function seedCadRollGoldCells(gold: string): void {
+    const cell = (railKey: string, value: number) => ({
+      placeKey: gold,
+      railKey,
+      cellState: { kind: "value", value, source: "cad_property", vintage: "2025" },
+    });
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          cell("marketValue", 411_000),
+          cell("assessedValue", 411_000),
+          cell("landValue", 88_000),
+          cell("improvementValue", 323_000),
+        ],
+      }),
+    );
+  }
+
+  async function seedCadRollGoldSnapshot(gold: string, contentHash: string) {
+    await dbMod.db.insert(placeLayerSnapshots).values({
+      placeKey: placeKeyForNode(gold),
+      adapterKey: TIER1_ADAPTER_KEY,
+      latRounded: "30.11000",
+      lngRounded: "-97.31500",
+      payloadJson: {
+        ...bakedPayload,
+        parcelNodeId: gold,
+        countyFips: "48021",
+        countyName: "Bastrop",
+        baseFacts: {
+          ...bakedPayload.baseFacts,
+          apn: "34137",
+          cadRoll: {
+            marketValue: {
+              v: 397260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            assessedValue: {
+              v: 397260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            landValue: {
+              v: 80000,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            improvementValue: {
+              v: 317260,
+              source: "cad_property",
+              vintage: "2025",
+              valueBasis: "county-assessed",
+            },
+            livingAreaSqft: { v: 2145, source: "cad_property", vintage: "2025" },
+          },
+        },
+      },
+      contentHash,
+    });
+  }
+
+  it("anonymous GET refuses all four CAD dollar fields with a typed studio-gated refusal", async () => {
+    const gold = "48021:34137";
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-anon");
+    const res = await request(getApp()).get(
+      `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+    );
+    expect(res.status).toBe(200);
+    const cadRoll = res.body.facets.baseFacts.cadRoll;
+    for (const field of [
+      "marketValue",
+      "assessedValue",
+      "landValue",
+      "improvementValue",
+    ]) {
+      expect(cadRoll[field]).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    }
+    // livingAreaSqft is not a dollar field and is never gated.
+    expect(cadRoll.livingAreaSqft).toMatchObject({ v: 2145 });
+    expect(JSON.stringify(cadRoll)).not.toContain("397260");
+    expect(JSON.stringify(cadRoll)).not.toContain("317260");
+  });
+
+  it("identified-only GET MUST refuse the CAD dollar fields — identified is not Studio", async () => {
+    const gold = "48021:34137";
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-ident-only");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: "user_cadroll_identified_only" },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("signed-in Solo GET MUST refuse the CAD dollar fields", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_solo";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-solo");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.assessedValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("Property-Unlock-only GET on THIS parcel MUST GRANT the CAD dollar fields (widened 2026-09-05 — Property Unlock now co-gates like Studio)", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_unlock";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: gold,
+      source: "stripe",
+    });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock");
+    seedCadRollGoldCells(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    // P-297: the granted caller reads the parcel's own cell's numbers.
+    expect(res.body.facets.baseFacts.cadRoll.landValue).toMatchObject({
+      v: 88000,
+    });
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
+      v: 411000,
+    });
+  });
+
+  it("Property-Unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse the CAD dollar fields — Property Unlock is per-parcel", async () => {
+    const gold = "48021:34137";
+    const otherParcel = "48021:99999";
+    const userId = "user_cadroll_unlock_other_parcel";
+    await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+    await dbMod.db.insert(pePropertyUnlocks).values({
+      ownerUserId: userId,
+      tenantId: DEFAULT_TENANT_ID,
+      parcelNodeId: otherParcel,
+      source: "stripe",
+    });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-unlock-other-parcel");
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.landValue).toEqual({
+      state: "refused",
+      code: "studio-gated",
+      reason: expect.any(String),
+    });
+  });
+
+  it("Studio GET serves the real CAD dollar values straight off the offline-baked snapshot", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_studio";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-studio");
+    seedCadRollGoldCells(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const cadRoll = res.body.facets.baseFacts.cadRoll;
+    // P-297: the values are the parcel's own cells' (the snapshot says
+    // 397260/80000/317260, none of which may be served for a slated rail).
+    expect(cadRoll.marketValue).toMatchObject({ v: 411000, source: "cad_property" });
+    expect(cadRoll.assessedValue).toMatchObject({ v: 411000 });
+    expect(cadRoll.landValue).toMatchObject({ v: 88000 });
+    expect(cadRoll.improvementValue).toMatchObject({ v: 323000 });
+  });
+
+  it("Team GET also serves the real CAD dollar values (Team === Studio for this gate)", async () => {
+    const gold = "48021:34137";
+    const userId = "user_cadroll_team";
+    await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "team" });
+    await seedCadRollGoldSnapshot(gold, "test-hash-cadroll-team");
+    seedCadRollGoldCells(gold);
+    const token = mintSessionToken({
+      audience: "user",
+      tenantId: DEFAULT_TENANT_ID,
+      requestor: { kind: "user", id: userId },
+    });
+    const res = await request(getApp())
+      .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.facets.baseFacts.cadRoll.marketValue).toMatchObject({
+      v: 411000,
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // P-246 (2026-09-16). valueHistoryFact carries the SAME four CAD dollar
+  // fields as baseFacts.cadRoll, one entry per tax year, but was reaching
+  // the wire unabridged regardless of grantsOwnerFact -- a Solo caller was
+  // refused cadRoll.marketValue above and handed the identical 2025 dollar
+  // figure back one field later via valueHistoryFact.entries[0].marketValue.
+  // Fixture entry matches the live 908 PINE / 48021:34137 read the dispatch
+  // cited (taxYear 2025, marketValue 511345, assessedValue null on this
+  // parcel, landValue 106715, improvementValue 404630, viaCrosswalk false).
+  // -------------------------------------------------------------------
+  describe("valueHistoryFact dollar gate (P-246)", () => {
+    const gold = "48021:34137";
+    const liveEntry = {
+      taxYear: 2025,
+      marketValue: "511345",
+      assessedValue: null,
+      landValue: "106715",
+      improvementValue: "404630",
+      viaCrosswalk: false,
+    };
+
+    async function seedValueHistoryPresent(placeKey: string) {
+      // The route 404s "not_baked" before it ever reaches valueHistoryFact
+      // unless a Tier-1 baked snapshot row exists for this parcel -- same
+      // requirement seedCadRollGoldSnapshot above already satisfies for its
+      // own gold parcel.
+      await dbMod.db.insert(placeLayerSnapshots).values({
+        placeKey: placeKeyForNode(placeKey),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: "30.11000",
+        lngRounded: "-97.31500",
+        payloadJson: {
+          ...bakedPayload,
+          parcelNodeId: placeKey,
+          countyFips: "48021",
+          countyName: "Bastrop",
+        },
+        contentHash: `test-hash-valuehistory-${placeKey}`,
+      });
+      // P-297: no verdict store is injected here any more. The rail is slated
+      // for 48021 in code, and the parcel's own cell below is the whole
+      // decision -- the county verdict no longer gates this route.
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey,
+              railKey: "valueHistory",
+              cellState: {
+                kind: "value",
+                disposition: "rows",
+                rowCount: 1,
+                source: "cad_property",
+                vintage: "2025",
+              },
+            },
+          ],
+          companionRows: [
+            {
+              placeKey,
+              railKey: "valueHistory",
+              rowIndex: 0,
+              payload: liveEntry,
+              source: "cad_property",
+              vintage: "2025",
+            },
+          ],
+        }),
+      );
+    }
+
+    afterEach(() => {
+      resetParcelRecordQueryableForTests();
+    });
+
+    it("anonymous GET refuses all four valueHistory dollar fields with a typed studio-gated refusal; taxYear/viaCrosswalk survive", async () => {
+      await seedValueHistoryPresent(gold);
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.state).toBe("present");
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.taxYear).toBe(2025);
+      expect(entry.viaCrosswalk).toBe(false);
+      for (const field of [
+        "marketValue",
+        "assessedValue",
+        "landValue",
+        "improvementValue",
+      ]) {
+        expect(entry[field]).toEqual({
+          state: "refused",
+          code: "studio-gated",
+          reason: expect.any(String),
+        });
+      }
+      expect(JSON.stringify(res.body.valueHistoryFact)).not.toContain(
+        "511345",
+      );
+      expect(JSON.stringify(res.body.valueHistoryFact)).not.toContain(
+        "404630",
+      );
+    });
+
+    it("signed-in Solo GET MUST refuse the valueHistory dollar fields", async () => {
+      const userId = "user_valuehistory_solo";
+      await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "solo" });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.entries[0].marketValue).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    });
+
+    it("Property-Unlock-only GET on THIS parcel MUST GRANT the valueHistory dollar fields", async () => {
+      const userId = "user_valuehistory_unlock";
+      await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+      await dbMod.db.insert(pePropertyUnlocks).values({
+        ownerUserId: userId,
+        tenantId: DEFAULT_TENANT_ID,
+        parcelNodeId: gold,
+        source: "stripe",
+      });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.marketValue).toBe(511345);
+      expect(entry.landValue).toBe(106715);
+      expect(entry.improvementValue).toBe(404630);
+      expect(entry.assessedValue).toBeNull();
+    });
+
+    it("Property-Unlock-only GET on a DIFFERENT parcel than the one unlocked MUST refuse the valueHistory dollar fields", async () => {
+      const otherParcel = "48021:99999";
+      const userId = "user_valuehistory_unlock_other_parcel";
+      await seedPeUser(userId, { accessTier: "free", subscriptionTier: null });
+      await dbMod.db.insert(pePropertyUnlocks).values({
+        ownerUserId: userId,
+        tenantId: DEFAULT_TENANT_ID,
+        parcelNodeId: otherParcel,
+        source: "stripe",
+      });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.valueHistoryFact.entries[0].marketValue).toEqual({
+        state: "refused",
+        code: "studio-gated",
+        reason: expect.any(String),
+      });
+    });
+
+    it("Studio GET serves the real valueHistory dollar values", async () => {
+      const userId = "user_valuehistory_studio";
+      await seedPeUser(userId, { accessTier: "paid", subscriptionTier: "studio" });
+      await seedValueHistoryPresent(gold);
+      const token = mintSessionToken({
+        audience: "user",
+        tenantId: DEFAULT_TENANT_ID,
+        requestor: { kind: "user", id: userId },
+      });
+      const res = await request(getApp())
+        .get(`/api/brokerage/v1/place/node/${encodeURIComponent(gold)}/facets`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const entry = res.body.valueHistoryFact.entries[0];
+      expect(entry.marketValue).toBe(511345);
+      expect(entry.landValue).toBe(106715);
+      expect(entry.improvementValue).toBe(404630);
+    });
+  });
 });
+
+// -----------------------------------------------------------------------
+// PE/MCP-vs-facets parity audit (2026-09-07). D6: this route's baked
+// `facets.envelope` was UNCONDITIONALLY null and no live setbacks fact was
+// ever fetched, so it reported NO setback data for ANY parcel, ever, while
+// the research/brief path already had real numbers. D5: the baked zoning
+// stamp always won here when present, and this route never consulted the
+// live parcel_record ledger at all, so a live, gate-passing ledger
+// determination could silently disagree with a stale baked stamp forever.
+// Both are fixed by wiring this route onto the SAME loadSetbacksFactForServe
+// / loadZoningFactForServe loaders the research/brief path already uses
+// (setbacksFactServeCutover.ts / zoningFactServeCutover.ts), never a second
+// implementation.
+//
+// P-297 (2026-09-16, operator ruling A-193) then changed which of the two
+// answers a SLATED rail is allowed to serve: the test below that used to
+// assert "with no live cell, the stale bake still wins" now asserts the
+// declared refusal, and the D6 "unslated" leg runs on a county that is
+// actually absent from PARCEL_RECORD_SLATE.
+// -----------------------------------------------------------------------
+
+describe.skipIf(!hasDb)(
+  "setbacksFact wiring + zoning ledger precedence (PE/MCP-vs-facets parity audit, 2026-09-07)",
+  () => {
+    const LEDGER_NODE_ID = "48021:103387";
+    const ledgerBakedPayload = {
+      facetSchemaVersion: "node-facets-tier1-v1",
+      tier: 1,
+      parcelNodeId: LEDGER_NODE_ID,
+      countyFips: "48021",
+      countyName: "Bastrop",
+      baseFacts: {
+        apn: "103387",
+        situsAddress: "1 TEST LEDGER RD",
+        situsCity: "BASTROP",
+        situsState: "TX",
+        landUse: null,
+        acreage: { value: 1.0, sqft: 43560, method: "shoelace-wgs84" },
+      },
+      // A STALE baked stamp -- the fix must NOT serve this once a live,
+      // gate-passing parcel_record ledger fact exists for this parcel.
+      zoning: {
+        district: "SF-STALE-BAKE",
+        jurisdictionKey: "bastrop_city_tx_legacy",
+        provenance: null,
+      },
+      envelope: { status: "declined", confidence: 0, provisional: true },
+      facetCoverage: {
+        baseFacts: true,
+        landUse: false,
+        acreage: true,
+        zoning: true,
+        envelope: false,
+      },
+      provenance: { parcelSource: "txgio", landUseGateBlocked: false },
+      bakedAt: "2026-07-20T22:34:46.946Z",
+    };
+
+    beforeEach(async () => {
+      if (!ctx.schema) return;
+      await dbMod.db.insert(placeLayerSnapshots).values([
+        {
+          placeKey: placeKeyForNode(LEDGER_NODE_ID),
+          adapterKey: TIER1_ADAPTER_KEY,
+          latRounded: "30.11000",
+          lngRounded: "-97.32000",
+          payloadJson: ledgerBakedPayload,
+          contentHash: "test-hash-ledger-node",
+        },
+      ]);
+    });
+
+    afterEach(async () => {
+      resetParcelRecordQueryableForTests();
+      if (!ctx.schema) return;
+      await truncateAll(ctx.schema.pool, ["place_layer_snapshots"]);
+    });
+
+    it("D6: a SLATED county now serves REAL setback numbers this route never showed before", async () => {
+      // P-297: the slate alone cuts this rail over for 48021 -- the parcel's
+      // own cells below are the decision, and the county verdict is not read.
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_FRONT_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 25, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_SIDE_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 7, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_REAR_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 20, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: SETBACK_CORNER_FT_RAIL_KEY,
+              cellState: { kind: "value", value: 15, source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+          ],
+        }),
+      );
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.setbacksFact.state).toBe("present");
+      expect(res.body.setbacksFact.frontFt).toBe(25);
+      expect(res.body.setbacksFact.sideFt).toBe(7);
+      expect(res.body.setbacksFact.rearFt).toBe(20);
+      expect(res.body.setbacksFact.cornerFt).toBe(15);
+      // Additive, not a resurrection: facets.envelope stays permanently null.
+      expect(res.body.facets.envelope).toBeNull();
+    });
+
+    it("D6: an UNSLATED county's setbacksFact is null and facets.envelope stays the pre-existing permanent null (no regression)", async () => {
+      // P-297: "uns slated" is a fact about the (county, rail) PAIR, not about
+      // the route. 48021:103387 -- the node this block was originally written
+      // on -- has setbackFrontFt in PARCEL_RECORD_SLATE, so it is the SLATED
+      // case (previous test). The unslated path this test is named for needs a
+      // county absent from the slate on that rail: Anderson 48001 is absent
+      // from PARCEL_RECORD_SLATE entirely, and this is the ruling's other half
+      // -- an unslated rail keeps its current path, byte-identical.
+      const UNSLATED_NODE_ID = "48001:103387";
+      await dbMod.db.insert(placeLayerSnapshots).values({
+        placeKey: placeKeyForNode(UNSLATED_NODE_ID),
+        adapterKey: TIER1_ADAPTER_KEY,
+        latRounded: "30.11000",
+        lngRounded: "-97.32000",
+        payloadJson: {
+          ...ledgerBakedPayload,
+          parcelNodeId: UNSLATED_NODE_ID,
+          countyFips: "48001",
+          countyName: "Anderson",
+          zoning: { ...ledgerBakedPayload.zoning, jurisdictionKey: "anderson_city_tx_legacy" },
+        },
+        contentHash: "test-hash-ledger-node-48001",
+      });
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(UNSLATED_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.setbacksFact).toBeNull();
+      expect(res.body.facets.envelope).toBeNull();
+      // And no cell was even consulted: the unslated rail never reached
+      // parcel_record, so no refusal can be produced from one.
+      expect(JSON.stringify(res.body.setbacksFact)).not.toContain("parcel_record");
+    });
+
+    it("D5: a SLATED live zoning ledger fact overrides the STALE baked stamp -- the exact cross-surface disagreement the audit found", async () => {
+      // P-297: the slate alone cuts this rail over for 48021; the cells below
+      // are the decision. The county verdict is not read on this path.
+      setParcelRecordQueryableForTests(
+        memoryParcelRecordStore({
+          cells: [
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_DISTRICT_RAIL_KEY,
+              cellState: { kind: "value", value: "SF-1", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_JURISDICTION_KEY_RAIL_KEY,
+              cellState: { kind: "value", value: "bastrop_city_tx", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+            {
+              placeKey: LEDGER_NODE_ID,
+              railKey: ZONING_PROVENANCE_RAIL_KEY,
+              cellState: { kind: "value", value: "https://gis.example.test/zoning/bastrop", source: "bastrop_city_tx", vintage: "2026-09-07" },
+            },
+          ],
+        }),
+      );
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      // The live ledger wins -- NOT the stale baked "SF-STALE-BAKE" stamp.
+      expect(res.body.facets.zoning.district).toBe("SF-1");
+      expect(res.body.facets.zoning.jurisdictionKey).toBe("bastrop_city_tx");
+      expect(res.body.facets.zoning.district).not.toBe("SF-STALE-BAKE");
+      expect(res.body.facets.facetCoverage.zoning).toBe(true);
+    });
+
+    it("P-297 D5: with NO live zoning cell on a slated rail, the STALE baked stamp is NOT served -- the rail declares a refusal with the cell's reason", async () => {
+      // PRE-RULING (audit finding D5, 2026-09-07) this test asserted the baked
+      // "SF-STALE-BAKE" stamp won whenever the ledger had nothing to say. That
+      // is exactly the fall-back-to-bake A-193 names as the defect: 48021's
+      // zoningDistrict pair is in PARCEL_RECORD_SLATE, so the parcel's own cell
+      // is the answer, and with no readable cell the answer is a declared
+      // refusal -- never the July bake. The test now pins the refusal, and the
+      // stale district must not appear anywhere in the served zoning wire.
+      const res = await request(getApp()).get(
+        `/api/brokerage/v1/place/node/${encodeURIComponent(LEDGER_NODE_ID)}/facets`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.facets.zoning.state).toBe("refused");
+      expect(res.body.facets.zoning.code).toBe(
+        "parcel-record-store-not-configured",
+      );
+      expect(res.body.facets.zoning.reason).toMatch(/parcel_record/);
+      expect(res.body.facets.zoning.district).toBeUndefined();
+      expect(JSON.stringify(res.body.facets.zoning)).not.toContain(
+        "SF-STALE-BAKE",
+      );
+      // The rail did not earn a zoning determination, and says so.
+      expect(res.body.facets.facetCoverage.zoning).toBe(false);
+      // The source twin follows the rail rather than the bake.
+      expect(res.body.facets.provenance.zoningSource.verdict).toBe("refused");
+      expect(res.body.facets.provenance.zoningSource.code).toBe(
+        "parcel-record-store-not-configured",
+      );
+    });
+  },
+);

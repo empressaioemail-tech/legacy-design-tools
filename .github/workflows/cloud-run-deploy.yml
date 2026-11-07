@@ -200,6 +200,16 @@ jobs:
         # G-60 PLAN_REVIEW_BACKEND_URL + PLAN_REVIEW_API_KEY: same replace
         # trap. Bake both here so the remount proxy cannot silently fall
         # off the next canary. Do not remove.
+        #
+        # --min-instances=1: REGRESSION GUARD (2026-08 Connect B1 abort).
+        # A prior serving revision (00565-min1) already had minScale=1.
+        # This workflow baked --min-instances=0, so every later canary
+        # recreated a scale-to-zero revision. gcloud services update
+        # --min-instances only writes the template; the serving
+        # revision keeps a null minScale until a new revision is
+        # created and traffic is shifted. Verify
+        # autoscaling.knative.dev/minScale on the serving revision,
+        # not the service template. Do not set this back to 0.
         run: |
           set -euo pipefail
           IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
@@ -214,6 +224,19 @@ jobs:
             echo "::warning::First deploy for $SVC: Cloud Run does not support --no-traffic when creating the service. Default URL may route 100% to this revision until you adjust traffic; use the canary tag URL for smoke."
           fi
 
+          # --set-env-vars is authoritative-replace. A missing key here deletes
+          # any manual Cloud Run value. CORTEX_USER_DAILY_API_LIMIT=50000 is the
+          # bake (2026-08-28). 10000 locked the operator out of the product twice.
+          # DATABASE_URL binds DEPLOYMENT_DATABASE_URL_DIRECT, not
+          # DEPLOYMENT_DATABASE_URL. The Neon pooler injected
+          # SET default_transaction_read_only = on for this database on
+          # 2026-08-31, killing every write while reads stayed green.
+          # A hand-applied fix was reverted by this workflow the same day
+          # (--set-secrets is authoritative-replace) and broke customer
+          # login for ~10 hours before anyone noticed. REVERT to
+          # DEPLOYMENT_DATABASE_URL only when Neon explains the injection
+          # and the pooler is restored. Running unpooled is a cost, not a
+          # resting state. See doc_repo _inbox/2026-08-31_neon_pooler_readonly_incident.md
           gcloud run deploy "$SVC" \
             --region="$RGN" \
             --image="${IMAGE}" \
@@ -221,7 +244,7 @@ jobs:
             --port=8080 \
             --cpu=2 \
             --memory=8Gi \
-            --min-instances=0 \
+            --min-instances=1 \
             --max-instances=10 \
             --concurrency=80 \
             --timeout=300 \
@@ -230,8 +253,8 @@ jobs:
             --vpc-egress=private-ranges-only \
             --service-account=${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }} \
             --allow-unauthenticated \
-            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=anthropic,BRIEFING_LLM_MODE=anthropic,CLASSIFICATION_LLM_MODE=anthropic,AIR_FINDING_ORCHESTRATED=1,ENGINE_API_URL=https://hauska-engine-api-h7gvu7rgcq-uc.a.run.app,ENGINE_SPINE_FINDINGS=1,ENGINE_SPINE_FINDINGS_ORCHESTRATED=1,ENGINE_SPINE_BRIEFING=1,ENGINE_SPINE_HYDROLOGY=1,ENGINE_SPINE_TOPOGRAPHY=1,PRECEDENCE_ENGINE_PRODUCTION=1,HYDROLOGY_PYSHEDS_INSTALLED=1,MNML_RENDER_MODE=mock,RENDERS_PROD_ENABLED=false,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private,ICC_ES_REPORT_URL_TEMPLATE=https://icc-es.org/report-listing/?search_api_fulltext={ESR},BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data,CORTEX_USER_DAILY_API_LIMIT=10000,FINDINGS_ICC_MODEL_CODE_SUPPLEMENT=true,GATE_CONTEXT_MODE=enforce,OVERPASS_URL=http://10.128.0.2:8080/api/interpreter,PLAN_REVIEW_BACKEND_URL=https://plan-review-ozx33wafia-ue.a.run.app,RECORDS_REQUEST_WORKER_URL=https://records-request-worker-1062716564162.us-central1.run.app/run \
-            --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,PE_SESSION_EXCHANGE_SECRET=PE_SESSION_EXCHANGE_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest,SNAPSHOT_SECRET=SNAPSHOT_SECRET:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest,ENGINE_API_GATE_TOKEN=HAUSKA_ENGINE_API_KEY:latest,BROKERAGE_EXTENSION_PUBLIC_KEY=BROKERAGE_EXTENSION_PUBLIC_KEY:latest,COTALITY_PROPERTY_KEY=COTALITY_PROPERTY_KEY:latest,COTALITY_PROPERTY_SECRET=COTALITY_PROPERTY_SECRET:latest,COTALITY_SPATIALTILE_KEY=COTALITY_SPATIALTILE_KEY:latest,COTALITY_SPATIALTILE_SECRET=COTALITY_SPATIALTILE_SECRET:latest,COTALITY_RISKMETER_KEY=COTALITY_RISKMETER_KEY:latest,COTALITY_RISKMETER_SECRET=COTALITY_RISKMETER_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PUBLISHABLE_KEY=STRIPE_PUBLISHABLE_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,STRIPE_PRO_PRICE_ID=STRIPE_PRO_PRICE_ID:latest,STRIPE_MAX_PRICE_ID=STRIPE_MAX_PRICE_ID:latest,PIPEDRIVE_API_TOKEN=PIPEDRIVE_API_TOKEN:latest,GATE_CONTEXT_SIGNING_KEY=GATE_CONTEXT_SIGNING_KEY:latest,BRIEF_RETRIEVAL_API_URL=BRIEF_RETRIEVAL_API_URL:latest,BRIEF_RETRIEVAL_API_KEY=BRIEF_RETRIEVAL_API_KEY:latest,PLAN_REVIEW_API_KEY=PLAN_REVIEW_API_KEY:latest,ATOMS_DATABASE_URL=ATOMS_DATABASE_URL:latest,STRIPE_SOLO_PRICE_ID=STRIPE_SOLO_PRICE_ID:latest,STRIPE_STUDIO_PRICE_ID=STRIPE_STUDIO_PRICE_ID:latest,STRIPE_TEAM_PRICE_ID=STRIPE_TEAM_PRICE_ID:latest,STRIPE_TEAM_SEAT_PRICE_ID=STRIPE_TEAM_SEAT_PRICE_ID:latest,STRIPE_PE_UNLOCK_PRICE_ID=STRIPE_PE_UNLOCK_PRICE_ID:latest,STRIPE_SOLO_ANNUAL_PRICE_ID=STRIPE_SOLO_ANNUAL_PRICE_ID:latest,STRIPE_STUDIO_ANNUAL_PRICE_ID=STRIPE_STUDIO_ANNUAL_PRICE_ID:latest,STRIPE_TEAM_ANNUAL_PRICE_ID=STRIPE_TEAM_ANNUAL_PRICE_ID:latest
+            --set-env-vars=NODE_ENV=production,LOG_LEVEL=info,AIR_FINDING_LLM_MODE=anthropic,BRIEFING_LLM_MODE=anthropic,CLASSIFICATION_LLM_MODE=anthropic,AIR_FINDING_ORCHESTRATED=1,ENGINE_API_URL=https://hauska-engine-api-h7gvu7rgcq-uc.a.run.app,ENGINE_SPINE_FINDINGS=1,ENGINE_SPINE_FINDINGS_ORCHESTRATED=1,ENGINE_SPINE_BRIEFING=1,ENGINE_SPINE_HYDROLOGY=1,ENGINE_SPINE_TOPOGRAPHY=1,PRECEDENCE_ENGINE_PRODUCTION=1,HYDROLOGY_PYSHEDS_INSTALLED=1,MNML_RENDER_MODE=mock,RENDERS_PROD_ENABLED=false,DXF_CONVERTER_MODE=mock,AI_INTEGRATIONS_ANTHROPIC_BASE_URL=https://api.anthropic.com,PUBLIC_OBJECT_SEARCH_PATHS=/legacy-design-tools-prod-objects/public,PRIVATE_OBJECT_DIR=/legacy-design-tools-prod-objects/.private,ICC_ES_REPORT_URL_TEMPLATE=https://icc-es.org/report-listing/?search_api_fulltext={ESR},BROKERAGE_FEDERAL_DATA_DIR=/app/var/brokerage-federal-data,CORTEX_USER_DAILY_API_LIMIT=50000,FINDINGS_ICC_MODEL_CODE_SUPPLEMENT=true,GATE_CONTEXT_MODE=enforce,OVERPASS_URL=http://10.128.0.2:8080/api/interpreter,PLAN_REVIEW_BACKEND_URL=https://plan-review-ozx33wafia-ue.a.run.app,RECORDS_REQUEST_WORKER_URL=https://records-request-worker-1062716564162.us-central1.run.app/run \
+            --set-secrets=DATABASE_URL=DEPLOYMENT_DATABASE_URL_DIRECT:latest,AI_INTEGRATIONS_ANTHROPIC_API_KEY=AI_INTEGRATIONS_ANTHROPIC_API_KEY:latest,SESSION_SECRET=SESSION_SECRET:latest,PE_SESSION_EXCHANGE_SECRET=PE_SESSION_EXCHANGE_SECRET:latest,BIM_MODEL_SHARED_SECRET=BIM_MODEL_SHARED_SECRET:latest,SNAPSHOT_SECRET=SNAPSHOT_SECRET:latest,SERVICE_API_KEY=SERVICE_API_KEY:latest,ENGINE_API_GATE_TOKEN=HAUSKA_ENGINE_API_KEY:latest,BROKERAGE_EXTENSION_PUBLIC_KEY=BROKERAGE_EXTENSION_PUBLIC_KEY:latest,COTALITY_PROPERTY_KEY=COTALITY_PROPERTY_KEY:latest,COTALITY_PROPERTY_SECRET=COTALITY_PROPERTY_SECRET:latest,COTALITY_SPATIALTILE_KEY=COTALITY_SPATIALTILE_KEY:latest,COTALITY_SPATIALTILE_SECRET=COTALITY_SPATIALTILE_SECRET:latest,COTALITY_RISKMETER_KEY=COTALITY_RISKMETER_KEY:latest,COTALITY_RISKMETER_SECRET=COTALITY_RISKMETER_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PUBLISHABLE_KEY=STRIPE_PUBLISHABLE_KEY:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,STRIPE_PRO_PRICE_ID=STRIPE_PRO_PRICE_ID:latest,STRIPE_MAX_PRICE_ID=STRIPE_MAX_PRICE_ID:latest,PIPEDRIVE_API_TOKEN=PIPEDRIVE_API_TOKEN:latest,GATE_CONTEXT_SIGNING_KEY=GATE_CONTEXT_SIGNING_KEY:latest,BRIEF_RETRIEVAL_API_URL=BRIEF_RETRIEVAL_API_URL:latest,BRIEF_RETRIEVAL_API_KEY=BRIEF_RETRIEVAL_API_KEY:latest,RETRIEVAL_API_KEY=HAUSKA_ENGINE_API_KEY:latest,PLAN_REVIEW_API_KEY=PLAN_REVIEW_API_KEY:latest,ATOMS_DATABASE_URL=ATOMS_DATABASE_URL:latest,FACTORY_DATABASE_URL=FACTORY_DATABASE_URL:latest,STRIPE_SOLO_PRICE_ID=STRIPE_SOLO_PRICE_ID:latest,STRIPE_STUDIO_PRICE_ID=STRIPE_STUDIO_PRICE_ID:latest,STRIPE_TEAM_PRICE_ID=STRIPE_TEAM_PRICE_ID:latest,STRIPE_TEAM_SEAT_PRICE_ID=STRIPE_TEAM_SEAT_PRICE_ID:latest,STRIPE_PE_UNLOCK_PRICE_ID=STRIPE_PE_UNLOCK_PRICE_ID:latest,STRIPE_SOLO_ANNUAL_PRICE_ID=STRIPE_SOLO_ANNUAL_PRICE_ID:latest,STRIPE_STUDIO_ANNUAL_PRICE_ID=STRIPE_STUDIO_ANNUAL_PRICE_ID:latest,STRIPE_TEAM_ANNUAL_PRICE_ID=STRIPE_TEAM_ANNUAL_PRICE_ID:latest,RESEND_API_KEY=RESEND_API_KEY:latest
 
       - name: Show new revision and canary smoke URL
         run: |
@@ -250,6 +273,36 @@ jobs:
           echo ""
           echo "Canary tag URL (smoke /api/healthz here; after first deploy, default URL may share traffic — see job log above):"
           echo "  https://canary---${HOST}"
+
+      # P-279 post-deploy credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY HERE: the deploy is what creates the new revision, and the tag list is what a deploy
+      # leaves lying around. This first run catches the tags that were already stale
+      # before this deploy; the post-shift run below catches the ones this deploy creates.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the verdict is read from the check's OWN JSON report, never from its process exit
+      # code. A missing module, a syntax error, an uncaught exception, a usage error or an
+      # unreadable service all leave stdout without that JSON and read "did-not-run" — never
+      # "violation". scripts/p279-tagged-revision-check.mjs is the single table both call sites
+      # read; there is no second copy of a case statement to drift. Its non-zero exit fails this
+      # step (GitHub's default `bash -e`).
+      - name: Tagged-revision credential check (P-279)
+        run: |
+          node scripts/p279-tagged-revision-check.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"
 
   # ────────────────────────────────────────────────────────────────────
   # Phase 2 — operator-triggered deploy lifecycle jobs.
@@ -317,10 +370,12 @@ jobs:
         # `::add-mask::` keeps the connection string out of the GHA log.
         # The deploy SA has `roles/secretmanager.secretAccessor` per
         # docs/deploy.md §4; the same binding the Cloud Run runtime uses.
+        # Reads DEPLOYMENT_DATABASE_URL_DIRECT: migrations are writes and
+        # fail read-only through the Neon pooler (incident 2026-08-31).
         run: |
           set -euo pipefail
           URL=$(gcloud secrets versions access latest \
-            --secret=DEPLOYMENT_DATABASE_URL \
+            --secret=DEPLOYMENT_DATABASE_URL_DIRECT \
             --project=${{ secrets.GCP_PROJECT_ID }})
           echo "::add-mask::$URL"
           echo "DATABASE_URL=$URL" >> "$GITHUB_ENV"
@@ -343,6 +398,21 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # P-362. This job calls a repo script (scripts/p279-tagged-revision-check.mjs), so the
+      # repo must exist on the runner. It did not, and on 2026-09-18 the missing module's exit 1
+      # was reported as a credential violation.
+      #
+      # WHICH COMMIT: for a workflow_dispatch run `github.sha` is the head of the ref the run was
+      # dispatched against, and the workflow file itself is read from that same commit, so the
+      # script and the workflow are the same revision by construction. It is NOT necessarily the
+      # revision whose image is being shifted: `image_tag` is an operator input that defaults to
+      # `latest`, so the workflow cannot know the image's commit from inside the run. The
+      # guarantee bought here is workflow <-> script, which is the one this check needs.
+      - name: Checkout (the commit this workflow was dispatched from)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Validate required secrets
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -390,6 +460,34 @@ jobs:
             echo "::error::Production /api/healthz returned HTTP ${STATUS} after traffic shift — investigate before declaring the shift done"
             exit 1
           fi
+
+      # P-279 post-shift credential check.
+      # A tagged revision cannot outlive an auth or secret variable the SERVING
+      # revision carries. Finding fa9addb4: 37 of 51 hauska-engine tags pointed at
+      # revisions lacking ENGINE_API_GATE_TOKEN. P-251 removed that instance and the
+      # class returned on this repo's services within hours: cortex-api carried 15
+      # failing tags and smartsite-mcp 30 on 2026-09-17. Every one of those tag URLs
+      # is reachable and runs the environment its revision was created with.
+      #
+      # WHY AFTER THE SHIFT, SECOND RUN: at canary time the OLD revision is still serving, so a credential ADDED by
+      # this deploy is invisible to the comparison. The serving revision changes at the
+      # shift, which is the moment the comparison becomes complete — and the moment
+      # the stale tags become provably stale.
+      #
+      # Reads Cloud Run BY FIELD from --format=json, never positionally. The script this step
+      # runs is scripts/p279-tagged-revision-check.mjs, whose own table is 0 clean / 1 violation
+      # / 2 did-not-run, and BOTH non-zero codes fail this step: a check that could not read
+      # what it needs must never read as green. It mutates nothing — removing or repointing a
+      # tag is an operator decision.
+      # P-362: the same single table as the canary run above. The verdict is read from the check's
+      # OWN JSON report, never from its process exit code, so a check that could not run reads
+      # "did-not-run" and never "violation".
+      - name: Tagged-revision credential check (P-279) [after traffic shift]
+        run: |
+          node scripts/p279-tagged-revision-check.mjs \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --service "${{ env.CLOUD_RUN_SERVICE }}"
 
   rollback:
     name: Roll traffic back to a prior revision

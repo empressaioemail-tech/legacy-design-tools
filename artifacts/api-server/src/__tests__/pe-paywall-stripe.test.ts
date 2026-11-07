@@ -73,8 +73,11 @@ function signedWebhookPayload(body: Record<string, unknown>): {
 
 function checkoutCompletedEvent(
   object: Record<string, unknown>,
+  eventId = "evt_test_paywall_default",
 ): Record<string, unknown> {
   return {
+    id: eventId,
+    livemode: false,
     type: "checkout.session.completed",
     data: { object: { id: "cs_test_1", object: "checkout.session", ...object } },
   };
@@ -144,6 +147,13 @@ describe("PE checkout routes (WDLL item 3) — simulated mode (no Stripe keys)",
   });
 });
 
+function stripeListSubscriptionsEmpty(): Response {
+  return new Response(JSON.stringify({ object: "list", data: [] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function mockStripeCheckoutSession(payload: Record<string, unknown>): {
   checkoutBodies: URLSearchParams[];
 } {
@@ -151,6 +161,9 @@ function mockStripeCheckoutSession(payload: Record<string, unknown>): {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const path = String(url);
     const body = new URLSearchParams(String(init?.body ?? ""));
+    if (path.includes("/subscriptions")) {
+      return stripeListSubscriptionsEmpty();
+    }
     if (path.includes("/customers")) {
       return new Response(JSON.stringify({ id: "cus_test_unlock_3b" }), {
         status: 200,
@@ -274,6 +287,166 @@ describe("unlock custom / hosted checkout chrome (WDLL 3b item 2)", () => {
   });
 });
 
+describe("Stripe customer email — Custom Checkout confirm() requires one (2026-09-04 fix)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("passes the account's email when creating a new Stripe customer", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "operator@example.com" })
+      .where(eq(users.id, USER_A));
+
+    const customerBodies: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const body = new URLSearchParams(String(init?.body ?? ""));
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
+      if (path.includes("/customers")) {
+        customerBodies.push(body);
+        return new Response(JSON.stringify({ id: "cus_test_email_new" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_email", client_secret: "cs_test_email_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerBodies).toHaveLength(1);
+    expect(customerBodies[0]!.get("email")).toBe("operator@example.com");
+  });
+
+  it("backfills email onto an existing Stripe customer that was created without one", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "backfilled@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_needs_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerGets: string[] = [];
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
+      if (path.includes("/customers/cus_test_needs_email") && method === "GET") {
+        customerGets.push(path);
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/customers/cus_test_needs_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_needs_email", email: "backfilled@example.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_backfill", client_secret: "cs_test_backfill_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerGets).toHaveLength(1);
+    expect(customerUpdates).toHaveLength(1);
+    expect(customerUpdates[0]!.get("email")).toBe("backfilled@example.com");
+  });
+
+  it("does not re-issue a backfill when the existing customer already has an email", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    await db
+      .update(users)
+      .set({ email: "already-set@example.com" })
+      .where(eq(users.id, USER_A));
+    await db
+      .update(peUserEntitlements)
+      .set({ stripeCustomerId: "cus_test_already_has_email" })
+      .where(eq(peUserEntitlements.ownerUserId, USER_A));
+
+    const customerUpdates: URLSearchParams[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      const method = init?.method ?? "GET";
+      if (path.includes("/subscriptions")) {
+        return stripeListSubscriptionsEmpty();
+      }
+      if (path.includes("/customers/cus_test_already_has_email") && method === "GET") {
+        return new Response(
+          JSON.stringify({ id: "cus_test_already_has_email", email: "already-set@example.com" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (path.includes("/customers/cus_test_already_has_email") && method === "POST") {
+        customerUpdates.push(new URLSearchParams(String(init?.body ?? "")));
+        return new Response(JSON.stringify({ id: "cus_test_already_has_email" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (path.includes("/checkout/sessions")) {
+        return new Response(
+          JSON.stringify({ id: "cs_test_noop", client_secret: "cs_test_noop_secret" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected path ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month", uiMode: "custom" });
+    expect(res.status).toBe(200);
+    expect(customerUpdates).toHaveLength(0);
+  });
+});
+
 describe("Stripe webhook PE routing (WDLL item 5)", () => {
   beforeEach(() => {
     process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
@@ -386,11 +559,24 @@ describe("Stripe webhook PE routing (WDLL item 5)", () => {
   });
 
   it("brokerage installId-only checkout (no pe_user_id) is unaffected", async () => {
+    // Realistic fixture: createSubscriptionCheckoutSession (brokerageStripe.ts)
+    // always sets metadata.subscription_tier on the session it creates, so a
+    // genuine completed checkout for this legacy install-scoped seam carries
+    // it too. FAIL CLOSED (OPS-16 A-061): a webhook event with NEITHER a
+    // recognized metadata tier NOR a price id matching a configured
+    // STRIPE_PRO_PRICE_ID/STRIPE_MAX_PRICE_ID must refuse rather than default
+    // to "pro" — this fixture supplies the tier the same way the real seam
+    // does, so this test still proves the PE-routing question it was written
+    // for (unaffected by pe_user_id-keyed routing) without relying on the
+    // retired fail-open default.
     const { raw, signature } = signedWebhookPayload(
       checkoutCompletedEvent({
         customer: "cus_test_5",
         client_reference_id: "install-brokerage-only",
-        metadata: { install_id: "install-brokerage-only" },
+        metadata: {
+          install_id: "install-brokerage-only",
+          subscription_tier: "pro",
+        },
       }),
     );
     const result = await handleStripeWebhook(raw, signature);
@@ -400,6 +586,18 @@ describe("Stripe webhook PE routing (WDLL item 5)", () => {
       installId: "install-brokerage-only",
     });
     expect(result).not.toHaveProperty("peUserId");
+  });
+
+  it("VIOLATION: brokerage installId-only checkout with no recognizable tier (no metadata tier, no matching price id) refuses rather than defaulting to pro", async () => {
+    const { raw, signature } = signedWebhookPayload(
+      checkoutCompletedEvent({
+        customer: "cus_test_6",
+        client_reference_id: "install-brokerage-unrecognized",
+        metadata: { install_id: "install-brokerage-unrecognized" },
+      }),
+    );
+    const result = await handleStripeWebhook(raw, signature);
+    expect(result.handled).toBe(false);
   });
 });
 
@@ -604,5 +802,172 @@ describe("session-exchange claims install history (WDLL item 6)", () => {
     });
     expect(res.status).toBe(201);
     expect(res.body.claimedInstallHistory).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OPS-16 P-185 — PROMOTEKIT AFFILIATE REFERRAL, the route-wiring half.
+//
+// The pure rule lives in lib/promotekitReferral.ts and is pinned DB-free in
+// promotekit-referral.test.ts. THIS block proves the two PE checkout routes
+// actually forward `promotekitReferral` from the request body onto the Stripe
+// Checkout Session form — the hop a pure rule test cannot see. Both directions
+// per route: with the field the form carries the key(s), without it the keys
+// are ABSENT.
+//
+// NOTE: these are DB-backed (route + entitlement row) and run in CI's Postgres
+// service. They are not runnable on the workstation (no local database).
+// ---------------------------------------------------------------------------
+
+const REFERRAL_METADATA_KEY = "metadata[promotekit_referral]";
+const REFERRAL_SUBSCRIPTION_KEY =
+  "subscription_data[metadata][promotekit_referral]";
+
+describe("subscription checkout guard (P-494)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 409 subscription_exists when the customer already has an active subscription", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.includes("/subscriptions")) {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [{ id: "sub_existing", status: "active" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (path.includes("/customers")) {
+        return new Response(JSON.stringify({ id: "cus_has_sub" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: `unexpected ${path}` } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("subscription_exists");
+    expect(res.body.billingPortalRoute).toBe("/property-explorer/v1/billing/portal");
+  });
+});
+
+describe("PromoteKit referral forwarded by the PE checkout routes (OPS-16 P-185)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("billing/checkout: the referral rides metadata AND subscription_data, and allow_promotion_codes stays on", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_sub",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_sub",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({
+      tier: "solo",
+      interval: "month",
+      promotekitReferral: "aff_abc123",
+    });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBe("aff_abc123");
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBe("aff_abc123");
+    expect(form.get("allow_promotion_codes")).toBe("true");
+  });
+
+  it("billing/checkout: no referral -> NEITHER key appears (no stale cached value)", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_sub_plain",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_sub_plain",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+      USER_A,
+    ).send({ tier: "solo", interval: "month" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBeNull();
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+  });
+
+  it("entitlement/checkout: the referral rides the unlock session; allow_promotion_codes is on", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_unlock",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_unlock",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068", promotekitReferral: "aff_abc123" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    const form = checkoutBodies[0]!;
+    expect(form.get(REFERRAL_METADATA_KEY)).toBe("aff_abc123");
+    expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+    expect(form.get("allow_promotion_codes")).toBe("true");
+    expect(form.get("metadata[checkout_kind]")).toBe("property_unlock");
+  });
+
+  it("entitlement/checkout: no referral -> the key is absent", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_PE_UNLOCK_PRICE_ID = "price_test_unlock_15";
+    const { checkoutBodies } = mockStripeCheckoutSession({
+      id: "cs_test_pk_unlock_plain",
+      url: "https://checkout.stripe.com/c/pay/cs_test_pk_unlock_plain",
+    });
+    const res = await asUser(
+      request(getApp()).post("/api/property-explorer/v1/entitlement/checkout"),
+      USER_A,
+    ).send({ parcelNodeId: "48055:10068" });
+    expect(res.status).toBe(200);
+    expect(checkoutBodies).toHaveLength(1);
+    expect(checkoutBodies[0]!.get(REFERRAL_METADATA_KEY)).toBeNull();
+  });
+
+  it("a malformed referral is DROPPED at the route, never a 400 — the purchase still opens", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_fake";
+    process.env.STRIPE_SOLO_PRICE_ID = "price_test_solo";
+    for (const bad of ["has whitespace", "x".repeat(129), 42, { a: 1 }]) {
+      vi.restoreAllMocks();
+      const { checkoutBodies } = mockStripeCheckoutSession({
+        id: "cs_test_pk_bad",
+        url: "https://checkout.stripe.com/c/pay/cs_test_pk_bad",
+      });
+      const res = await asUser(
+        request(getApp()).post("/api/property-explorer/v1/billing/checkout"),
+        USER_A,
+      ).send({ tier: "solo", interval: "month", promotekitReferral: bad });
+      expect(res.status).toBe(200);
+      const form = checkoutBodies[0]!;
+      expect(form.get(REFERRAL_METADATA_KEY)).toBeNull();
+      expect(form.get(REFERRAL_SUBSCRIPTION_KEY)).toBeNull();
+    }
   });
 });

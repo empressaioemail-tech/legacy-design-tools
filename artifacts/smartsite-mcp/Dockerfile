@@ -12,6 +12,9 @@ COPY lib/db/package.json ./lib/db/
 COPY lib/db/tsconfig.json ./lib/db/
 COPY lib/db/src ./lib/db/src
 COPY lib/db/drizzle.config.ts ./lib/db/
+COPY lib/icc-notice/package.json ./lib/icc-notice/
+COPY lib/icc-notice/tsconfig.json ./lib/icc-notice/
+COPY lib/icc-notice/src ./lib/icc-notice/src
 
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate && pnpm install --filter @workspace/smartsite-mcp... --frozen-lockfile || pnpm install --filter @workspace/smartsite-mcp...
 
@@ -19,7 +22,9 @@ COPY artifacts/smartsite-mcp ./artifacts/smartsite-mcp
 COPY tsconfig.base.json ./
 
 WORKDIR /app/artifacts/smartsite-mcp
-RUN pnpm add -D esbuild && pnpm exec esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.mjs --external:dotenv --external:express --external:jose --external:drizzle-orm --external:pg --external:zod --external:"@modelcontextprotocol/*"
+RUN pnpm add -D esbuild \
+ && pnpm exec esbuild src/card/app-entry.ts --bundle --platform=browser --format=iife --minify-whitespace --outfile=dist/card.iife.js \
+ && pnpm exec esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.mjs --external:dotenv --external:express --external:jose --external:drizzle-orm --external:pg --external:zod --external:"@modelcontextprotocol/*" --external:esbuild
 
 ENV NODE_ENV=production
 EXPOSE 8080

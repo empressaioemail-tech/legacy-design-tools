@@ -1,33 +1,119 @@
 import { describe, expect, it } from "vitest";
 
-import { SMARTSITE_MCP_TOOLS, SERVER_NAME } from "../src/constants.js";
+import { LISTED_TOOLS, SMARTSITE_MCP_TOOLS, SERVER_NAME } from "../src/constants.js";
 import { renderLlmsTxt } from "../src/health.js";
 
 describe("smartsite-mcp constants", () => {
-  it("lists exactly eight tools", () => {
-    expect(SMARTSITE_MCP_TOOLS).toHaveLength(8);
-    expect(new Set(SMARTSITE_MCP_TOOLS.map((t) => t.name)).size).toBe(8);
+  it("lists exactly seventeen tools", () => {
+    expect(SMARTSITE_MCP_TOOLS).toHaveLength(17);
+    expect(new Set(SMARTSITE_MCP_TOOLS.map((t) => t.name)).size).toBe(17);
   });
 
   it("names the server Smart Site", () => {
     expect(SERVER_NAME).toBe("Smart Site");
   });
 
-  it("marks records tools blocked pending backend", () => {
-    const records = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
-    expect(records.map((t) => t.name).sort()).toEqual([
+  it("marks both records pairs and ask_the_map blocked, each with a reason", () => {
+    const blocked = SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked");
+    expect(blocked.map((t) => t.name).sort()).toEqual([
+      "ask_the_map",
       "check_request",
+      "list_purchased_records",
+      "read_purchased_record",
       "request_records",
     ]);
+    for (const tool of blocked) {
+      expect(
+        (tool as { blockedReason?: string }).blockedReason,
+        `${tool.name} blockedReason`,
+      ).toMatch(/^P-\d+( item \d+)?/);
+    }
+    const askTheMap = SMARTSITE_MCP_TOOLS.find((t) => t.name === "ask_the_map");
+    expect((askTheMap as { blockedReason?: string }).blockedReason).toContain(
+      "P-91 item 34",
+    );
+    // P-242 (this row): list_purchased_records / read_purchased_record are a
+    // DIFFERENT, more recent governing decision than request_records /
+    // check_request's P-85 item 4 — a future reader must trace to the right
+    // one, so the two pairs carry distinct blockedReason values.
+    for (const name of ["list_purchased_records", "read_purchased_record"] as const) {
+      const tool = SMARTSITE_MCP_TOOLS.find((t) => t.name === name);
+      expect((tool as { blockedReason?: string }).blockedReason).toBe("P-242");
+    }
+  });
+
+  // P-110: export_instrument is live again, rewired to the real two-hop
+  // Hauska contract. "brief" has no upstream counterpart and is refused in
+  // the handler, not at the catalog level (see tools.test.ts).
+  it("export_instrument is live and names the real upstream shape, not brief", () => {
+    const exportInstrument = SMARTSITE_MCP_TOOLS.find(
+      (t) => t.name === "export_instrument",
+    );
+    expect(exportInstrument?.readiness).toBe("live");
+    expect((exportInstrument as { blockedReason?: string }).blockedReason).toBeUndefined();
+    expect(exportInstrument?.description).toContain("kind_not_available");
+    expect(exportInstrument?.description).not.toMatch(/\/tools\/export_instrument/);
+  });
+
+  it("descriptions do not promise a map, listings, or web search, and owner data is tiered", () => {
+    const askTheMap = SMARTSITE_MCP_TOOLS.find((t) => t.name === "ask_the_map");
+    expect(askTheMap?.description).not.toMatch(/visible map context/i);
+    expect(askTheMap?.description).toContain("not_ready");
+    const getSmartSite = SMARTSITE_MCP_TOOLS.find((t) => t.name === "get_smart_site");
+    expect(getSmartSite?.description).toContain("upgrade_required");
+    expect(getSmartSite?.description).toContain("Array cap 50");
+    // H2 (2026-08-30): node bodies average 4,711 chars (largest 5,549); a
+    // 50-id node batch is about 235,000, past what the host delivers to the panel.
+    expect(getSmartSite?.description).toContain("array cap 25");
+    expect(getSmartSite?.description).toMatch(/depth node: array cap 25/);
+    expect(getSmartSite?.description).toMatch(/does not need to be saved/);
+    expect(getSmartSite?.description).toContain("Owner name and mailing address are included for Studio and Team");
+    expect(getSmartSite?.description).toContain("declared refusal");
+    expect(getSmartSite?.description).not.toMatch(/does not carry at any depth/);
+    expect(getSmartSite?.description).toContain("area figure is withheld");
+    const findParcel = SMARTSITE_MCP_TOOLS.find((t) => t.name === "find_parcel");
+    expect(findParcel?.description).toContain("missClass");
+    expect(findParcel?.description).toMatch(/not that the parcel does not exist/);
+    // P-107 (OPS-16 A-072). find_parcel's own coverage claim was stale
+    // ("Central Texas") relative to the store it actually queries, and the
+    // description never told a caller the two miss classes mean opposite
+    // things. Locked in here so a future edit cannot silently regress
+    // either half of the fix.
+    expect(findParcel?.description).toContain("out_of_coverage");
+    expect(findParcel?.description).not.toMatch(/Central Texas/);
+    const listScreens = SMARTSITE_MCP_TOOLS.find((t) => t.name === "list_screens");
+    expect(listScreens?.description).toMatch(/does not open a board/);
+    for (const name of ["save_property", "set_property_status"] as const) {
+      const tool = SMARTSITE_MCP_TOOLS.find((t) => t.name === name);
+      expect(tool?.description).toContain("New, Watching, Chasing, Passed");
+    }
+    // B2 (cortex S9, same cut): a duplicate is a row outcome, not a screen refuse.
+    const createScreen =
+      SMARTSITE_MCP_TOOLS.find((t) => t.name === "create_screen")?.description ?? "";
+    expect(createScreen).not.toContain("duplicate_resolved_node");
+    expect(createScreen).not.toMatch(/dedupe first/i);
+    expect(createScreen).toContain("degraded.duplicates");
+    expect(createScreen).toContain("not written twice");
+    expect(
+      SMARTSITE_MCP_TOOLS.find((t) => t.name === "add_to_screen")?.description,
+    ).toContain("walk, saved, pasted");
   });
 });
 
 describe("llms.txt", () => {
-  it("includes hostname and eight tool names", () => {
+  it("includes the hostname and every listed tool", () => {
     const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
     expect(txt).toContain("mcp.smartsite.cloud");
-    for (const tool of SMARTSITE_MCP_TOOLS) {
-      expect(txt).toContain(tool.name);
+    for (const tool of LISTED_TOOLS) expect(txt).toContain(tool.name);
+  });
+
+  // Operator, 2026-10-05: parked tools are not published at all (this replaces
+  // P-109 item 3's "advertised not ready" line).
+  it("publishes no parked tool and no not-ready marker", () => {
+    const txt = renderLlmsTxt("https://mcp.smartsite.cloud");
+    for (const tool of SMARTSITE_MCP_TOOLS.filter((t) => t.readiness === "blocked")) {
+      expect(txt).not.toContain("`" + tool.name + "`");
     }
+    expect(txt).not.toContain("not ready");
   });
 });

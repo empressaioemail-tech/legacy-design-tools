@@ -21,7 +21,9 @@ export {
   parsePacsExport,
   parsePacsInfoLine,
   readImprovementRollups,
+  ImprovementVocabularyMismatchError,
 } from "./pacs/parser";
+export type { ImprovementRollup, ImprovementSegmentTypeSample } from "./pacs/parser";
 export {
   APPRAISAL_INFO,
   APPRAISAL_INFO_MIN_LEN,
@@ -135,6 +137,7 @@ export type {
 export {
   ZONING_LAYERS,
   resolveZoningLayer,
+  canonicalZoningJurisdictionKey,
   wiredZoningCityKeys,
   resolveZoningJurisdiction,
 } from "./txgio/zoning-layers";
@@ -209,6 +212,13 @@ export {
   resolveCountyContainment,
   resolveCountyContainmentAtPoint,
   representativePoint,
+  buildEtjBoundaryIndex,
+  resolveEtj,
+  resolveEtjAtPoint,
+  resolveEtjByIncorporation,
+  ETJ_SERVABLE_STATUSES,
+  ETJ_UNINCORPORATED_AREA_LEGAL_GROUND,
+  statusIsServable,
 } from "./boundary/containment";
 export type {
   CityBoundaryIndexEntry,
@@ -216,17 +226,126 @@ export type {
   CityContainmentResult,
   CountyContainmentResult,
   EtjStatus,
+  EtjBoundaryIndex,
+  EtjBoundaryIndexEntry,
+  EtjBoundarySourceRow,
+  EtjRingRefusal,
+  EtjSourceCoverageEntry,
+  EtjContainmentResult,
+  EtjContainingCity,
+  EtjIncorporationSettlement,
 } from "./boundary/containment";
 export {
   CITY_LIMITS_SOURCE,
+  cityLimitsAreaShareFromDecision,
   cityLimitsFactFromContainment,
+  incorporationSettlesEtj,
+  parseCityLimitsAreaShare,
   unmeasuredCityLimitsFact,
   usableCityLimitsQueryPoint,
 } from "./boundary/cityLimitsFact";
 export type {
+  CityLimitsAreaShare,
   CityLimitsFact,
   CityLimitsStatus,
 } from "./boundary/cityLimitsFact";
+export {
+  AREA_SHARE_METHOD,
+  EQUAL_AREA_SRID,
+  MAJORITY_SHARE,
+  SLIVER_MAX_M2,
+  SLIVER_MAX_SHARE,
+  SPLIT_DISCLOSURE_BELOW_SHARE,
+  cityAreaShareSql,
+  decideByAreaShare,
+  describeAreaShareSplit,
+  formatShare,
+  geometryAreaM2,
+  groupCityAreaShareRows,
+  isSliverPiece,
+  measureJurisdictionPieces,
+  projectEpsg3083,
+} from "./boundary/areaShare";
+export type {
+  AreaShareDecision,
+  AreaSharePiece,
+  CityAreaShareSqlRow,
+  JurisdictionPolygon,
+  MeasuredJurisdictionPiece,
+} from "./boundary/areaShare";
+export {
+  ETJ_SOURCE,
+  etjFactFromContainment,
+  unmeasuredEtjFact,
+  usableEtjQueryPoint,
+} from "./boundary/etjFact";
+export type { EtjFact, EtjDisposition } from "./boundary/etjFact";
+export {
+  ETJ_REGISTRY,
+  ETJ_SOURCE_VINTAGE,
+  cityLimitsOnlyEntries,
+  etjPredicateMustBeSelective,
+  etjRegistryEntry,
+  etjSourceEntries,
+  etjWhereClause,
+} from "./boundary/etjRegistry";
+export type {
+  EtjRegistryEntry,
+  EtjSourceMode,
+  EtjMembershipPredicate,
+} from "./boundary/etjRegistry";
+export {
+  ETJ_MAX_PAGE_SIZE,
+  ETJ_RATE_MS,
+  countEtjFeatures,
+  fetchEtjBoundaryFeatures,
+  fetchEtjSourceMetadata,
+} from "./boundary/etjService";
+export type {
+  EtjRawFeature,
+  EtjSourceMetadata,
+  EtjFetchOptions,
+} from "./boundary/etjService";
+export {
+  normalizeEtjBoundaryFeature,
+  readObjectId,
+  readRingLabel,
+} from "./boundary/etjParse";
+export type { TxEtjBoundaryRecord } from "./boundary/etjParse";
+export {
+  ETJ_DEFAULT_BATCH_SIZE,
+  deleteEtjBoundariesForSources,
+  upsertEtjBoundaries,
+  upsertEtjSources,
+} from "./boundary/etjIngest";
+export type {
+  EtjIngestDb,
+  EtjSourceRowMeta,
+  EtjUpsertOptions,
+  EtjUpsertSummary,
+} from "./boundary/etjIngest";
+export {
+  REPAIR_RELATIVE_AREA_TOLERANCE,
+  ETJ_AREA_SRID,
+  ETJ_DERIVED_STATUSES,
+  deriveEtjServedGeometry,
+} from "./boundary/etjDerive";
+export type {
+  EtjDeriveDb,
+  EtjDeriveSummary,
+  EtjRingDerivationOutcome,
+} from "./boundary/etjDerive";
+export {
+  ETJ_CONTROL_POINTS,
+  verifyEtjControlPoints,
+} from "./boundary/etjVerify";
+export type {
+  EtjControlPoint,
+  EtjControlOutcome,
+  EtjPublisherGuard,
+  EtjVerifyResult,
+  EtjVerifyOptions,
+} from "./boundary/etjVerify";
 export {
   NFHL_DEFAULT_SOURCE,
   NFHL_DEFAULT_VINTAGE,

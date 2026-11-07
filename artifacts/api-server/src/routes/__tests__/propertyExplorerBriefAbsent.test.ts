@@ -1,0 +1,245 @@
+/**
+ * P-91 research/brief miss split: absent parcel versus unbaked parcel versus
+ * a probe that could not answer. Before this cut every miss was
+ * baked_snapshot_not_found, and the MCP painted "Not on file" for parcels
+ * it had never checked.
+ *
+ * Mocked: db handle, entitlement gate, the baked snapshot read (null in every
+ * case here), the existence probe, and the modules that reach
+ * @workspace/cad-ingest subpaths this isolate cannot resolve.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import request from "supertest";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
+
+const fakes = vi.hoisted(() => ({
+  probe: vi.fn<(input: { parcelNodeId: string }) => Promise<{ parcelNodeId: string; label: string } | null>>(),
+  snapshot: vi.fn<(id: string) => Promise<unknown>>(),
+}));
+
+vi.mock("@workspace/db", () => ({
+  db: {},
+  peSavedProperties: {},
+  peShareGrants: {},
+  peWorkbenchState: {},
+  peScreens: {},
+  peScreenRows: {},
+  // P-153: propertyExplorer.ts's draw-block orchestration now transitively
+  // reaches the real parcel-fetch/setback-jurisdiction machinery
+  // (brokerageGisLayers -> brokerageTxParcels/brokerageGisCache ->
+  // txgioParcelStore; @workspace/codes -> orchestrator.ts) at MODULE LOAD,
+  // even though none of it is ever queried by this test (the atom-pending
+  // draw path this test never exercises is the only caller). Stub tables
+  // only, never real Drizzle handles.
+  txgioParcel: {},
+  cadProperty: {},
+  cotalitySpatialTileCache: {},
+  cotalityPropertyAttrCache: {},
+  cotalityGeocodeCache: {},
+  txParcelTileCache: {},
+  codeAtomSources: {},
+  codeAtoms: {},
+  codeAtomFetchQueue: {},
+}));
+
+vi.mock("../../lib/peEntitlement", () => ({
+  PE_FREE_CHAT_MESSAGE_LIMIT: 3,
+  createPePropertyUnlock: vi.fn(),
+  getPeFreeChatMessagesUsed: vi.fn(),
+  hasPeDevPaidBypass: vi.fn(async () => false),
+  isPePropertyEntitled: vi.fn(async () => true),
+  requirePeAuthenticated: (_req: Request, _res: Response, next: NextFunction) =>
+    next(),
+  requirePePaidOrPropertyUnlocked:
+    () => (_req: Request, _res: Response, next: NextFunction) => next(),
+  resolvePeEntitlement: vi.fn(),
+  resolvePeOwnerUserId: () => "user-brief-absent",
+  // OPS-16 A-103 item 5 / A-104 (co-gate widened 2026-09-05):
+  // propertyExplorer.ts now reuses this real predicate to gate the CAD
+  // tax-assessed dollar fields per parcel. This suite is about the brief
+  // miss-split, not entitlement, so a stub that always refuses is enough --
+  // every case here misses before a real dollar value would ever render.
+  grantsOwnerCoGatedFields: vi.fn(async () => false),
+}));
+
+vi.mock("../../lib/peScreenSaveDb", () => ({
+  createDrizzleScreenSaveStore: vi.fn(),
+}));
+
+vi.mock("../../lib/peScreenSaveResolve", () => ({
+  // The brief-miss probe rides this seam (same as add_to_screen), so the fake
+  // probe is wired here, not on txgioAddressResolve.
+  cortexNodeLookup: () => (parcelNodeId: string) => fakes.probe({ parcelNodeId }),
+  cortexQueryResolver: vi.fn(),
+}));
+
+vi.mock("../brokerageNodeFacets", () => ({
+  isValidParcelNodeId: (raw: string) =>
+    /^\d{5}:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(raw),
+  loadBakedNodeFacetSnapshot: (id: string) => fakes.snapshot(id),
+}));
+
+vi.mock("../../lib/txgioAddressResolve", () => ({
+  lookupParcelNodeForScreen: (input: { parcelNodeId: string }) =>
+    fakes.probe(input),
+}));
+
+vi.mock("../../lib/verdictLayerServe", () => ({
+  countyFipsFromParcelNodeId: (id: string) => id.split(":")[0] ?? null,
+}));
+
+vi.mock("../../lib/floodHazardFactRead", async (importOriginal) => ({
+  // P-297 (2026-09-16, operator ruling A-193): a slated rail now serves the
+  // parcel's OWN cell, so the brief path reaches
+  // `floodHazardFactFromParcelRecord`, which imports this module's
+  // `FLOOD_HAZARD_FACT_SOURCE` constant. A mock that stubs ONLY the atom
+  // reader is a partial mock of a hand-picked subset, and the missing export
+  // threw out of the handler as a 500 rather than any served answer. Keep the
+  // real module surface and stub only the read this suite wants stubbed.
+  ...(await importOriginal<typeof import("../../lib/floodHazardFactRead")>()),
+  loadFloodHazardFactAtom: vi.fn(async () => null),
+}));
+vi.mock("../../lib/boundaryEdgeFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/boundaryEdgeFactRead")>()),
+  loadBoundaryEdgeFactAtom: vi.fn(async () => null),
+}));
+vi.mock("../../lib/pipelineFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/pipelineFactRead")>()),
+  loadPipelineFactAtom: vi.fn(async () => null),
+}));
+vi.mock("../../lib/wellFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/wellFactRead")>()),
+  loadWellFactAtom: vi.fn(async () => null),
+}));
+vi.mock("../../lib/structuralFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/structuralFactRead")>()),
+  loadStructuralFactAtom: vi.fn(async () => null),
+}));
+vi.mock("../../lib/specialDistrictFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/specialDistrictFactRead")>()),
+  loadSpecialDistrictFactAtom: vi.fn(async () => null),
+}));
+// OPS-16 A-103 item 6 / A-104: assembleNodeBriefBody now also reads building
+// footprint (a direct atom read, no serve-cutover wrapper -- same category as
+// pipeline/boundary above, so it needs the same explicit mock rather than
+// relying on the allowlist short-circuit the cutover-wrapped facts below get).
+vi.mock("../../lib/buildingFootprintFactRead", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/buildingFootprintFactRead")>()),
+  loadBuildingFootprintFactAtom: vi.fn(async () => null),
+}));
+
+vi.mock("../../lib/peRecordsEngagement", () => ({
+  ensurePeRecordsEngagement: vi.fn(),
+  findPeRecordsEngagement: vi.fn(),
+}));
+
+vi.mock("../../lib/recordsRequestService", () => ({
+  createRecordsRequestJob: vi.fn(),
+  listRecordsRequestJobsWire: vi.fn(),
+  listRecordsRequestInboxWire: vi.fn(),
+}));
+
+const propertyExplorerRouter = (await import("../propertyExplorer")).default;
+
+const ABSENT = "48021:900099";
+const UNBAKED = "48021:34169";
+
+function buildApp(): Express {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.session = { tenantId: "default" } as Express.Request["session"];
+    next();
+  });
+  app.use("/api", propertyExplorerRouter);
+  return app;
+}
+
+describe("POST /property-explorer/v1/research/brief miss split", () => {
+  beforeEach(() => {
+    fakes.probe.mockReset();
+    fakes.snapshot.mockReset();
+    fakes.snapshot.mockResolvedValue(null);
+  });
+
+  it("stub depth, no parcel row: 404 parcel_not_found", async () => {
+    fakes.probe.mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post("/api/property-explorer/v1/research/brief")
+      .send({ parcelNodeId: ABSENT, depth: "stub" });
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ error: "parcel_not_found", parcelNodeId: ABSENT });
+    expect(typeof res.body.message).toBe("string");
+    expect(fakes.probe).toHaveBeenCalledWith({ parcelNodeId: ABSENT });
+  });
+
+  it("stub depth, parcel row exists, no snapshot: 404 baked_snapshot_not_found", async () => {
+    fakes.probe.mockResolvedValue({ parcelNodeId: UNBAKED, label: UNBAKED });
+    const res = await request(buildApp())
+      .post("/api/property-explorer/v1/research/brief")
+      .send({ parcelNodeId: UNBAKED, depth: "stub" });
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({
+      error: "baked_snapshot_not_found",
+      parcelNodeId: UNBAKED,
+    });
+    expect(typeof res.body.message).toBe("string");
+  });
+
+  it("node depth, no parcel row: 404 parcel_not_found", async () => {
+    fakes.probe.mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post("/api/property-explorer/v1/research/brief")
+      .send({ parcelNodeId: ABSENT });
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ error: "parcel_not_found", parcelNodeId: ABSENT });
+  });
+
+  it("node depth, parcel row exists, no snapshot: 404 baked_snapshot_not_found", async () => {
+    fakes.probe.mockResolvedValue({ parcelNodeId: UNBAKED, label: UNBAKED });
+    const res = await request(buildApp())
+      .post("/api/property-explorer/v1/research/brief")
+      .send({ parcelNodeId: UNBAKED });
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({
+      error: "baked_snapshot_not_found",
+      parcelNodeId: UNBAKED,
+    });
+  });
+
+  it("the probe throwing is 503 lookup_unavailable, never either 404", async () => {
+    fakes.probe.mockRejectedValue(new Error("pool exhausted"));
+    for (const body of [
+      { parcelNodeId: ABSENT, depth: "stub" },
+      { parcelNodeId: ABSENT },
+    ]) {
+      const res = await request(buildApp())
+        .post("/api/property-explorer/v1/research/brief")
+        .send(body);
+      expect(res.status).toBe(503);
+      expect(res.headers["content-type"]).toMatch(/application\/json/);
+      expect(res.body).toEqual({ error: "lookup_unavailable", parcelNodeId: ABSENT });
+    }
+  });
+
+  it("the array path keeps per-id notFound inside a 200 and does not probe", async () => {
+    fakes.probe.mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post("/api/property-explorer/v1/research/brief")
+      .send({ parcelNodeId: [ABSENT, UNBAKED], depth: "stub" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ parcels: [], notFound: [ABSENT, UNBAKED] });
+    // Fix register C6: every miss names its reason; existence stays unmeasured (no probe).
+    for (const id of [ABSENT, UNBAKED]) {
+      expect(res.body.notFoundReasons[id]).toMatchObject({ reason: expect.any(String) });
+    }
+    expect(res.body).not.toHaveProperty("absent");
+    expect(fakes.probe).not.toHaveBeenCalled();
+  });
+});

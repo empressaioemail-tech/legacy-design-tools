@@ -6,9 +6,16 @@ import type { BrokerageSiteContext } from "./brokerageSiteContext";
 import type { BriefAtomInput } from "./brokerageBriefLlm";
 import { getBriefingLlmClient } from "./briefingLlmClient";
 import {
-  resolveGrokBriefingModel,
-  BRIEFING_GROK_MAX_TOKENS,
+  BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
+  isAnthropicTruncated,
+  CODE_CITING_OUTPUT_CONFIG_LOW,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";
+import { logger } from "./logger";
 
 export type LayVerdictStatus = "yes" | "maybe" | "no" | "unknown";
 
@@ -26,7 +33,7 @@ export interface LaySummaryResult {
   verdicts: LayVerdict[];
   presentationMode: PresentationMode;
   generatedAt: string;
-  method: "grok" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 function escapeHtml(s: string): string {
@@ -233,15 +240,37 @@ export function buildRulesLaySummary(input: {
   };
 }
 
-async function completeGrok(system: string, user: string): Promise<string | null> {
+async function completeAnthropic(
+  system: string,
+  user: string,
+): Promise<string | null> {
   const bundle = await getBriefingLlmClient();
-  if (bundle?.kind !== "grok") return null;
-  return bundle.client.completeChat({
-    model: resolveGrokBriefingModel(),
-    maxTokens: BRIEFING_GROK_MAX_TOKENS,
+  if (bundle?.kind !== "anthropic") return null;
+  const response = await bundle.client.beta.messages.create({
+    model: BRIEFING_ANTHROPIC_MODEL,
+    betas: CODE_CITING_FALLBACK_BETAS,
+    fallbacks: CODE_CITING_FALLBACKS,
+    max_tokens: CODE_CITING_MAX_TOKENS,
+    output_config: CODE_CITING_OUTPUT_CONFIG_LOW,
     system,
-    user,
+    messages: [{ role: "user", content: user }],
   });
+  if (isAnthropicRefusal(response)) {
+    // null -> caller returns the rules-v1 lay summary.
+    logger.warn(
+      { stopReason: "refusal" },
+      "lay summary: Claude refused; falling back to rules-v1",
+    );
+    return null;
+  }
+  if (isAnthropicTruncated(response)) {
+    logger.warn(
+      { stopReason: "max_tokens" },
+      "lay summary: Claude hit max_tokens; falling back to rules-v1",
+    );
+    return null;
+  }
+  return textFromAnthropicContent(response.content).trim() || null;
 }
 
 export async function generateLaySummary(input: {
@@ -287,7 +316,7 @@ export async function generateLaySummary(input: {
       .join("\n"),
   ].join("\n");
 
-  const raw = await completeGrok(system, user);
+  const raw = await completeAnthropic(system, user);
   if (!raw) {
     return buildRulesLaySummary(input);
   }
@@ -326,7 +355,7 @@ export async function generateLaySummary(input: {
       verdicts,
       presentationMode: input.presentationMode,
       generatedAt: input.finishedAt,
-      method: "grok",
+      method: "anthropic",
     };
   } catch {
     return buildRulesLaySummary(input);

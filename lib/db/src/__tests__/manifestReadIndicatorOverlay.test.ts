@@ -47,7 +47,12 @@ describe("manifest read-path indicator overlay (R-09)", () => {
       verifiedByInstrument: null,
     };
     const result = applyDepthRailDisplayGate(cell);
-    expect(result.displayState).toBe("not-yet");
+    // Composed with ruling 4 (2026-08-19, lane SS-W15): the demotion target
+    // is now measured-below-bar, not not-yet. isPartial still survives
+    // exactly as this test (R-09, PR #447) originally established -- see
+    // countyLedgerCompute.ts's applyDepthRailDisplayGate for the full
+    // reasoning on why both fields survive the composition.
+    expect(result.displayState).toBe("measured-below-bar");
     expect(result.isPartial).toBe(true);
   });
 

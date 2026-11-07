@@ -61,6 +61,10 @@ import {
   rentAreaLayerFixtureResult,
 } from "../lib/brokerageGisRentAreaLayers";
 import { isBrokerageServiceCaller } from "../middlewares/brokerageServiceAuth";
+import { isBrowserProxyCaller } from "../middlewares/browserProxyEndUser";
+import { grantsOwnerCoGatedFields } from "../lib/peEntitlement";
+import { gateOwnerCoGatedFields } from "../lib/ownerCoGatedMapFields";
+import { isValidParcelNodeId, resolveOwnerFactCaller } from "./brokerageNodeFacets";
 
 function mapDataMaxInstallOverride(
   installId: string | null,
@@ -111,6 +115,28 @@ async function resolveMapDataPackageTier(
   });
 
   return { packageTier, profileRow };
+}
+
+/**
+ * Owner co-gate for every map-data response body (see
+ * lib/ownerCoGatedMapFields.ts). The Max package gate above decides whether
+ * the caller gets map data at all; it says NOTHING about owner fields — the
+ * hauska-map same-origin proxy resolves to Max for anonymous browsers. Owner
+ * name / mailing / exemptions / CAD dollar values leave only when the
+ * owner-fact gate grants: Studio|Team for every parcel, or an active
+ * Property Unlock for that one parcel. Default deny, key omitted.
+ */
+async function gateMapDataOwnerFields<T>(
+  req: Request,
+  body: T,
+  contextParcelNodeId?: string | null,
+): Promise<T> {
+  const caller = await resolveOwnerFactCaller(req);
+  return gateOwnerCoGatedFields(body, {
+    caller,
+    grant: grantsOwnerCoGatedFields,
+    contextParcelNodeId,
+  });
 }
 
 export const brokerageMapDataRouter: IRouter = Router();
@@ -230,6 +256,26 @@ function reqLog(req: Request): typeof logger {
   return (req as unknown as { log?: typeof logger }).log ?? logger;
 }
 
+/**
+ * The ONE map-data read the browser proxy serves below Max: the `parcels`
+ * gis-layer, which the Property Explorer fact-sheet resolver uses for every
+ * visitor to draw the parcel's own ring. Parcel boundaries are public record
+ * (the same polygons ship to every visitor in the parcels PMTiles), and every
+ * owner co-gated property on them (owner, mailing, exemptions, CAD values)
+ * is removed per caller by gateMapDataOwnerFields. Until the proxy carried
+ * the real end user, anonymous visitors reached this as Max; this keeps the
+ * geometry they already had and nothing else. Every other layer, the
+ * composites and the assemble stay Max-only. Scoped to proxy callers only, so
+ * no direct-API caller's access changes.
+ */
+export const BROWSER_PROXY_PUBLIC_GIS_LAYERS: ReadonlySet<string> = new Set([
+  "parcels",
+]);
+
+function browserProxyPublicGisLayer(req: Request, layer: string): boolean {
+  return isBrowserProxyCaller(req) && BROWSER_PROXY_PUBLIC_GIS_LAYERS.has(layer);
+}
+
 function sendTierRequired(
   res: Response,
   packageTier: ReturnType<typeof resolveInvestorPackageTier>,
@@ -316,10 +362,12 @@ brokerageMapDataRouter.post(
       fixture: useFixture,
     });
 
-    res.json({
-      ...envelope,
-      packageTier,
-    });
+    res.json(
+      await gateMapDataOwnerFields(req, {
+        ...envelope,
+        packageTier,
+      }),
+    );
   },
 );
 
@@ -333,7 +381,10 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
   const log = reqLog(req);
   const installId = installIdFromRequest(req);
   const { packageTier } = await resolveMapDataPackageTier(req, installId);
-  if (packageTier !== "max") {
+  if (
+    packageTier !== "max" &&
+    !browserProxyPublicGisLayer(req, parsed.data.layer)
+  ) {
     sendTierRequired(res, packageTier);
     return;
   }
@@ -353,7 +404,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         const meta = listGisLayerEndpoints().find(
           (l) => l.layer === parsed.data.layer,
         );
-        res.json({
+        res.json(await gateMapDataOwnerFields(req, {
           layer: parsed.data.layer,
           provider: meta?.provider ?? parsed.data.layer,
           adapterKey: meta?.adapterKey ?? parsed.data.layer,
@@ -364,7 +415,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
           geojson,
           packageTier,
           fixture: true,
-        });
+        }));
         return;
       }
 
@@ -378,7 +429,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
               northLat: 30.4,
             };
         const result = rentAreaLayerFixtureResult(bbox);
-        res.json({
+        res.json(await gateMapDataOwnerFields(req, {
           layer: result.layer,
           provider: result.provider,
           adapterKey: result.adapterKey,
@@ -392,7 +443,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
           operatorDataPullRequired: result.operatorDataPullRequired,
           packageTier,
           fixture: true,
-        });
+        }));
         return;
       }
 
@@ -406,12 +457,14 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         });
         return;
       }
-      res.json({
-        ...fixture.result,
-        packageTier,
-        fixture: true,
-        fixtureMeta: fixture.manifest,
-      });
+      res.json(
+        await gateMapDataOwnerFields(req, {
+          ...fixture.result,
+          packageTier,
+          fixture: true,
+          fixtureMeta: fixture.manifest,
+        }),
+      );
       return;
     }
 
@@ -420,7 +473,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         ? normalizeGisLayerBbox(parsed.data.bbox)
         : undefined;
       const result = await queryRentAreaLayerGeoJson({ bbox });
-      res.json({
+      res.json(await gateMapDataOwnerFields(req, {
         layer: result.layer,
         provider: result.provider,
         adapterKey: result.adapterKey,
@@ -435,7 +488,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
         disclosure: result.disclosure,
         operatorDataPullRequired: result.operatorDataPullRequired,
         packageTier,
-      });
+      }));
       return;
     }
 
@@ -452,7 +505,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
       bbox: parsed.data.bbox,
       forceRefresh,
     });
-    res.json({
+    res.json(await gateMapDataOwnerFields(req, {
       layer: result.layer,
       provider: result.provider,
       adapterKey: result.adapterKey,
@@ -466,7 +519,7 @@ brokerageMapDataRouter.post("/gis-layer", async (req: Request, res: Response) =>
       // surface the provider's honesty fields when present.
       ...(result.notSurveyGrade ? { notSurveyGrade: true } : {}),
       ...(result.disclaimer ? { disclaimer: result.disclaimer } : {}),
-    });
+    }));
   } catch (err) {
     if (err instanceof AdapterRunError) {
       const status = err.code === "no-coverage" ? 404 : 502;
@@ -555,9 +608,18 @@ brokerageMapDataRouter.post("/", async (req: Request, res: Response) => {
       mudPidLine: verdict?.mudPidLine ?? null,
     });
 
+    const contextParcelNodeId =
+      parsed.data.parcelKey && isValidParcelNodeId(parsed.data.parcelKey)
+        ? parsed.data.parcelKey
+        : null;
+    const gated = await gateMapDataOwnerFields(
+      req,
+      { mapData: payload, reasoningOverlays },
+      contextParcelNodeId,
+    );
     res.json({
-      mapData: payload,
-      reasoningOverlays,
+      mapData: gated.mapData,
+      reasoningOverlays: gated.reasoningOverlays,
       honesty,
       packageTier,
     });

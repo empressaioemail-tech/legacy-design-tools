@@ -10,7 +10,7 @@
 
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
@@ -20,6 +20,42 @@ export const BROWSER_UA =
 
 export function isUrl(input: string): boolean {
   return /^https?:\/\//i.test(input);
+}
+
+/** `gs://<bucket>/<object>` — the Cloud Run job's only input path (P-169);
+ *  no laptop path into the database, per the 2026-09-12 no-break-glass
+ *  ruling. The job's attached service account already has ADC; no new
+ *  secret or credential is required to read a project-owned bucket. */
+export function isGcsUri(input: string): boolean {
+  return /^gs:\/\/[^/]+\/.+/i.test(input);
+}
+
+/**
+ * Download a `gs://bucket/object` URI to `destDir` using the ambient
+ * Application Default Credentials (Cloud Run's attached service account
+ * in production; `gcloud auth application-default login` locally for a
+ * dry-run against a public/owned object). Dynamic import so a plain
+ * http(s)/local-file run never pays for pulling in the GCS client.
+ */
+export async function downloadFromGcs(
+  gsUri: string,
+  destDir: string,
+  log: (msg: string) => void = () => {},
+): Promise<string> {
+  const match = /^gs:\/\/([^/]+)\/(.+)$/i.exec(gsUri);
+  if (!match) throw new Error(`not a gs:// URI: ${gsUri}`);
+  const [, bucketName, objectName] = match;
+
+  await mkdir(destDir, { recursive: true });
+  const dest = join(destDir, basename(objectName));
+  await mkdir(dirname(dest), { recursive: true });
+
+  log(`downloading ${gsUri}`);
+  const { Storage } = await import("@google-cloud/storage");
+  const storage = new Storage();
+  await storage.bucket(bucketName).file(objectName).download({ destination: dest });
+  log(`saved ${dest}`);
+  return dest;
 }
 
 /** Derive a safe local filename from a URL. */

@@ -14,7 +14,7 @@ import request from "supertest";
 import type { Express } from "express";
 import { vi } from "vitest";
 import { ctx } from "./test-context";
-import { db, peSavedProperties } from "@workspace/db";
+import { db, peSavedProperties, users } from "@workspace/db";
 import { DEFAULT_TENANT_ID } from "../middlewares/session";
 
 const SERVICE_TOKEN = "test-service-token-share-dossier";
@@ -79,6 +79,13 @@ function serviceGet(query: Record<string, string>) {
 
 describe("GET /api/property-explorer/v1/internal/share-dossier", () => {
   beforeEach(async () => {
+    // OPS-16 P-111: pe_saved_properties.owner_user_id now FKs to users.id
+    // (previously ungated -- exactly the gap OPS-16 A-075 found), so the
+    // fixture rows below need real parent rows first.
+    await db.insert(users).values([
+      { id: OWNER, displayName: OWNER },
+      { id: OTHER_OWNER, displayName: OTHER_OWNER },
+    ]);
     await db.insert(peSavedProperties).values([
       {
         tenantId: DEFAULT_TENANT_ID,

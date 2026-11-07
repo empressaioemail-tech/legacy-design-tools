@@ -44,6 +44,10 @@ import { providerSourceKindForKey } from "./providerCatalog";
 import { makeCadPropertyLookup } from "./cadPropertyLookup";
 import { makePermitHistoryLookup } from "./permitHistoryLookup";
 import { makeTxgioParcelPointLookup } from "./txgioParcelStore";
+import {
+  applyExemptionTypesServeToSiteContext,
+  type ExemptionDetailLevel,
+} from "./exemptionTypesServe";
 
 /** Wall-clock budget for one brief site-context fetch (all adapters). */
 export const BROKERAGE_SITE_CONTEXT_TIMEOUT_MS = 45_000;
@@ -537,12 +541,18 @@ export async function fetchBrokerageSiteContext(
     }
   }
 
-  return {
-    placeKey,
-    parcelClip,
-    packageTier,
-    layers,
-  };
+  const exemptionLevel: ExemptionDetailLevel =
+    packageTier === "pro" || packageTier === "max" ? "homestead-only" : "none";
+
+  return applyExemptionTypesServeToSiteContext(
+    {
+      placeKey,
+      parcelClip,
+      packageTier,
+      layers,
+    },
+    exemptionLevel,
+  );
 }
 
 function layerDetailLines(layer: BrokerageSiteContextLayer): string[] {
@@ -556,7 +566,7 @@ function layerDetailLines(layer: BrokerageSiteContextLayer): string[] {
   return summary ? [summary] : [];
 }
 
-/** Plain-text block for Grok prompts (ok layers with Cotality/federal summaries). */
+/** Plain-text block for LLM prompts (ok layers with Cotality/federal summaries). */
 export function formatSiteContextForLlm(ctx: BrokerageSiteContext): string {
   const lines: string[] = [];
   for (const layer of ctx.layers) {

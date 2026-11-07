@@ -88,7 +88,9 @@ async function buildAll() {
       "@swc/*",
       "@aws-sdk/*",
       "@azure/*",
-      "@opentelemetry/*",
+      // @opentelemetry/api is deliberately NOT external: @anthropic-ai/sdk 1.x
+      // imports it at module load, and the deployed bundle has no node_modules
+      // to resolve it from (SS-W18 boot smoke caught this on the 1.4.0 bump).
       "@google-cloud/*",
       "@google/*",
       "googleapis",

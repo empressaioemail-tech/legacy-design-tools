@@ -24,7 +24,9 @@ import {
 } from "@workspace/db/testing";
 import { ctx } from "./test-context";
 import { sessionMiddleware } from "../middlewares/session";
+import { sessionRevocationMiddleware } from "../middlewares/sessionRevocation";
 import { userRateLimitMiddleware } from "../middlewares/userRateLimit";
+import { browserProxyEndUserMiddleware } from "../middlewares/browserProxyEndUser";
 
 /**
  * Tables that the api-server tests touch. CASCADE handles FK chains, so
@@ -42,7 +44,34 @@ export const TRUNCATE_TABLES: readonly string[] = [
   "saved_workspace_spaces",
   "pe_user_identities",
   "pe_user_entitlements",
+  // P-480 — entitlement history references webhook events.
+  "pe_user_entitlement_history",
+  "pe_stripe_webhook_events",
+  // P-87 Claude Sync -- written by the MCP server, read by the PE card.
+  "pe_ai_connections",
+  // P-98 next-action rail -- shown/acted per ladder rung. Cascades off
+  // `users`, but listed explicitly per the "if a route writes to it, it's in
+  // this list" invariant so the activation-event suite starts empty and a
+  // count assertion cannot pick up another test's rows.
+  "pe_activation_events",
+  // P-100 item 4 -- once-per-account activation milestone. A different table
+  // from `pe_activation_events` and a different subject: that one is per
+  // ladder-rung impression, this one is one row per account per milestone.
+  "pe_account_activations",
+  // P-100 item 3 -- share attribution. Cascades off `users` AND off
+  // `pe_share_grants`, but listed explicitly per the "if a route writes to
+  // it, it's in this list" invariant so a first-touch assertion cannot pick
+  // up another test's row.
+  "pe_share_attributions",
+  // P-100 item 5 -- the refusal ledger. No FK at all (install ids are not
+  // accounts), so nothing else's CASCADE clears it.
+  "gtm_event_refusals",
+  "pe_team_members",
+  "pe_team_invitations",
   "pe_saved_properties",
+  // P-91 / P-92 Wave B — screens are a different table from saves.
+  "pe_screens",
+  "pe_screen_rows",
   // R1 paywall (LOCK 2026-07-29) — per-property unlock record + signed-in
   // free chat counter. Both cascade off `users`, but listed explicitly per
   // the "if a route writes to it, it's in this list" invariant so the
@@ -53,6 +82,12 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // No FK chain touches it besides `users`, but listed explicitly per the
   // "if a route writes to it, it's in this list" invariant.
   "pe_workbench_state",
+  // P-106 constraint search - the projection the constraint route READS.
+  // No route writes it (the build job does), but a test that seeds it must
+  // not leak rows into the next one, and the "if a test touches it, it is in
+  // this list" invariant is the same invariant either way.
+  "pe_parcel_constraint_index",
+  "pe_parcel_constraint_index_builds",
   "recorded_instruments",
   "restriction_clauses",
   "snapshots",
@@ -287,6 +322,31 @@ export const TRUNCATE_TABLES: readonly string[] = [
   // known-empty state (its 503/404 cases assert an EMPTY store, which a
   // row leaked from an earlier test would silently turn green).
   "serving_sweep_county",
+  // P-112 email leg — magic-link tokens. No FK to `users` (a token can be
+  // requested before any account exists — the verify path is also how a
+  // brand-new signup is created), so nothing else's CASCADE clears it.
+  "pe_magic_link_tokens",
+  // T1-A — server-side sessions, per-user token cutoffs and the duplicate-
+  // account merge log. No FK to `users` on three of them (they must outlive
+  // an account delete), so nothing else's CASCADE clears them.
+  "pe_sessions",
+  "pe_session_cutoffs",
+  "pe_account_merges",
+  "pe_account_merge_rows",
+  // P-413 / P-492 lifecycle outbox. FK to users — listed so a leftover
+  // pending send cannot leak into the next test's lifecycle assertions.
+  "pe_lifecycle_outbox",
+  // P-492 — the contact record (cascades off users, listed per the
+  // invariant), affiliates (no FK to users at all) and the drain's own
+  // per-tick record (no FK).
+  "ss_contact",
+  "affiliate_partner",
+  "ss_lifecycle_drain_run",
+  // T2-WATCH — Watching tab snapshots, changes and push subscriptions. All
+  // cascade off users; listed per the "if a route writes to it" invariant.
+  "pe_watch_snapshots",
+  "pe_watch_changes",
+  "pe_push_subscriptions",
 ];
 
 /**
@@ -311,6 +371,10 @@ export async function buildTestApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(sessionMiddleware);
+  // Mirror app.ts: browser-proxy end-user identity sits between the session
+  // and per-user metering.
+  app.use(browserProxyEndUserMiddleware);
+  app.use(sessionRevocationMiddleware);
   app.use(userRateLimitMiddleware);
   app.use("/api", router);
   return app;
@@ -329,6 +393,7 @@ export async function buildPlanReviewBffTestApp(): Promise<Express> {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true }));
   app.use(sessionMiddleware);
+  app.use(sessionRevocationMiddleware);
   app.use(userRateLimitMiddleware);
   app.use("/api/plan-review", planReviewBffRouter);
   return app;
@@ -358,6 +423,10 @@ export function setupRouteTests(
 
   afterEach(async () => {
     if (!ctx.schema) return;
+    // A route's detached lifecycle try can still hold a projection transaction;
+    // truncating under it deadlocks (CI 2026-10-03). Let it finish first.
+    const { settleDetachedLifecycleWork } = await import("../lib/peLifecycleDispatch");
+    await settleDetachedLifecycleWork();
     await truncateAll(ctx.schema.pool, TRUNCATE_TABLES);
   });
 

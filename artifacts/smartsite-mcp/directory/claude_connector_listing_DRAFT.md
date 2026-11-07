@@ -5,7 +5,7 @@ plan_row: P-88
 wdll_item: 19
 vendor: Anthropic Claude (custom connector / connector directory)
 hostname: mcp.smartsite.cloud
-last_updated: 2026-08-27
+last_updated: 2026-09-25
 source: artifacts/smartsite-mcp/src/constants.ts, src/health.ts (llms.txt)
 ---
 
@@ -28,7 +28,7 @@ source: artifacts/smartsite-mcp/src/constants.ts, src/health.ts (llms.txt)
 
 ## Short description (directory blurb)
 
-Smart Site is Empressa's property intelligence product. Connect your Smart Site account to find Texas parcels, open smart-site analysis with citations and verdicts, list saved properties, run property reports, and ask natural-language questions about a parcel — all at your Stripe tier (Free, Solo, Studio, or Team). OAuth sign-in only; no API keys.
+Smart Site is Empressa's property intelligence product. Connect your Smart Site account to find Texas parcels, open the inline MCP App (screening board or single-parcel map), read smart-site analysis with citations, manage screening screens, and run property reports — at your Stripe tier (Free, Solo, Studio, or Team). OAuth sign-in only; no API keys. The inline app renders on hosts that support MCP Apps (e.g. claude.ai); other hosts still receive full text results.
 
 ## Long description
 
@@ -108,11 +108,12 @@ Subscription is the only credential path. Per-call Hauska metering is not live o
 
 ## Example prompts (directory / QA)
 
-- "Find parcel 801 Pine St, Bastrop TX 78602"
-- "Get the smart site for parcel node 48021:34137"
+- "Look up 801 Pine St, Bastrop TX 78602 and open its smart site."
+- "Create a screening board from this list: [paste addresses]"
+- "Reopen my Bastrop screen and compare the rails."
+- "Get smart site for 48021:34137 — use the map panel, not a board."
 - "List my saved properties"
 - "Run a report on 48021:34137"
-- "Ask the map: what is the flood risk on this parcel?"
 
 Gold fixture for acceptance probes: `48021:34137` (801 Pine St, Bastrop, TX).
 

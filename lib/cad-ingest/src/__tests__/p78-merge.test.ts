@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyPathAMerge,
   landAcresFromGis,
+  landAcresFromLegalDescription,
+  legalAcresFromStratMap,
   parseYearBuilt,
   REFUSE_GIS_AREA_REASON,
 } from "../p78Merge";
@@ -126,5 +128,334 @@ describe("landAcresFromGis unit table", () => {
       refuse: true,
       reason: REFUSE_GIS_AREA_REASON,
     });
+  });
+});
+
+describe("landAcresFromLegalDescription (McLennan leftover-farm fallback, F-01)", () => {
+  it("parses the dominant 'Acres <n>' phrasing (real McLennan example)", () => {
+    expect(
+      landAcresFromLegalDescription("LOT 4 BLOCK 2 RIVER OAKS ADDN Acres 0.414"),
+    ).toBe("0.4140");
+  });
+
+  it("FALSIFIER: prefers 'Total <n> Ac' over an earlier decoy '<n> Ac' in the same string (real McLennan example)", () => {
+    // The decoy (0.116) is a sub-tract figure, not the parcel's real total.
+    // A naive first-match-wins "<number> Ac" regex would return "0.1160".
+    expect(
+      landAcresFromLegalDescription(
+        "AXTELL OT Block 5 Lot 4 5 & 0.116 Ac Aband ROW (A) Total 0.414 Ac",
+      ),
+    ).toBe("0.4140");
+  });
+
+  it("returns null for a description with no parseable acreage (honest absence, never invented)", () => {
+    expect(landAcresFromLegalDescription("LOT 4 BLOCK 2 RIVER OAKS ADDN")).toBeNull();
+  });
+
+  it("returns null for a non-positive or non-finite figure", () => {
+    expect(landAcresFromLegalDescription("Acres 0")).toBeNull();
+    expect(landAcresFromLegalDescription("Acres -1.5")).toBeNull();
+  });
+
+  it("returns null for null/undefined/non-string input", () => {
+    expect(landAcresFromLegalDescription(null)).toBeNull();
+    expect(landAcresFromLegalDescription(undefined)).toBeNull();
+    expect(landAcresFromLegalDescription(12.5)).toBeNull();
+  });
+});
+
+describe("normalizeStratMapLandUse LEGAL_DESC fallback (McLennan, F-01)", () => {
+  const base = {
+    Prop_ID: "1",
+    TAX_YEAR: "2025",
+    STAT_LAND_: "A1",
+  };
+
+  it("falls back to LEGAL_DESC acreage when GIS_AREA_U is unusable (the real McLennan shape: land_value present, land_acres null)", () => {
+    const rec = normalizeStratMapLandUse(
+      "48309",
+      0,
+      {
+        ...base,
+        GIS_AREA: 1.5,
+        GIS_AREA_U: "", // McLennan's real drop: no usable unit on any row
+        LEGAL_DESC: "LOT 4 BLOCK 2 RIVER OAKS ADDN Acres 0.414",
+        LAND_VALUE: 12000,
+      },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBe("0.4140");
+    expect(rec!.landValue).toBe(12000);
+  });
+
+  it("FALSIFIER: does NOT regress a county whose GIS_AREA already resolves -- the GIS value wins even when LEGAL_DESC also carries a (different) figure", () => {
+    const rec = normalizeStratMapLandUse(
+      "48055",
+      0,
+      {
+        ...base,
+        GIS_AREA: 2.5,
+        GIS_AREA_U: "AC",
+        LEGAL_DESC: "LOT 9 BLOCK 3 SOME OTHER ADDN Acres 9.999",
+      },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBe("2.5000");
+  });
+
+  it("stays null when neither GIS_AREA nor LEGAL_DESC carries a usable figure (no fabrication)", () => {
+    const rec = normalizeStratMapLandUse(
+      "48309",
+      0,
+      { ...base, GIS_AREA: 1.5, GIS_AREA_U: "", LEGAL_DESC: "LOT 4 BLOCK 2 RIVER OAKS ADDN" },
+      newCounters(),
+    );
+    expect(rec!.landAcres).toBeNull();
+  });
+});
+
+describe("CTX-HAYS-REBIND: a geometry apply cannot blank a published crosswalk", () => {
+  it("a StratMap re-apply LEAVES an existing quick_ref_id / property_number intact", () => {
+    // The whole safety argument for putting these two under coalesce. The
+    // StratMap loader emits null for both (hardcoded, see
+    // txgio/landuse.ts), so coalesce(incoming, existing) returns the EXISTING
+    // value and the crosswalk a real CAD export established survives.
+    //
+    // This is NOT true of source_file, which applyPathAMerge overwrites
+    // unconditionally -- which is exactly why lineage could not be recovered
+    // from it and why the crosswalk had to come from the county rather than
+    // from provenance.
+    const existing = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2025,
+      quickRefId: "R26199",
+      propertyNumber: "11-2520-0000-03100-2",
+      situsAddress: "340 WINDMILL WAY, BUDA, TX 78610",
+      sourceFile: "2026-PROPERTY-DATA-EXPORT-FILES.zip",
+      sourceVintage: "tier:cad-export;2026",
+    };
+    const stratmapIncoming = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2025,
+      quickRefId: null,
+      propertyNumber: null,
+      situsAddress: "100 RIVERSIDE DR, SAN MARCOS, TX 78666",
+      sourceFile: "stratmap25-landparcels_48209_lp.zip",
+      sourceVintage: "stratmap25",
+    };
+    const merged = applyPathAMerge(existing, stratmapIncoming);
+    expect(merged.quickRefId).toBe("R26199");
+    expect(merged.propertyNumber).toBe("11-2520-0000-03100-2");
+    // THE P-78 MERGE ROOT FIX (Phase 0 audit section 3/4, P3). Before this fix, the SAME merge
+    // ALSO overwrote situsAddress with the StratMap incoming value -- the exact defect audited
+    // as "p78Merge.ts letting geometry-source fields overwrite appraisal-source fields". Now
+    // situsAddress runs through the same authority-aware merge as quickRefId/propertyNumber's
+    // reasoning already implied it should: a non-cad-export incoming value can never overwrite
+    // an existing cad-export value. The real CAD export's situs survives a StratMap re-apply,
+    // exactly like its quickRefId/propertyNumber already did.
+    expect(merged.situsAddress).toBe("340 WINDMILL WAY, BUDA, TX 78610");
+    // source_file/source_vintage are NOT in AUTHORITY_COALESCE_FIELDS (they describe the row's
+    // own provenance, not an appraisal attribute) and are still overwritten unconditionally --
+    // this is the pre-existing, intentional "lineage could not be recovered from it" behavior
+    // the comment on applyPathAMerge's sourceFile/sourceVintage assignment already documents.
+    expect(merged.sourceFile).toBe("stratmap25-landparcels_48209_lp.zip");
+  });
+
+  it("a real CAD export re-publishing a corrected identifier DOES win", () => {
+    const existing = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2026,
+      quickRefId: "R00000",
+      propertyNumber: "00-0000-0000-00000-0",
+      sourceFile: "old.zip",
+      sourceVintage: "tier:cad-export;2025",
+    };
+    const corrected = {
+      countyFips: "48209",
+      propId: "40138",
+      taxYear: 2026,
+      quickRefId: "R26199",
+      propertyNumber: "11-2520-0000-03100-2",
+      sourceFile: "2026-PROPERTY-DATA-EXPORT-FILES.zip",
+      sourceVintage: "tier:cad-export;2026",
+    };
+    const merged = applyPathAMerge(existing, corrected);
+    expect(merged.quickRefId).toBe("R26199");
+    expect(merged.propertyNumber).toBe("11-2520-0000-03100-2");
+  });
+
+  it("the StratMap loader emits null for both, which is what makes the above safe", () => {
+    // Read from the loader rather than restated: if normalizeStratMapLandUse
+    // ever started mapping the shapefile's GEO_ID into property_number, the
+    // crosswalk's two sides would both come from the geometry publisher and
+    // the corroboration would agree by construction.
+    const rec = normalizeStratMapLandUse(
+      "48209",
+      0,
+      {
+        Prop_ID: "26199",
+        GEO_ID: "11-2520-0000-03100-2",
+        SITUS_ADDR: "340 WINDMILL WAY, BUDA, TX 78610",
+        GIS_AREA: 0.45,
+        GIS_AREA_U: "AC",
+      } as never,
+      newCounters(),
+      2025,
+    );
+    expect(rec?.quickRefId).toBeNull();
+    expect(rec?.propertyNumber).toBeNull();
+  });
+});
+
+describe("THE P-78 MERGE ROOT (Phase 0 audit section 3/4, P3): authority-aware merge for every appraisal-sourced field, not only yearBuilt/livingAreaSqft", () => {
+  const camaRow = {
+    countyFips: "48053",
+    propId: "24560",
+    taxYear: 2025,
+    ownerName: "REAL CAD OWNER",
+    legalDescription: "REAL CAD LEGAL",
+    landValue: 50000,
+    improvementValue: 10000,
+    marketValue: 60000,
+    assessedValue: 55000,
+    landAcres: "1.5000",
+    propertyUseCode: "A1",
+    exemptionCodes: ["HS"],
+    sourceFile: "cad-export.zip",
+    sourceVintage: "tier:cad-export;2026",
+  };
+  const stratmapRow = {
+    countyFips: "48053",
+    propId: "24560",
+    taxYear: 2025,
+    ownerName: "STRATMAP OWNER",
+    legalDescription: "STRATMAP LEGAL",
+    landValue: 1,
+    improvementValue: 1,
+    marketValue: 2,
+    assessedValue: null,
+    landAcres: "9.9999",
+    propertyUseCode: "XX",
+    exemptionCodes: null,
+    sourceFile: "stratmap25.dbf",
+    sourceVintage: "tier:stratmap-roll;adapter:stratmap",
+  };
+
+  it("a StratMap (non-cad-export) incoming row can NEVER overwrite an existing cad-export row's appraisal fields, for every one of the 11 remaining AUTHORITY_COALESCE_FIELDS this fixture exercises", () => {
+    const merged = applyPathAMerge(camaRow, stratmapRow);
+    expect(merged.ownerName).toBe("REAL CAD OWNER");
+    expect(merged.legalDescription).toBe("REAL CAD LEGAL");
+    expect(merged.landValue).toBe(50000);
+    expect(merged.improvementValue).toBe(10000);
+    expect(merged.marketValue).toBe(60000);
+    expect(merged.assessedValue).toBe(55000);
+    expect(merged.landAcres).toBe("1.5000");
+    expect(merged.propertyUseCode).toBe("A1");
+    expect(merged.exemptionCodes).toEqual(["HS"]);
+  });
+
+  it("FALSIFIER: the OLD bare-coalesce merge (last-wins) regresses every one of those fields back to the StratMap value -- proving the fixture above is not vacuous", () => {
+    const naiveLastWins = { ...stratmapRow };
+    expect(naiveLastWins.ownerName).not.toBe(applyPathAMerge(camaRow, stratmapRow).ownerName);
+    expect(naiveLastWins.landValue).not.toBe(applyPathAMerge(camaRow, stratmapRow).landValue);
+    expect(naiveLastWins.legalDescription).not.toBe(applyPathAMerge(camaRow, stratmapRow).legalDescription);
+  });
+
+  it("a cad-export incoming row DOES win over an existing cad-export row (a re-published, corrected roll takes effect)", () => {
+    const correctedCamaIncoming = { ...camaRow, ownerName: "CORRECTED OWNER", landValue: 51000 };
+    const merged = applyPathAMerge(camaRow, correctedCamaIncoming);
+    expect(merged.ownerName).toBe("CORRECTED OWNER");
+    expect(merged.landValue).toBe(51000);
+  });
+
+  it("a non-null incoming value fills a null existing value regardless of tier (null never beats a value, on either side)", () => {
+    const existingWithGap = { ...camaRow, ownerName: null as unknown as string };
+    const merged = applyPathAMerge(existingWithGap, stratmapRow);
+    expect(merged.ownerName).toBe("STRATMAP OWNER");
+  });
+
+  it("a null incoming value never blanks an existing value, regardless of tier", () => {
+    const incomingWithGap = { ...stratmapRow, ownerName: null as unknown as string };
+    const merged = applyPathAMerge(camaRow, incomingWithGap);
+    expect(merged.ownerName).toBe("REAL CAD OWNER");
+  });
+
+  it("two StratMap loads in a row (neither side cad-export): incoming wins, identical to the pre-fix bare-coalesce outcome", () => {
+    const olderStratmap = { ...stratmapRow, ownerName: "OLDER STRATMAP OWNER" };
+    const newerStratmap = { ...stratmapRow, ownerName: "NEWER STRATMAP OWNER" };
+    const merged = applyPathAMerge(olderStratmap, newerStratmap);
+    expect(merged.ownerName).toBe("NEWER STRATMAP OWNER");
+  });
+});
+
+describe("cad_property.legal_acres: the CAD's stated LEGAL_AREA off a StratMap row (hauska-factory #295)", () => {
+  // Fixture shape: a Burnet (48053) StratMap land-parcels row whose GIS area
+  // (0.90 ac) disagrees with the CAD's stated legal area (0.57 ac) -- the
+  // 48053:29742 case #295 measured. Synthetic owner/situs, real column names
+  // (TNRIS land-parcel schema, see txgio/parse.ts header).
+  const BURNET_ROW = {
+    Prop_ID: "29742",
+    TAX_YEAR: "2025",
+    STAT_LAND_: "A1",
+    LEGAL_DESC: "S1234 EXAMPLE SUBDIVISION LOT 7",
+    GIS_AREA: 0.9,
+    GIS_AREA_U: "AC",
+    LEGAL_AREA: 0.57,
+    LGL_AREA_U: "AC",
+  };
+
+  it("keeps the CAD's legal acres alongside (not instead of) the GIS land_acres", () => {
+    const rec = normalizeStratMapLandUse("48053", 0, BURNET_ROW, newCounters());
+    expect(rec!.legalAcres).toBe("0.5700");
+    expect(rec!.landAcres).toBe("0.9000");
+  });
+
+  it("accepts the DBF's F-type string form and the long unit spellings", () => {
+    expect(legalAcresFromStratMap("5.70000000000e-01", "AC")).toBe("0.5700");
+    expect(legalAcresFromStratMap(" 12.25 ", "acres")).toBe("12.2500");
+    expect(legalAcresFromStratMap(43560, "SF")).toBe("1.0000");
+    expect(legalAcresFromStratMap(1, "HA")).toBe("2.4711");
+  });
+
+  it("blank / zero / negative / non-numeric LEGAL_AREA -> null", () => {
+    for (const v of ["", "   ", 0, "0", "0.000", -1, "-1", "N/A", "1.5 AC", null, undefined, Number.NaN]) {
+      expect(legalAcresFromStratMap(v, "AC"), String(v)).toBeNull();
+    }
+    const rec = normalizeStratMapLandUse("48053", 0, { ...BURNET_ROW, LEGAL_AREA: "" }, newCounters());
+    expect(rec!.legalAcres).toBeNull();
+    // land_acres is untouched by a blank legal area
+    expect(rec!.landAcres).toBe("0.9000");
+  });
+
+  it("FALSIFIER: never guesses a unit -- blank or unrecognised LGL_AREA_U is null even with a real number", () => {
+    expect(legalAcresFromStratMap(0.57, "")).toBeNull();
+    expect(legalAcresFromStratMap(0.57, null)).toBeNull();
+    expect(legalAcresFromStratMap(0.57, undefined)).toBeNull();
+    expect(legalAcresFromStratMap(0.57, "SQM")).toBeNull();
+    expect(legalAcresFromStratMap(0.57, "LOT")).toBeNull();
+    const rec = normalizeStratMapLandUse("48053", 0, { ...BURNET_ROW, LGL_AREA_U: " " }, newCounters());
+    expect(rec!.legalAcres).toBeNull();
+  });
+
+  it("a row with no LEGAL_AREA columns at all (older/other drops) -> null, row still emitted", () => {
+    const { LEGAL_AREA: _a, LGL_AREA_U: _u, ...bare } = BURNET_ROW;
+    const rec = normalizeStratMapLandUse("48053", 0, bare, newCounters());
+    expect(rec).not.toBeNull();
+    expect(rec!.legalAcres).toBeNull();
+  });
+
+  it("merge: a StratMap reload fills legal_acres on an existing row that lacked it", () => {
+    const existing = { countyFips: "48053", propId: "29742", taxYear: 2025, landAcres: "0.9000", legalAcres: null, sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    const incoming = { countyFips: "48053", propId: "29742", taxYear: 2025, landAcres: "0.9000", legalAcres: "0.5700", sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    expect(applyPathAMerge(existing, incoming).legalAcres).toBe("0.5700");
+  });
+
+  it("merge: a CAD export (which publishes no legal_acres) never blanks a stored value", () => {
+    const existing = { countyFips: "48053", propId: "29742", taxYear: 2025, legalAcres: "0.5700", sourceVintage: "tier:stratmap-roll;adapter:stratmap" };
+    const incoming = { countyFips: "48053", propId: "29742", taxYear: 2025, legalAcres: null, sourceVintage: "tier:cad-export;adapter:x" };
+    expect(applyPathAMerge(existing, incoming).legalAcres).toBe("0.5700");
   });
 });

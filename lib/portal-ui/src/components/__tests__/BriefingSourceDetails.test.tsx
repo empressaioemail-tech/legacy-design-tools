@@ -619,6 +619,29 @@ describe("formatSetbackSummaryMarkdown", () => {
     );
   });
 
+  it("P-299: a height the code does not state reads 'not stated', never the 999 sentinel and never a bare 'null'", () => {
+    const md = formatSetbackSummaryMarkdown({
+      jurisdictionDisplayName: "City of Round Rock, TX",
+      district: {
+        district_name: "SF-2 Single-Family Residential 2 (Conventional)",
+        front_ft: 25,
+        rear_ft: 20,
+        side_ft: 5,
+        side_corner_ft: 15,
+        // The route resolves the corpus's 999 stated-absence sentinel to null
+        // before this ever reaches the FE (P-299); the FE must not print it.
+        max_height_ft: null,
+        max_lot_coverage_pct: 40,
+        max_impervious_pct: 55,
+        citation_url: "https://example.test/code",
+      },
+      snapshotDate: "2026-09-17T00:00:00.000Z",
+    });
+    expect(md).toContain("height not stated");
+    expect(md).not.toContain("999");
+    expect(md).not.toContain("null");
+  });
+
   it("drops the snapshot suffix when snapshotDate is missing", () => {
     const md = formatSetbackSummaryMarkdown({
       jurisdictionDisplayName: "Bastrop County, TX",

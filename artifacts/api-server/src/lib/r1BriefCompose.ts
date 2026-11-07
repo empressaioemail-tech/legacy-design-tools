@@ -1,37 +1,91 @@
 /**
  * Pure R1 brief composition from baked facets + live atom reads.
  * Kept DB-free so route tests can exercise refusal wiring without a store.
+ *
+ * Every section carries a `disposition` (P-91 v2, triage D2/D3): present is
+ * a determination, refused is a producer refusal about the parcel, absent is
+ * no determination and no refusal (data null, an empty record, a typed
+ * absence that is not promoted, or an atom that is not there), unread is a
+ * producer that has not run for this parcel. The stub depth projects these
+ * into the rail vocabulary through `smartSiteStub.railStateFromSectionDisposition`;
+ * the predicates below are the one derivation both depths share.
  */
+
+import {
+  setbackConflictNote,
+  type SetbackConflictSecondSourceInput,
+} from "@empressaio/atom-contract/display";
 
 import type {
   FloodHazardFactPresent,
   FloodHazardFactRead,
 } from "./floodHazardFactRead";
+import type {
+  ParcelRecordFloodRead,
+  ParcelRecordFloodValue,
+  ParcelRecordFloodAbsentVerified,
+  ParcelRecordFloodZoneRow,
+} from "./parcelRecordFactRead";
+import { resolveInSfha, resolveIsSfha } from "./floodHazardFactFromParcelRecord";
+import { classifyFemaZoneSfha } from "./femaZoneCode";
 import type { EnvelopeBriefRefusal } from "./envelopeBriefRefusal";
 import { envelopeAgentGuidance } from "./envelopeBriefRefusal";
+import type { EnvelopeDrawOutcome } from "./buildableEnvelope/envelopeDrawOutcome";
+import { envelopeDrawRefusalReason } from "./buildableEnvelope/envelopeDrawOutcome";
+import type { ZoningFactRead } from "./zoningFactFromParcelRecord";
+import type { SetbacksFactRead } from "./setbacksFactFromParcelRecord";
+import type { LandUseFactRead } from "./landUseFactRead";
+import { ptadLandUseDescription } from "./ptadLandUse";
+import { isSlatedForCellServe } from "./cellServeRule";
 
 type JsonRecord = Record<string, unknown>;
 
+export type R1BriefSectionDisposition =
+  | "present"
+  | "absent"
+  | "refused"
+  | "unread";
+
+export type R1BriefSectionId =
+  | "zoning"
+  | "setbacks-envelope"
+  | "flood"
+  | "land-use"
+  | "drainage";
+
 export type R1BriefSection = {
-  id: "zoning" | "setbacks-envelope" | "flood" | "land-use";
+  id: R1BriefSectionId;
   title: string;
   data: unknown;
   refusal?: unknown;
   citations: string[];
   /** ISO instant for when this section's determination was evaluated or baked. */
   asOf: string | null;
+  disposition: R1BriefSectionDisposition;
+  /** Present with `unread`: why the producer has not run for this parcel. */
+  reason?: string;
   /** Present when the section carries a determination but no http citation URL. */
   citationsDegraded?: boolean;
-  /** Flood-only: clarifies Zone X + outside-SFHA misreads. */
+  /** P-445: required whenever citationsDegraded: why source+vintage cannot be attached. Never blank. */
+  citationsUnavailableReason?: string;
+  /** Flood-only: clarifies Zone X + outside-SFHA misreads. Withheld while citationsDegraded (F2). */
   zoneExposureSummary?: string | null;
   /** Setbacks-envelope-only: MCP guard when data is refused. */
   agentGuidance?: string | null;
 };
 
+/** Why the drainage section is unread until the facet exists (F7). */
+export const DRAINAGE_UNREAD_REASON =
+  "drainage facet not produced for this parcel";
+
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
     : null;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function urlsFrom(value: unknown): string[] {
@@ -47,9 +101,10 @@ function urlsFrom(value: unknown): string[] {
       }
       if (
         key &&
-        (key === "sourceCitation" ||
+        (        key === "sourceCitation" ||
           key === "citationUrl" ||
-          key === "sourceUrl") &&
+          key === "sourceUrl" ||
+          key === "provenance") &&
         /^https?:\/\//i.test(candidate)
       ) {
         urls.add(candidate);
@@ -117,7 +172,132 @@ function envelopeHasProductData(envelope: unknown): boolean {
   return false;
 }
 
-/** Exported for unit tests — Zone X + inSFHA:false is often misread as minimal risk. */
+/* ------------------------------------------------------------------ */
+/* Disposition predicates: the one derivation node and stub share.     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A zoning determination is a district. The Tier-1 bake writes
+ * `{ district, jurisdictionKey?, provenance? } | null`; a record without a
+ * district (an empty record, a note) is not a determination.
+ */
+export function zoningDisposition(zoning: unknown): "present" | "absent" {
+  if (nonEmptyString(zoning)) return "present";
+  const record = asRecord(zoning);
+  if (!record) return "absent";
+  return ["district", "zone", "code", "zoningCode"].some((key) =>
+    nonEmptyString(record[key]),
+  )
+    ? "present"
+    : "absent";
+}
+
+/**
+ * A land-use determination is a code. The Tier-1 bake writes
+ * `{ code, description, source, vintage } | null`; the land-use-fact atom
+ * shape carries `landUseCode`. Description, source and vintage without a
+ * code are not a determination.
+ */
+/**
+ * A PTAD class code with no label borrows the shared description. A label
+ * already on the atom wins. Codes that are not a short PTAD token (a
+ * hyphenated local name such as SF-RESIDENTIAL) are not run through the
+ * first-letter map, which would otherwise call them special inventory.
+ */
+export function landUseCustomerLabel(
+  landUseCode: string,
+  landUseLabel: string | null | undefined,
+): string | null {
+  const named = landUseLabel?.trim() ?? "";
+  if (named) return named;
+  const code = landUseCode.trim();
+  if (!/^[A-Za-z][A-Za-z0-9]{0,3}$/.test(code)) return null;
+  return ptadLandUseDescription(code);
+}
+
+export function landUseDisposition(landUse: unknown): "present" | "absent" {
+  if (nonEmptyString(landUse)) return "present";
+  const record = asRecord(landUse);
+  if (!record) return "absent";
+  return ["code", "landUseCode"].some((key) => nonEmptyString(record[key]))
+    ? "present"
+    : "absent";
+}
+
+/** Envelope: product data is present; a typed refusal is refused; else absent. */
+export function envelopeDisposition(
+  envelope: unknown,
+  refusal?: { state?: string } | null,
+): "present" | "refused" | "absent" {
+  if (envelopeHasProductData(envelope)) return "present";
+  if (refusal?.state === "refused") return "refused";
+  return "absent";
+}
+
+/**
+ * Disposition of a live fact read (flood today). A typed absence is not
+ * promoted at section level (WDLL item 5: absent-verified needs a positive
+ * typed result the section vocabulary does not carry), and an atom that is
+ * not there is absent, not a refusal about the parcel. Every other refusal
+ * code is a producer refusal.
+ */
+export function factReadDisposition(
+  read: { state: "present" | "absent" | "refused"; code?: string } | null | undefined,
+): R1BriefSectionDisposition {
+  if (!read) return "absent";
+  if (read.state === "present") return "present";
+  if (read.state === "absent") return "absent";
+  return read.code === "atom-miss" ? "absent" : "refused";
+}
+
+/**
+ * Drainage facet in the bake (`facets.drainage`), defined here ahead of the
+ * data lane: a record with `state: "refused"` is refused; `state: "absent"`
+ * is absent; any other non-empty record (or `state: "present"`) is present;
+ * null or an empty record is unread because the producer has not run.
+ */
+export function drainageDisposition(
+  drainage: unknown,
+): R1BriefSectionDisposition {
+  const record = asRecord(drainage);
+  if (!record) return "unread";
+  if (record.state === "refused") return "refused";
+  if (record.state === "absent") return "absent";
+  return Object.keys(record).length > 0 ? "present" : "unread";
+}
+
+/**
+ * Every zone's share, in wire order (row 0 = largest), as a short clause
+ * list -- "AE (23%), X (77%)". A `null` areaShare (the old single-point
+ * payload, or the atom path) omits the percentage: there is no share to
+ * report, not a 100% claim this module did not earn.
+ */
+function zoneShareClauses(zones: FloodHazardFactPresent["zones"]): string {
+  return zones
+    .map((z) => {
+      const name = z.zone?.trim() || "unmapped";
+      return typeof z.areaShare === "number" ? `${name} (${Math.round(z.areaShare * 100)}%)` : name;
+    })
+    .join(", ");
+}
+
+/**
+ * Whole-parcel D1: the sliver sentence takes priority over everything else
+ * below -- "touches the flood zone at the edge" is never silently folded
+ * into the ordinary in/outside-SFHA prose, and the full zone list still
+ * ships so the sliver is never hidden either.
+ */
+function sliverEdgeSentence(fact: FloodHazardFactPresent): string {
+  const edgeZone = fact.zones.find((z) => z.isSfha === true);
+  const name = edgeZone?.zone?.trim() || fact.floodZone || "a mapped SFHA zone";
+  return (
+    `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
+    `sliver threshold. Every mapped zone on this parcel: ${zoneShareClauses(fact.zones)}. ` +
+    "Touching the edge is never reported as 'in' the flood zone, and is never dropped from the record."
+  );
+}
+
+/** Exported for unit tests. Zone X + inSFHA:false is often misread as minimal risk. */
 export function summarizeFloodZoneExposure(
   fact: FloodHazardFactPresent,
 ): string | null {
@@ -132,43 +312,245 @@ export function summarizeFloodZoneExposure(
     );
   }
 
-  if (fact.inSpecialFloodHazardArea) {
+  if (fact.touchesSfhaEdge) {
+    return sliverEdgeSentence(fact);
+  }
+
+  // Whole-parcel (card F2): when more than one zone touches the parcel,
+  // every row and its share is named -- "A consumer that prints one zone
+  // must print every zone with its share" (hiding a second zone is a
+  // CONTRACT_RULES.md breach, same rule the map already honors).
+  const multiZone = fact.zones.length > 1 ? ` Zones on this parcel: ${zoneShareClauses(fact.zones)}.` : "";
+
+  // 2026-10-12 tristate fix: `null` is genuinely unknown (no stated SFHA_TF
+  // and a non-decisive zone letter) -- never folded into the "outside the
+  // SFHA" prose below, which would silently turn "unknown" into "no".
+  if (fact.inSpecialFloodHazardArea === null) {
+    return (
+      `Mapped FEMA flood zone ${fact.floodZone} does not state a Special Flood Hazard Area ` +
+      "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+      `not treated as 'in' and not treated as 'outside' the SFHA.${multiZone}`
+    );
+  }
+
+  if (fact.inSpecialFloodHazardArea === true) {
     const bfe =
       typeof fact.baseFloodElevation === "number"
         ? ` Base flood elevation ${fact.baseFloodElevation} ft.`
         : "";
     return (
       `Mapped FEMA flood zone ${fact.floodZone} is in a Special Flood Hazard Area ` +
-      `(1% annual-chance floodplain).${bfe}`
+      `(1% annual-chance floodplain).${bfe}${multiZone}`
     );
   }
 
-  if (zone === "X" || zone.startsWith("X")) {
+  if (zone === "X" || zone === "X500" || zone.startsWith("X ")) {
     if (subty.includes("0.2 PCT") || subty.includes("0.2%")) {
       return (
         `Mapped Zone ${fact.floodZone} with 0.2% annual-chance flood hazard` +
         (fact.zoneSubtype ? ` (${fact.zoneSubtype})` : "") +
-        ". Outside the SFHA but not minimal risk — shaded Zone X still carries flood exposure."
+        `. Outside the SFHA but not minimal risk. Shaded Zone X still carries flood exposure.${multiZone}`
       );
     }
     if (fact.zoneSubtype) {
       return (
         `Mapped Zone ${fact.floodZone} outside the SFHA (${fact.zoneSubtype}). ` +
-        "Zone X is not automatically minimal risk — read the zone subtype."
+        `Zone X is not automatically minimal risk. Read the zone subtype.${multiZone}`
       );
     }
     return (
       "Mapped Zone X outside the SFHA. Zone X with inSpecialFloodHazardArea: false is " +
       "often misread as minimal risk; confirm unshaded Zone X versus 0.2% annual-chance " +
-      "shaded X — zone subtype was not recorded on this atom."
+      `shaded X. Zone subtype was not recorded on this atom.${multiZone}`
     );
   }
 
   return (
     `Mapped FEMA flood zone ${fact.floodZone} is outside the Special Flood Hazard Area` +
     (fact.zoneSubtype ? ` (${fact.zoneSubtype})` : "") +
-    "."
+    `.${multiZone}`
   );
+}
+
+/** Same clause-list shape as the atom-path's zoneShareClauses, over the parcel_record row shape. */
+function parcelRecordZoneShareClauses(zones: ReadonlyArray<ParcelRecordFloodZoneRow>): string {
+  return zones
+    .map((z) => {
+      const name = z.zone?.trim() || "unmapped";
+      return typeof z.areaShare === "number" ? `${name} (${Math.round(z.areaShare * 100)}%)` : name;
+    })
+    .join(", ");
+}
+
+/**
+ * Exported for unit tests. Parcel-record's flood companion carries a real
+ * floodway boolean (unlike the atoms path, which only string-matches
+ * "FLOODWAY" out of a free-text zone label -- see parcelRecordFactRead.ts's
+ * own header comment) and no zoneSubtype field, so this is a distinct
+ * function from summarizeFloodZoneExposure, not a reuse: the input shapes
+ * genuinely differ, not just the source.
+ *
+ * CARD F2 (whole-parcel flood): `fact.zones` carries EVERY companion row.
+ * `inSpecialFloodHazardArea`/the sliver exception are computed here with
+ * the SAME `resolveInSfha` rule floodHazardFactFromParcelRecord.ts applies
+ * -- not reimplemented, so the two surfaces cannot drift (operator ruling
+ * D1: a sliver touch is "touches the flood zone at the edge", never "in",
+ * never hidden).
+ */
+export function summarizeParcelRecordFloodZoneExposure(
+  fact: ParcelRecordFloodValue,
+): string | null {
+  const zoneRaw = fact.floodZone?.trim() ?? "";
+  if (!zoneRaw) {
+    return (
+      "Parcel does not intersect a mapped FEMA flood zone (treat as Zone X by omission). " +
+      "That is a mapped negative, not a FEMA 'no risk' certificate."
+    );
+  }
+  const bfe =
+    typeof fact.baseFloodElevation === "number"
+      ? ` Base flood elevation ${fact.baseFloodElevation} ft.`
+      : "";
+  // The old single-point payload (every row's areaShare is null) keeps its
+  // ORIGINAL "any letter but X" rule byte-for-byte -- this function predates
+  // isSfhaZone and this dispatch does not relitigate it for a payload shape
+  // it was already shipping against. Only a real whole-parcel payload (at
+  // least one row with a real areaShare) takes the new D1 path below.
+  const isWholeParcelPayload = fact.zones.some((z) => typeof z.areaShare === "number");
+  if (!isWholeParcelPayload) {
+    if (fact.floodway) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} is within the regulatory floodway.${bfe} ` +
+        "The floodway carries the most restrictive federal and local development standards."
+      );
+    }
+    // Exact-code rule (femaZoneCode.ts): D / AREA NOT INCLUDED / OPEN WATER
+    // are unknown, never "in" (was: any letter but X).
+    const legacySfha = classifyFemaZoneSfha(zoneRaw);
+    if (legacySfha === null) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} does not state a Special Flood Hazard Area ` +
+        "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+        "not treated as 'in' and not treated as 'outside' the SFHA."
+      );
+    }
+    if (legacySfha === true) {
+      return (
+        `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
+        `(1% annual-chance floodplain).${bfe}`
+      );
+    }
+    return (
+      `Mapped Zone ${zoneRaw} outside the Special Flood Hazard Area. ` +
+      "Zone X is not automatically minimal risk."
+    );
+  }
+
+  // Whole-parcel (card F2): `fact.zones` carries EVERY companion row.
+  // inSfha/the sliver exception use the SAME `resolveInSfha` rule
+  // floodHazardFactFromParcelRecord.ts applies -- not reimplemented, so the
+  // two surfaces cannot drift (operator ruling D1).
+  const { inSfha, touchesSfhaEdge } = resolveInSfha(fact.zones);
+  const multiZone =
+    fact.zones.length > 1 ? ` Zones on this parcel: ${parcelRecordZoneShareClauses(fact.zones)}.` : "";
+
+  if (touchesSfhaEdge) {
+    const edgeZone = fact.zones.find((z) => resolveIsSfha(z) === true);
+    const name = edgeZone?.zone?.trim() || zoneRaw;
+    return (
+      `Parcel touches Zone ${name} at the edge -- a Special Flood Hazard Area share below the ` +
+      `sliver threshold.${multiZone} Touching the edge is never reported as 'in' the flood zone, ` +
+      "and is never dropped from the record."
+    );
+  }
+  if (fact.floodway) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} is within the regulatory floodway.${bfe} ` +
+      `The floodway carries the most restrictive federal and local development standards.${multiZone}`
+    );
+  }
+  if (inSfha === true) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} is in a Special Flood Hazard Area ` +
+      `(1% annual-chance floodplain).${bfe}${multiZone}`
+    );
+  }
+  // 2026-10-12 tristate fix: `null` is genuinely unknown (no stated SFHA_TF
+  // and a non-decisive zone letter across every qualifying zone) -- never
+  // folded into the "outside the SFHA" prose below, which would silently
+  // turn "unknown" into "no".
+  if (inSfha === null) {
+    return (
+      `Mapped FEMA flood zone ${zoneRaw} does not state a Special Flood Hazard Area ` +
+      "determination, and the zone letter alone is not decisive. Flood hazard status unknown -- " +
+      `not treated as 'in' and not treated as 'outside' the SFHA.${multiZone}`
+    );
+  }
+  return (
+    `Mapped Zone ${zoneRaw} outside the Special Flood Hazard Area. ` +
+    `Zone X is not automatically minimal risk.${multiZone}`
+  );
+}
+
+/**
+ * Parcel-record is the preferred flood source when it has earned a
+ * determination (value or absent-verified) -- the reconciled point-on-surface
+ * rule the old atoms/bake path does not have (parcelRecordFactRead.ts). This
+ * function serves only those two states; every other state is decided in
+ * composeFloodBriefSection, which asks the slate question first (P-297/A-193):
+ * on a slated pair the cell is the answer, so "unaccounted" (nothing has
+ * looked yet) and "refused" are a declared refusal with the cell's reason and
+ * never the atoms path.
+ */
+function composeFloodBriefSectionFromParcelRecord(
+  fact: ParcelRecordFloodValue | ParcelRecordFloodAbsentVerified,
+): BriefSectionParts {
+  if (fact.state === "value") {
+    // 2026-10-12 tristate fix: `data.zones[*].isSfha` must agree with the
+    // map/card overlay's resolved value for the SAME row -- both now call
+    // the SAME `resolveIsSfha` (`resolveZoneIsSfha`) rather than this
+    // section exposing the row's raw, unresolved SFHA_TF flag while the
+    // overlay exposes a resolved one (the exact "brief says null, overlay
+    // says false" disagreement this fixes). `resolveIsSfha` is idempotent on
+    // an already-boolean `isSfha`, so this is a pure widening of what this
+    // section already claims, never a narrower one.
+    const resolvedFact: ParcelRecordFloodValue = {
+      ...fact,
+      zones: fact.zones.map((z) => ({ ...z, isSfha: resolveIsSfha(z) })),
+    };
+    const posture = withCitationPosture({
+      data: resolvedFact,
+      // parcel_record's flood companion carries provenance (method, source
+      // vintage) rather than a clickable URL; urlsFrom only recognizes real
+      // http(s) URLs, so this is honestly empty, not a citation we chose to
+      // drop. F2's own rule (withhold the quotable prose until a citation
+      // exists behind it) is respected as written: the structured zone/
+      // floodway/BFE values still ship in `data` either way; only the
+      // narrative sentence is conditionally withheld.
+      citations: [],
+      asOf: fact.sourceVintage,
+      disposition: "present",
+      citationsUnavailableReason:
+        "parcel_record flood companion carries method and vintage, not an http citation URL",
+    });
+    return {
+      ...posture,
+      zoneExposureSummary: posture.citationsDegraded
+        ? null
+        : summarizeParcelRecordFloodZoneExposure(fact),
+    };
+  }
+  // absent-verified: a real determination (the sweep looked, found nothing),
+  // never promoted past "absent" at section level -- same rule
+  // factReadDisposition already applies to floodHazardFactRead's own typed
+  // absence (WDLL item 5, this file's existing comment on factReadDisposition).
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+    zoneExposureSummary: null,
+  };
 }
 
 type BriefSectionParts = Pick<
@@ -177,51 +559,129 @@ type BriefSectionParts = Pick<
   | "refusal"
   | "citations"
   | "asOf"
+  | "disposition"
+  | "reason"
   | "citationsDegraded"
+  | "citationsUnavailableReason"
   | "zoneExposureSummary"
   | "agentGuidance"
 >;
 
 function withCitationPosture(
-  parts: Pick<BriefSectionParts, "data" | "refusal" | "citations" | "asOf" | "zoneExposureSummary">,
+  parts: Pick<BriefSectionParts, "data" | "citations" | "asOf" | "disposition"> & {
+    citationsUnavailableReason?: string;
+  },
 ): BriefSectionParts {
-  const hasDetermination =
-    parts.data !== null &&
-    parts.data !== undefined &&
-    parts.refusal == null;
+  const degraded =
+    parts.disposition === "present" && parts.citations.length === 0;
   return {
     ...parts,
-    citationsDegraded: hasDetermination && parts.citations.length === 0,
+    citationsDegraded: degraded,
+    ...(degraded
+      ? {
+          citationsUnavailableReason:
+            parts.citationsUnavailableReason?.trim() ||
+            "present determination has no http citation URL; vintage is the section asOf or undeclared",
+        }
+      : {}),
   };
+}
+
+/**
+ * The slate question for the flood rail, asked of a `parcel_record` read's own
+ * place key (`<county_fips>:<prop_id>`, the store's own key grammar).
+ *
+ * The county is the only thing needed: `isSlatedForCellServe` is the same
+ * one-rule function every `*ServeCutover.ts` wrapper asks, so this depth
+ * cannot drift from the facets depth about which pairs the slate covers. A
+ * read with no usable key answers `false` -- see the caller for why that keeps
+ * its pre-cutover path rather than fabricating a refusal.
+ */
+function isSlatedForCellServeOnFlood(
+  placeKey: string | null | undefined,
+): boolean {
+  const countyFips = /^(\d{5}):/.exec((placeKey ?? "").trim())?.[1];
+  return countyFips !== undefined && isSlatedForCellServe(countyFips, "flood");
 }
 
 function composeFloodBriefSection(
   tier2: unknown,
   floodHazardFact?: FloodHazardFactRead,
+  parcelRecordFloodFact?: ParcelRecordFloodRead,
 ): BriefSectionParts {
+  if (parcelRecordFloodFact) {
+    if (
+      parcelRecordFloodFact.state === "value" ||
+      parcelRecordFloodFact.state === "absent-verified"
+    ) {
+      return composeFloodBriefSectionFromParcelRecord(parcelRecordFloodFact);
+    }
+    // P-297 / A-193. Pre-ruling this dropped every other state through to the
+    // atoms-based path below ("never silently treated as an absence"): a
+    // not-applicable cell lost its earned absence to a stale atom, and a
+    // refused/unaccounted cell lost its reason to the bake. On a slated rail
+    // the cell is the answer -- not-applicable is the stated absence, and
+    // refused/unaccounted is a declared refusal with the cell's reason.
+    //
+    // The slate question is asked HERE, from the read's own place_key, and
+    // not left to the caller: unlike zoning and setbacks (whose wrappers only
+    // ever return a fact for a slated pair), flood's parcel_record read
+    // (parcelRecordFactRead.loadParcelRecordFloodFact, P-152) is ungated, so
+    // it carries a refusal or an absence for UNSLATED counties too -- and on
+    // an unslated pair the pre-cutover atoms path is still the answer (P-297:
+    // an unslated pair is untouched, byte-identical). A read that could not
+    // place itself (`place_key: null`, i.e. an unparseable node id) cannot
+    // answer the slate question at all, so it too keeps the old fall-through.
+    if (isSlatedForCellServeOnFlood(parcelRecordFloodFact.placeKey)) {
+      if (parcelRecordFloodFact.state === "not-applicable") {
+        return {
+          data: parcelRecordFloodFact,
+          citations: [],
+          asOf: null,
+          disposition: "absent",
+          zoneExposureSummary: null,
+        };
+      }
+      return {
+        data: null,
+        refusal: parcelRecordFloodFact,
+        citations: [],
+        asOf: null,
+        disposition: "refused",
+        ...(parcelRecordFloodFact.state === "refused"
+          ? { reason: parcelRecordFloodFact.reason }
+          : {}),
+      };
+    }
+  }
   if (floodHazardFact) {
     if (floodHazardFact.state === "present") {
-      const citations = urlsFrom(floodHazardFact);
-      return withCitationPosture({
+      const posture = withCitationPosture({
         data: floodHazardFact,
-        citations,
+        citations: urlsFrom(floodHazardFact),
         asOf: floodHazardFact.evaluatedAt,
-        zoneExposureSummary: summarizeFloodZoneExposure(floodHazardFact),
+        disposition: "present",
       });
+      // F2 (triage D5): the prose is the most quotable sentence in the brief
+      // and is withheld until the citation behind it exists.
+      return {
+        ...posture,
+        zoneExposureSummary: posture.citationsDegraded
+          ? null
+          : summarizeFloodZoneExposure(floodHazardFact),
+      };
     }
     if (floodHazardFact.state === "absent") {
-      const citations = urlsFrom(floodHazardFact);
-      return withCitationPosture({
+      return {
         data: floodHazardFact,
-        citations,
+        citations: urlsFrom(floodHazardFact),
         asOf: asOfFrom(floodHazardFact),
+        disposition: factReadDisposition(floodHazardFact),
         zoneExposureSummary: null,
-      });
+      };
     }
-    if (
-      floodHazardFact.state === "refused" &&
-      floodHazardFact.code === "atom-miss"
-    ) {
+    const disposition = factReadDisposition(floodHazardFact);
+    if (floodHazardFact.code === "atom-miss") {
       const bakedRefusal = asRecord(tier2)?.floodDisposition ?? null;
       if (bakedRefusal) {
         return {
@@ -229,6 +689,7 @@ function composeFloodBriefSection(
           refusal: bakedRefusal,
           citations: urlsFrom(bakedRefusal),
           asOf: asOfFrom(bakedRefusal),
+          disposition,
         };
       }
     }
@@ -237,6 +698,7 @@ function composeFloodBriefSection(
       refusal: floodHazardFact,
       citations: [],
       asOf: null,
+      disposition,
     };
   }
   const refusal = asRecord(tier2)?.floodDisposition ?? null;
@@ -245,6 +707,183 @@ function composeFloodBriefSection(
     refusal,
     citations: urlsFrom(refusal),
     asOf: asOfFrom(refusal),
+    disposition: refusal != null ? "refused" : "absent",
+  };
+}
+
+/**
+ * Exported for unit tests. OPS-16 A-096/A-097/A-098: parcel_record's zoning
+ * determination takes priority over the Tier-1 bake's own zoningDisposition
+ * whenever it has genuinely earned one (present, or a verified absence --
+ * absent-verified/not-applicable), the same rule
+ * composeFloodBriefSectionFromParcelRecord already applies for flood. The
+ * coarse section disposition stays "present"/"absent" either way (WDLL item
+ * 5: the four-value R1BriefSectionDisposition enum is not where a
+ * not-applicable distinction lives -- that distinction is visible in `data`
+ * itself, matching flood's own choice not to promote absent-verified past
+ * "absent" at section level). UNLIKE flood's ungated Consumer-C read, this
+ * fact only ever arrives non-null when the (county, zoningDistrict) pair is
+ * slated and gate-passing (zoningFactServeCutover.ts) -- so a "refused"
+ * record fact here means the record was reachable but its OWN read failed
+ * (e.g. a malformed cell), not "not cut over." Falling through to the
+ * legacy bake-derived section in that case (rather than surfacing "refused"
+ * to a customer, unlike wells'/cityLimits' own no-fallback convention)
+ * protects this section's "never regress a parcel that currently has a real
+ * answer" invariant -- the more prominent, narrative-driving role this
+ * section plays for a customer justifies the extra caution.
+ *
+ * Takes only the present/absent-verified/not-applicable variants, matching
+ * composeFloodBriefSectionFromParcelRecord's own narrowed parameter type --
+ * a refused fact is never valid input here BY TYPE, not by a runtime
+ * branch; the caller (buildR1Brief) is the one place that decides whether a
+ * given fact reaches this function at all.
+ */
+export function composeZoningBriefSectionFromParcelRecord(
+  fact: Exclude<ZoningFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = {
+      district: fact.district,
+      jurisdictionKey: fact.jurisdictionKey,
+      provenance: fact.provenance,
+    };
+    const citations = urlsFrom(data);
+    return withCitationPosture({
+      data,
+      citations,
+      asOf: fact.sourceVintage ?? fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+      citationsUnavailableReason:
+        citations.length === 0
+          ? fact.sourceVintage
+            ? `zoning provenance is not an http URL; vintage is ${fact.sourceVintage}`
+            : "zoning provenance is not an http URL and the cell carries no vintage"
+          : undefined,
+    });
+  }
+  // absent (absent-verified / not-applicable)
+  return {
+    data: fact,
+    citations: [],
+    asOf: fact.sourceVintage,
+    disposition: "absent",
+  };
+}
+
+/**
+ * Exported for unit tests. Setbacks' own mirror of
+ * composeZoningBriefSectionFromParcelRecord -- see that function's module
+ * doc for the shared reasoning and its own narrowed-by-type refused
+ * exclusion.
+ */
+export function composeSetbacksBriefSectionFromParcelRecord(
+  fact: Exclude<SetbacksFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = {
+      frontFt: fact.frontFt,
+      sideFt: fact.sideFt,
+      rearFt: fact.rearFt,
+      cornerFt: fact.cornerFt,
+    };
+    return withCitationPosture({
+      data,
+      citations: [],
+      asOf: fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+      citationsUnavailableReason:
+        "parcel_record setbacks cell has no citation URL; vintage is the cell evaluatedAt",
+    });
+  }
+  // absent (absent-verified / not-applicable)
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+  };
+}
+
+/**
+ * Exported for unit tests. PE/MCP-vs-facets parity audit (2026-09-07, D2):
+ * before this fix, the land-use section always read `baseFacts.landUse` --
+ * the retired-store cad-roll object -- and never the real land-use-fact
+ * atom brokerageNodeFacets.ts's facets route already reads
+ * (`loadLandUseFactAtom`). Same "record wins whenever it has genuinely
+ * earned one (present, or a verified absence)" rule
+ * composeZoningBriefSectionFromParcelRecord and
+ * composeSetbacksBriefSectionFromParcelRecord already apply for their own
+ * sections. UNLIKE those two, land-use-fact has no allowlist/gate cutover
+ * step -- loadLandUseFactAtom is unconditional, so "no atom at all" arrives
+ * here as a REFUSED code (atom-miss), not an absent state; refused still
+ * falls through to the legacy baked value exactly like the other two.
+ */
+export function composeLandUseBriefSectionFromAtom(
+  fact: Exclude<LandUseFactRead, { state: "refused" }>,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (fact.state === "present") {
+    const data = {
+      landUseCode: fact.landUseCode,
+      landUseLabel: landUseCustomerLabel(fact.landUseCode, fact.landUseLabel),
+    };
+    return withCitationPosture({
+      data,
+      citations: [],
+      asOf: fact.evaluatedAt ?? bakedAt,
+      disposition: "present",
+      citationsUnavailableReason: fact.sourceVintage
+        ? `CAD land-use atom has no ordinance citation URL; vintage is ${fact.sourceVintage}`
+        : "CAD land-use atom has no ordinance citation URL and no vintage",
+    });
+  }
+  // absent
+  return {
+    data: fact,
+    citations: [],
+    asOf: null,
+    disposition: "absent",
+  };
+}
+
+function composeSetbacksFromEnvelopeOutcome(
+  outcome: EnvelopeDrawOutcome,
+  bakedAt: string | null,
+): BriefSectionParts {
+  if (outcome.state === "modelled") {
+    const data = {
+      frontFt: outcome.model.setbacks.front_ft,
+      sideFt: outcome.model.setbacks.side_ft,
+      rearFt: outcome.model.setbacks.rear_ft,
+      cornerFt: outcome.model.setbacks.side_corner_ft ?? null,
+      district: outcome.model.setbacks.district,
+      disclosure: outcome.model.disclosure,
+    };
+    return withCitationPosture({
+      data,
+      citations: urlsFrom(data),
+      asOf: bakedAt,
+      disposition: "present",
+      citationsUnavailableReason:
+        "live envelope derivation carries disclosure, not an http citation URL",
+    });
+  }
+  const reason = envelopeDrawRefusalReason(outcome.refusal);
+  return {
+    data: null,
+    refusal: {
+      state: "refused",
+      code: outcome.refusal.step,
+      reason,
+    },
+    citations: [],
+    asOf: bakedAt,
+    disposition: "refused",
+    reason,
+    agentGuidance:
+      "Setbacks and buildable envelope were refused by the same derivation the draw uses. Do not invent setback distances or a buildable polygon.",
   };
 }
 
@@ -252,20 +891,46 @@ function composeSetbacksEnvelopeBriefSection(
   envelope: unknown,
   envelopeBriefRefusal?: EnvelopeBriefRefusal | null,
   bakedAt?: string | null,
+  parcelRecordSetbacksFact?: SetbacksFactRead | null,
+  envelopeOutcome?: EnvelopeDrawOutcome | null,
 ): BriefSectionParts {
-  if (envelopeHasProductData(envelope)) {
+  if (envelopeOutcome) {
+    return composeSetbacksFromEnvelopeOutcome(envelopeOutcome, bakedAt ?? null);
+  }
+  if (parcelRecordSetbacksFact) {
+    // P-297 / A-193: a refused setbacks cell is a declared refusal with the
+    // cell's reason, never the bake-derived envelope section. Pre-ruling this
+    // fell through (the same "never regress a parcel" caution the zoning
+    // section above used to apply). Mirrors smartSiteStub.ts's
+    // railStateFromSetbacksFact at the other depth.
+    if (parcelRecordSetbacksFact.state === "refused") {
+      return {
+        data: null,
+        refusal: parcelRecordSetbacksFact,
+        citations: [],
+        asOf: null,
+        disposition: "refused",
+        reason: parcelRecordSetbacksFact.reason,
+      };
+    }
+    return composeSetbacksBriefSectionFromParcelRecord(parcelRecordSetbacksFact, bakedAt ?? null);
+  }
+  const disposition = envelopeDisposition(envelope, envelopeBriefRefusal);
+  if (disposition === "present") {
     return withCitationPosture({
-      data: envelope,
+      data: withSetbackConflictNote(envelope),
       citations: urlsFrom(envelope),
       asOf: asOfFrom(envelope) ?? bakedAt ?? null,
+      disposition,
     });
   }
-  if (envelopeBriefRefusal) {
+  if (disposition === "refused" && envelopeBriefRefusal) {
     return {
       data: null,
       refusal: envelopeBriefRefusal,
       citations: [],
       asOf: bakedAt ?? null,
+      disposition,
       agentGuidance: envelopeAgentGuidance(envelopeBriefRefusal),
     };
   }
@@ -273,7 +938,95 @@ function composeSetbacksEnvelopeBriefSection(
     data: envelope ?? null,
     citations: urlsFrom(envelope),
     asOf: asOfFrom(envelope) ?? bakedAt ?? null,
+    disposition: "absent",
   });
+}
+
+/**
+ * P-154 wave 6 (R-1): the conflict row on the MCP surface. When the
+ * setbacks-envelope facet carries a disagreement between two of the city's
+ * own sources (`secondSource.conflict`), the model read gets ONE sentence
+ * from `@empressaio/atom-contract/display`, the same function the panel and
+ * the PDF call, so all three print the same characters (OPS-23 R-6; the
+ * `reasonDisplayText`/`envelopeHuman` pairing in smartsite-mcp's
+ * tool-honesty.ts is this same pattern).
+ *
+ * Additive and dormant: no `conflict` on the rail means the envelope is
+ * returned UNCHANGED, never with a note. A note where the sources agree
+ * would mean the detector is wrong (wave-6 falsifier). The raw rail is left
+ * untouched beside the composed sentence.
+ */
+export function withSetbackConflictNote(envelope: unknown): unknown {
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return envelope;
+  }
+  const rail = envelope as JsonRecord;
+  const second = asRecord(rail.secondSource);
+  const conflict = second ? asRecord(second.conflict) : null;
+  if (!conflict) return envelope;
+  return {
+    ...rail,
+    conflictNote: setbackConflictNote(
+      conflict as unknown as SetbackConflictSecondSourceInput,
+    ),
+  };
+}
+
+function composeDrainageBriefSection(  drainage: unknown,
+  bakedAt: string | null,
+): BriefSectionParts {
+  const disposition = drainageDisposition(drainage);
+  if (disposition === "unread") {
+    return {
+      data: null,
+      citations: [],
+      asOf: bakedAt,
+      disposition,
+      reason: DRAINAGE_UNREAD_REASON,
+    };
+  }
+  if (disposition === "refused") {
+    return {
+      data: null,
+      refusal: drainage,
+      citations: urlsFrom(drainage),
+      asOf: asOfFrom(drainage) ?? bakedAt,
+      disposition,
+    };
+  }
+  return withCitationPosture({
+    data: drainage,
+    citations: urlsFrom(drainage),
+    asOf: asOfFrom(drainage) ?? bakedAt,
+    disposition,
+  });
+}
+
+function sectionFromParts(
+  id: R1BriefSectionId,
+  title: string,
+  parts: BriefSectionParts,
+): R1BriefSection {
+  return {
+    id,
+    title,
+    data: parts.data,
+    ...(parts.refusal != null ? { refusal: parts.refusal } : {}),
+    citations: parts.citations,
+    asOf: parts.asOf,
+    disposition: parts.disposition,
+    ...(parts.reason != null ? { reason: parts.reason } : {}),
+    ...(parts.citationsDegraded ? { citationsDegraded: true } : {}),
+    ...(parts.citationsUnavailableReason
+      ? { citationsUnavailableReason: parts.citationsUnavailableReason }
+      : {}),
+    ...(parts.zoneExposureSummary != null
+      ? { zoneExposureSummary: parts.zoneExposureSummary }
+      : {}),
+    ...(parts.agentGuidance != null
+      ? { agentGuidance: parts.agentGuidance }
+      : {}),
+  };
 }
 
 export function buildR1Brief(
@@ -281,7 +1034,16 @@ export function buildR1Brief(
   tier2: unknown,
   options?: {
     floodHazardFact?: FloodHazardFactRead;
+    parcelRecordFloodFact?: ParcelRecordFloodRead;
     envelopeBriefRefusal?: EnvelopeBriefRefusal | null;
+    /** OPS-16 A-096/A-097/A-098. Non-null only when (county, zoningDistrict) is slated and gate-passing -- see zoningFactServeCutover.ts. */
+    parcelRecordZoningFact?: ZoningFactRead | null;
+    /** OPS-16 A-096/A-097/A-098. Non-null only when (county, setbackFrontFt) is slated and gate-passing -- see setbacksFactServeCutover.ts. */
+    parcelRecordSetbacksFact?: SetbacksFactRead | null;
+    /** PE/MCP-vs-facets parity audit (2026-09-07, D2). Unconditional (no allowlist/gate cutover) -- see landUseFactRead.ts. */
+    landUseFact?: LandUseFactRead | null;
+    /** P-445: the same live envelope outcome the draw overlay uses. When present it owns the brief section. */
+    envelopeOutcome?: EnvelopeDrawOutcome | null;
   },
 ): {
   sections: R1BriefSection[];
@@ -295,62 +1057,86 @@ export function buildR1Brief(
     typeof root.bakedAt === "string" && root.bakedAt.trim()
       ? root.bakedAt
       : null;
-  const floodSection = composeFloodBriefSection(
-    tier2,
-    options?.floodHazardFact,
-  );
+  const parcelRecordZoningFact = options?.parcelRecordZoningFact;
+  const zoningSection =
+    parcelRecordZoningFact && parcelRecordZoningFact.state !== "refused"
+      ? composeZoningBriefSectionFromParcelRecord(parcelRecordZoningFact, bakedAt)
+      : parcelRecordZoningFact
+        ? // P-297 / A-193. Pre-ruling a refused zoning cell fell through to the
+          // bake-derived section ("never regress a parcel that currently has a
+          // real answer"). On a slated rail that fall-through is the defect:
+          // the cell is the answer, and a refusal is a declared refusal with
+          // the cell's reason -- the bake is never served for it. This mirrors
+          // smartSiteStub.ts's railStateFromZoningFact at the other depth.
+          {
+            data: null,
+            refusal: parcelRecordZoningFact,
+            citations: [],
+            asOf: null,
+            disposition: "refused" as const,
+            reason: parcelRecordZoningFact.reason,
+          }
+        : withCitationPosture({
+            data: root.zoning ?? null,
+            citations: urlsFrom(root.zoning),
+            asOf: asOfFrom(root.zoning) ?? bakedAt,
+            disposition: zoningDisposition(root.zoning),
+          });
   const envelopeSection = composeSetbacksEnvelopeBriefSection(
     envelope,
     options?.envelopeBriefRefusal,
     bakedAt,
+    options?.parcelRecordSetbacksFact,
+    options?.envelopeOutcome,
+  );
+  const floodSection = composeFloodBriefSection(
+    tier2,
+    options?.floodHazardFact,
+    options?.parcelRecordFloodFact,
+  );
+  const landUseFactOpt = options?.landUseFact;
+  // P-207: the land-use-fact atom writer has no address-join recovery of its
+  // own -- it always writes a join-hold absence for a gate-blocked county
+  // (LANDUSE_JOIN_DISABLED_FIPS_SEED), even on a node where the Tier-1 bake's
+  // OWN independent, owner-gated situs-address join (buildTier1Payload's
+  // resolveAddressLandUse) has already recovered a real code from the same
+  // CAD roll (`provenance.landUseAddressRecovered`). That recovery is a
+  // second, independently-sourced positive determination the atom cannot see,
+  // not a re-derivation of the disabled prop_id join -- it must win over the
+  // atom's absence the same way a genuinely earned atom determination wins
+  // over the legacy value in every other case. Scoped to exactly this signal:
+  // every other absent/refused shape is unchanged.
+  const landUseAddressRecovered =
+    (asRecord(root.provenance)?.landUseAddressRecovered ?? false) === true;
+  const landUseSection = landUseAddressRecovered
+    ? withCitationPosture({
+        data: baseFacts.landUse ?? null,
+        citations: urlsFrom(baseFacts.landUse),
+        asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
+        disposition: landUseDisposition(baseFacts.landUse),
+      })
+    : landUseFactOpt && landUseFactOpt.state !== "refused"
+      ? composeLandUseBriefSectionFromAtom(landUseFactOpt, bakedAt)
+      : withCitationPosture({
+          data: baseFacts.landUse ?? null,
+          citations: urlsFrom(baseFacts.landUse),
+          asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
+          disposition: landUseDisposition(baseFacts.landUse),
+        });
+  const drainageSection = composeDrainageBriefSection(
+    root.drainage ?? null,
+    bakedAt,
   );
   const sections: R1BriefSection[] = [
-    {
-      id: "zoning",
-      title: "Zoning",
-      data: root.zoning ?? null,
-      citations: urlsFrom(root.zoning),
-      asOf: asOfFrom(root.zoning) ?? bakedAt,
-      ...(urlsFrom(root.zoning).length === 0 && root.zoning != null
-        ? { citationsDegraded: true }
-        : {}),
-    },
-    {
-      id: "setbacks-envelope",
-      title: "Setbacks and buildable envelope",
-      data: envelopeSection.data,
-      ...(envelopeSection.refusal != null
-        ? { refusal: envelopeSection.refusal }
-        : {}),
-      citations: envelopeSection.citations,
-      asOf: envelopeSection.asOf,
-      ...(envelopeSection.citationsDegraded ? { citationsDegraded: true } : {}),
-      ...(envelopeSection.agentGuidance != null
-        ? { agentGuidance: envelopeSection.agentGuidance }
-        : {}),
-    },
-    {
-      id: "flood",
-      title: "Flood",
-      data: floodSection.data,
-      ...(floodSection.refusal != null ? { refusal: floodSection.refusal } : {}),
-      citations: floodSection.citations,
-      asOf: floodSection.asOf,
-      ...(floodSection.citationsDegraded ? { citationsDegraded: true } : {}),
-      ...(floodSection.zoneExposureSummary != null
-        ? { zoneExposureSummary: floodSection.zoneExposureSummary }
-        : {}),
-    },
-    {
-      id: "land-use",
-      title: "Land use",
-      data: baseFacts.landUse ?? null,
-      citations: urlsFrom(baseFacts.landUse),
-      asOf: asOfFrom(baseFacts.landUse) ?? bakedAt,
-      ...(urlsFrom(baseFacts.landUse).length === 0 && baseFacts.landUse != null
-        ? { citationsDegraded: true }
-        : {}),
-    },
+    sectionFromParts("zoning", "Zoning", zoningSection),
+    sectionFromParts(
+      "setbacks-envelope",
+      "Setbacks and buildable envelope",
+      envelopeSection,
+    ),
+    sectionFromParts("flood", "Flood", floodSection),
+    sectionFromParts("land-use", "Land use", landUseSection),
+    sectionFromParts("drainage", "Drainage", drainageSection),
   ];
   const disclosures = verbatimValues(
     { facets, tier2 },

@@ -70,6 +70,19 @@ describe("interpretFloodHazardFactRows", () => {
     expect(read.floodZone).toBe("AO");
   });
 
+  it("CARD F2: the atom path (one point, one zone) maps to a single-entry zones array, overlap single, touchesSfhaEdge false -- never a sliver", () => {
+    const read = interpretFloodHazardFactRows(GOLD, [
+      { entity_id: GOLD, body: GOLD_PRESENT_BODY },
+    ]);
+    expect(read.state).toBe("present");
+    if (read.state !== "present") return;
+    expect(read.zones).toEqual([
+      { zone: "AO", subtype: null, isSfha: true, floodway: false, bfe: null, areaShare: null },
+    ]);
+    expect(read.overlap).toBe("single");
+    expect(read.touchesSfhaEdge).toBe(false);
+  });
+
   it("serves a present finding stored only on the padded key (dual-grammar hit)", () => {
     const read = interpretFloodHazardFactRows(GOLD, [
       {
@@ -143,6 +156,27 @@ describe("interpretFloodHazardFactRows", () => {
     expect(read.state).toBe("absent");
     if (read.state !== "absent") return;
     expect(read.absence?.kind).toBe("no-flood-coverage");
+    expect(read.sourceVintage).toBeNull();
+  });
+
+  it("carries sourceVintage on a typed absence so the draw can earn absent-verified", () => {
+    const read = interpretFloodHazardFactRows("48021:99999", [
+      {
+        entity_id: "48021:99999",
+        body: {
+          entityType: "flood-hazard-fact",
+          sourceTier: "absent",
+          absence: {
+            kind: "no-flood-coverage",
+            reason: "parcel centroid outside NFHL county tile coverage",
+          },
+          sourceVintage: "NFHL_48_20260101",
+        },
+      },
+    ]);
+    expect(read.state).toBe("absent");
+    if (read.state !== "absent") return;
+    expect(read.sourceVintage).toBe("NFHL_48_20260101");
   });
 
   it("refuses a body that is neither a present finding nor an absence", () => {

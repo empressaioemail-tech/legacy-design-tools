@@ -87,7 +87,7 @@ describe("assertLabeledWebSearchCitation — violate unlabeled web text", () => 
     expect(() =>
       assertLabeledWebSearchCitation({
         atomDid: "websearch:civic:bastrop-isd",
-        label: "Bastrop ISD — web-search backup, not a Hauska atom",
+        label: "Bastrop ISD — City website · not yet verified",
         snippet: RESEARCH_CHAT_WEBSEARCH_DISCLOSURE,
         disclosure: RESEARCH_CHAT_WEBSEARCH_DISCLOSURE,
         source: "websearch",

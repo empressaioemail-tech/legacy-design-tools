@@ -1,0 +1,621 @@
+/**
+ * CAD roll value fields from `cad_property`: read, bake, and wire.
+ *
+ * NEVER read `cad-parcel-roll` atoms for these fields. Hays / Travis /
+ * Williamson atom bodies are hollow; Bastrop atoms invent livingArea,
+ * assessed, and improvement-$0 coverage the CAD table does not have.
+ *
+ * Dollar fields are three-state: present (v>0), zero (key present, v===0),
+ * absent (key missing, no v, with basis). A stored 0 is CAD's value, never
+ * collapsed to absent. livingAreaSqft is not a dollar: positive or absent.
+ */
+
+export const CAD_PROPERTY_SOURCE = "cad_property" as const;
+/** @deprecated value is cad_property. The atom name must not be the source. */
+export const CAD_PARCEL_ROLL_SOURCE = CAD_PROPERTY_SOURCE;
+export const COUNTY_ASSESSED_VALUE_BASIS = "county-assessed" as const;
+/**
+ * CTX-B1 (2026-09-10, operator ruling A1): a dollar value merged into
+ * `cad_property` from the StratMap redistribution adapter, not from the
+ * county appraisal district's own export. Served as a labelled present
+ * value, never as an absence -- see `valueBasisFromRow` for the
+ * discriminator and why `county-assessed` was previously stamped on both.
+ */
+export const STRATMAP_REDISTRIBUTED_VALUE_BASIS = "stratmap-redistributed" as const;
+export type ValueBasis =
+  | typeof COUNTY_ASSESSED_VALUE_BASIS
+  | typeof STRATMAP_REDISTRIBUTED_VALUE_BASIS;
+
+/** One field as stored on `baseFacts.cadRoll` after the bake. */
+export type CadRollBakedDollar = {
+  v: number;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+  valueBasis: ValueBasis;
+};
+
+export type CadRollBakedSqft = {
+  v: number;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedYear = {
+  v: number;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedText = {
+  v: string;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export type CadRollBakedCodes = {
+  v: string[];
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+};
+
+export interface CadRollBaked {
+  marketValue: CadRollBakedDollar | null;
+  assessedValue: CadRollBakedDollar | null;
+  landValue: CadRollBakedDollar | null;
+  improvementValue: CadRollBakedDollar | null;
+  livingAreaSqft: CadRollBakedSqft | null;
+}
+
+export type CadRollPresentWire = {
+  state: "present";
+  v: number;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+  valueBasis?: ValueBasis;
+};
+
+export type CadRollZeroWire = {
+  state: "zero";
+  v: 0;
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+  valueBasis?: ValueBasis;
+  basis?: string;
+};
+
+export type CadRollAbsentWire = {
+  state: "absent";
+  source: typeof CAD_PROPERTY_SOURCE;
+  vintage: string | null;
+  basis: string;
+};
+
+export type CadRollValueWire =
+  | CadRollPresentWire
+  | CadRollZeroWire
+  | CadRollAbsentWire;
+
+export type CadRollWire = {
+  marketValue: CadRollValueWire;
+  assessedValue: CadRollValueWire;
+  landValue: CadRollValueWire;
+  improvementValue: CadRollValueWire;
+  livingAreaSqft: CadRollValueWire;
+};
+
+function finiteOrNull(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * Non-negative whole dollars. Missing, non-finite, and negative are absent.
+ * A stored 0 is 0. Collapsing 0 to null was the planner-introduced defect:
+ * Bastrop vacant land carries a real stored improvementValue of 0.
+ */
+export function nonNegativeDollarOrNull(v: unknown): number | null {
+  const n = finiteOrNull(v);
+  if (n == null || n < 0) return null;
+  return Math.round(n);
+}
+
+/**
+ * Same contract as nonNegativeDollarOrNull. The prior implementation
+ * treated 0 as absent; that collapse is retired for dollar fields.
+ */
+export function positiveDollarOrNull(v: unknown): number | null {
+  return nonNegativeDollarOrNull(v);
+}
+
+/** Positive sqft only; null and non-positive are absent, never zero. */
+export function positiveSqftOrNull(v: unknown): number | null {
+  const n = finiteOrNull(v);
+  if (n == null || n <= 0) return null;
+  return Math.round(n);
+}
+
+function bakedDollar(
+  v: unknown,
+  vintage: string | null,
+  valueBasis: ValueBasis,
+): CadRollBakedDollar | null {
+  const dollars = nonNegativeDollarOrNull(v);
+  if (dollars == null) return null;
+  return {
+    v: dollars,
+    source: CAD_PROPERTY_SOURCE,
+    vintage,
+    valueBasis,
+  };
+}
+
+/**
+ * CTX-B1 discriminator (operator ruling A1, 2026-09-10). `cad_property.
+ * source_file` and `source_vintage` are overwritten unconditionally by
+ * `p78Merge.ts`'s `ON CONFLICT` clause -- on a county merged more than once
+ * at one tax year they are the LAST WRITER, never the lineage, so neither
+ * may be read as the tier. `assessed_value` is different: the StratMap
+ * adapter (`txgio/landuse.ts`) hard-codes `assessedValue: null` on every
+ * row it produces -- it cannot structurally populate this field -- while
+ * `p78Merge.ts`'s `applyPathAMerge` COALESCEs `assessedValue` (never
+ * overwrites it unconditionally), so a genuine CAD import's assessed value
+ * survives a later StratMap merge at the same declared tax year even
+ * though `source_file` does not. This is the same discriminator
+ * CTX-HAYS-SPLIT used (`assessed_value IS NOT NULL`) to recover 244
+ * genuine CAD rows from under an overwritten StratMap source tag. A row is
+ * only ever read here already scoped to the declared vintage
+ * (`fetchCountyCadPropertyRoll`'s `WHERE tax_year = declared.taxYear`), so
+ * the declared-vintage half of the derivation is structural, not an extra
+ * check against `row`.
+ *
+ * Absence of a positive assessed value is the DEFAULT (StratMap), never
+ * the reverse: this must never assert `county-assessed` without the
+ * evidence, per the same never-claim-without-a-positive-determination
+ * discipline the rest of this file already applies to absence.
+ */
+export function isGenuineCadExportRow(
+  row: Pick<CadPropertyRollSlice, "assessedValue">,
+): boolean {
+  return nonNegativeDollarOrNull(row.assessedValue) != null;
+}
+
+export function valueBasisFromRow(
+  row: Pick<CadPropertyRollSlice, "assessedValue">,
+): ValueBasis {
+  return isGenuineCadExportRow(row)
+    ? COUNTY_ASSESSED_VALUE_BASIS
+    : STRATMAP_REDISTRIBUTED_VALUE_BASIS;
+}
+
+export interface CadPropertyBakedFacts {
+  cadRoll: CadRollBaked;
+  yearBuilt: CadRollBakedYear | null;
+  legalDescription: CadRollBakedText | null;
+  exemptionCodes: CadRollBakedCodes | null;
+}
+
+/** Stamp CAD facts onto an existing bake payload. Does not touch zoning/envelope. */
+export function applyCadPropertyFactsToPayload(
+  payload: Record<string, unknown>,
+  facts: CadPropertyBakedFacts,
+): Record<string, unknown> {
+  const base =
+    payload.baseFacts && typeof payload.baseFacts === "object" && !Array.isArray(payload.baseFacts)
+      ? { ...(payload.baseFacts as Record<string, unknown>) }
+      : {};
+  return {
+    ...payload,
+    baseFacts: {
+      ...base,
+      cadRoll: facts.cadRoll,
+      yearBuilt: facts.yearBuilt,
+      legalDescription: facts.legalDescription,
+      exemptionCodes: facts.exemptionCodes,
+    },
+  };
+}
+
+/**
+ * True when a row's own prop_id fell off the declared roll (P-178). A marked
+ * row's stale dollar/legal/exemption columns are never certified values --
+ * see cadPropertyFactsFromRow, the single choke point every reader of a
+ * cad_property row passes through for these facts.
+ */
+export function isAbsentFromDeclaredDrop(
+  row: Pick<CadPropertyRollSlice, "rollMembership">,
+): boolean {
+  return row.rollMembership === ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP;
+}
+
+export function cadPropertyFactsFromRow(
+  row: CadPropertyRollSlice | null | undefined,
+): CadPropertyBakedFacts {
+  if (!row || isAbsentFromDeclaredDrop(row)) {
+    return {
+      cadRoll: emptyCadRoll(),
+      yearBuilt: null,
+      legalDescription: null,
+      exemptionCodes: null,
+    };
+  }
+  const vintage = vintageLabelFromCadPropertyRow(row);
+  return {
+    cadRoll: cadRollFromCadProperty(row),
+    yearBuilt: bakedYear(row.yearBuilt, vintage),
+    legalDescription: bakedLegal(row.legalDescription, vintage),
+    exemptionCodes: bakedExemptionCodes(row.exemptionCodes, vintage),
+  };
+}
+
+function bakedSqft(v: unknown, vintage: string | null): CadRollBakedSqft | null {
+  const sqft = positiveSqftOrNull(v);
+  if (sqft == null) return null;
+  return { v: sqft, source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export function bakedYear(v: unknown, vintage: string | null): CadRollBakedYear | null {
+  const n = finiteOrNull(v);
+  if (n == null || n <= 0) return null;
+  return { v: Math.round(n), source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export function bakedLegal(
+  v: unknown,
+  vintage: string | null,
+): CadRollBakedText | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (!t) return null;
+  return { v: t, source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+export function bakedExemptionCodes(
+  v: unknown,
+  vintage: string | null,
+): CadRollBakedCodes | null {
+  if (!Array.isArray(v)) return null;
+  const codes = v
+    .filter((c): c is string => typeof c === "string" && c.trim() !== "")
+    .map((c) => c.trim());
+  if (codes.length === 0) return null;
+  return { v: codes, source: CAD_PROPERTY_SOURCE, vintage };
+}
+
+/**
+ * P-178 (2026-09-13). The one recognised `cad_property.roll_membership`
+ * value today: this row's own prop_id was present on a prior drop of this
+ * tax_year and is absent from the DECLARED drop. See the migration
+ * (drizzle/0101_cad_property_roll_membership.sql) for the write side.
+ */
+export const ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP =
+  "absent-from-declared-drop" as const;
+
+export interface CadPropertyRollSlice {
+  taxYear: number | null;
+  marketValue: unknown;
+  assessedValue: unknown;
+  landValue: unknown;
+  improvementValue: unknown;
+  livingAreaSqft: unknown;
+  yearBuilt?: unknown;
+  legalDescription?: unknown;
+  exemptionCodes?: unknown;
+  /** P-178: a marked row's stale dollar/text columns are never served as present. See cadPropertyFactsFromRow. */
+  rollMembership?: unknown;
+  /** P-178: the row's own cad_property.source_vintage, read for vintageLabelFromCadPropertyRow. */
+  sourceVintage?: unknown;
+}
+
+/**
+ * P-178 (2026-09-13). "The dollar rows' vintage label becomes the drop's
+ * name and date, not the load timestamp" and, until a fresher drop lands,
+ * "the card's vintage label must say `2026 preliminary` so a customer
+ * comparing to hayscad.com is not misled"
+ * (`_decisions/2026-09-13_hays_declared_2026_roll_is_the_8_26_export.md`).
+ *
+ * A small, explicit, GROWABLE map from `cad_property.source_vintage` (the
+ * parser's own machine label for an export drop) to the human-readable label
+ * a customer reads. Add the 8-26-2026 certified export's own entry once its
+ * load step (P-178 item 4/5) fixes the exact `source_vintage` string it
+ * writes -- deliberately not guessed here.
+ *
+ * Every source_vintage NOT in this map (every other county, every vintage
+ * this repo has not named) falls back to the bare tax year, byte-identical
+ * to the behaviour before this card. This map growing is the only way this
+ * function's OUTPUT for an unnamed vintage can ever change.
+ */
+const KNOWN_SOURCE_VINTAGE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  "2026-preliminary-data-export-files": "2026 preliminary (notice values)",
+  /**
+   * The 8-26-2026 certified export's own source_vintage string, fixed by
+   * the staging pilot load (cli.ts's own machine label: `tier:cad-export;
+   * adapter:orion;drop:hays_20260826_certified`, live-read 2026-09-13).
+   * Not guessed ahead of the load, per this map's own header.
+   */
+  "tier:cad-export;adapter:orion;drop:hays_20260826_certified": "2026-08-26 certified export",
+});
+
+export function vintageLabelFromCadPropertyRow(
+  row: Pick<CadPropertyRollSlice, "taxYear" | "sourceVintage">,
+): string | null {
+  const known =
+    typeof row.sourceVintage === "string"
+      ? KNOWN_SOURCE_VINTAGE_LABELS[row.sourceVintage]
+      : undefined;
+  if (known) return known;
+  return row.taxYear != null ? String(row.taxYear) : null;
+}
+
+/** Empty cadRoll: every key present, every value null. Used when CAD was not consulted or the row missed. */
+export function emptyCadRoll(): CadRollBaked {
+  return {
+    marketValue: null,
+    assessedValue: null,
+    landValue: null,
+    improvementValue: null,
+    livingAreaSqft: null,
+  };
+}
+
+/** Map a `cad_property` row to baked `baseFacts.cadRoll`. Never an atom claim. */
+export function cadRollFromCadProperty(row: CadPropertyRollSlice): CadRollBaked {
+  const vintage = vintageLabelFromCadPropertyRow(row);
+  const valueBasis = valueBasisFromRow(row);
+  return {
+    marketValue: bakedDollar(row.marketValue, vintage, valueBasis),
+    assessedValue: bakedDollar(row.assessedValue, vintage, valueBasis),
+    landValue: bakedDollar(row.landValue, vintage, valueBasis),
+    improvementValue: bakedDollar(row.improvementValue, vintage, valueBasis),
+    livingAreaSqft: bakedSqft(row.livingAreaSqft, vintage),
+  };
+}
+
+/**
+ * @deprecated name. Same mapper as cadRollFromCadProperty. The bake must
+ * call cadRollFromCadProperty with a cad_property row, never an atom claim.
+ */
+export function cadRollFromClaim(row: CadPropertyRollSlice): CadRollBaked {
+  return cadRollFromCadProperty(row);
+}
+
+const LAND_VALUE_ZERO_BASIS_SUFFIX =
+  "cad_property.land_value is 0; $0 land looks like missing and is served as zero, not collapsed to absent";
+
+export function cadRollFieldToWire(
+  baked:
+    | CadRollBakedDollar
+    | CadRollBakedSqft
+    | null
+    | undefined,
+  fieldName: string,
+  parcelNodeId: string,
+  vintage: string | null,
+  withValueBasis: boolean,
+): CadRollValueWire {
+  const isDollar = withValueBasis;
+  if (baked && typeof baked.v === "number" && Number.isFinite(baked.v)) {
+    if (baked.v > 0) {
+      return {
+        state: "present",
+        v: baked.v,
+        source: baked.source,
+        vintage: baked.vintage ?? vintage,
+        ...(isDollar && "valueBasis" in baked
+          ? { valueBasis: baked.valueBasis }
+          : {}),
+      };
+    }
+    if (baked.v === 0 && isDollar) {
+      return {
+        state: "zero",
+        v: 0,
+        source: baked.source,
+        vintage: baked.vintage ?? vintage,
+        ...("valueBasis" in baked ? { valueBasis: baked.valueBasis } : {}),
+        ...(fieldName === "landValue"
+          ? { basis: `${parcelNodeId}: ${LAND_VALUE_ZERO_BASIS_SUFFIX}` }
+          : {}),
+      };
+    }
+  }
+  return {
+    state: "absent",
+    source: CAD_PROPERTY_SOURCE,
+    vintage,
+    basis: `${parcelNodeId}: cad_property.${fieldName} is absent`,
+  };
+}
+
+export function cadRollToWire(
+  cadRoll: CadRollBaked | null | undefined,
+  parcelNodeId: string,
+  parcelVintage: string | null,
+): CadRollWire {
+  const vintage =
+    parcelVintage ??
+    cadRoll?.marketValue?.vintage ??
+    cadRoll?.assessedValue?.vintage ??
+    cadRoll?.livingAreaSqft?.vintage ??
+    null;
+  const roll = cadRoll ?? {
+    marketValue: null,
+    assessedValue: null,
+    landValue: null,
+    improvementValue: null,
+    livingAreaSqft: null,
+  };
+  return {
+    marketValue: cadRollFieldToWire(
+      roll.marketValue,
+      "marketValue",
+      parcelNodeId,
+      vintage,
+      true,
+    ),
+    assessedValue: cadRollFieldToWire(
+      roll.assessedValue,
+      "assessedValue",
+      parcelNodeId,
+      vintage,
+      true,
+    ),
+    landValue: cadRollFieldToWire(
+      roll.landValue,
+      "landValue",
+      parcelNodeId,
+      vintage,
+      true,
+    ),
+    improvementValue: cadRollFieldToWire(
+      roll.improvementValue,
+      "improvementValue",
+      parcelNodeId,
+      vintage,
+      true,
+    ),
+    livingAreaSqft: cadRollFieldToWire(
+      roll.livingAreaSqft,
+      "livingAreaSqft",
+      parcelNodeId,
+      vintage,
+      false,
+    ),
+  };
+}
+
+/**
+ * The four dollar rails ruled Studio+-only co-gated with owner-info display
+ * (OPS-16 A-103 item 5 / A-104). `livingAreaSqft` is NOT a dollar field and
+ * is never touched by anything in this gate — the operator's ruling is
+ * specifically about tax-assessed VALUATION, and living area carries no
+ * dollar sign.
+ */
+export const CAD_ROLL_DOLLAR_FIELDS = [
+  "marketValue",
+  "assessedValue",
+  "landValue",
+  "improvementValue",
+] as const;
+export type CadRollDollarField = (typeof CAD_ROLL_DOLLAR_FIELDS)[number];
+
+/**
+ * The typed refusal a gated caller receives in place of a dollar value —
+ * same shape family as {@link CadRollValueWire}'s own `state` discriminant,
+ * so a consumer that already switches on `.state` gets a fourth case rather
+ * than an unannounced shape. Deliberately NOT the "absent" state: absent
+ * means the county roll itself carries no value, which is a different,
+ * factual claim from "this caller's tier does not unlock this field". Never
+ * write a fourth independent tier check (OPS-16 A-087) — this refusal
+ * carries no verdict of its own; the caller passes `granted` in already
+ * decided by `subscriptionTierGrantsStudio`.
+ */
+export type CadRollValuationRefusal = {
+  state: "refused";
+  code: "studio-gated";
+  reason: string;
+};
+
+export function studioGatedCadRollValuationRefusal(): CadRollValuationRefusal {
+  return {
+    state: "refused",
+    code: "studio-gated",
+    reason:
+      "County tax-assessed valuation (market/land/improvement/assessed value) is Studio or Team only. Anonymous, free, Solo, unlock, and identified-only callers receive no dollar value.",
+  };
+}
+
+/**
+ * Gate the four dollar fields on a fully wire-shaped {@link CadRollWire}
+ * (post {@link cadRollToWire}). `granted` callers get the wire back
+ * unchanged, `livingAreaSqft` included. Refused callers get the four dollar
+ * fields replaced by {@link studioGatedCadRollValuationRefusal}; `
+ * livingAreaSqft` is untouched — it is outside this ruling.
+ */
+export function gateCadRollWireValuation(
+  wire: CadRollWire,
+  granted: boolean,
+): {
+  marketValue: CadRollValueWire | CadRollValuationRefusal;
+  assessedValue: CadRollValueWire | CadRollValuationRefusal;
+  landValue: CadRollValueWire | CadRollValuationRefusal;
+  improvementValue: CadRollValueWire | CadRollValuationRefusal;
+  livingAreaSqft: CadRollValueWire;
+} {
+  if (granted) return wire;
+  const out = { ...wire } as {
+    marketValue: CadRollValueWire | CadRollValuationRefusal;
+    assessedValue: CadRollValueWire | CadRollValuationRefusal;
+    landValue: CadRollValueWire | CadRollValuationRefusal;
+    improvementValue: CadRollValueWire | CadRollValuationRefusal;
+    livingAreaSqft: CadRollValueWire;
+  };
+  for (const key of CAD_ROLL_DOLLAR_FIELDS) {
+    out[key] = studioGatedCadRollValuationRefusal();
+  }
+  return out;
+}
+
+/**
+ * Gate the four dollar fields on a raw `baseFacts.cadRoll`-shaped record —
+ * the shape actually on the wire at `brokerageNodeFacets.ts`'s response
+ * boundary, where a field is EITHER the legacy baked shape
+ * ({@link CadRollBakedDollar} / `null`, whatever the offline bake wrote)
+ * OR the live overlay's wire shape ({@link CadRollValueWire}), depending on
+ * whether `attachCadRollOverlaysToFacets` had a live value to merge for
+ * that specific field. This function does not care which shape a field
+ * arrived in — granted, it passes every key through unchanged; refused, it
+ * replaces each of the four dollar keys that is actually present on the
+ * record with the same typed refusal, and leaves every other key (incl.
+ * `livingAreaSqft`) untouched.
+ */
+export function gateBakedCadRollRecord<T extends Record<string, unknown>>(
+  cadRoll: T,
+  granted: boolean,
+): T {
+  if (granted) return cadRoll;
+  const out: Record<string, unknown> = { ...cadRoll };
+  for (const key of CAD_ROLL_DOLLAR_FIELDS) {
+    if (key in out) out[key] = studioGatedCadRollValuationRefusal();
+  }
+  return out as T;
+}
+
+/** True when any serialized field would be present (v>0). Zero is not present. */
+export function cadRollWireHasPresentValue(wire: CadRollWire): boolean {
+  return (
+    Object.values(wire) as CadRollValueWire[]
+  ).some((f) => f.state === "present");
+}
+
+/**
+ * Three-state honesty check. Replaces cadRollWireNeverUsesZero (retired:
+ * that check forbade every v:0, which collapsed vacant-lot truth).
+ *
+ * - state present must not carry v:0
+ * - state absent must not carry v
+ * - state zero must have v===0
+ * - livingAreaSqft must never be state zero (not a dollar)
+ */
+export function cadRollWireThreeStatesHold(wire: CadRollWire): boolean {
+  if (wire.livingAreaSqft.state === "zero") return false;
+  for (const field of Object.values(wire) as CadRollValueWire[]) {
+    if (field.state === "present") {
+      if (typeof field.v !== "number" || field.v === 0 || field.v <= 0) {
+        return false;
+      }
+    } else if (field.state === "absent") {
+      if ("v" in field && (field as { v?: unknown }).v !== undefined) {
+        return false;
+      }
+    } else if (field.state === "zero") {
+      if (field.v !== 0) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}

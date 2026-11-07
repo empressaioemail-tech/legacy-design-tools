@@ -89,6 +89,7 @@ export type SpecialDistrictFactTypedAbsence = {
   verifiedAbsence: unknown;
   sourceTier: string | null;
   sourceAdapter: string | null;
+  sourceVintage: string | null;
 };
 
 export type SpecialDistrictFactRefusal = {
@@ -97,7 +98,22 @@ export type SpecialDistrictFactRefusal = {
     | "atom-miss"
     | "bind-conflict"
     | "atoms-store-not-configured"
-    | "malformed-atom";
+    | "malformed-atom"
+    /**
+     * PARCEL-B-SLATE1 (F-01): specialDistrictFactFromParcelRecord.ts's own
+     * refusal codes, distinct from the atom-store codes above -- a
+     * parcel_record cell miss/store-not-configured/malformed-cell/
+     * unaccounted is a different failure mode than an atom-store miss and
+     * must not be collapsed into "atom-miss" (that would misrepresent
+     * which store failed). "invalid-parcel-node-id" matches the naming
+     * already used by the sibling flood and wells parcel_record adapters.
+     */
+    | "invalid-parcel-node-id"
+    | "parcel-record-cell-miss"
+    | "parcel-record-unaccounted"
+    | "parcel-record-engine-refused"
+    | "parcel-record-malformed-cell"
+    | "parcel-record-store-not-configured";
   source: typeof SPECIAL_DISTRICT_FACT_SOURCE;
   tried: SpecialDistrictFactBindPrefixes | [];
   reason: string;
@@ -274,6 +290,7 @@ function interpretBody(
       verifiedAbsence: rec.verifiedAbsence ?? null,
       sourceTier: asNullableString(rec.sourceTier),
       sourceAdapter: asNullableString(rec.sourceAdapter),
+      sourceVintage: asNullableString(rec.sourceVintage),
     };
   }
 

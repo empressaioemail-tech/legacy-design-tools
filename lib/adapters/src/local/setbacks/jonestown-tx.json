@@ -1,0 +1,635 @@
+{
+  "$schema": "./schema.json",
+  "jurisdictionKey": "jonestown-tx",
+  "jurisdictionDisplayName": "City of Jonestown, TX",
+  "note": "City of Jonestown, Texas — Development Code (Unified Development Code), Chapter 3 of the Code of Ordinances, Article 3 Land Use, Division 3.1 Land Uses by Zoning District, Section 3.1.1 (\"General parameters for determining permitted land uses\"), which carries the district dimensional charts (CHART 3.1.1-1 through CHART 3.1.1-5). ROUTE (this citation is authoritative but NOT reproducible by a plain GET of the cited file): eCode360 serves the substantive article text only through its print endpoint; the ordinary article page https://ecode360.com/40446470 renders the Section outline with NO body text and NO tables, and a plain fetch of it returns no dimensional standard at all (verified 2026-09-16). The text quoted here was read from https://ecode360.com/print/JO6363?guid=40446470, which returns the whole Chapter 3 as flattened text (about 2.7 MB of HTML). The charts in that print view are FLATTENED TABLES — every cell is emitted as its own line, so a chart row is a label/value sequence with no sentence form. Every quote below is therefore the chart's column header plus the verbatim cell values for that row (no number is paraphrased or converted), which is the closest verbatim form the source offers. VINTAGE (checked at source before extracting, per the batch-2 method changes): every Section 3.1.x citation line in the text read carries \"( Ordinance 2025-O-650 adopted 1/9/2025 )\"; later section citations in the same article read \"Ordinance 2025-O-653 adopted 4/10/2025; Ordinance 2026-O-661 adopted 1/8/2026\". The code's own New Laws panel (read on the article page 2026-09-16) lists exactly one adopted-but-not-yet-incorporated law for this chapter: Ordinance 2026-O-667, adopted 2026-06-11, whose own title in the panel is \"2026-O-667 amend Ch 8 of Noise reg & Ch. 3 of UDC amplified sound\". It amends Chapter 3 only as to amplified sound, so it does not disturb the dimensional charts; the dimensional text read here is NOT a repealed or superseded scheme. SENTINEL CONVENTION: every not_specified field carries the numeric sentinel 999 (the convention already used by round-rock-tx.json) together with provenance.not_specified = true and a verbatim quote of the source language that caused the gap. 999 is outside every gate sanity band, so if a not_specified flag were ever dropped the value would FLAG rather than silently read as a real standard. BASE CASE: CHART 3.1.1-1 (\"REQUIREMENTS FOR LOTS\") is codified as the base for every district, because CHART 3.1.1-2 is expressly conditioned on the lot being served by public sewer and CHART 3.1.1-3 is expressly limited to \"EXISTING SUBDIVIDED LOTS THAT ARE LESS THAN ONE ACRE\". The Chart 3.1.1-2 alternate values (front 25 ft. and street-side 20 ft. for GUI, O, B-1, B-2, I-1; R-1 unchanged) are quoted verbatim in each affected field's provenance and are NOT codified, so a caller must not read these as the only applicable numbers where a lot is on public sewer. CONDITIONAL (NON-SCALAR) CELLS: in Chart 3.1.1-1 the side-yard and rear-yard cells for GUI, O, B-1, B-2 and I-1 state a dependent rule rather than a number (\"Note 1\" for the side, \"Note 2\"/\"Note 3\" for the rear), and Note 1 itself is a two-branch rule keyed to the district being abutted. Those cells are coded 999/not_specified with the full Note text quoted verbatim rather than resolved to one branch, because resolving them would fabricate a number the ordinance does not state. MAX LOT COVERAGE: 999/not_specified for every residential district and for GUI, because Chart 3.1.1-5 states \"N/A\" for those districts' \"Maximum Building Footprint\". For O, B-1, B-2 and I-1 Chart 3.1.1-5 states the conditional pair \"45% traditional/65% LID\" (footnote * explains the two branches); 45 (traditional) is codified as the base with the full pair quoted, at reduced confidence, because the choice between the branches is the applicant's water-quality-control approach, not a district attribute. MAX IMPERVIOUS COVER: Chart 3.1.1-5 states \"40%\" for R-R, M-1, M-2, R-1, R-2 and R-3 (codified), and \"LCRA**\" for GUI, O, B-1, B-2 and I-1, where footnote ** reads \"LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended\" — i.e. the code delegates the numeric to an external instrument, so it is coded 999/not_specified with that delegation quoted verbatim. Chart 3.1.1-5's own notes also limit the calculation to land above the 685 MSL contour. OMITTED DISTRICTS (deliberate, mirroring the cibolo-tx.json precedent of omitting live codes that have no dimensional row): RV (Section 3.1.9) and PUD (Section 3.1.14) appear in the ordinance's 16-district list (Section 3.1.1.C) but have NO row in any of Charts 3.1.1-1 through 3.1.1-5 — PUD is expressly a negotiated district and the chart note says a PUD \"shall use the requirements in this chart as a baseline for design and development of a PUD ... Deviations from any requirements in Chart 3.1.1-1. may be approved by a PUD\", which is the PUD-refusal case, not a table row. FM-1 (Section 3.1.15), STR-1 (Section 3.1.16) and T (Section 3.1.17) are overlays/temporary district, not base districts. M-1 is codified as its own row carrying the chart's shared \"R-1/M-1\" values, which the ordinance states explicitly (M-1 detached single-family dwellings are \"subject to the conditions and limitations and site development regulations for the R-1 single-family residential district set forth in Section 3.1.4\"). NOT READ / NOT CROSS-CHECKED: Chart 3.1.1-6 (land use table) was not extracted — it is a use table, not a dimensional table. No second primary source was cross-checked: Jonestown has no staged zoning layer in our corpus (`city:Travis:jonestown-tx` is a zoning-refused no-table row) and no code-section atom corpus exists for this jurisdiction, so every value is primary-source-verified. P-299 OT-2 (2026-09-17): this table's 77 primary-source-verified value slots are RELABELLED to \"transcription-read\", the fourth verification state added to gate.ts in the same change, with confidence capped at 0.75 (rule G9). Reason, from this file's own note above: every value here was read through a COPY of the governing instrument rather than off the instrument's own text -- eCode360's print endpoint, because the ordinary article page renders an outline with no body text or tables. The state is not a downgrade of the read's quality; it is the honest name for the channel, and it keeps \"primary-source-verified\" meaning what it says for the tables that did reach the instrument's own text. It is treated exactly like primary-source-verified for rule G2 (no code-section atom is required) and skips G5's quote round-trip for the same reason.",
+  "districts": [
+    {
+      "district_name": "R-R Rural Estate District",
+      "front_ft": 30,
+      "rear_ft": 30,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-R\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-R\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-R\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-R\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-R\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"R-R\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"1,400 sq. ft. primary - 650 sq. ft. secondary\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"R-R\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "R-1 Single-Family Detached District",
+      "front_ft": 30,
+      "rear_ft": 30,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 28,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"R-1\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"1,000 sq. ft. for lots more than 6,000 sq. ft. / 650 sq. ft. for lots less than 6,000 sq. ft.\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"R-1\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "M-1 Single-Family Manufactured Housing District",
+      "front_ft": 30,
+      "rear_ft": 30,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 28,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-1/M-1\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"M-1\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"650 sq. ft.\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"M-1\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "R-2 Two-Family Attached District",
+      "front_ft": 30,
+      "rear_ft": 30,
+      "side_ft": 25,
+      "side_corner_ft": 30,
+      "max_height_ft": 28,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-2\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-2\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-2\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-2\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-2\": Front Setback 30 ft.; Side Setback 25 ft.; Street Side Yard Setback 30 ft.; Rear Setback 30 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"R-2\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"900 sq. ft. per dwelling unit\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"R-2\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "R-3 Multifamily Residential District",
+      "front_ft": 30,
+      "rear_ft": 50,
+      "side_ft": 50,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-3\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-3\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-3\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-3\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"R-3\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"R-3\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"750 sq. ft. per dwelling unit\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"R-3\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "M-2 Manufactured Home Park District",
+      "front_ft": 30,
+      "rear_ft": 50,
+      "side_ft": 50,
+      "side_corner_ft": 30,
+      "max_height_ft": 28,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 40,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"M-2\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"M-2\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"M-2\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"M-2\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered).",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"M-2\": Front Setback 30 ft.; Side Setback 50 ft.; Street Side Yard Setback 30 ft.; Rear Setback 50 ft.; Height Limit 28 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"M-2\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"650 sq. ft.\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"M-2\", column \"Maximum Impervious Cover\": \"40%\". The chart's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        }
+      }
+    },
+    {
+      "district_name": "O Professional and Office District",
+      "front_ft": 30,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"O\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 25 ft. for this district; both values are real and the 30 ft. figure from Chart 3.1.1-1 is codified as the base because Chart 3.1.1-2 is expressly conditioned on service by public sewer.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"O\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The rear-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 3\", which resolves to 40 feet minimum from O, B-1, B-2, I-1, and 50 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3. The rule is therefore quoted verbatim rather than reduced to one number; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"O\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The side-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 1\": \"Note 1: 25 feet minimum from O, B-1, B-2, I-1, and 40 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3.\" Two different numeric answers are therefore correct depending on what the lot abuts, and the resolution is quoted verbatim rather than picked; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"O\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 20 ft. for this district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"O\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"O\", column \"Maximum Building Footprint\": \"45% traditional/65% LID\", with the chart's footnote \"*Maximum building footprint of 45% of total property area if following traditional standards of water quality/impervious cover control, and a maximum building footprint of 65% of the total property area if following low impact development (LID) standards.\" The 45% (traditional) branch is codified as the base; both branches are real and the choice is the applicant's water-quality approach, not a district attribute.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"O\", column \"Maximum Impervious Cover\": \"LCRA**\", with the chart's footnote \"**LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended.\" The code therefore states no numeric impervious cap for this district itself and delegates it to an external instrument; 999 is the not_specified sentinel, not a standard. Chart 3.1.1-5's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "B-1 Business-Retail District",
+      "front_ft": 30,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 25 ft. for this district; both values are real and the 30 ft. figure from Chart 3.1.1-1 is codified as the base because Chart 3.1.1-2 is expressly conditioned on service by public sewer.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The rear-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 3\", which resolves to 40 feet minimum from O, B-1, B-2, I-1, and 50 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3. The rule is therefore quoted verbatim rather than reduced to one number; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The side-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 1\": \"Note 1: 25 feet minimum from O, B-1, B-2, I-1, and 40 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3.\" Two different numeric answers are therefore correct depending on what the lot abuts, and the resolution is quoted verbatim rather than picked; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 20 ft. for this district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"B-1\", column \"Maximum Building Footprint\": \"45% traditional/65% LID\", with the chart's footnote \"*Maximum building footprint of 45% of total property area if following traditional standards of water quality/impervious cover control, and a maximum building footprint of 65% of the total property area if following low impact development (LID) standards.\" The 45% (traditional) branch is codified as the base; both branches are real and the choice is the applicant's water-quality approach, not a district attribute.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"B-1\", column \"Maximum Impervious Cover\": \"LCRA**\", with the chart's footnote \"**LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended.\" The code therefore states no numeric impervious cap for this district itself and delegates it to an external instrument; 999 is the not_specified sentinel, not a standard. Chart 3.1.1-5's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "B-2 Business-General District",
+      "front_ft": 30,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 30,
+      "max_height_ft": 35,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-2\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 25 ft. for this district; both values are real and the 30 ft. figure from Chart 3.1.1-1 is codified as the base because Chart 3.1.1-2 is expressly conditioned on service by public sewer.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-2\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The rear-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 3\", which resolves to 40 feet minimum from O, B-1, B-2, I-1, and 50 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3. The rule is therefore quoted verbatim rather than reduced to one number; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-2\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The side-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 1\": \"Note 1: 25 feet minimum from O, B-1, B-2, I-1, and 40 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3.\" Two different numeric answers are therefore correct depending on what the lot abuts, and the resolution is quoted verbatim rather than picked; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-2\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 20 ft. for this district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"B-2\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 35 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"B-2\", column \"Maximum Building Footprint\": \"45% traditional/65% LID\", with the chart's footnote \"*Maximum building footprint of 45% of total property area if following traditional standards of water quality/impervious cover control, and a maximum building footprint of 65% of the total property area if following low impact development (LID) standards.\" The 45% (traditional) branch is codified as the base; both branches are real and the choice is the applicant's water-quality approach, not a district attribute.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"B-2\", column \"Maximum Impervious Cover\": \"LCRA**\", with the chart's footnote \"**LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended.\" The code therefore states no numeric impervious cap for this district itself and delegates it to an external instrument; 999 is the not_specified sentinel, not a standard. Chart 3.1.1-5's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "I-1 Light Industry District",
+      "front_ft": 30,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 30,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 45,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"I-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 2; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 25 ft. for this district; both values are real and the 30 ft. figure from Chart 3.1.1-1 is codified as the base because Chart 3.1.1-2 is expressly conditioned on service by public sewer.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"I-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 2; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The rear-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 2\", which resolves to 50 feet minimum from O, B-1, B-2, I-1, and 100 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3. The rule is therefore quoted verbatim rather than reduced to one number; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"I-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 2; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The side-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 1\": \"Note 1: 25 feet minimum from O, B-1, B-2, I-1, and 40 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3.\" Two different numeric answers are therefore correct depending on what the lot abuts, and the resolution is quoted verbatim rather than picked; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"I-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 2; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 20 ft. for this district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"I-1\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 2; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"I-1\", column \"Maximum Building Footprint\": \"45% traditional/65% LID\", with the chart's footnote \"*Maximum building footprint of 45% of total property area if following traditional standards of water quality/impervious cover control, and a maximum building footprint of 65% of the total property area if following low impact development (LID) standards.\" The 45% (traditional) branch is codified as the base; both branches are real and the choice is the applicant's water-quality approach, not a district attribute.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"I-1\", column \"Maximum Impervious Cover\": \"LCRA**\", with the chart's footnote \"**LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended.\" The code therefore states no numeric impervious cap for this district itself and delegates it to an external instrument; 999 is the not_specified sentinel, not a standard. Chart 3.1.1-5's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    },
+    {
+      "district_name": "GUI Governmental, Utility and Institutional District",
+      "front_ft": 30,
+      "rear_ft": 999,
+      "side_ft": 999,
+      "side_corner_ft": 30,
+      "max_height_ft": 30,
+      "max_lot_coverage_pct": 999,
+      "max_impervious_pct": 999,
+      "citation_url": "https://ecode360.com/print/JO6363?guid=40446470",
+      "provenance": {
+        "front_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"GUI\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 25 ft. for this district; both values are real and the 30 ft. figure from Chart 3.1.1-1 is codified as the base because Chart 3.1.1-2 is expressly conditioned on service by public sewer.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "rear_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"GUI\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The rear-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 3\", which resolves to 40 feet minimum from O, B-1, B-2, I-1, and 50 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3. The rule is therefore quoted verbatim rather than reduced to one number; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"GUI\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). The side-yard cell for this district in CHART 3.1.1-1 is the dependent reference \"Note 1\": \"Note 1: 25 feet minimum from O, B-1, B-2, I-1, and 40 feet minimum with 6' fence from R-R, R-1, M-1, M-2, R-2, and R-3.\" Two different numeric answers are therefore correct depending on what the lot abuts, and the resolution is quoted verbatim rather than picked; 999 is the not_specified sentinel, not a standard.",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "side_corner_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"GUI\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-2. REQUIREMENTS FOR LOTS WITH PUBLIC SEWER states the same column as 20 ft. for this district.",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_height_ft": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-1. REQUIREMENTS FOR LOTS — row \"GUI\": Front Setback 30 ft.; Side Setback Note 1; Street Side Yard Setback 30 ft.; Rear Setback Note 3; Height Limit 30 ft. (flattened chart row: the eCode360 print view emits each cell on its own line, so the row is reproduced here as its labelled cell values, unaltered). CHART 3.1.1-1's own note adds: \"Note 5: Height limits for the O, B-1, B-2, and R-1 districts pertain to structures after the effective date of this ordinance.\"",
+          "confidence": 0.75,
+          "verification_state": "transcription-read"
+        },
+        "max_lot_coverage_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5. MINIMUM AND MAXIMUM SQUARE FOOTAGE FOR BUILDINGS AND MAXIMUM IMPERVIOUS COVER REQUIREMENTS — row \"GUI\", column \"Maximum Building Footprint\": \"N/A\". The ordinance states no numeric building-footprint cap for this district; 999 is the not_specified sentinel, not a standard. The code limits building size for this district by minimum FLOOR AREA instead (same chart, column \"Minimum Sq. Ft. of Floor Area\": \"3,000 sq. ft.\").",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        },
+        "max_impervious_pct": {
+          "section_number": "3.1.1",
+          "quote": "CHART 3.1.1-5 ... row \"GUI\", column \"Maximum Impervious Cover\": \"LCRA**\", with the chart's footnote \"**LCRA - For maximum impervious cover standards refer to Lower Colorado River Authority Highland Lakes Watershed Ordinance Manual, as amended.\" The code therefore states no numeric impervious cap for this district itself and delegates it to an external instrument; 999 is the not_specified sentinel, not a standard. Chart 3.1.1-5's own notes add \"Only land above the 685 MSL shall be used to calculate impervious cover\" and \"Open, unpaved, off-street parking and loading areas will not be considered as lot coverage under this subsection.\"",
+          "confidence": 0.7,
+          "verification_state": "transcription-read",
+          "not_specified": true
+        }
+      }
+    }
+  ]
+}

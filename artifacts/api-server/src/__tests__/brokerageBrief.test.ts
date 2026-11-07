@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { anthropicChatShim } from "./anthropicChatShim";
 import request from "supertest";
 import type { Express } from "express";
 import { ctx } from "./test-context";
@@ -98,8 +99,8 @@ vi.mock("../lib/briefingLlmClient", async () => {
   return {
     ...actual,
     getBriefingLlmClient: vi.fn(async () => ({
-      kind: "grok" as const,
-      client: { completeChat: completeChatMock },
+      kind: "anthropic" as const,
+      client: anthropicChatShim(completeChatMock),
     })),
   };
 });
@@ -170,7 +171,7 @@ const layVerdictsJson = JSON.stringify({
   ],
 });
 
-function mockGrokResponses() {
+function mockLlmResponses() {
   completeChatMock.mockImplementation(
     async (opts: { system?: string }) => {
       const system = opts.system ?? "";
@@ -239,10 +240,10 @@ beforeEach(() => {
     ],
   });
   completeChatMock.mockReset();
-  mockGrokResponses();
+  mockLlmResponses();
   setBriefingLlmClient({
-    kind: "grok",
-    client: { completeChat: completeChatMock },
+    kind: "anthropic",
+    client: anthropicChatShim(completeChatMock),
   });
   setResearchChatCivicHttpForTests(async () => {
     throw new Error("civic fetch disabled in brief suite unless a test injects");
@@ -276,6 +277,22 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     expect(res.status).toBe(401);
   });
 
+  it("extension_public is retired: a caller presenting the old chrome-extension key gets a real 401, not a granted tier (operator ruling 2026-09-07)", async () => {
+    process.env.BROKERAGE_EXTENSION_PUBLIC_KEY = "formerly-real-extension-key";
+    resetBrokerageApiKeysForTests();
+    try {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/brief")
+        .set({ Authorization: "Bearer formerly-real-extension-key" })
+        .send({ address: "251 Cool Water Dr, Bastrop, TX 78602" });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("unauthorized");
+    } finally {
+      delete process.env.BROKERAGE_EXTENSION_PUBLIC_KEY;
+      resetBrokerageApiKeysForTests();
+    }
+  });
+
   it("returns validation_error errorClass on invalid body", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
@@ -285,7 +302,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     expect(res.body.errorClass).toBe("validation_error");
   });
 
-  it("runs brief with grok reasoning for Bastrop address", async () => {
+  it("runs brief with anthropic reasoning for Bastrop address", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief")
       .set(authHeaders)
@@ -303,7 +320,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
     );
     expect(fetchBrokerageSiteContextMock).toHaveBeenCalled();
     expect(res.body.sections).toHaveLength(5);
-    expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.reasoningSummary.method).toBe("anthropic");
     expect(res.body.laySummary).toBeTruthy();
     expect(res.body.laySummary.verdicts.length).toBeGreaterThanOrEqual(3);
     expect(res.body.laySummary.verdicts[0].status).toMatch(
@@ -376,7 +393,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief", () => {
       billable: true,
       sku: "property-brief-v1",
     });
-    expect(res.body.reasoningSummary.method).toBe("grok");
+    expect(res.body.reasoningSummary.method).toBe("anthropic");
     expect(res.body.laySummary.verdicts.length).toBeGreaterThan(0);
   });
 });
@@ -395,7 +412,7 @@ describe.skipIf(!hasDb)("GET /api/brokerage/v1/brief/:runId", () => {
 
     expect(getRes.status).toBe(200);
     expect(getRes.body.runId).toBe(briefRes.body.runId);
-    expect(getRes.body.reasoningSummary.method).toBe("grok");
+    expect(getRes.body.reasoningSummary.method).toBe("anthropic");
     expect(getRes.body.laySummary).toBeTruthy();
   });
 
@@ -408,7 +425,7 @@ describe.skipIf(!hasDb)("GET /api/brokerage/v1/brief/:runId", () => {
 });
 
 describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
-  it("returns grok summary with citations", async () => {
+  it("returns anthropic summary with citations", async () => {
     const res = await request(getApp())
       .post("/api/brokerage/v1/brief/summarize")
       .set(authHeaders)
@@ -427,10 +444,77 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/brief/summarize", () => {
     expect(res.status).toBe(200);
     expect(res.body.headline).toBeTruthy();
     expect(res.body.html).toContain("<p>");
-    expect(res.body.method).toBe("grok");
+    expect(res.body.method).toBe("anthropic");
     expect(res.body.citations.length).toBeGreaterThan(0);
   });
 });
+
+describe.skipIf(!hasDb)(
+  "POST /api/brokerage/v1/research/narrative-section (OPS-16 P-120 item 6)",
+  () => {
+    it("rejects an unauthenticated caller — reuses the router's own auth gate, no bypass", async () => {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: { zoning: { status: "present", district: "SF-3" } },
+        });
+      expect(res.status).toBe(401);
+    });
+
+    it("a real MCP service-token caller (the same SERVICE_API_KEY path hauska-mcp-server already uses) gets a real narrative with per-category markers", async () => {
+      completeChatMock.mockResolvedValueOnce(
+        "The parcel is zoned SF-3, permitting single-family residential use [zoning]. No flood hazard determination could be made for this parcel [flood].",
+      );
+
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: {
+            zoning: { status: "present", district: "SF-3" },
+            flood: { status: "absent" },
+          },
+          courthouseDocuments: [
+            { citation: "Deed Restriction 2019-004521", excerpt: "No mobile homes." },
+          ],
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.narrative).toContain("[zoning]");
+      expect(res.body.narrative).toContain("[flood]");
+      expect(res.body.generatedBy).toBe("anthropic");
+      expect(typeof res.body.generatedAt).toBe("string");
+      // Locked contract with hauska-engine: no citedSections field — the
+      // caller derives it itself by scanning for its own facts keys.
+      expect(res.body.citedSections).toBeUndefined();
+    });
+
+    it("400s on a missing parcelNodeId — the router's own validation, not a silent pass-through", async () => {
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({ facts: { zoning: { status: "present" } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+    });
+
+    it("falls back to rules-v1 honestly when the LLM returns nothing, never a fabricated narrative", async () => {
+      completeChatMock.mockResolvedValueOnce(null);
+      const res = await request(getApp())
+        .post("/api/brokerage/v1/research/narrative-section")
+        .set({ Authorization: `Bearer ${TEST_SERVICE_TOKEN}` })
+        .send({
+          parcelNodeId: "48453:12345",
+          facts: { zoning: { status: "absent" } },
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.generatedBy).toBe("rules-v1");
+      expect(res.body.narrative).toMatch(/unavailable/i);
+    });
+  },
+);
 
 describe.skipIf(!hasDb)("POST /api/brokerage/v1/research/chat", () => {
   it("returns 404 for unknown runId", async () => {
@@ -470,7 +554,7 @@ describe.skipIf(!hasDb)("POST /api/brokerage/v1/research/chat", () => {
 
     expect(chatRes.status).toBe(200);
     expect(chatRes.body.message).toMatch(/ADU/i);
-    expect(chatRes.body.method).toBe("grok");
+    expect(chatRes.body.method).toBe("anthropic");
     expect(chatRes.body.sources).toBeDefined();
     expect(Array.isArray(chatRes.body.sources)).toBe(true);
     expect(chatRes.body.presentationMode).toBe("consumer");

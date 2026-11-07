@@ -22,6 +22,7 @@
     "yearBuilt": null,
     "livingAreaSqft": null,
     "landAcres": "0.5000",
+    "legalAcres": null,
     "propertyUseCode": "A1",
     "sourceFile": "stratmap25-landparcels_48113_lp.dbf",
     "sourceVintage": "tier:stratmap-roll;adapter:stratmap;drop:stratmap25-landparcels_48113_lp"
@@ -44,6 +45,7 @@
     "yearBuilt": null,
     "livingAreaSqft": null,
     "landAcres": null,
+    "legalAcres": null,
     "propertyUseCode": "A1",
     "sourceFile": "stratmap25-landparcels_48113_lp.dbf",
     "sourceVintage": "tier:stratmap-roll;adapter:stratmap;drop:stratmap25-landparcels_48113_lp"

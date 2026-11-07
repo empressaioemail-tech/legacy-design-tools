@@ -210,6 +210,97 @@ export function normalizeSitusSearchPrefix(raw: string): string | null {
   return tokens.join(" ");
 }
 
+/** Canonical street-type suffix tokens (USPS abbreviations). */
+const STREET_TYPE_SUFFIXES = new Set(Object.values(STREET_TYPE_ABBR));
+
+/**
+ * Prefix variants for locality-filtered situs search. When the typed query
+ * includes a street-type suffix ("908 Pine St") but the CAD situs omits it
+ * ("908 PINE , BASTROP, TX 78602"), exact street-key lookup misses; prefix
+ * ILIKE on the stripped form recovers the hit while locality still blocks
+ * homonyms in other counties.
+ */
+export function situsSearchPrefixVariants(raw: string): string[] {
+  const streetOnly = raw.split(",")[0] ?? raw;
+  const primary = normalizeSitusSearchPrefix(streetOnly);
+  if (!primary) return [];
+
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 3) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
+/**
+ * Exact street-key set for situs lookup. Unions the resolver candidates
+ * with the street-type-stripped prefix variants so a typed "908 Pine St"
+ * matches a CAD situs whose first-comma segment is "908 PINE".
+ */
+export function situsSearchStreetKeys(raw: string): string[] {
+  const keys: string[] = [];
+  for (const key of normalizeStreetLineCandidates(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  for (const key of situsSearchPrefixVariants(raw)) {
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Bare-street key for "everyone on Pine St". Returns null when the
+ * first-comma segment starts with a house number (that is prefix
+ * search, not this) or when the only token is a street-type suffix.
+ */
+export function normalizeBareStreetLine(raw: string): string | null {
+  const segment = raw.split(",")[0] ?? raw;
+  const cleaned = segment
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (/^\d/.test(tokens[0]!)) return null;
+
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (UNIT_DESIGNATORS.has(t) || t.startsWith("#")) break;
+    out.push(DIRECTIONAL_ABBR[t] ?? STREET_TYPE_ABBR[t] ?? t);
+  }
+  if (out.length === 0) return null;
+  if (out.length === 1 && STREET_TYPE_SUFFIXES.has(out[0]!)) return null;
+  return out.join(" ");
+}
+
+/** Primary bare-street needle plus the street-type-stripped form. */
+export function situsSearchBareStreetVariants(raw: string): string[] {
+  const primary = normalizeBareStreetLine(raw);
+  if (!primary) return [];
+  const variants: string[] = [primary];
+  const tokens = primary.split(" ").filter(Boolean);
+  if (tokens.length >= 2) {
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) {
+      const stripped = tokens.slice(0, -1).join(" ");
+      if (stripped.length > 0 && !variants.includes(stripped)) {
+        variants.push(stripped);
+      }
+    }
+  }
+  return variants;
+}
+
 /** City / state / ZIP constraints parsed from a typeahead or MCP find query. */
 export type PlaceSearchLocality = {
   city: string | null;
@@ -217,7 +308,10 @@ export type PlaceSearchLocality = {
   zip: string | null;
 };
 
-function normalizeLocalityToken(value: string | null | undefined): string | null {
+/** Fold a locality token (city name) the same way every parsed locality
+ *  does, so a value read straight from a stored column (P-172:
+ *  `situs_city`) compares equal to one parsed out of a query string. */
+export function normalizeLocalityToken(value: string | null | undefined): string | null {
   if (!value) return null;
   const folded = value.trim().toUpperCase().replace(/\s+/g, " ");
   return folded.length > 0 ? folded : null;
@@ -251,6 +345,64 @@ function parseLocalityTail(tail: string): PlaceSearchLocality {
 }
 
 /**
+ * City-only tail on a comma-less address with no state/ZIP anchor. Does not
+ * call {@link normalizeStreetLineCandidates} (that function calls this).
+ */
+/** US state and territory codes, for removing a trailing state from a city with no ZIP. */
+const US_STATE_CODES = new Set(["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","PR","GU","VI"]);
+
+function parseTrailingCityWithoutAnchor(raw: string): { city: string | null; state: string | null } | null {
+  const flat = raw
+    .trim()
+    .replace(/,/g, " ");
+  const tokens = flat
+    .toUpperCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (tokens.length < 3 || !/^\d/.test(tokens[0]!)) return null;
+
+  const last = tokens[tokens.length - 1]!;
+  if (ZIP_RE.test(last)) return null;
+
+  for (let i = tokens.length - 2; i >= 1; i--) {
+    const t = tokens[i]!;
+    const canonical = STREET_TYPE_ABBR[t] ?? t;
+    if (STREET_TYPE_SUFFIXES.has(canonical)) {
+      const cityTokens = tokens.slice(i + 1);
+      // "1301 Water St Bastrop TX": the trailing state is not part of the city
+      // (QA 2026-09-29, fix register C1). Only with a city word before it, so a
+      // street like "Water Ct" never loses its suffix as Connecticut.
+      let state: string | null = null;
+      if (cityTokens.length >= 2 && US_STATE_CODES.has(cityTokens[cityTokens.length - 1]!)) {
+        state = cityTokens.pop()!;
+      }
+      if (cityTokens.length >= 1 && cityTokens.length <= 4) {
+        return { city: normalizeLocalityToken(cityTokens.join(" ")), state };
+      }
+      break;
+    }
+  }
+
+  for (let cityWords = 1; cityWords <= 3; cityWords++) {
+    const splitAt = tokens.length - cityWords;
+    if (splitAt < 2) break;
+    const cityTokens = tokens.slice(splitAt);
+    const maybeCity = cityTokens.join(" ");
+    if (!maybeCity || STREET_TYPE_SUFFIXES.has(cityTokens[0]!)) continue;
+    if (cityTokens.some((t) => ZIP_RE.test(t) || STATE_RE.test(t))) continue;
+    const beforeCity = tokens[splitAt - 1]!;
+    const beforeCanon =
+      STREET_TYPE_ABBR[beforeCity] ?? DIRECTIONAL_ABBR[beforeCity] ?? beforeCity;
+    if (STREET_TYPE_SUFFIXES.has(beforeCanon)) continue;
+    return { city: normalizeLocalityToken(maybeCity), state: null };
+  }
+  return null;
+}
+
+/**
  * Parse city/state/ZIP from a full typed address for prefix-search filtering.
  * Supports "908 Pine St, Bastrop TX 78602" and comma-less "908 Pine St Bastrop TX 78602".
  */
@@ -260,7 +412,12 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
 
   const commaParts = trimmed.split(",").map((p) => p.trim()).filter(Boolean);
   if (commaParts.length >= 2) {
-    return parseLocalityTail(commaParts.slice(1).join(", "));
+    const tail = parseLocalityTail(commaParts.slice(1).join(", "));
+    if (!tail.city && commaParts.length === 2) {
+      const city = parseTrailingCityWithoutAnchor(commaParts[0]!)?.city ?? null;
+      if (city) return { city, state: tail.state, zip: tail.zip };
+    }
+    return tail;
   }
 
   const flat = trimmed.replace(/,/g, " ");
@@ -271,16 +428,27 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
     .trim()
     .split(" ")
     .filter(Boolean);
-  if (tokens.length < 4) return { city: null, state: null, zip: null };
+  if (tokens.length < 3) return { city: null, state: null, zip: null };
 
   const last = tokens[tokens.length - 1]!;
-  if (!ZIP_RE.test(last)) return { city: null, state: null, zip: null };
+  if (!ZIP_RE.test(last)) {
+    const parsedCity = parseTrailingCityWithoutAnchor(trimmed);
+    return { city: parsedCity?.city ?? null, state: parsedCity?.state ?? null, zip: null };
+  }
   const zip = last;
   const maybeState = tokens[tokens.length - 2]!;
   if (!STATE_RE.test(maybeState)) {
     return { city: null, state: null, zip };
   }
   const state = maybeState;
+
+  const beforeStateZip = trimmed
+    .replace(new RegExp(`\\s+${state}\\s+${zip}\\s*$`, "i"), "")
+    .trim();
+  const anchoredCity = parseTrailingCityWithoutAnchor(beforeStateZip)?.city ?? null;
+  if (anchoredCity) {
+    return { city: anchoredCity, state, zip };
+  }
 
   let end = tokens.length - 2; // strip state + zip
   const withoutAnchor = tokens.slice(0, end);
@@ -297,6 +465,21 @@ export function parsePlaceSearchLocality(raw: string): PlaceSearchLocality {
     }
   }
   if (streetTokenCount == null) {
+    for (let i = withoutAnchor.length - 1; i >= 1; i--) {
+      const t = withoutAnchor[i]!;
+      const canonical = STREET_TYPE_ABBR[t] ?? t;
+      if (STREET_TYPE_SUFFIXES.has(canonical)) {
+        const cityTokens = withoutAnchor.slice(i + 1);
+        if (cityTokens.length >= 1 && cityTokens.length <= 4) {
+          return {
+            city: normalizeLocalityToken(cityTokens.join(" ")),
+            state,
+            zip,
+          };
+        }
+        break;
+      }
+    }
     return { city: null, state, zip };
   }
   const cityTokens = withoutAnchor.slice(streetTokenCount);
@@ -441,6 +624,11 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
     emitAnchorStrippedCandidates(flatTokens, push);
   }
 
+  emitCityOnlyTailStrippedCandidates(raw, push);
+
+  const beforeSuffix = [...candidates];
+  emitImpliedStreetSuffixCandidates(raw, beforeSuffix, push);
+
   return candidates;
 }
 
@@ -461,6 +649,52 @@ export function normalizeStreetLineCandidates(raw: string): string[] {
  * 1..3-word city drop and let the DB's EXACT normalized match + unique-prop
  * rule pick the real street line.
  */
+/**
+ * Comma-less "<street> <city>" with no state/ZIP anchor: strip the parsed city
+ * tail so keys match stored situs first-comma segments (e.g. "1503 WATER ST").
+ */
+function emitCityOnlyTailStrippedCandidates(
+  raw: string,
+  push: (toks: string[]) => void,
+): void {
+  const city = parseTrailingCityWithoutAnchor(raw)?.city ?? null;
+  if (!city) return;
+
+  const flatTokens = baseStreetTokens(raw.replace(/,/g, " "));
+  if (flatTokens.length < 2) return;
+
+  const cityTokens = city.split(" ").filter(Boolean);
+  if (flatTokens.length <= cityTokens.length + 1) return;
+
+  const tail = flatTokens.slice(-cityTokens.length);
+  if (tail.join(" ") !== city) return;
+
+  push(flatTokens.slice(0, flatTokens.length - cityTokens.length));
+}
+
+/** When the typed line omits a street-type suffix the store often carries. */
+function emitImpliedStreetSuffixCandidates(
+  raw: string,
+  keys: string[],
+  push: (toks: string[]) => void,
+): void {
+  const city = parseTrailingCityWithoutAnchor(raw)?.city ?? null;
+  for (const key of keys) {
+    const tokens = key.split(" ").filter(Boolean);
+    if (tokens.length < 2) continue;
+    const last = tokens[tokens.length - 1]!;
+    if (STREET_TYPE_SUFFIXES.has(last)) continue;
+    if (city) {
+      const cityTokens = city.split(" ").filter(Boolean);
+      if (tokens.length > cityTokens.length) {
+        const tail = tokens.slice(-cityTokens.length).join(" ");
+        if (tail === city) continue;
+      }
+    }
+    push([...tokens, "ST"]);
+  }
+}
+
 function emitAnchorStrippedCandidates(
   tokens: string[],
   push: (toks: string[]) => void,
@@ -556,4 +790,80 @@ export function buildNormalizedStreetSql(col: string): string {
   // Final trim + whitespace collapse in case a replacement changed length
   // (it never introduces spaces, but keep the contract identical).
   return `trim(${expr})`;
+}
+
+/**
+ * Every Texas county FIPS (254 codes). The situs functional index is
+ * `(county_fips, <normalized street>)`. A search that omits the leading
+ * column seq-scans `txgio_parcel` (16M rows / 18 GB) and hits the 20 s
+ * budget. `allStoreCounties()` cannot supply this list: it still tags
+ * Bastrop as live-ArcGIS and would drop 48021 while 74k situs rows sit
+ * in the table.
+ *
+ * The odd-number 001..507 assignment is the Census county-code scheme
+ * for Texas, verified 254-of-254 against the statewide roster. This
+ * function is the index bound, not a name directory.
+ */
+export function texasCountyFipsList(): string[] {
+  const out: string[] = [];
+  for (let n = 1; n <= 507; n += 2) {
+    out.push(`48${String(n).padStart(3, "0")}`);
+  }
+  return out;
+}
+
+/**
+ * Real, verified two-letter USPS state and territory codes. Deliberately
+ * NARROWER than {@link STATE_RE} above: that regex is kept broad on purpose
+ * (any two-letter token sitting directly before a trailing zip is treated
+ * as *a* state, for normalization/stripping purposes only), but
+ * out-of-coverage detection needs the opposite bias — a false positive
+ * reads to a caller as "Smart Site does not serve this place" when the
+ * real defect might just be a garbled query, so this set only recognises
+ * tokens that are genuinely a real state or territory abbreviation.
+ */
+export const US_STATE_AND_TERRITORY_CODES: ReadonlySet<string> = new Set([
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "DC", "PR", "VI", "GU", "AS", "MP",
+]);
+
+/**
+ * The one state the situs / rooftop store covers today — every FIPS
+ * {@link texasCountyFipsList} emits is a Texas county. Read by
+ * {@link isOutOfCoverageStateCode} and exported so a caller can name it in
+ * a user-facing message without hardcoding the string a second time.
+ *
+ * P-107 / OPS-16 A-072. This is the one place this claim lives on the
+ * api-server side; smartsite-mcp's tool-honesty.ts mirrors it by hand
+ * (documented there, same convention as PlaceSearchRefusalCode above)
+ * because that package has no workspace dependency on this one.
+ */
+export const COVERED_STATE_CODE = "TX";
+
+/**
+ * True when `code` is a real, recognised US state/territory abbreviation
+ * OTHER than the one the store covers today ({@link COVERED_STATE_CODE}).
+ *
+ * Used by {@link searchPlaceByPrefix} (P-107 / OPS-16 A-072) to distinguish
+ * "this query resolves outside every place Smart Site covers" from an
+ * honest in-coverage no-match, so the two stop collapsing into the same
+ * bare `no-hit` — the defect the card measured: an out-of-coverage address
+ * (`1600 E Camelback Rd, Phoenix, AZ`) and a genuine in-coverage miss
+ * (`147 Kahana Ln, Bastrop` with no matching parcel) came back
+ * indistinguishable, which reads to a user as "this address does not
+ * exist" either way.
+ *
+ * Scoped deliberately narrow: fires only on an EXPLICIT, recognised state
+ * token (e.g. "...Phoenix, AZ"). A query with no parsed state (most typed
+ * Texas addresses omit the state) or an unrecognised two-letter token is
+ * NOT treated as out-of-coverage and still runs the ordinary search —
+ * false "out of coverage" is the worse failure mode here, not a missed one.
+ */
+export function isOutOfCoverageStateCode(code: string | null): boolean {
+  if (!code) return false;
+  return code !== COVERED_STATE_CODE && US_STATE_AND_TERRITORY_CODES.has(code);
 }

@@ -59,6 +59,10 @@ delete process.env.OPENAI_API_KEY;
 // call startQueueWorker) so this is belt-and-suspenders.
 process.env.CODE_ATOM_QUEUE_TICK_MS = "999999999";
 
+// P-492: the lifecycle drain's tests call runLifecycleDrainTick directly; a
+// background tick from an imported app.ts must not race them.
+process.env.SS_LIFECYCLE_DRAIN_INTERVAL_MS = "0";
+
 // A04.7: pin the snapshot secret so tests can send the right header.
 // snapshotSecret.ts caches the first value it sees at module load; without
 // this, dev mode would generate a random per-process value that the test

@@ -1,13 +1,19 @@
 /**
- * Grok + rules fallbacks for Hauska Property Brief brokerage API.
+ * Anthropic + rules fallbacks for Hauska Property Brief brokerage API.
  */
 
 import {
-  resolveGrokBriefingModel,
-  BRIEFING_GROK_MAX_TOKENS,
+  CODE_CITING_MAX_TOKENS,
+  CODE_CITING_FALLBACK_BETAS,
+  CODE_CITING_FALLBACKS,
+  isAnthropicTruncated,
   BRIEFING_ANTHROPIC_MODEL,
+  CODE_CITING_OUTPUT_CONFIG_MEDIUM,
+  isAnthropicRefusal,
+  textFromAnthropicContent,
 } from "@workspace/briefing-engine";
 import { getBriefingLlmClient } from "./briefingLlmClient";
+import { logger } from "./logger";
 import {
   formatBrokerageContextForLlm,
   type BrokerageSiteContext,
@@ -17,8 +23,14 @@ import {
   type PresentationMode,
 } from "./propertyBriefLaySummary";
 
-export const PROPERTY_BRIEF_DISCLAIMER =
-  "Property intel from Hauska municipal code catalog. Not legal advice. Verify with city staff and applicable zoning before client representations.";
+import {
+  RESEARCH_CHAT_CUSTOMER_DISCLAIMER,
+  sanitizeResearchChatCustomerText,
+} from "./brokerageResearchChatSanitize";
+
+export const PROPERTY_BRIEF_DISCLAIMER = RESEARCH_CHAT_CUSTOMER_DISCLAIMER;
+
+export { sanitizeResearchChatCustomerText } from "./brokerageResearchChatSanitize";
 
 /** @deprecated Use PROPERTY_BRIEF_DISCLAIMER */
 export const BROKERAGE_DISCLAIMER = PROPERTY_BRIEF_DISCLAIMER;
@@ -86,7 +98,7 @@ export interface ReasoningSummaryResult {
   citations: NumberedCitation[];
   disclaimer: string;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 export interface SummarizeResult {
@@ -95,7 +107,7 @@ export interface SummarizeResult {
   summary: string;
   citations: NumberedCitation[];
   disclaimer: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
 }
 
 /**
@@ -130,7 +142,7 @@ export interface ResearchChatResult {
   disclaimer: string;
   confidence: number;
   generatedAt: string;
-  method: "grok" | "anthropic" | "rules-v1";
+  method: "anthropic" | "rules-v1";
   presentationMode: PresentationMode;
 }
 
@@ -338,29 +350,35 @@ function textToHtmlParagraphs(text: string): string {
 async function completeBriefingLlm(
   system: string,
   user: string,
-): Promise<{ text: string | null; method: "grok" | "anthropic" }> {
+): Promise<{ text: string | null; method: "anthropic" }> {
   const bundle = await getBriefingLlmClient();
-  if (!bundle) return { text: null, method: "grok" };
+  if (!bundle) return { text: null, method: "anthropic" };
 
-  if (bundle.kind === "grok") {
-    const text = await bundle.client.completeChat({
-      model: resolveGrokBriefingModel(),
-      maxTokens: BRIEFING_GROK_MAX_TOKENS,
-      system,
-      user,
-    });
-    return { text, method: "grok" };
-  }
-
-  const response = await bundle.client.messages.create({
+  const response = await bundle.client.beta.messages.create({
     model: BRIEFING_ANTHROPIC_MODEL,
-    max_tokens: BRIEFING_GROK_MAX_TOKENS,
+    betas: CODE_CITING_FALLBACK_BETAS,
+    fallbacks: CODE_CITING_FALLBACKS,
+    max_tokens: CODE_CITING_MAX_TOKENS,
+    output_config: CODE_CITING_OUTPUT_CONFIG_MEDIUM,
     system,
     messages: [{ role: "user", content: user }],
   });
-  const textBlock = response.content.find((block) => block.type === "text");
-  const text =
-    textBlock && textBlock.type === "text" ? textBlock.text.trim() : null;
+  if (isAnthropicRefusal(response)) {
+    // Callers fall back to the rules-v1 output when text is null.
+    logger.warn(
+      { stopReason: "refusal" },
+      "brokerage brief: Claude refused; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  if (isAnthropicTruncated(response)) {
+    logger.warn(
+      { stopReason: "max_tokens" },
+      "brokerage brief: Claude hit max_tokens; falling back to rules-v1",
+    );
+    return { text: null, method: "anthropic" };
+  }
+  const text = textFromAnthropicContent(response.content).trim();
   return { text: text || null, method: "anthropic" };
 }
 
@@ -552,11 +570,17 @@ function finalizeResearchChatAnswer(
   atoms: BriefAtomInput[],
   presentationMode: PresentationMode,
   generatedAt: string,
-  method: "grok" | "anthropic" | "rules-v1",
+  method: "anthropic" | "rules-v1",
 ): ResearchChatResult {
-  const citations = parseInlineCitations(answer, atoms);
+  const sanitizedAnswer = sanitizeResearchChatCustomerText(answer);
+  if (/\bHauska\b/i.test(answer)) {
+    logger.warn("research chat: Hauska leaked in model answer; sanitized");
+  }
+  const citations = parseInlineCitations(sanitizedAnswer, atoms);
   const consumer = presentationMode === "consumer";
-  const plain = consumer ? stripInlineCitations(answer) : answer;
+  const plain = consumer
+    ? stripInlineCitations(sanitizedAnswer)
+    : sanitizedAnswer;
 
   // Grounding-derived sources: the atoms actually supplied to the prompt,
   // independent of marker survival. Populates `sources` in EVERY
@@ -599,6 +623,89 @@ function unionCitationsByN(
   return [...byN.values()].sort((a, b) => a.n - b.n);
 }
 
+export interface NarrativeSectionResult {
+  narrative: string;
+  generatedBy: "anthropic" | "rules-v1";
+  generatedAt: string;
+}
+
+/**
+ * Feasibility narrative-section generator (OPS-16 P-120 item 6). Shares
+ * only the lowest-level LLM-calling primitive (completeBriefingLlm, same
+ * BRIEFING_LLM_MODE routing/credentials as every other brokerage brief
+ * function) with generateSummarize/generateResearchChat — NOT a wrapper
+ * around either. Their prompt shape is a single flat numbered-citation
+ * list; this one is a nested per-category facts payload where each
+ * category self-reports present/absent, and the model is asked to mark
+ * which categories it actually drew on with a same-named [category]
+ * bracket marker (matching this codebase's own post-hoc-text-scan
+ * citation convention, e.g. parseInlineCitations — never a separate
+ * self-reported citation field, which the caller cannot independently
+ * verify). Caller (hauska-engine) derives citedSections itself by
+ * scanning the returned narrative for its own facts keys as markers, so
+ * this function does not attempt to report that field.
+ */
+export async function generateNarrativeSection(input: {
+  parcelNodeId: string;
+  facts: Record<string, unknown>;
+  courthouseDocuments?: Array<{ citation: string; excerpt: string }>;
+}): Promise<NarrativeSectionResult> {
+  const generatedAt = new Date().toISOString();
+  const factKeys = Object.keys(input.facts);
+  const system = [
+    "You are a Texas real estate feasibility-report writer.",
+    "Compose a Feasibility narrative section from the structured facts provided below.",
+    'Each fact category carries its own "present" or "absent" status. Only make a substantive claim from a category whose status is "present". For an "absent" category, either omit it entirely or state plainly that it could not be determined — never invent a value for it.',
+    "Whenever a sentence draws on a fact category, mark that sentence by appending the category's exact key name in brackets right after it, e.g. [zoning]. A category the narrative does not use gets no marker.",
+    "If courthouse documents are supplied and the narrative draws on one, append [courthouse] to that sentence.",
+    "Respond with the narrative prose only — plain text, no JSON, no markdown headers, no preamble.",
+  ].join(" ");
+
+  const factLines = factKeys.map(
+    (key) => `${key}: ${JSON.stringify(input.facts[key])}`,
+  );
+  const docLines = (input.courthouseDocuments ?? []).map(
+    (d, i) => `Courthouse document ${i + 1} (${d.citation}): ${d.excerpt}`,
+  );
+  const user = [
+    `Parcel: ${input.parcelNodeId}`,
+    "",
+    "Facts:",
+    ...factLines,
+    ...(docLines.length ? ["", "Courthouse documents:", ...docLines] : []),
+  ].join("\n");
+
+  const { text, method } = await completeBriefingLlm(system, user);
+  const narrative =
+    text?.trim() ||
+    "Feasibility narrative unavailable — the reasoning engine returned no content this run. Verify each section manually before relying on this report.";
+
+  return {
+    narrative,
+    generatedBy: text ? method : "rules-v1",
+    generatedAt,
+  };
+}
+
+/**
+ * The exact words an answer opens with when the numbered sources do not hold
+ * what was asked. The Smart Site Ask screen (hauska-map src/v2/ask) keys its
+ * honest "not on record" treatment off this phrase, so keep it stable.
+ */
+export const RESEARCH_CHAT_NOT_ON_RECORD = "Not on record here.";
+
+/**
+ * T2-ASK honesty rules (Smart Site product law, 2026-10-22): an answer comes
+ * only from the numbered sources (source [1] is the parcel's own record when
+ * the caller sends one), never estimates a missing value, and says plainly
+ * when the record lacks something, with the next step.
+ */
+export const RESEARCH_CHAT_RECORD_ONLY_RULES: readonly string[] = [
+  "Answer only from the numbered sources (the parcel record and the code sections retrieved for it). Never estimate, infer or fill in a value the sources do not state.",
+  `When the sources do not contain what was asked, start the answer with exactly "${RESEARCH_CHAT_NOT_ON_RECORD}" and then say in one sentence where that fact is recorded and the next step. Easements, plats and deeds are on the recorded plat or deed at the county clerk, which a records request can pull.`,
+  "Never state sale prices or comparable sales; Texas does not disclose them.",
+];
+
 export async function generateResearchChat(input: {
   address: string;
   jurisdiction: string | null;
@@ -621,6 +728,7 @@ export async function generateResearchChat(input: {
 
   const system = [
     "You are a Texas property intel assistant (lay-friendly Carfax-for-property).",
+    "Never name internal systems, product codenames, or catalog infrastructure in the answer.",
     presentationMode === "consumer"
       ? "Answer in plain English for a homebuyer. Do NOT include [n] citation markers or statute numbers in the answer text."
       : "Answer for a real estate professional. Cite with [n] inline matching source numbers.",
@@ -633,11 +741,15 @@ export async function generateResearchChat(input: {
         a.atomDid.startsWith("websearch:") ||
         a.atomDid.startsWith("reasoning:"),
     )
-      ? "Sources whose id starts with websearch: or that carry a web-search disclosure are a labeled web-search backup, not a Hauska catalog atom. Do not present them as verified corpus. Never fabricate ICC or code body."
+      ? "Sources whose id starts with websearch: or that carry a web-search disclosure are a labeled web-search backup, not a verified code record. Do not present them as verified corpus. Never fabricate ICC or code body."
       : null,
     hasPrivate
       ? "Use numbered code sources and private recorded-restriction excerpts (P1, P2, …) when the question touches HOA/CC&R/deed limits. Private restrictions are not municipal code."
       : "Use ONLY the numbered code atom sources. Do not invent code.",
+    ...RESEARCH_CHAT_RECORD_ONLY_RULES,
+    presentationMode === "consumer"
+      ? null
+      : "Every sentence that states a fact ends with the [n] marker of the source it comes from.",
     "No compliance guarantees.",
     "Respond with JSON only: {\"answer\": string (plain text)}.",
   ]

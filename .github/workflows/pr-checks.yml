@@ -7,7 +7,7 @@ on:
 jobs:
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,11 +36,43 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: check-no-hauska-atom-contract
         run: node scripts/check-no-hauska-atom-contract.mjs
+      # P-499 (OPS-16 A-382/A-383): one national source-table shape, keyed on
+      # the provider's own id (lib/source-registry, lib/db/drizzle/0111_
+      # source_feature.sql). Refuses a registry entry keyed positionally/on a
+      # bigserial, and any migration after 0111 that creates a new per-state
+      # tx_*/txgio_* table.
+      - name: check-source-shape (P-499)
+        run: node scripts/check-source-shape.mjs
+      # P-499 (OPS-16 A-382/A-383): serving-read ratchet. Fails on any
+      # artifacts/api-server or artifacts/smartsite-mcp reader of a source
+      # table that is not on the checked-in allow-list, and on any allow-list
+      # entry that no longer reads (the list only shrinks).
+      - name: check-serving-source-reads (P-499)
+        run: node scripts/check-serving-source-reads.mjs
+      # P-492 (OPS-16 A-368): GoHighLevel is retired from Smart Site with a hard
+      # cut. Nothing under cortex-api's source may call it or read its
+      # credentials again. rg exit 0 = a hit (fail), 1 = clean (pass), anything
+      # else = the gate could not run (fail; a broken gate must not read green).
+      - name: GoHighLevel retirement gate (P-492)
+        run: |
+          test -d artifacts/api-server/src || { echo "FAIL: artifacts/api-server/src missing; gate cannot run"; exit 1; }
+          set +e
+          rg -n --hidden -e 'leadconnectorhq\.com' -e 'GOHIGHLEVEL_' artifacts/api-server/src
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "FAIL: GoHighLevel reference under artifacts/api-server/src (retired by P-492; see _decisions/2026-10-03_ghl_retired_lifecycle_to_resend.md)"
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "FAIL: ripgrep exited $rc; the retirement gate did not run"
+            exit 1
+          fi
+          echo "OK: no leadconnectorhq.com or GOHIGHLEVEL_ under artifacts/api-server/src"
       - name: Typecheck
         run: pnpm run typecheck
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: pgvector/pgvector:pg14
@@ -100,11 +132,135 @@ jobs:
         run: |
           cd artifacts/api-server
           node node_modules/puppeteer/install.mjs
+      - name: Size the postgres lock table for the test suite
+        # P-375 (2026-09-19). `Test` has failed intermittently on suites the PR
+        # under review does not touch (#722, #727, and P-362's PR) with Postgres
+        # error 53200 "out of shared memory" / "You might need to increase
+        # max_locks_per_transaction", thrown out of lib/db's `dropTestSchema`.
+        # The fleet's answer was "re-run once" (`_queue/cards/ldt-576-retry`),
+        # which is a habit, not a control: a real regression in those suites
+        # would be re-run away the same way.
+        #
+        # MEASUREMENT. On a container identical to this service (same image, same
+        # env, default max_locks_per_transaction=64, default 64 MB /dev/shm),
+        # driving the REAL fixture schema (142 tables, 228 indexes and 246 ADD
+        # CONSTRAINT = 616 objects) through the lifecycle the harness uses
+        # (DROP SCHEMA IF EXISTS / CREATE SCHEMA / DDL replay / DROP SCHEMA
+        # CASCADE):
+        #   * one `DROP SCHEMA ... CASCADE` on that schema takes ~2,400 locks in
+        #     ONE transaction (binary search on a single session).
+        #   * the default lock table holds ~12,800 locks (measured; not the
+        #     64 x 101 textbook figure), so about six test files dropping a
+        #     schema at the same moment exhaust it. `pnpm test` fans out well
+        #     past that, which is why the reds land on untouched suites.
+        #   * 12 concurrent schema lifecycles failed in 3 of 4 runs; 24
+        #     concurrent failed in 3 of 3 runs, with 20-24 `out of shared memory`
+        #     errors each, and left 20-22 schemas behind.
+        #   * at max_locks_per_transaction=1024 the same 24-way load was clean in
+        #     3 of 3 runs, and 12-way clean in 4 of 4. Measured capacity ~190,000
+        #     locks, about 79x the per-operation need.
+        #
+        # --shm-size IS DELIBERATELY NOT SET, because it was measured not to be
+        # the lever: lock capacity is identical (12,800) at 64 MB and at 2 GB of
+        # /dev/shm, an equal 12-way load fails on both, and 1024 starts and
+        # passes on the stock 64 MB /dev/shm. The lock table is anonymous shared
+        # memory, not /dev/shm, so a larger --shm-size can never clear this
+        # error; only the GUC sizes it, and the GUC is PGC_POSTMASTER, so it
+        # needs a restart. That is what this step does.
+        #
+        # A job in the service container cannot be given the GUC declaratively
+        # (`services.options` is passed to `docker create` and there is no
+        # command override), so the step sets it with ALTER SYSTEM, restarts the
+        # container, waits for readiness, READS BACK the effective value and
+        # fails loudly if it did not take. The effective value is printed on
+        # every run: a Test log that does not carry this line, or carries it
+        # with the wrong number, is itself the finding and no longer has to be
+        # diagnosed from a suite's error text.
+        #
+        # THE `run:` BLOCK BELOW IS EXECUTED, NOT TRUSTED. It was extracted from
+        # this file byte-for-byte and run on a host that runs several containers
+        # from the same image, with exactly ONE line rebound (the container
+        # selector, because CI has exactly one and this host does not). That is
+        # how the `|| true` inside the readiness loop was found: without it the
+        # loop's first psql -- which fails on any postgres that is still
+        # restarting -- aborted the whole step with exit 2 under `set -e`, so
+        # the loop could only ever work when it was not needed. The guard that
+        # refuses an ambiguous container list was observed FIRING, not asserted:
+        # bound to a name with no container, the step exits 1 with "expected
+        # exactly one ... found 0".
+        run: |
+          set -euo pipefail
+          TARGET=1024
+          MATCHES=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          COUNT=$(printf '%s\n' "$MATCHES" | grep -c . || true)
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: expected exactly one pgvector/pgvector:pg14 service container, found $COUNT. Refusing to guess which postgres the suites run against: guessing wrong leaves the lock table unsized and the DB suites fail in the out-of-shared-memory shape, which is a red that reads like a broken test."
+            exit 1
+          fi
+          CONTAINER_ID="$MATCHES"
+          docker exec "$CONTAINER_ID" psql -U postgres -d test_db -c "ALTER SYSTEM SET max_locks_per_transaction = $TARGET;"
+          docker restart --time 60 "$CONTAINER_ID" > /dev/null
+          # --time 60 (not the 10s default) so postgres gets a CLEAN fast shutdown instead of
+          # a SIGKILL: an unclean stop makes the next start replay WAL first, which turns a
+          # 2-second restart into minutes and would look exactly like a hung Test job.
+          # Wait for QUERY readiness, not `pg_isready`: a restart after an unclean stop puts
+          # the server in crash recovery, where it answers the socket ("rejecting
+          # connections", pg_isready exit 1) long before it can execute anything. Only a
+          # real query proves the precondition for reading the setting back.
+          #
+          # `|| true` IS LOAD-BEARING, and this was found by RUNNING these bytes against a
+          # container that was in recovery, not by reading them. Without it the loop is
+          # decorative: psql that cannot connect exits 2, `set -o pipefail` makes the whole
+          # pipeline 2, and an assignment whose command substitution fails is itself a failed
+          # command under `set -e` -- so the FIRST iteration kills the step with a bare exit 2,
+          # the loop never loops, and the FAIL message below is unreachable. The loop
+          # therefore used to work exactly when it was not needed (CI's freshly-initialised
+          # container does a clean fast shutdown and answers the first probe) and fail
+          # silently in the one state it exists for. A gating indicator that cannot fire is
+          # not a control (DEV_PROCESS).
+          READY=""
+          for _ in $(seq 1 120); do
+            READY=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SELECT 1;" 2> /dev/null | tr -d '[:space:]' || true)
+            if [ "$READY" = "1" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" != "1" ]; then
+            echo "FAIL: postgres did not accept a query within 120s of the restart, so the lock table state is unknown; the DB suites must not run against a server that was never confirmed up"
+            exit 1
+          fi
+          # `|| true` for the same reason as the loop above: a psql that cannot connect must
+          # fall through to the comparison and be REPORTED, never abort the step with an
+          # unexplained exit 2. `2> /dev/null` keeps the log to our one line, which is the
+          # line a reader greps for.
+          EFFECTIVE=$(docker exec "$CONTAINER_ID" psql -U postgres -d test_db -tAc "SHOW max_locks_per_transaction;" 2> /dev/null | tr -d '[:space:]' || true)
+          echo "effective max_locks_per_transaction=$EFFECTIVE (wanted $TARGET)"
+          if [ "$EFFECTIVE" != "$TARGET" ]; then
+            echo "FAIL: max_locks_per_transaction reads '$EFFECTIVE', not '$TARGET'; the restart did not take and the DB suites would run on the undersized default"
+            exit 1
+          fi
       - name: Enable pgvector extension
         env:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Install postgis into the postgres service container
+        # TXGIO-GEOM-FIX: txgio_parcel.geom is a real PostGIS geometry(Geometry,4326)
+        # column in production (added by an uncodified manual process this card
+        # tracks properly for the first time), and upsertTxgioParcels now derives it
+        # on every write. pgvector/pgvector:pg14 has no postgis package baked in, but
+        # its PGDG apt repo is already configured, so it installs the same way it
+        # would on any Debian bookworm host. The server process runs INSIDE the
+        # service container, so the package has to land there too, not on the runner.
+        run: |
+          CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          docker exec -u root "$CONTAINER_ID" bash -c "apt-get update && apt-get install -y postgresql-14-postgis-3"
+      - name: Enable postgis extension
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS postgis;"
       - name: Push database schema
         run: pnpm --filter @workspace/db run push
       - name: Check schema fixture drift
@@ -115,20 +271,44 @@ jobs:
         # checked-in fixture will be stale and integration tests would
         # silently miss new columns/tables. Fail the PR loudly instead.
         run: pnpm --filter @workspace/db run test:fixture:drift
+      # A-30 (OPS-25, 2026-09-23). hauska-engine went PRIVATE on 2026-09-22 and this
+      # repo is PUBLIC, so the default GITHUB_TOKEN cannot read it: this step failed
+      # `Not Found` on every legacy-design-tools PR. It keeps failing closed, now
+      # through the sibling-read token, and a missing secret fails the step ABOVE it
+      # by name rather than as a 404 that reads like a missing repository.
+      - name: Require the sibling-read token, by name
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::This job cannot read the sibling repo hauska-engine, which is PRIVATE (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No tests were run against the engine checkout."
+            exit 1
+          fi
+          echo "Sibling-read credential present (value never printed)."
       - name: Checkout hauska-engine (writer disk probe)
         uses: actions/checkout@v4
         with:
           repository: empressaioemail-tech/hauska-engine
+          token: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+          persist-credentials: false
           path: hauska-engine-checkout
           sparse-checkout: |
             packages/engine-core/scripts
+      - name: P-456 smartsite-mcp production artifact HTML gate
+        env:
+          PARCEL_TILES_ORIGIN: https://hauska-artifacts.nyc3.digitaloceanspaces.com
+        run: |
+          cd artifacts/smartsite-mcp
+          pnpm exec playwright-core install chromium
+          node scripts/artifact-html-gate/run-gate.mjs
       - name: Run tests
         env:
           HAUSKA_ENGINE_ROOT: ${{ github.workspace }}/hauska-engine-checkout
         run: pnpm test
   l5-sf30-cotality-grep:
     name: L5 SF-30 Cotality warm grep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,7 +323,7 @@ jobs:
           echo "ci-cotality-warm-gate: clean"
   l5-sf24-sf25-score-greps:
     name: L5 SF-24/SF-25 score greps
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -202,7 +382,7 @@ jobs:
           echo "ci-coverage-clamp-shared-engine: clean"
   l5-silent-fallback-greps:
     name: L5 silent-fallback greps
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -224,7 +404,7 @@ jobs:
           echo "ci-mock-allowlist-hauska-engine: clean"
   l5-sf26-hand-hasWriter-grep:
     name: L5 SF-26 hand hasWriter grep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -239,7 +419,7 @@ jobs:
           echo "ci-hand-hasWriter-in-declaration: clean"
   ss-w16-tier2-flood-not-served:
     name: SS-W16 tier2 flood not served
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -424,7 +604,7 @@ jobs:
     # renaming this silently removes the requirement with no error and a green PR.
     # Change it only together with the protection setting.
     name: SS-W18 api-server boots
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Checkout
@@ -508,7 +688,7 @@ jobs:
 
   l17-ci-vintage-predicate:
     name: L17 ci-vintage-predicate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -549,3 +729,169 @@ jobs:
             exit 1
           fi
           echo "ci-vintage-predicate: clean (${#hits[@]} candidate file(s) checked)"
+
+  ci-pr-base-is-main:
+    # LOAD-BEARING NAME. "PR base is main" is a REQUIRED status check on main
+    # (branch protection). Protection matches the check-run name, so renaming
+    # this silently removes the requirement with no error and a green PR.
+    # Change it only together with the protection setting.
+    #
+    # PR #601 (2026-09-04, overlayDistricts serve cutover) merged into an
+    # abandoned stacked-PR branch instead of main; nothing caught the wrong
+    # base at merge time, and its content only reached main because #602
+    # happened to retarget and carry it along. This is a metadata check on
+    # the PR itself, not a content grep: every PR into this repo targets
+    # main, full stop. Stacked-PR branches may still merge into each other
+    # locally if a lane wants that shape, but the repo's own PRs never do.
+    name: PR base is main
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: ci-pr-base-is-main
+        run: |
+          if [ "${{ github.event.pull_request.base.ref }}" != "main" ]; then
+            echo "FAIL ci-pr-base-is-main: PR #${{ github.event.pull_request.number }} targets '${{ github.event.pull_request.base.ref }}', not main. Retarget the PR base to main."
+            exit 1
+          fi
+          echo "ci-pr-base-is-main: clean (base is main)"
+
+  cortex-daily-limit-bake:
+    name: cortex daily limit bake
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: ci-cortex-daily-limit-50000
+        run: |
+          # --set-env-vars is authoritative-replace. 10000 locked the operator
+          # out twice on 2026-08-28. The bake must stay 50000.
+          if rg -n 'CORTEX_USER_DAILY_API_LIMIT=10000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: bake is 10000; a deploy will lock the operator out"
+            exit 1
+          fi
+          if ! rg -q -- '--set-env-vars=.*CORTEX_USER_DAILY_API_LIMIT=50000' .github/workflows/cloud-run-deploy.yml; then
+            echo "FAIL ci-cortex-daily-limit-50000: --set-env-vars bake is missing CORTEX_USER_DAILY_API_LIMIT=50000"
+            exit 1
+          fi
+          echo "ci-cortex-daily-limit-50000: clean"
+
+  p279-tagged-revision-env-predicate:
+    name: P-279 tagged-revision env predicate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P-279 predicate over the shipped fixture set
+        # P-279. A tagged revision cannot outlive an auth or secret variable the
+        # SERVING revision carries. Finding fa9addb4 removed the instance; this
+        # row builds the class control.
+        #
+        # This job is the OFFLINE half (no cloud access, no credentials): the same
+        # predicate that gates the deploy workflows, run over checked-in fixtures —
+        # a passing service, a failing one, four refusal shapes, and an executed
+        # reverted-predicate falsifier proving the check is not syntax-only.
+        #
+        # The LIVE half runs in cloud-run-deploy.yml and
+        # cloud-run-deploy-smartsite-mcp.yml, after the canary deploy and again
+        # after the traffic shift, where the exit code fails the job. What is here
+        # keeps the RULE from rotting; it does not watch a deploy.
+        #
+        # Exit codes stay distinguishable and 2 (REFUSE) FAILS this job: a check
+        # that could not read what it needs and reads as green is the defect class
+        # this exists for (DEV_PROCESS 2.0/2.3).
+        run: |
+          set +e
+          node scripts/check-tagged-revision-env.mjs --selftest
+          CODE=$?
+          set -e
+          case "$CODE" in
+            0) echo "p279-tagged-revision-env-predicate: RESULT=clean" ;;
+            1) echo "p279-tagged-revision-env-predicate: RESULT=violation (the shipped fixture set did not pass)"; exit 1 ;;
+            2) echo "p279-tagged-revision-env-predicate: RESULT=did-not-run (REFUSE)"; exit 1 ;;
+            *) echo "p279-tagged-revision-env-predicate: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac
+
+  p279-tagged-revision-env-divergence:
+    name: P-279 canonical divergence
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: P-279 canonical divergence byte-compare
+        # DEV_PROCESS 2.4. scripts/check-tagged-revision-env.mjs here and
+        # tools/check-tagged-revision-env.mjs in hauska-engine are byte-identical on
+        # purpose. Two implementations of one rule drift into two rules; this
+        # compares them and REFUSES (never passes) on any byte difference, or when
+        # the canonical copy cannot be read at all.
+        #
+        # A-30 (OPS-25, 2026-09-23): hauska-engine is PRIVATE and `fetchCanonical`
+        # reads it over raw.githubusercontent.com, so an anonymous read now 404s
+        # (`CANONICAL_UNREADABLE`) — measured 2026-09-23 on legacy-design-tools #742,
+        # and reproduced locally at exit 2. A-30 rules that the copy is read through
+        # an AUTHENTICATED request. It is not read by editing the script: this file
+        # is byte-pinned in
+        # `scripts/fixtures/tagged-revision-env/canonical.json` (sha256
+        # edbcf318f225c97770c3eaa30b0bca5785f49d399065c2ff47aff649eb942d14) and
+        # byte-COMPARED with hauska-engine's copy, so any edit here is a
+        # SELF_HASH_MISMATCH and a divergence from the sibling, and would need the
+        # same edit carried into a repo this lane must not touch. Instead the
+        # credential is handed to curl through `CURL_HOME`: curl reads its default
+        # config from `$CURL_HOME/.curlrc` and adds the header to the script's own
+        # `curl -fsSL` call, with the script's bytes and both hashes untouched.
+        # THE LEADING DOT IS LOAD-BEARING AND WAS MEASURED BOTH WAYS on this host
+        # on 2026-09-23: with `$CURL_HOME/.curlrc` the private read answers 200;
+        # with `$CURL_HOME/curlrc` (no dot) it answers 404 and the check exits 2,
+        # because curl never opens that file. Order per curl's own documentation
+        # (everything.curl.dev/cmdline/configfile.html): `$CURL_HOME/.curlrc`,
+        # then `$XDG_CONFIG_HOME/curlrc`, then `$HOME/.curlrc`; on Windows
+        # `_curlrc` is also accepted with `.curlrc` preferred. This is the first
+        # thing to suspect if this step ever fails at the proof below.
+        #
+        # VERIFIED BOTH WAYS on 2026-09-23: unauthenticated the check exits 2 with
+        # CANONICAL_UNREADABLE and the raw URL in the detail; with this curlrc it
+        # PASSES and prints canonicalSha256 = the local hash. The canonical copy
+        # DOES exist on hauska-engine main — the header comment above that reads
+        # "EXPECTED RED UNTIL THE ENGINE PR MERGES ... this file does not exist
+        # there until that PR lands" is STALE (the file is there and byte-identical),
+        # so the read, not the engine, was the whole defect.
+        #
+        # A missing secret fails by name before the check runs. A fork PR receives no
+        # secrets and this job will fail closed for it, which is intended (A-30).
+        env:
+          SIBLING_REPO_READ_TOKEN: ${{ secrets.SIBLING_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIBLING_REPO_READ_TOKEN}" ]; then
+            echo "::error title=SIBLING_REPO_READ_TOKEN absent::The canonical copy lives in the PRIVATE hauska-engine repo and cannot be read anonymously (OPS-25 A-30). The check is right to fail closed; nothing is merged on it red. Set the repository secret SIBLING_REPO_READ_TOKEN (fine-grained, contents:read on hauska-map and hauska-engine only), then re-run this job. No divergence was measured."
+            exit 1
+          fi
+          AUTH_HOME="${RUNNER_TEMP}/curl-auth"
+          mkdir -p "${AUTH_HOME}"
+          # `.curlrc` (dot), NOT `curlrc`: curl's documented first location is
+          # `$CURL_HOME/.curlrc`. Written under both names that curl accepts on
+          # Windows (`_curlrc`) so an ancient Windows curl build cannot silently
+          # arrive unauthenticated either -- but the dot name is the one that
+          # works on the ubuntu runner this job uses.
+          printf 'header = "Authorization: Bearer %s"\n' "${SIBLING_REPO_READ_TOKEN}" > "${AUTH_HOME}/.curlrc"
+          cp "${AUTH_HOME}/.curlrc" "${AUTH_HOME}/_curlrc"
+          # Prove the credential actually arrives before judging the comparison:
+          # an unauthenticated read of a private repo is a 404, and a 404 here has
+          # already been mistaken for drift once.
+          CURL_HOME="${AUTH_HOME}" curl -sS -o /dev/null -w '%{http_code}\n' \
+            "https://raw.githubusercontent.com/empressaioemail-tech/hauska-engine/main/tools/check-tagged-revision-env.mjs" \
+            | grep -qx 200 || {
+              echo "::error title=CANONICAL READ UNAUTHENTICATED::the credential did not reach curl (expected HTTP 200 from raw.githubusercontent for the private repo's canonical copy). The divergence check would have reported CANONICAL_UNREADABLE, which is not a pass. No divergence was measured."
+              exit 1
+            }
+          set +e
+          CURL_HOME="${AUTH_HOME}" node scripts/check-tagged-revision-env.mjs --check-divergence
+          CODE=$?
+          set -e
+          rm -f "${AUTH_HOME}/.curlrc" "${AUTH_HOME}/_curlrc"
+          case "$CODE" in
+            0) echo "p279-canonical-divergence: RESULT=clean" ;;
+            2) echo "p279-canonical-divergence: RESULT=refused (the two copies differ, or the canonical copy could not be read - see the message above; this is NOT a pass)"; exit 1 ;;
+            *) echo "p279-canonical-divergence: RESULT=did-not-run (unexpected exit $CODE)"; exit 1 ;;
+          esac

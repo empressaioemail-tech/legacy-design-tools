@@ -1,6 +1,22 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifySessionToken } from "../lib/sessionToken";
+import { isAnonymousOwnerId } from "../lib/anonymousOwnerCookie";
 
+/**
+ * RETIRED (operator ruling, 2026-09-07: "cut the chrome extension we don't
+ * need it"). "extension_public" was the ONLY tier the chrome extension
+ * (hauska-brief-extension) ever authenticated as — confirmed dead in
+ * production before retiring: 248 brokerage_brief_runs total, ever, since
+ * 2026-05-26, ZERO since 2026-08-09. Kept in the type union (rather than
+ * deleted outright) because `/brief`, `/brief/summarize`, and
+ * `/research/chat` still branch on `isExtensionPublicClient` for their own
+ * rate-limiting/billing logic — that branching is now permanently dead code
+ * (this tier can never be assigned again, see loadBrokerageApiKeys and
+ * resolveBrokerageClientTier below), not a route deletion. A caller
+ * presenting the old BROKERAGE_EXTENSION_PUBLIC_KEY now falls straight
+ * through brokerageAuth's own unauthorized path — same 401 an unrecognized
+ * key already got, no new response shape.
+ */
 export type BrokerageClientTier = "operator" | "extension_public" | "user";
 
 declare global {
@@ -14,24 +30,16 @@ declare global {
 }
 
 let cachedKeys: Set<string> | null = null;
-let cachedExtensionPublicKey: string | null | undefined;
-
-function loadExtensionPublicKey(): string | null {
-  if (cachedExtensionPublicKey !== undefined) {
-    return cachedExtensionPublicKey;
-  }
-  const raw = process.env.BROKERAGE_EXTENSION_PUBLIC_KEY?.trim();
-  cachedExtensionPublicKey = raw || null;
-  return cachedExtensionPublicKey;
-}
 
 export function loadBrokerageApiKeys(): Set<string> {
   if (cachedKeys) return cachedKeys;
   const keys = new Set<string>();
+  // RETIRED: "BROKERAGE_EXTENSION_PUBLIC_KEY" deliberately removed from this
+  // list (see the BrokerageClientTier doc comment above) — a caller
+  // presenting that key must no longer authenticate as anything.
   for (const envName of [
     "BROKERAGE_OPERATOR_API_KEYS",
     "BROKERAGE_API_KEYS",
-    "BROKERAGE_EXTENSION_PUBLIC_KEY",
   ]) {
     const raw = process.env[envName]?.trim();
     if (!raw) continue;
@@ -47,12 +55,13 @@ export function loadBrokerageApiKeys(): Set<string> {
 /** TEST-ONLY: reset cached keys after env changes. */
 export function resetBrokerageApiKeysForTests(): void {
   cachedKeys = null;
-  cachedExtensionPublicKey = undefined;
 }
 
-export function resolveBrokerageClientTier(providedKey: string): BrokerageClientTier {
-  const publicKey = loadExtensionPublicKey();
-  if (publicKey && providedKey === publicKey) return "extension_public";
+export function resolveBrokerageClientTier(_providedKey: string): BrokerageClientTier {
+  // RETIRED: never resolves "extension_public" — a second, independent
+  // enforcement point alongside loadBrokerageApiKeys' own removal of
+  // BROKERAGE_EXTENSION_PUBLIC_KEY from the recognized-key set, so re-adding
+  // the key to only one of the two spots still can't reopen the tier.
   return "operator";
 }
 
@@ -61,6 +70,21 @@ export function isExtensionPublicClient(req: Request): boolean {
 }
 
 /** Signed-in brokerage user (session Bearer → tier `user`). */
+/**
+ * A verified session that names a real Smart Site user. The anonymous owner
+ * token (`mintAnonymousOwnerToken`, the pr_anon_owner cookie) is ALSO a
+ * verified session with requestor kind "user", id "anon_<hex>": it is a
+ * browse-only owner, never a signed-in user, so it never earns the user tier.
+ */
+export function isIdentifiedUserSession(
+  session: { requestor?: { kind: string; id: string } } | undefined,
+): boolean {
+  const r = session?.requestor;
+  if (!r || r.kind !== "user") return false;
+  const id = r.id.trim();
+  return id.length > 0 && !isAnonymousOwnerId(id);
+}
+
 export function authenticatedBrokerageUserId(req: Request): string | null {
   if (req.brokerageAuth?.tier !== "user") return null;
   if (req.session?.requestor?.kind !== "user") return null;
@@ -89,6 +113,26 @@ export function brokerageAuth(
   res: Response,
   next: NextFunction,
 ): void {
+  const provided = extractBrokerageApiKey(req);
+
+  // Session-JWT verification is independent of whether any static API key
+  // is configured — checked FIRST so an unconfigured key set never blocks a
+  // real logged-in user. Production has never provisioned
+  // BROKERAGE_OPERATOR_API_KEYS/BROKERAGE_API_KEYS as Cloud Run secrets;
+  // BROKERAGE_EXTENSION_PUBLIC_KEY was the only thing keeping
+  // loadBrokerageApiKeys() non-empty, so its retirement (2026-09-07) would
+  // otherwise 503 every session-authenticated request too, not just
+  // API-key callers.
+  if (provided?.includes(".")) {
+    const verified = verifySessionToken(provided);
+    if (verified.ok && isIdentifiedUserSession(verified.session)) {
+      req.session = verified.session;
+      req.brokerageAuth = { tier: "user" };
+      next();
+      return;
+    }
+  }
+
   const keys = loadBrokerageApiKeys();
   if (keys.size === 0) {
     res.status(503).json({
@@ -98,22 +142,10 @@ export function brokerageAuth(
     return;
   }
 
-  const provided = extractBrokerageApiKey(req);
-
   if (provided && keys.has(provided)) {
     req.brokerageAuth = { tier: resolveBrokerageClientTier(provided) };
     next();
     return;
-  }
-
-  if (provided?.includes(".")) {
-    const verified = verifySessionToken(provided);
-    if (verified.ok && verified.session.requestor?.kind === "user") {
-      req.session = verified.session;
-      req.brokerageAuth = { tier: "user" };
-      next();
-      return;
-    }
   }
 
   res.status(401).json({

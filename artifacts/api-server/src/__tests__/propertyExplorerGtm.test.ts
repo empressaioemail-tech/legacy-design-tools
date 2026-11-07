@@ -37,6 +37,14 @@ setupRouteTests((g) => {
 
 beforeAll(async () => {
   process.env.SERVICE_API_KEY = SERVICE_KEY;
+  // D-25: `brokerageBillingPublicBaseUrl()` no longer has a default, so the
+  // checkout route refuses by name (`billing_public_base_url_unset`) unless a
+  // public origin is configured. Every deployed spec sets it -- cortex-api sets
+  // `BROKERAGE_BILLING_PUBLIC_BASE_URL=https://api.empressa.io`. These tests are
+  // about the Stripe seam, not the resolver, so they run configured. The unset
+  // case is proven by name in `src/lib/retrievalEndpoint.test.ts`.
+  process.env.BROKERAGE_BILLING_PUBLIC_BASE_URL =
+    "https://cortex-api-test.example";
   delete process.env.PIPEDRIVE_API_TOKEN;
   delete process.env.STRIPE_SECRET_KEY;
 
@@ -99,6 +107,39 @@ describe("property explorer GTM + billing seam", () => {
     expect(res.body.mode).toBe("simulated");
     expect(res.body.stripeConfigured).toBe(false);
     expect(res.body.honestNote).toMatch(/simulated/i);
+  });
+
+  it("VIOLATION: configured Stripe + missing STRIPE_PRO_PRICE_ID refuses 503, never a simulated session under a real key", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_configured";
+    delete process.env.STRIPE_PRO_PRICE_ID;
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/property-explorer/billing/checkout")
+      .set("Authorization", `Bearer ${SERVICE_KEY}`)
+      .set("X-Hauska-Install-Id", INSTALL_ID)
+      .send({ tier: "pro" });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("checkout_unavailable");
+    expect(res.body.missing).toBe("STRIPE_PRO_PRICE_ID");
+    expect(res.body.mode).toBeUndefined();
+    delete process.env.STRIPE_SECRET_KEY;
+  });
+
+  it("VIOLATION: configured Stripe + missing STRIPE_MAX_PRICE_ID refuses 503 for the max tier specifically", async () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_fake_configured";
+    delete process.env.STRIPE_MAX_PRICE_ID;
+    const app = getApp();
+    const res = await request(app)
+      .post("/api/brokerage/v1/property-explorer/billing/checkout")
+      .set("Authorization", `Bearer ${SERVICE_KEY}`)
+      .set("X-Hauska-Install-Id", INSTALL_ID)
+      .send({ tier: "max" });
+
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("checkout_unavailable");
+    expect(res.body.missing).toBe("STRIPE_MAX_PRICE_ID");
+    delete process.env.STRIPE_SECRET_KEY;
   });
 
   it("rejects unknown PE event types", async () => {

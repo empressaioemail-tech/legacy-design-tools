@@ -15,17 +15,41 @@
  * Usage:
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- \
  *     --city=georgetown-tx \
- *     [--limit=N] [--dry-run] [--prop-ids-file=<path>]
+ *     [--limit=N] [--dry-run] [--prop-ids-file=<path>] [--clear-stale]
  *   pnpm --filter @workspace/cad-ingest zoning-stamp -- --list
  *
- * DATABASE_URL must point at the target Postgres unless --dry-run. The new
- * `zoning_district` column must exist on the deployment DB (migration 0059)
- * or every UPDATE no-ops silently — apply the migration first.
+ * `--clear-stale` (whole-county runs only; refused with --limit or
+ * --prop-ids-file): after the stamp, rows still carrying this city's key that
+ * the current layer did not stamp go back to NULL. Without it a re-stamp only
+ * ever adds, and a parcel the city's layer has since left out keeps its old
+ * code. With --dry-run it prints the count and a sample and writes nothing.
  *
- * Additive + idempotent + exit-bounded: only `zoning_district` is written,
- * a re-run recomputes and overwrites in place, and the run fetches the
- * zoning layer + stamps + prints a summary, then exits (0 on success, 1 on
- * fatal error or an empty zoning layer).
+ * DATABASE_URL must point at the target Postgres unless --dry-run. The
+ * `zoning_district` column (migration 0059) and `zoning_district_interim`
+ * (migration 0103) must exist on the deployment DB or the stamp FAILS CLOSED —
+ * the batched UPDATE names both columns, so Postgres rejects the unknown one
+ * and the first batch aborts with zero rows written. It does not no-op
+ * silently. Apply both migrations first.
+ *
+ * Additive + idempotent + exit-bounded: only the two zoning columns are
+ * written, a re-run recomputes and overwrites in place, and the run fetches
+ * the zoning layer + stamps + prints a summary, then exits (0 on success, 1
+ * on fatal error or an empty zoning layer).
+ *
+ * A FULL (unscoped, unlimited), non-dry run also writes a row to
+ * `zoning_stamp_run` (migration 0112) after the stamp completes — the
+ * independent reference hauska-factory's gate 1 (load-reconciliation-gate)
+ * reconciles stored zoning rows against, per city. A `--limit` or
+ * `--prop-ids-file` run (a sample, a smoke test) deliberately writes none.
+ *
+ * FEATURES AND ACCOUNTS (P-259b). `parcels read` counts FEATURES
+ * (`DISTINCT ON feature_index`). A feature carrying no CAD account
+ * (`prop_id` '0', empty or NULL) is SKIPPED — it writes no row and is never
+ * PIPed — and the summary prints, on every leg, the feature count, the
+ * account-bearing feature count, the distinct real-account count, and the
+ * skipped count by reason. In Travis 423,540 of 828,773 features carry
+ * `prop_id '0'`, so a feature count reported as an account count would be
+ * wrong by that much; both are named instead.
  *
  * `--prop-ids-file=<path>` (scoped mode): restricts the parcel READ (and
  * therefore the UPDATE, which only ever targets rows produced by that
@@ -37,9 +61,9 @@
  * deduped before use. WITHOUT this flag the CLI is byte-identical to the
  * whole-county path other cities depend on — this flag only ever narrows.
  * The resolved summary reports listSize / matched / stamped /
- * notFoundInParcelStore / noZoningPolygonHit, every count named, so a
- * mismatch between the requested list and what's actually in the store is
- * visible before (dry-run) or after (live) any write.
+ * notFoundInParcelStore / skippedNoAccount / noZoningPolygonHit, every count
+ * named, so a mismatch between the requested list and what's actually in the
+ * store is visible before (dry-run) or after (live) any write.
  *
  * Egress: the zoning fetch is a plain HTTPS GET to the city's ArcGIS host.
  * Some public ArcGIS TLS setups have an unreachable OCSP/CRL endpoint from
@@ -51,21 +75,129 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { normalizeDigitId } from "./geo";
 import { ZONING_LAYERS, resolveZoningLayer } from "./zoning-layers";
-import { fetchZoningFeatures } from "./zoning-service";
-import { buildZoningIndex } from "./zoning-stamp";
-import { stampCountyZoning } from "./zoning-stamp-db";
+import {
+  fetchZoningFeatures,
+  type RawZoningFeature,
+  type ZoningLayerMeta,
+} from "./zoning-service";
+import { buildParcelIdIndex, buildZoningIndex } from "./zoning-stamp";
+import { stampCountyZoning, buildZoningStampRunRow, writeZoningStampRun } from "./zoning-stamp-db";
+import { isClusterJobExecution, LAPTOP_WRITE_FROZEN, LAPTOP_WRITE_FROZEN_MESSAGE } from "../jobPlane";
+
+/**
+ * Layer-level audit of the base-code parse (P-259). Pure, over the fetched
+ * features, so it can be asserted in a test: how many published values resolved
+ * to a base district, how many are planned development, and — listed in full,
+ * never sampled — every value that resolved to neither.
+ */
+export interface LayerParseAudit {
+  features: number;
+  /** Features whose code field published nothing (dropped from the index). */
+  noCode: number;
+  distinctValues: number;
+  base: number;
+  plannedDevelopment: number;
+  unrecognised: number;
+  /**
+   * Of `base`, the features whose published value carried a declared interim
+   * qualifier (P-259b) — Austin's `I-<base>`, read as its base. A SUBSET of
+   * `base`, never added to it.
+   */
+  interimBase: number;
+  /** Of `plannedDevelopment`, the features whose value was interim (`I-PUD`). */
+  interimPlannedDevelopment: number;
+  /** Interim published values with their feature counts (`I-SF-2` -> n, …). */
+  interimValueHistogram: Record<string, number>;
+  baseHistogram: Record<string, number>;
+  unrecognisedHistogram: Record<string, number>;
+  overlayHistogram: Record<string, number>;
+}
+
+export function layerParseAudit(features: RawZoningFeature[]): LayerParseAudit {
+  const audit: LayerParseAudit = {
+    features: features.length,
+    noCode: 0,
+    distinctValues: 0,
+    base: 0,
+    plannedDevelopment: 0,
+    unrecognised: 0,
+    interimBase: 0,
+    interimPlannedDevelopment: 0,
+    interimValueHistogram: {},
+    baseHistogram: {},
+    unrecognisedHistogram: {},
+    overlayHistogram: {},
+  };
+  const bump = (h: Record<string, number>, k: string): void => {
+    h[k] = (h[k] ?? 0) + 1;
+  };
+  for (const f of features) {
+    if (f.code === null) {
+      // Published nothing (or a configured nullDistrictCode): dropped from the
+      // index, so a parcel inside such a polygon lands in the "no polygon"
+      // bucket. Counted here so the ambiguity is sized in the log rather than
+      // hidden by it.
+      audit.noCode += 1;
+      continue;
+    }
+    if (f.parse === undefined) continue;
+    if (f.parse.kind === "base") {
+      audit.base += 1;
+      bump(audit.baseHistogram, f.code);
+      if (f.parse.interim) {
+        audit.interimBase += 1;
+        bump(audit.interimValueHistogram, f.parse.raw.trim());
+      }
+      // Overlays are counted ONLY here. For a resolved base the parser can
+      // prove which tokens are the base and which are the suffix; for a
+      // planned-development or unrecognised value the whole published value is
+      // stamped raw and its tokens are not classified, so counting them as
+      // "overlays" would report a token inside "UNZ-NP" (or the PUD in
+      // "PUD-NP") as an overlay token. Left out, not guessed. An INTERIM value
+      // IS classified (the qualifier is stripped by the same rule), so "I-SF-2-NP"
+      // contributes its NP here and SF-2 to `baseHistogram` — the point of the rule.
+      for (const overlay of f.parse.overlays) bump(audit.overlayHistogram, overlay);
+    } else if (f.parse.kind === "planned-development") {
+      audit.plannedDevelopment += 1;
+      bump(audit.baseHistogram, f.code);
+      if (f.parse.interim) {
+        audit.interimPlannedDevelopment += 1;
+        bump(audit.interimValueHistogram, f.parse.raw.trim());
+      }
+    } else {
+      // Includes an interim value whose qualifier was recognised but whose
+      // remainder matched no base (`I-XYZ`): disclosed as interim, still
+      // unrecognised, still stamped verbatim.
+      audit.unrecognised += 1;
+      bump(audit.unrecognisedHistogram, f.parse.raw.trim());
+    }
+  }
+  audit.distinctValues =
+    Object.keys(audit.baseHistogram).length +
+    Object.keys(audit.unrecognisedHistogram).length;
+  return audit;
+}
+
+/** Rows of `hist`, descending by count (ties by key) — stable output for logs. */
+function sortedHist(hist: Record<string, number>): [string, number][] {
+  return Object.entries(hist).sort((a, b) =>
+    b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0]),
+  );
+}
 
 /**
  * Normalize a raw prop id (leading zeros stripped from an all-digit id,
- * left untouched otherwise). Mirrors `normalizeCadPropId` in
- * `artifacts/api-server/src/lib/parcelNodeId.ts` — duplicated here (not
- * imported) so `cad-ingest` stays dependency-free of `api-server`.
+ * left untouched otherwise). Delegates to `geo.ts`'s `normalizeDigitId` —
+ * the SAME rule the zoning-stamp parcel-id join now applies (Bug 2) — so
+ * the two never drift into two copies of one rule. `geo.ts`'s own doc
+ * comment carries the cross-package note: this mirrors `normalizeCadPropId`
+ * in `artifacts/api-server/src/lib/parcelNodeId.ts`, not imported from it so
+ * `cad-ingest` stays dependency-free of `api-server`.
  */
 export function normalizePropId(propId: string): string {
-  const t = propId.trim();
-  if (!/^\d+$/.test(t)) return t;
-  return t.replace(/^0+(?=\d)/, "");
+  return normalizeDigitId(propId);
 }
 
 /**
@@ -113,6 +245,101 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+export interface WriteGateRefusal {
+  code: typeof LAPTOP_WRITE_FROZEN;
+  message: string;
+}
+
+/**
+ * Cluster-job write gate (2026-10-07 stage-3 ruling; jobPlane.ts, reused —
+ * not copied — from cad-ingest's cli.ts gate in #793). `isWriteRun` is the
+ * caller's own determination of whether this invocation will write (here:
+ * not --dry-run — stampCountyZoning itself never issues an UPDATE when
+ * dryRun is true, see zoning-stamp-db.ts). Returns a refusal descriptor for
+ * a write run outside a cluster Job; null when the run may proceed.
+ * Exported so the gate is testable directly, independent of argv parsing /
+ * network / DB.
+ */
+export function zoningStampWriteGate(
+  isWriteRun: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): WriteGateRefusal | null {
+  if (!isWriteRun) return null;
+  if (isClusterJobExecution(env)) return null;
+  return { code: LAPTOP_WRITE_FROZEN, message: LAPTOP_WRITE_FROZEN_MESSAGE };
+}
+
+/**
+ * Print what the layer says about itself. The projection is READ AT SOURCE
+ * (never assumed): if the host did not answer `?f=json`, say so explicitly
+ * rather than print a frame nobody verified. `outSR=4326` is requested on
+ * every page and the response frame is checked before any PIP.
+ */
+function logLayerMeta(meta: ZoningLayerMeta): void {
+  if (meta.unavailable) {
+    log(
+      "layer metadata: UNAVAILABLE (the host did not answer ?f=json) — source " +
+        "spatial reference and vintage are NOT read; every page is still " +
+        "requested outSR=4326 and its returned frame is verified",
+    );
+    return;
+  }
+  log(`layer metadata: ${meta.name ?? "(unnamed)"} (read at source)`);
+  log(
+    `  source spatial reference: wkid ${meta.sourceWkid ?? "(none published)"}` +
+      (meta.sourceLatestWkid !== null ? ` (latestWkid ${meta.sourceLatestWkid})` : "") +
+      " — every page is requested outSR=4326 and the returned frame is verified",
+  );
+  log(
+    `  layer vintage (editingInfo.lastEditDate): ${meta.lastEditDate ?? "(not published)"}`,
+  );
+  log(`  maxRecordCount: ${meta.maxRecordCount ?? "(not published)"}`);
+}
+
+/** The base-code parse audit, printed before any PIP so the layer is understood first. */
+function logParseAudit(audit: LayerParseAudit): void {
+  log("---- layer base-code audit (P-259) ----");
+  log(`features fetched:       ${audit.features}`);
+  log(
+    `  no published code:     ${audit.noCode} (dropped from the index — never a district)`,
+  );
+  log(
+    `resolved to a base:     ${audit.base} features, ${sortedHist(audit.baseHistogram).length} distinct codes`,
+  );
+  log(
+    `  of which interim:     ${audit.interimBase} features (declared interim qualifier read as its base district, P-259b)`,
+  );
+  log(
+    `planned development:    ${audit.plannedDevelopment} features (stamped raw — A-164 PUD message)`,
+  );
+  if (audit.interimPlannedDevelopment > 0) {
+    log(
+      `  of which interim:     ${audit.interimPlannedDevelopment} features (I-PUD family)`,
+    );
+  }
+  const interimValues = sortedHist(audit.interimValueHistogram);
+  if (interimValues.length > 0) {
+    log(
+      `interim values read:    ${interimValues.length} distinct published values → ` +
+        interimValues.map(([v, n]) => `${v} ${n}`).join(", "),
+    );
+  }
+  log(
+    `UNRECOGNISED:           ${audit.unrecognised} features, ` +
+      `${sortedHist(audit.unrecognisedHistogram).length} distinct published values ` +
+      "(stamped verbatim — never a truncated prefix)",
+  );
+  for (const [code, n] of sortedHist(audit.unrecognisedHistogram)) {
+    log(`    ${code.padEnd(24)} ${n}`);
+  }
+  const overlays = sortedHist(audit.overlayHistogram);
+  log(
+    `overlays carried:       ${overlays.length} distinct tokens (` +
+      overlays.map(([t, n]) => `${t} ${n}`).join(", ") +
+      ")",
+  );
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2).filter((a) => a !== "--");
   const { values } = parseArgs({
@@ -123,6 +350,7 @@ async function main(): Promise<void> {
       "dry-run": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       "prop-ids-file": { type: "string" },
+      "clear-stale": { type: "boolean", default: false },
     },
   });
 
@@ -131,7 +359,11 @@ async function main(): Promise<void> {
     for (const c of Object.values(ZONING_LAYERS)) {
       log(
         `  ${c.cityKey.padEnd(16)} county=${c.countyFips} ` +
-          `field=${c.codeField} ${c.layerUrl}`,
+          `field=${c.codeField}${c.baseCodeParse ? " +base-code-parse" : ""}` +
+          (c.baseCodeParse?.interimQualifiers?.length
+            ? ` interim=${c.baseCodeParse.interimQualifiers.join("/")}`
+            : "") +
+          ` ${c.layerUrl}`,
       );
     }
     log(`total: ${Object.keys(ZONING_LAYERS).length}`);
@@ -141,7 +373,7 @@ async function main(): Promise<void> {
   if (!values.city) {
     fail(
       "usage: zoning-stamp --city=<key|name|countyFips> [--limit=N] " +
-        "[--dry-run] [--prop-ids-file=<path>] | zoning-stamp --list",
+        "[--dry-run] [--prop-ids-file=<path>] [--clear-stale] | zoning-stamp --list",
     );
   }
   const cfg = resolveZoningLayer(values.city);
@@ -157,6 +389,20 @@ async function main(): Promise<void> {
   if (!dryRun && !databaseUrl) {
     fail("DATABASE_URL must be set (or pass --dry-run to fetch + PIP only)");
   }
+
+  // 2026-10-07 stage-3 ruling (jobPlane.ts): a write (not --dry-run) runs
+  // only inside a cluster Job on the DigitalOcean job plane -- no
+  // break-glass laptop run (carries the 2026-09-12 no-break-glass ruling to
+  // this loader, which previously checked nothing). Refuses before the
+  // zoning layer is even fetched.
+  const zoningGateRefusal = zoningStampWriteGate(!dryRun);
+  if (zoningGateRefusal) {
+    console.error(
+      JSON.stringify({ event: "zoning-stamp.refused", ...zoningGateRefusal }),
+    );
+    process.exit(2);
+  }
+
   const limit = values.limit !== undefined ? Number(values.limit) : undefined;
   if (limit !== undefined && !Number.isInteger(limit)) {
     fail(`--limit must be an integer, got "${values.limit}"`);
@@ -191,8 +437,10 @@ async function main(): Promise<void> {
   log("fetching zoning polygons...");
   const raw = await fetchZoningFeatures({
     cfg,
+    onMeta: logLayerMeta,
     onPage: ({ total }) => log(`  fetched ${total} zoning features...`),
   });
+  const audit = layerParseAudit(raw);
   const index = buildZoningIndex(raw);
   log(`zoning polygons indexed: ${index.length} (of ${raw.length} fetched)`);
   if (index.length === 0) {
@@ -204,7 +452,35 @@ async function main(): Promise<void> {
   // Distinct district codes present in the layer (the audit surface for the
   // ZONE -> setback-district alignment).
   const codesInLayer = [...new Set(index.map((p) => p.code))].sort();
-  log(`district codes in layer: ${codesInLayer.join(", ")}`);
+  log(`codes in the index: ${codesInLayer.join(", ")}`);
+  if (cfg.baseCodeParse) logParseAudit(audit);
+
+  // Bug 2 (parcel-id-first join): built from the SAME fetched `raw`
+  // features `index` came from, but NOT filtered by `buildZoningIndex`'s
+  // blank-code drop — a blank code on the parcel's own feature is exactly
+  // the fact this index exists to answer. Only built when the layer config
+  // carries `parcelIdField`; every other city's run is untouched.
+  // `parcelIdDiscriminatorValues` (cross-county fix) restricts the id join
+  // to features on this layer that are actually on THIS city's county side
+  // (Horseshoe Bay's layer also carries Llano CAD parcels under an
+  // overlapping PROP_ID space) — see zoning-stamp.ts's buildParcelIdIndex.
+  const parcelIdIndex = cfg.parcelIdField
+    ? buildParcelIdIndex(raw, {
+        discriminatorAcceptValues: cfg.parcelIdDiscriminatorValues,
+      })
+    : undefined;
+  if (parcelIdIndex) {
+    const blankOwnFeatures = [...parcelIdIndex.values()].filter(
+      (e) => e.code === null,
+    ).length;
+    log(
+      `parcel-id index (field ${cfg.parcelIdField}` +
+        (cfg.parcelIdDiscriminatorField
+          ? `, discriminator ${cfg.parcelIdDiscriminatorField}=${(cfg.parcelIdDiscriminatorValues ?? []).join("/")}`
+          : "") +
+        `): ${parcelIdIndex.size} ids indexed (${blankOwnFeatures} carry a blank/no-district code)`,
+    );
+  }
 
   // 2. Stamp the county's parcels.
   if (dryRun && !databaseUrl) {
@@ -216,6 +492,7 @@ async function main(): Promise<void> {
   }
   const pool = new Pool({ connectionString: databaseUrl });
   let summary;
+  let runRecordId: number | undefined;
   try {
     const db = drizzle(pool);
     log(`${dryRun ? "DRY-RUN " : ""}stamping ${cfg.countyFips} parcels...`);
@@ -227,9 +504,33 @@ async function main(): Promise<void> {
       dryRun,
       limit,
       propIds,
+      parcelIdIndex,
+      // Layers with a geographic sub-area field (Horseshoe Bay SUBDIVISION) also write
+      // txgio_parcel.zoning_subarea -- migration 0113 must be applied before a non-dry run.
+      writeSubarea: Boolean(cfg.subareaField),
+      clearStale: values["clear-stale"] ?? false,
       onProgress: (done, matched) =>
         log(`  stamped ${done} parcels (${matched} matched)...`),
     });
+    // Run record (migration 0112), FULL non-dry runs only. A `--limit` or
+    // `--prop-ids-file` run stamps a PARTIAL population on purpose (a sample,
+    // a bounded smoke test) -- recording it as "the latest run" would make
+    // gate 1 (hauska-factory load-reconciliation-gate) compare the full
+    // county's stored row count against a sample's tiny numbers and refuse a
+    // correct countywide stamp as ZONING_LOAD_UNRECONCILED. Only an
+    // unscoped, unlimited, non-dry run is the countywide population gate 1
+    // means to reconcile against.
+    if (!dryRun && propIds === undefined && limit === undefined) {
+      const row = buildZoningStampRunRow({
+        countyFips: cfg.countyFips,
+        cityKey: cfg.cityKey,
+        layerUrl: cfg.layerUrl,
+        layerReadAt: new Date(startedAt),
+        summary,
+      });
+      const inserted = await writeZoningStampRun(db, row);
+      runRecordId = inserted.id;
+    }
   } finally {
     await pool.end();
   }
@@ -240,13 +541,121 @@ async function main(): Promise<void> {
   log(`city:             ${cfg.cityKey} (${cfg.cityName})`);
   log(`county:           ${cfg.countyFips}`);
   log(`zoning polygons:  ${index.length}`);
-  log(`parcels read:     ${summary.parcelsRead}`);
-  log(`parcels matched:  ${summary.parcelsMatched}`);
-  log(`parcels null:     ${summary.parcelsUnmatched} (centroid in no zoning polygon)`);
+  // Features AND accounts, named separately on every leg (P-259b): the CLI's
+  // denominator is FEATURES (`DISTINCT ON feature_index`), and in Travis
+  // 423,540 of 828,773 features carry `prop_id '0'`. A figure never travels
+  // without its denomination.
+  log(`features read:    ${summary.parcelsRead} (DISTINCT feature_index)`);
+  log(
+    `accounts read:    ${summary.accountsRead} (distinct real prop_id)`,
+  );
+  log(
+    `account-bearing:  ${summary.accountBearingFeatures} features carried a real prop_id`,
+  );
+  log(
+    `skipped:          ${summary.parcelsSkippedNoAccount} features carried NO CAD account ` +
+      `(wrote no row, never PIPed; ${sortedHist(summary.skippedNoAccountByReason)
+        .map(([r, n]) => `${r} ${n}`)
+        .join(", ")})`,
+  );
+  log(`parcels matched:  ${summary.parcelsMatched} (base district stamped)`);
+  log(
+    `  of which interim: ${summary.parcelsInterim} (declared interim qualifier read as its base district, P-259b)`,
+  );
+  log(
+    `planned dev:      ${summary.parcelsPlannedDevelopment} (stamped raw — A-164 PUD message)`,
+  );
+  if (summary.parcelsInterimPlannedDevelopment > 0) {
+    log(
+      `  of which interim: ${summary.parcelsInterimPlannedDevelopment} (I-PUD family)`,
+    );
+  }
+  log(
+    `unrecognised:     ${summary.parcelsUnrecognised} (published value stamped verbatim, no base resolved)`,
+  );
+  log(
+    `parcels null:     ${summary.parcelsUnmatched} ` +
+      "(representative point in no zoning polygon carrying a published code: " +
+      "outside the city, an un-zoned pocket, or one of the layer's empty-code polygons)",
+  );
+  if (parcelIdIndex) {
+    log(
+      `no district (layer): ${summary.parcelsNoDistrictOnLayer} (Bug 2: the ` +
+        "parcel's OWN feature was found by id and its code there is blank — " +
+        "declared, never stamped from a neighbour)",
+    );
+    log(
+      `id-geometry mismatch: ${summary.parcelsIdGeometryMismatch} (an id match ` +
+        "was found but its feature's geometry does not contain this parcel's " +
+        "interior point -- rejected as a cross-county/numeric id coincidence, " +
+        "the point lookup decided instead; NOT a 7th bucket, see note below)",
+    );
+  }
+  log(
+    `buckets sum:      ${
+      summary.parcelsMatched +
+      summary.parcelsPlannedDevelopment +
+      summary.parcelsUnrecognised +
+      summary.parcelsUnmatched +
+      summary.parcelsNoDistrictOnLayer +
+      summary.parcelsSkippedNoAccount
+    } (must equal features read; a feature is in exactly one of matched / planned dev / ` +
+      "unrecognised / null / no-district-on-layer / skipped-no-account)",
+  );
   log(`rows updated:     ${dryRun ? "0 (dry-run)" : summary.rowsUpdated}`);
-  const hist = Object.entries(summary.codeHistogram).sort((a, b) => b[1] - a[1]);
+  if (summary.staleFeatures !== undefined) {
+    log(
+      `stale stamps:     ${summary.staleFeatures} features still carry ${cfg.cityKey} but no current polygon holds them; ` +
+        `${dryRun ? "would clear (dry-run)" : `cleared ${summary.staleRowsCleared ?? 0} rows`}`,
+    );
+    if ((summary.staleSample ?? []).length > 0) {
+      log(`  sample (prop_id=old code): ${(summary.staleSample ?? []).join(", ")}`);
+    }
+  }
+  log(
+    `run record:       ${
+      runRecordId !== undefined
+        ? `zoning_stamp_run id=${runRecordId}`
+        : dryRun
+          ? "none (dry-run)"
+          : "none (scoped run -- --limit or --prop-ids-file; not the countywide population gate 1 reconciles against)"
+    }`,
+  );
+  const interimVals = sortedHist(summary.interimValueHistogram);
+  if (interimVals.length > 0) {
+    log(
+      `interim values stamped (${interimVals.length} distinct, every one listed):`,
+    );
+    for (const [value, n] of interimVals) {
+      log(`  ${value.padEnd(24)} ${n}`);
+    }
+    log(
+      `  read as (interim base histogram): ` +
+        sortedHist(summary.interimBaseHistogram)
+          .map(([base, n]) => `${base} ${n}`)
+          .join(", "),
+    );
+  }
+  const hist = sortedHist(summary.codeHistogram);
   log(`district histogram (${hist.length} codes):`);
   for (const [code, n] of hist) log(`  ${code.padEnd(8)} ${n}`);
+  const unrec = sortedHist(summary.unrecognisedHistogram);
+  if (unrec.length > 0) {
+    log(`unrecognised values (${unrec.length} distinct, every one listed):`);
+    for (const [code, n] of unrec) log(`  ${code.padEnd(24)} ${n}`);
+  }
+  const overlays = sortedHist(summary.overlayHistogram);
+  if (overlays.length > 0) {
+    log(
+      `overlays on stamped parcels (${overlays.length} tokens): ` +
+        overlays.map(([t, n]) => `${t} ${n}`).join(", "),
+    );
+  }
+  if (summary.subareaHistogram) {
+    const sub = sortedHist(summary.subareaHistogram);
+    log(`sub-area (${cfg.subareaField}) on stamped parcels (${sub.length} values, written to zoning_subarea):`);
+    for (const [v, n] of sub) log(`  ${v.padEnd(28)} ${n}`);
+  }
   log(`duration:         ${seconds}s`);
 
   if (propIds !== undefined) {
@@ -254,20 +663,57 @@ async function main(): Promise<void> {
     log(`listSize:              ${summary.listSize}`);
     log(`matched (in store):    ${summary.matched}`);
     log(`stamped:               ${dryRun ? "0 (dry-run)" : summary.parcelsMatched}`);
+    log(
+      `  of which interim:    ${summary.parcelsInterim} (declared interim qualifier read as its base district)`,
+    );
     log(`notFoundInParcelStore: ${summary.notFoundInParcelStore?.length ?? 0}`);
     if (summary.notFoundInParcelStore && summary.notFoundInParcelStore.length > 0) {
       log(`  ids: ${summary.notFoundInParcelStore.join(", ")}`);
+    }
+    log(
+      `skippedNoAccount:      ${summary.skippedNoAccountPropIds?.length ?? 0} (no CAD account — wrote no row, never PIPed)`,
+    );
+    if (
+      summary.skippedNoAccountPropIds &&
+      summary.skippedNoAccountPropIds.length > 0
+    ) {
+      log(`  ids: ${summary.skippedNoAccountPropIds.join(", ")}`);
     }
     log(`noZoningPolygonHit:    ${summary.noZoningPolygonHit?.length ?? 0}`);
     if (summary.noZoningPolygonHit && summary.noZoningPolygonHit.length > 0) {
       log(`  ids: ${summary.noZoningPolygonHit.join(", ")}`);
     }
+    log(
+      `unrecognisedInPolygon: ${summary.unrecognisedPropIds?.length ?? 0} (published value stamped verbatim, no base resolved)`,
+    );
+    if (summary.unrecognisedPropIds && summary.unrecognisedPropIds.length > 0) {
+      log(`  ids: ${summary.unrecognisedPropIds.join(", ")}`);
+    }
+    if (parcelIdIndex) {
+      log(
+        `noDistrictOnLayer:     ${summary.noDistrictOnLayerPropIds?.length ?? 0} (Bug 2: own feature found by id, code blank — declared, never from a neighbour)`,
+      );
+      if (
+        summary.noDistrictOnLayerPropIds &&
+        summary.noDistrictOnLayerPropIds.length > 0
+      ) {
+        log(`  ids: ${summary.noDistrictOnLayerPropIds.join(", ")}`);
+      }
+    }
     if (summary.perParcel && summary.perParcel.length > 0) {
       log(`${dryRun ? "would-stamp" : "stamped"} per-parcel table:`);
-      log(`  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} district`);
+      log(
+        `  ${"prop_id".padEnd(12)} ${"feature_index".padEnd(14)} ${"kind".padEnd(20)} ${"interim".padEnd(8)} ${"method".padEnd(29)} district`,
+      );
       for (const row of summary.perParcel) {
         log(
-          `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ${row.district ?? "(none)"}`,
+          `  ${row.propId.padEnd(12)} ${String(row.featureIndex).padEnd(14)} ` +
+            `${row.kind.padEnd(20)} ${(row.interim === undefined ? "-" : String(row.interim)).padEnd(8)} ` +
+            `${(row.matchMethod ?? "-").padEnd(29)} ${row.district ?? "(none)"}` +
+            (row.publishedCode && row.publishedCode !== row.district
+              ? `   [published: ${row.publishedCode}]`
+              : "") +
+            (row.subarea !== undefined ? `   [subarea: ${row.subarea ?? "(blank)"}]` : ""),
         );
       }
     }

@@ -1,4 +1,9 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -7,12 +12,16 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./middlewares/session";
 import { userRateLimitMiddleware } from "./middlewares/userRateLimit";
+import { browserProxyEndUserMiddleware } from "./middlewares/browserProxyEndUser";
+import { sessionRevocationMiddleware } from "./middlewares/sessionRevocation";
 import { mountSpaStatic } from "./middlewares/spaStatic";
 import { stripeWebhookHandler } from "./routes/brokerageBilling";
 import { startBriefingGenerationJobsSweep } from "./lib/briefingGenerationJobsSweep";
 import { startFindingRunsSweep } from "./lib/findingRunsSweep";
 import { startTerrainJobsSweep } from "./lib/terrainGenerationJobsSweep";
 import { startAdapterCacheSweepWorker } from "./lib/adapterCache";
+import { startLifecycleDrain } from "./lib/peLifecycleDrain";
+import { startWatchDetector } from "./lib/peWatching";
 
 // Start the code-atom fetch queue drainer at module load. Polls every
 // CODE_ATOM_QUEUE_TICK_MS (default 10s) for pending entries.
@@ -42,6 +51,18 @@ startTerrainJobsSweep(logger);
 // once and never re-cached. Disabled with
 // ADAPTER_CACHE_SWEEP_INTERVAL_MS=0.
 startAdapterCacheSweepWorker({ log: logger });
+
+// P-492: drain the Smart Site lifecycle outbox on a schedule (retry without
+// waiting for another user's event; quiet and Claude-connected scans). Every
+// tick writes a row to `ss_lifecycle_drain_run`. Rows are claimed with
+// FOR UPDATE SKIP LOCKED, so every instance can run it. See
+// `lib/peLifecycleDrain.ts`.
+startLifecycleDrain(logger);
+
+// T2-WATCH: daily change detection for saved properties (Watching tab). Hourly
+// tick; each saved parcel is claimed per row, so every instance can run it.
+// WATCH_DETECT_TICK_MS=0 disables it. See lib/peWatching.ts.
+startWatchDetector(logger);
 
 const app: Express = express();
 
@@ -80,9 +101,71 @@ app.use(express.urlencoded({ extended: true }));
 // See `middlewares/session.ts` for the cookie shape and the
 // dev-only header overrides honored when NODE_ENV !== "production".
 app.use(sessionMiddleware);
+// Browser-proxy end-user identity: AFTER the session (it may replace it with
+// the proxied end user's own verified session, or force anonymous) and BEFORE
+// per-user metering, so a proxied signed-in user is metered as themselves.
+app.use(browserProxyEndUserMiddleware);
+// T1-A: server-side revocation / sliding-expiry check of whichever signed
+// token the two middlewares above accepted. Before metering, so a revoked
+// token is metered (and gated) as the anonymous caller it now is.
+app.use(sessionRevocationMiddleware);
 app.use(userRateLimitMiddleware);
 
 app.use("/api", router);
+
+/**
+ * A 4xx the framework itself raised for the client (body-parser's
+ * entity.parse.failed / entity.too.large carry `status` and `expose: true`).
+ * Anything else, including app errors that happen to carry a status, is an
+ * internal error. Narrow on purpose: a boundary that rewrites every error
+ * into a client fault is the over-broad control.
+ */
+function exposedClientErrorStatus(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const e = err as { status?: unknown; statusCode?: unknown; expose?: unknown };
+  const status =
+    typeof e.status === "number"
+      ? e.status
+      : typeof e.statusCode === "number"
+        ? e.statusCode
+        : null;
+  if (status === null || e.expose !== true) return null;
+  return status >= 400 && status <= 499 ? status : null;
+}
+
+// JSON error boundary for every /api route. Without it Express renders the
+// finalhandler HTML page: an MCP caller passes that page through verbatim
+// with isError: true, and outside production a DrizzleQueryError embeds SQL
+// and params in it. Express 5 forwards a rejected async handler here on its
+// own (no wrapper). Mounted at /api so the SPA static path is untouched.
+app.use(
+  "/api",
+  (err: unknown, req: Request, res: Response, next: NextFunction) => {
+    const path = req.originalUrl?.split("?")[0] ?? req.url;
+    const clientStatus = exposedClientErrorStatus(err);
+    if (clientStatus === null) {
+      logger.error({ err, path, method: req.method }, "api_internal_error");
+    } else {
+      logger.warn(
+        { err, path, method: req.method, status: clientStatus },
+        "api_client_error",
+      );
+    }
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    if (clientStatus !== null) {
+      const type = (err as { type?: unknown }).type;
+      res.status(clientStatus).json({
+        error: "bad_request",
+        type: typeof type === "string" ? type : "client_error",
+      });
+      return;
+    }
+    res.status(500).json({ error: "internal_error" });
+  },
+);
 
 // Production single-service static-serve: when SPA_STATIC_ROOT is set
 // (the Cloud Run image), api-server also serves the built Vite SPAs.
