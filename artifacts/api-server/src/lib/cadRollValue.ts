@@ -294,6 +294,7 @@ export function bakedExemptionCodes(
 export const ROLL_MEMBERSHIP_ABSENT_FROM_DECLARED_DROP =
   "absent-from-declared-drop" as const;
 
+/**
  * Street-segment key for cross-validating a `cad_property` propId match
  * against the snapshot's own (TxGIO-derived) situs address — NOT the same
  * normalizer as `normalizeSitusAddress` in joinNormalize.ts (that one keys a
