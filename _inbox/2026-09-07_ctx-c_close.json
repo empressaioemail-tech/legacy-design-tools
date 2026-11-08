@@ -1,0 +1,77 @@
+{
+  "lane": "CTX-C",
+  "planRow": "P-124",
+  "type": "close",
+  "closedAt": "2026-09-07T22:15:00Z",
+  "worktree": "P:/tmp/ctx-c-cadroll",
+  "branch": "feat/ctx-c-cad-completeness",
+  "repo": "legacy-design-tools",
+  "missionPremise": "Every Tier-1 bake writes baseFacts.cadRoll ALL-NULL by design (nodeFacetBakeTier1Cli.ts:507-514); a separate patch CLI was supposed to populate it and had never been run for any of the six Central-TX counties. facetScore does not count cadRoll as a coverage dimension, so a re-bake without the patch folded in silently re-nulls it even at an equal-or-better score. The onboarding runbook documented only the bake half (Step Z7). This is 'unaccounted' presented as absence.",
+  "completionPredicate": "All six counties have real cadRoll values where cad_property carries them (verified correct, not just present) and honest absence where it does not; the patch cannot be run and forgotten again; land-use state per county is established with evidence as blocked, stale, or real. A stranger should be able to verify this by: (1) running node-facet-bake-tier1-with-cad-roll for a county and confirming a nonzero situsAgree/situsInconclusive count with situsDisagree correctly excluded from patched values; (2) confirming the onboarding runbook names this as one step; (3) reading county_facet_coverage against live baseFacts.landUse counts per county.",
+  "scopeBasis": "Dispatch explicitly forbade running the Tier-1/Tier-2 bake and deploying, and named lib/cad-ingest (CTX-A) and lib/adapters/src/local/setbacks (CTX-B) as other lanes' territory. Mid-session, doc-repo-26 additionally held the --apply step for an ordering reason discovered during execution (CTX-A's imminent county-wide re-stamp + Z7 bake would silently destroy an apply run now, since facetScore can't see cadRoll) — this was not in the original dispatch and is a legitimate scope boundary discovered live, not a self-imposed one.",
+
+  "prNumbers": [637],
+  "mergeShas": [],
+  "ciConclusion": "not yet checked — PR just opened, CI has not reported",
+  "headCommit": "380db745",
+
+  "checkpointArtifacts": [
+    "_inbox/2026-09-07_ctx-c_cp1.json"
+  ],
+
+  "countsWithCountingRules": {
+    "note": "All counts are FULL POPULATION (patch CLI's own dry-run scan of every place_layer_snapshots row for the county, adapter_key=node-facets:tier1), not samples, unless marked TABLESAMPLE.",
+    "48021_bastrop":    { "scanned": 77799,  "cadPropertyRows": 77799,  "noCadRow": 0,     "situsDisagree": 0,     "situsDisagreeRate": "0.0%" },
+    "48055_caldwell":   { "scanned": 48649,  "cadPropertyRows": 48382,  "noCadRow": 267,   "situsDisagree": 212,   "situsDisagreeRate": "0.44%" },
+    "48209_hays":       { "scanned": 173050, "cadPropertyRows": 134606, "noCadRow": 38444, "situsDisagree": 37473, "situsDisagreeRate": "27.8%" },
+    "48309_mclennan":   { "scanned": 114255, "cadPropertyRows": 114255, "noCadRow": 0,     "situsDisagree": 0,     "situsDisagreeRate": "0.0%" },
+    "48453_travis":     { "scanned": 500307, "cadPropertyRows": 492848, "noCadRow": 7459,  "situsDisagree": 14403, "situsDisagreeRate": "2.9%" },
+    "48491_williamson": { "scanned": 602050, "cadPropertyRows": 319480, "noCadRow": 282570,"situsDisagree": 0,     "situsDisagreeRate": "0.0%" }
+  },
+
+  "constraintsHonored": [
+    "Did not touch lib/cad-ingest (CTX-A's territory) — read one file there read-only (lib/cad-ingest/src/vintage.ts) for reference, made no edits",
+    "Did not touch lib/adapters/src/local/setbacks/ (CTX-B's territory)",
+    "Did not run the Tier-1 or Tier-2 bake — built the fold-in wrapper (nodeFacetBakeTier1WithCadRollCli.ts) but never executed it, even in --dry-run, since its first step invokes the bake",
+    "Did not deploy",
+    "Did not touch doc_repo — drafted the onboarding runbook edit as a local artifact (artifacts/api-server/CTX-C_onboarding_runbook_patch.md) for doc-repo-26 to land",
+    "Did not touch LANDUSE_JOIN_DISABLED_FIPS_SEED / landUseJoinKey despite finding evidence its Williamson justification looks stale — routed to CTX-G (ledger owner), did not act",
+    "Did not run --apply — held per doc-repo-26's explicit instruction, an ordering finding (bake-before-patch sequencing) discovered mid-session",
+    "Reported (did not fix) everything found outside scope: Williamson land-use gate staleness (CTX-G), the R-account/numeric duplicate-node mechanism (doc-repo-26/CTX-A/CTX-D), the joinNormalize.ts internal owner-match-rate inconsistency (recorded, not resolved)",
+    "Verified at source throughout, not from the dispatch's own prose: read nodeFacetBakeTier1Cli.ts, factory_onboarding_runbook.md, joinIntegrityGate.ts, joinNormalize.ts, parcelNodeId.ts, cadRollValue.ts directly rather than trusting the dispatch's characterization of them",
+    "Filed one correction to the dispatch's own technical claim (ON CONFLICT DO UPDATE vs plain UPDATE) per DEV_PROCESS 3.2a, with file:line citation"
+  ],
+
+  "whatRemainsOpen": [
+    "--apply has NOT run for any county. All six dry-run results above are dry-run only; zero production writes have been made by this lane.",
+    "PR #637 is open, not merged. No CI result yet.",
+    "nodeFacetBakeTier1WithCadRollCli.ts is committed but never executed (bake execution forbidden to this lane by dispatch).",
+    "The onboarding runbook edit is drafted but not landed (doc-repo-26 owns doc_repo commits).",
+    "CTX-F determined the fold-in belongs in the publish sequence, not a pre-bake readiness check (their reasoning, agreed) — the exact mechanism that makes cadRoll un-skippable in production is not yet wired anywhere; only this lane's own wrapper CLI exists as the building block.",
+    "hauska-factory's automated bake sequence (BAKE_CLI_FILES) cannot pick up this fold-in until CTX-F's held _LDT_SHA pin advances, which is gated on unrelated review work (loadLedgerBlockedFips widening, buildable-envelope changes) — not this lane's blocker to clear.",
+    "Land-use staleness for Caldwell/McLennan/Travis (join proven capable per the coverage ledger, live bake shows near-zero) is reported, not fixed — fixing it requires a Tier-1 bake run, forbidden to this lane.",
+    "Williamson land-use gate staleness reported to CTX-G, not ruled on.",
+    "Williamson's R-account/numeric duplicate-node mechanism: established and tested (colocation + fact-agreement), but the serving-path question (which id format a live customer lookup actually resolves) is unresolved and outside this lane's DB access — handed to doc-repo-26/CTX-A/CTX-D.",
+    "joinNormalize.ts's internal owner-match-rate inconsistency for Hays (0.013% vs 1.1%, both far from this session's own 54.8-72.2% situs-based reading) is recorded as an open question, not reconciled."
+  ],
+
+  "fleetMemoryScratch": [
+    "LESSON: when a propId-based join has no documented integrity gate, verify it empirically before trusting a 'roughly zero' collision estimate — a full-population check found Hays at 27.8% and an entirely undocumented Travis at 2.9%, an order of magnitude apart, both material at scale.",
+    "LESSON: a count match between two numbers from different instruments (my noCadRow, another lane's instantiation count) is not evidence they measure the same thing until tested at row identity — arithmetic identity (a+b=total) is suggestive, not proof.",
+    "LESSON: when two populations show a suspicious count relationship, a cheap decisive test is spatial/identity colocation (same rounded lat/lng) plus an asymmetric bidirectional check (does A imply B, does B imply A) — the asymmetry itself (100% vs 89.6% here) is often more informative than either rate alone.",
+    "DEAD-END: assumed the Williamson R-vs-numeric split in place_layer_snapshots came from the same cad_property declared-vintage mechanism I'd been analyzing in the legacy bake. It didn't — both sample nodes traced to the CONFORMANT bake (parcelSource=conformant-v1-cad-parcel-roll), a different pipeline reading atoms from a different database (hauska_mcp) via situs-address crosswalk, not propId. Don't assume two populations with a matching split pattern share a mechanism without checking which code path actually wrote them.",
+    "GROUND-TRUTH (2026-09-07 live, DEPLOYMENT_DATABASE_URL/neondb): Williamson cad_property has two disjoint ingests — tax_year 2025/stratmap-roll/282,569 rows all R-prefixed, tax_year 2026/cad-export/319,480 rows all numeric. DECLARED_CAD_VINTAGES pins Williamson to 2026.",
+    "GROUND-TRUTH (2026-09-07 live): current txgio_parcel AND txgio_parcel_staging for Williamson are 100% R-prefixed (304,162-304,298 rows depending on predicate), zero numeric rows, single ingest 2026-09-03.",
+    "GROUND-TRUTH (2026-09-07 live): Williamson R-account and numeric-id Tier-1 nodes colocate 89.6% (R->numeric) / 100% (numeric->R) at 5-decimal lat/lng precision, and agree 359/359 on zoning district, land-use code, and acreage where both exist.",
+    "OPEN: which node-id format Williamson's live serving path (PMTiles click-to-resolve) actually queries by — not resolvable from this database, needs the PMTiles bake or serving code.",
+    "OPEN: Hays owner-match-rate reconciliation (joinNormalize.ts's own 0.013% vs 1.1% vs this session's 54.8-72.2% situs-based reading) — three numbers, not reconciled."
+  ],
+
+  "leave_behind": "corroborateCadPropertyMatchBySitus (cadRollValue.ts) is a general-purpose situs-corroboration helper — usable anywhere else in this codebase a propId-keyed join to cad_property needs a cheap correctness check, not just this patch CLI. nodeFacetBakeTier1WithCadRollCli.ts is a thin, reusable orchestration pattern (spawn two existing CLIs in sequence, forward --county/--dry-run) that could be copied for other 'two steps that must run together' problems in this pipeline. CTX-C_onboarding_runbook_patch.md (own repo, not doc_repo) has the exact drafted runbook text for whoever lands it.",
+
+  "reportedNotFixed": [
+    "Williamson land-use gate (LANDUSE_JOIN_DISABLED_FIPS_SEED) justification appears stale post-R-strip-retirement — routed to CTX-G",
+    "Williamson R-account/numeric node duplication mechanism and its serving-path implications — routed to doc-repo-26/CTX-A/CTX-D",
+    "Caldwell/McLennan/Travis land-use bakes are stale relative to proven ledger capability — reported in CP1, requires a Tier-1 bake to fix (forbidden to this lane)"
+  ]
+}
