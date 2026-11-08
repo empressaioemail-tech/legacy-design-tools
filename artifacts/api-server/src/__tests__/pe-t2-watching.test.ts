@@ -224,7 +224,14 @@ describe("detectWatchChanges", () => {
     await detectWatchChanges(undefined, { force: true, now: new Date("2026-10-21T00:00:00Z") });
     const rows = await changeRows();
     expect(rows.map((r) => [r.kind, r.title])).toEqual([["appraisal", "Appraisal updated"]]);
-    expect(JSON.stringify(await q("SELECT * FROM pe_watch_changes"))).not.toMatch(/455|412/);
+    // Only the words a person reads carry the no-figures rule. SELECT * also returned the random id
+    // UUID and timestamps, which can contain 412 or 455 by chance and flaked this test.
+    const shown = await q<{ title: string; source_url: string | null }>("SELECT title, source_url FROM pe_watch_changes");
+    expect(shown).toHaveLength(1);
+    for (const r of shown) {
+      expect(r.title).not.toMatch(/[\d$]/);
+      expect(r.source_url ?? "").not.toMatch(/455|412/);
+    }
   });
 
   it("a records-request job reaching complete is a records_request change", async () => {
