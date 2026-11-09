@@ -43,6 +43,11 @@ export type SetbacksFactPresent = {
   sideFt: number | null;
   rearFt: number | null;
   cornerFt: number | null;
+  /**
+   * Re-walk 2026-11-09: when a side, rear or corner cell was refused, its own reason (which quotes the city's text),
+   * so the envelope can say why in the city's words. Absent when the dimension was served or the cell said nothing.
+   */
+  refusals?: Partial<Record<"side" | "rear" | "corner", string>>;
   sourceAdapter: "parcel_record";
   sourceVintage: string | null;
   evaluatedAt: string | null;
@@ -116,14 +121,16 @@ const REFUSAL_CODE_MAP = {
  * null on anything but a real present finite number. Never throws, never
  * fabricates.
  */
-async function scalarNumberOrNull(
+async function scalarRead(
   countyFips: string,
   propId: string,
   railKey: string,
-): Promise<number | null> {
+): Promise<{ value: number | null; refusal: string | null }> {
   const cell = await loadParcelRecordCell(countyFips, propId, railKey);
-  if (cell.state !== "present") return null;
-  return typeof cell.value === "number" && Number.isFinite(cell.value) ? cell.value : null;
+  /* only the cell's own refusal (it quotes the city), not a missing row or an unread store */
+  if (cell.state === "refused" && cell.code === "engine-refused") return { value: null, refusal: cell.reason || null };
+  if (cell.state !== "present") return { value: null, refusal: null };
+  return { value: typeof cell.value === "number" && Number.isFinite(cell.value) ? cell.value : null, refusal: null };
 }
 
 export async function setbacksFactFromParcelRecord(parcelNodeId: string): Promise<SetbacksFactRead> {
@@ -174,19 +181,24 @@ export async function setbacksFactFromParcelRecord(parcelNodeId: string): Promis
       reason: `parcel_record_cell ${placeKey}/${SETBACK_FRONT_FT_RAIL_KEY} is kind=value but its value is not a readable number. Refusing rather than inventing one.`,
     };
   }
-  const [sideFt, rearFt, cornerFt] = await Promise.all([
-    scalarNumberOrNull(parsed.countyFips, parsed.propId, SETBACK_SIDE_FT_RAIL_KEY),
-    scalarNumberOrNull(parsed.countyFips, parsed.propId, SETBACK_REAR_FT_RAIL_KEY),
-    scalarNumberOrNull(parsed.countyFips, parsed.propId, SETBACK_CORNER_FT_RAIL_KEY),
+  const [side, rear, corner] = await Promise.all([
+    scalarRead(parsed.countyFips, parsed.propId, SETBACK_SIDE_FT_RAIL_KEY),
+    scalarRead(parsed.countyFips, parsed.propId, SETBACK_REAR_FT_RAIL_KEY),
+    scalarRead(parsed.countyFips, parsed.propId, SETBACK_CORNER_FT_RAIL_KEY),
   ]);
+  const refusals: Partial<Record<"side" | "rear" | "corner", string>> = {};
+  if (side.refusal) refusals.side = side.refusal;
+  if (rear.refusal) refusals.rear = rear.refusal;
+  if (corner.refusal) refusals.corner = corner.refusal;
   return {
     state: "present",
     source: SETBACKS_FACT_SOURCE,
     entityId: placeKey,
     frontFt,
-    sideFt,
-    rearFt,
-    cornerFt,
+    sideFt: side.value,
+    rearFt: rear.value,
+    cornerFt: corner.value,
+    ...(Object.keys(refusals).length ? { refusals } : {}),
     sourceAdapter: "parcel_record",
     sourceVintage: cell.vintage || null,
     evaluatedAt: cell.vintage || null,
