@@ -48,6 +48,12 @@ export type SetbacksFactPresent = {
    * so the envelope can say why in the city's words. Absent when the dimension was served or the cell said nothing.
    */
   refusals?: Partial<Record<"side" | "rear" | "corner", string>>;
+  /**
+   * Operator option A (2026-11-09): when the cells were written from the 2026 Bastrop Development Code chart (factory
+   * method "bastrop-bdc-2026-chart") rather than the city's map, which still carries the repealed rule, what the
+   * envelope says about its source. Absent for every other source.
+   */
+  chartSource?: { label: string; section: string | null; page: string | null; ordinanceUrl: string | null; abutsResidential: boolean | null; note: string | null };
   sourceAdapter: "parcel_record";
   sourceVintage: string | null;
   evaluatedAt: string | null;
@@ -133,6 +139,21 @@ async function scalarRead(
   return { value: typeof cell.value === "number" && Number.isFinite(cell.value) ? cell.value : null, refusal: null };
 }
 
+/** The 2026-chart source a factory cell names in its basis, or null (operator option A, 2026-11-09). */
+export function chartSourceOf(raw: Record<string, unknown> | null | undefined): SetbacksFactPresent["chartSource"] | null {
+  const basis = raw && typeof raw.basis === "object" && raw.basis !== null ? (raw.basis as Record<string, unknown>) : null;
+  if (!basis || basis.method !== "bastrop-bdc-2026-chart") return null;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return {
+    label: str(basis.source) ?? "2026 Development Code (Ord. 2026-06)",
+    section: str(basis.section),
+    page: str(basis.page),
+    ordinanceUrl: str(basis.ordinanceUrl),
+    abutsResidential: typeof basis.abutsResidential === "boolean" ? basis.abutsResidential : null,
+    note: str(basis.note),
+  };
+}
+
 export async function setbacksFactFromParcelRecord(parcelNodeId: string): Promise<SetbacksFactRead> {
   const parsed = parseParcelNodeId(parcelNodeId);
   if (!parsed) {
@@ -190,10 +211,12 @@ export async function setbacksFactFromParcelRecord(parcelNodeId: string): Promis
   if (side.refusal) refusals.side = side.refusal;
   if (rear.refusal) refusals.rear = rear.refusal;
   if (corner.refusal) refusals.corner = corner.refusal;
+  const chartSource = chartSourceOf(cell.raw);
   return {
     state: "present",
     source: SETBACKS_FACT_SOURCE,
     entityId: placeKey,
+    ...(chartSource ? { chartSource } : {}),
     frontFt,
     sideFt: side.value,
     rearFt: rear.value,

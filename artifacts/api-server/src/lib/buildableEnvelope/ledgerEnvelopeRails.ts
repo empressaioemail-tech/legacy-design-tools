@@ -97,6 +97,19 @@ function decline(
  * Read the rails and either hand back the cells' own numbers or the cell's
  * own refusal. Never calls the codified setback table.
  */
+/** Ordinance No. 2026-06 (Bastrop Development Code) took effect on this date. */
+export const BDC_2026_EFFECTIVE_DATE = "2026-04-14";
+
+/**
+ * "2026 Bastrop Development Code (Ord. 2026-06), Sec. 14.02.003.F.3; the city's map still shows the repealed rule."
+ * plus the abutting note when the cell carries one.
+ */
+export function chartSourceLabel(chart: NonNullable<import("../setbacksFactFromParcelRecord").SetbacksFactPresent["chartSource"]>): string {
+  const where = chart.section ? `, ${/^Sec./.test(chart.section) ? chart.section : `Sec. ${chart.section}`}` : "";
+  const base = `2026 Bastrop Development Code (Ord. 2026-06)${where}; the city's map still shows the repealed rule.`;
+  return chart.note && !chart.note.includes("the city's map") ? `${base} ${chart.note}` : base;
+}
+
 export async function decideEnvelopeFromLedger(
   parcelNodeId: string | null,
 ): Promise<LedgerEnvelopeDecision> {
@@ -198,6 +211,7 @@ export async function decideEnvelopeFromLedger(
     zoningCode: zoning.district,
   };
   const vintage = setbacks.sourceVintage ?? zoning.sourceVintage ?? "unreadable";
+  const chart = setbacks.chartSource ?? null;
   const resolved: AuthoritativeSetbackResolution = {
     scalars: {
       front_ft: frontFt,
@@ -207,10 +221,12 @@ export async function decideEnvelopeFromLedger(
     },
     districtCode: zoning.district,
     sourceKind: "parcel-record",
-    sourceLabel: "parcel_record setbackFrontFt/setbackSideFt/setbackRearFt/setbackCornerFt",
-    effectiveDate: vintage,
-    dateBasis: "unreadable",
-    citationUrl: zoning.provenance,
+    // Operator option A (2026-11-09): cells written from the 2026 Development Code chart say so, with the ordinance
+    // and its effective date; the city's map still shows the repealed rule.
+    sourceLabel: chart ? chartSourceLabel(chart) : "parcel_record setbackFrontFt/setbackSideFt/setbackRearFt/setbackCornerFt",
+    effectiveDate: chart ? BDC_2026_EFFECTIVE_DATE : vintage,
+    dateBasis: chart ? "ordinance-effective-date" : "unreadable",
+    citationUrl: chart?.ordinanceUrl ?? zoning.provenance,
     table,
     district: districtMapping,
   };

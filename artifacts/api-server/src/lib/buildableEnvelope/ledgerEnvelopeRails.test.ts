@@ -87,3 +87,43 @@ describe("decideEnvelopeFromLedger carries the district a setback decline is abo
     expect(decision.ledgerDistrict).toBeNull();
   });
 });
+
+describe("operator option A (2026-11-09): setbacks from the 2026 Development Code chart say so", () => {
+  const ORD = "https://www.cityofbastrop.org/page/open/18744/0/ORDINANCE%20NO.%202026-06%20B3%20Code%20Repeal%20and%20Bastrop%20Development%20Code%20Adoption.pdf";
+  function mu(chartSource: Record<string, unknown> | undefined) {
+    loadZoningFactForServeMock.mockResolvedValue({ state: "present", entityId: "48021:33977", district: "MU", jurisdictionKey: "bastrop-development-code", provenance: "zoning-cell", sourceVintage: "2026-11-09" });
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "present",
+      entityId: "48021:33977",
+      frontFt: 15,
+      sideFt: 10,
+      rearFt: 15,
+      cornerFt: 10,
+      sourceVintage: "2026-11-09",
+      ...(chartSource ? { chartSource } : {}),
+    });
+  }
+
+  it("1102 Pecan St (MU): the 2026 chart is the source, with its section, the ordinance link and its effective date", async () => {
+    mu({ label: "2026 Development Code (Ord. 2026-06)", section: "14.02.003.F.3", page: "Page 11 of 191", ordinanceUrl: ORD, abutsResidential: true, note: "Applied 10 ft to all sides because one side abuts a residential district." });
+    const decision = await decideEnvelopeFromLedger("48021:33977");
+    expect(decision.state).toBe("values");
+    if (decision.state !== "values") return;
+    expect(decision.resolved.scalars.side_ft).toBe(10);
+    expect(decision.resolved.sourceLabel).toBe(
+      "2026 Bastrop Development Code (Ord. 2026-06), Sec. 14.02.003.F.3; the city's map still shows the repealed rule. Applied 10 ft to all sides because one side abuts a residential district.",
+    );
+    expect(decision.resolved.citationUrl).toBe(ORD);
+    expect(decision.resolved.effectiveDate).toBe("2026-04-14");
+    expect(decision.resolved.dateBasis).toBe("ordinance-effective-date");
+  });
+
+  it("any other source keeps the parcel_record label and its own vintage", async () => {
+    mu(undefined);
+    const decision = await decideEnvelopeFromLedger("48021:33977");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.resolved.sourceLabel).toBe("parcel_record setbackFrontFt/setbackSideFt/setbackRearFt/setbackCornerFt");
+    expect(decision.resolved.dateBasis).toBe("unreadable");
+    expect(decision.resolved.citationUrl).toBe("zoning-cell");
+  });
+});
