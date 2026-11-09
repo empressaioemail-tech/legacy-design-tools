@@ -19,6 +19,7 @@ import {
 } from "./authoritativeSetbackSource";
 import type { DistrictMappingResult } from "./districtMapping";
 import { loadSetbacksFactForServe } from "../setbacksFactServeCutover";
+import { setbackRefusalWords } from "./setbackRefusalWords";
 import {
   type SetbacksFactRead,
 } from "../setbacksFactFromParcelRecord";
@@ -124,7 +125,8 @@ export async function decideEnvelopeFromLedger(
   if (setbacks.sideFt == null) {
     return {
       state: "declined",
-      ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackSideFt is not a readable number. Refusing rather than inventing one.`,
+      // Re-walk 2026-11-09: the city's own words and, for Bastrop, the current code's rule (setbackRefusalWords.ts).
+      ledgerReason: setbackRefusalWords({ dimension: "side", entityId: setbacks.entityId, district: zoning.district, refusal: setbacks.refusals?.side }),
       ledgerCode: "parcel-record-malformed-cell",
       rail: "setbackSideFt",
       ledgerDistrict: zoning.district,
@@ -133,7 +135,7 @@ export async function decideEnvelopeFromLedger(
   if (setbacks.rearFt == null) {
     return {
       state: "declined",
-      ledgerReason: `parcel_record_cell ${setbacks.entityId}/setbackRearFt is not a readable number. Refusing rather than inventing one.`,
+      ledgerReason: setbackRefusalWords({ dimension: "rear", entityId: setbacks.entityId, district: zoning.district, refusal: setbacks.refusals?.rear }),
       ledgerCode: "parcel-record-malformed-cell",
       rail: "setbackRearFt",
       ledgerDistrict: zoning.district,
