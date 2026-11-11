@@ -94,6 +94,7 @@ import {
   mkdirSync,
   renameSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -104,6 +105,10 @@ import pg from "pg";
 
 import { tryResolveDeclaredCadVintage } from "@workspace/cad-ingest";
 import { parcelNodeId } from "./lib/parcelNodeId";
+import {
+  buildParcelsPmtilesManifest,
+  parcelsPmtilesManifestName,
+} from "./lib/parcelsPmtilesManifest";
 import {
   landUseJoinKey,
   addressJoinKey,
@@ -631,12 +636,25 @@ function toDockerPath(p: string): string {
   return `//${win[1].toLowerCase()}/${win[2].replace(/\\/g, "/")}`;
 }
 
-async function contentHash12Async(filePath: string): Promise<string> {
+async function contentSha256Async(filePath: string): Promise<string> {
   const hash = createHash("sha256");
   const fd = createReadStream(filePath);
   fd.on("data", (d) => hash.update(d));
   await once(fd, "end");
-  return hash.digest("hex").slice(0, 12);
+  return hash.digest("hex");
+}
+
+/** Git SHA of the checkout the bake runs from; null if git is unavailable. */
+function bakeGitSha(): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -865,12 +883,28 @@ async function bakeAndReport(
   runTippecanoe(plan, layer, minZoom, maxZoom, geojsonPath, tmpOut);
   if (!existsSync(tmpOut)) fail("tippecanoe produced no output file");
 
-  const hash = await contentHash12Async(tmpOut);
+  const sha256 = await contentSha256Async(tmpOut);
+  const hash = sha256.slice(0, 12);
   const finalName = `parcels.${hash}.pmtiles`;
   const finalPath = join(outDir, finalName);
   renameSync(tmpOut, finalPath);
   const pmSizeMb = (statSync(finalPath).size / 1_048_576).toFixed(1);
   log(`PMTiles: ${finalName} (${pmSizeMb} MB) at ${finalPath}`);
+
+  // Provenance sidecar next to the .pmtiles (does not affect tiles or hash).
+  const manifest = buildParcelsPmtilesManifest({
+    sha256,
+    writtenAt: new Date().toISOString(),
+    sourceLayer: layer,
+    gitSha: bakeGitSha(),
+    argv: process.argv.slice(2).filter((a) => a !== "--"),
+    perCounty: stats
+      ? stats.perCounty.map((c) => ({ fips: c.fips, features: c.features }))
+      : null,
+  });
+  const manifestPath = join(outDir, parcelsPmtilesManifestName(hash));
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  log(`manifest: ${manifestPath}`);
   summarize(stats, finalPath, `${pmSizeMb} MB`, startedAt);
 }
 
