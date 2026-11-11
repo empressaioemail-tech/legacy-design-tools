@@ -100,3 +100,37 @@ load-bearing mechanism. Set `TIPPECANOE_ATTRIBUTE_ID=1` to force the flag.)
 The output is renamed to `parcels.<sha256-12>.pmtiles`. When the operator later
 promotes staging into prod or loads more CAD roll, re-baking produces a fresh
 hash; D4 uploads the hashed name to GCS so cache-busting is automatic.
+
+## Provenance sidecar
+
+After the `.pmtiles` is hashed and renamed, the bake writes
+`parcels.<hash>.manifest.json` next to it. It does not change the tiles, the
+hash or the filename. The builder is the pure function
+`buildParcelsPmtilesManifest` in `src/lib/parcelsPmtilesManifest.ts`.
+
+The shape follows hauska-map `apps/property-explorer/public/tiles.json`
+(`hash`, `sourceLayer`, `promoteId`, `counties`, `featured`, `writtenAt`)
+and adds provenance:
+
+```json
+{
+  "hash": "c931db20bfc1",
+  "sha256": "<full 64-hex sha256 of the .pmtiles>",
+  "file": "parcels.c931db20bfc1.pmtiles",
+  "sourceLayer": "parcels",
+  "promoteId": "parcel_node_id",
+  "writtenAt": "2026-09-26T12:51:08.553Z",
+  "counties": ["48001", "48491"],
+  "featured": { "48001": 31676, "48491": 97000 },
+  "bake": { "gitSha": "<git HEAD of the bake checkout>", "argv": ["--out-dir=./x"] }
+}
+```
+
+- `featured` is the per-county exported feature count (same key name as
+  `tiles.json`). With `--limit` the counts reflect the cap.
+- `counties` and `featured` are omitted for `--geojson=` bakes (the DB export
+  is skipped, so per-county counts are unknown).
+- `droppedByTileBuilder` (in `tiles.json`) is NOT written: tippecanoe does not
+  report which feature ids it dropped, so the bake cannot know it.
+- `bake.gitSha` is null if git is unavailable; `bake.argv` is the CLI args.
+- `url` (in `tiles.json`) is not written; the bake does not upload.
