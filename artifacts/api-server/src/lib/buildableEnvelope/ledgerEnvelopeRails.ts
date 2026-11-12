@@ -64,6 +64,9 @@ export type LedgerEnvelopeDecision = LedgerEnvelopeValues | LedgerEnvelopeDeclin
 const UNSERVED =
   "The ledger serving path did not serve this parcel. Zoning and setbacks were not re-derived.";
 
+export const ZONING_DISTRICT_NOT_READ =
+  "Setbacks not checked: the zoning district for this parcel has not been read.";
+
 function reasonOf(read: ZoningFactRead | SetbacksFactRead): {
   ledgerReason: string;
   ledgerCode: string;
@@ -135,7 +138,19 @@ export async function decideEnvelopeFromLedger(
   ]);
 
   if (!zoning || zoning.state !== "present") {
-    return decline(zoning, "zoningDistrict", null);
+    const declined = decline(zoning, "zoningDistrict", null);
+    // Operator rule: a parcel without a district shows "Not checked". Only the
+    // district cell itself being absent, or unaccounted, reads this way. An
+    // unserved read, a malformed cell, an engine refusal and a cell miss keep
+    // their own words. The cell code is kept so the audit trail is unchanged.
+    if (
+      zoning &&
+      (zoning.state === "absent" ||
+        (zoning.state === "refused" && zoning.code === "parcel-record-unaccounted"))
+    ) {
+      return { ...declined, ledgerReason: ZONING_DISTRICT_NOT_READ };
+    }
+    return declined;
   }
   if (!setbacks || setbacks.state !== "present") {
     return decline(setbacks, "setbackFrontFt", zoning.district);

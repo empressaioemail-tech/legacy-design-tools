@@ -195,3 +195,81 @@ describe("district confidence: a review district is disclosed, never shown as ce
     expect(decision.resolved.districtDisclosure).not.toMatch(/guarantee|safe/i);
   });
 });
+
+describe("a parcel with no zoning district reads Not checked (operator rule)", () => {
+  const SENTENCE =
+    "Setbacks not checked: the zoning district for this parcel has not been read.";
+
+  it("absent district cell: the exact sentence, the cell's own code kept", async () => {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "absent",
+      entityId: "48021:34105",
+      absence: { kind: "absent-verified", reason: "swept, nothing found" },
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue(null);
+    const d = await decideEnvelopeFromLedger("48021:34105");
+    expect(d.state).toBe("declined");
+    if (d.state !== "declined") return;
+    expect(d.ledgerReason).toBe(SENTENCE);
+    expect(d.ledgerCode).toBe("absent-verified");
+    expect(d.rail).toBe("zoningDistrict");
+    expect(d.ledgerDistrict).toBeNull();
+  });
+
+  it("unaccounted district cell: the exact sentence", async () => {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-unaccounted",
+      entityId: "48021:34105",
+      reason: "cell unaccounted",
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue(null);
+    const d = await decideEnvelopeFromLedger("48021:34105");
+    if (d.state !== "declined") throw new Error("expected decline");
+    expect(d.ledgerReason).toBe(SENTENCE);
+    expect(d.ledgerCode).toBe("parcel-record-unaccounted");
+  });
+
+  it("unserved (county not slated) is unchanged", async () => {
+    loadZoningFactForServeMock.mockResolvedValue(null);
+    loadSetbacksFactForServeMock.mockResolvedValue(null);
+    const d = await decideEnvelopeFromLedger("48021:34105");
+    if (d.state !== "declined") throw new Error("expected decline");
+    expect(d.ledgerCode).toBe("unserved");
+    expect(d.ledgerReason).toMatch(/did not serve this parcel/);
+  });
+
+  it("a refused district cell that is not unaccounted (PUD, malformed) keeps its reason", async () => {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      entityId: "48021:34105",
+      reason: "PUD: setbacks are set by the ordinance for this development",
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue(null);
+    const d = await decideEnvelopeFromLedger("48021:34105");
+    if (d.state !== "declined") throw new Error("expected decline");
+    expect(d.ledgerReason).toBe("PUD: setbacks are set by the ordinance for this development");
+    expect(d.ledgerCode).toBe("parcel-record-engine-refused");
+  });
+
+  it("a district present with no setback cells keeps the table-has-no-row reason", async () => {
+    present(15);
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "refused",
+      code: "parcel-record-engine-refused",
+      entityId: "48021:34105",
+      reason: 'district "GC" is on file, but no row',
+    });
+    const d = await decideEnvelopeFromLedger("48021:34105");
+    if (d.state !== "declined") throw new Error("expected decline");
+    expect(d.ledgerReason).toBe('district "GC" is on file, but no row');
+    expect(d.ledgerDistrict).toBe("R-1");
+  });
+
+  it("a district present with setbacks draws as before", async () => {
+    present(15);
+    const d = await decideEnvelopeFromLedger("48453:832328");
+    expect(d.state).toBe("values");
+  });
+});
