@@ -143,9 +143,17 @@ export async function decideEnvelopeFromLedger(
     // district cell itself being absent, or unaccounted, reads this way. An
     // unserved read, a malformed cell, an engine refusal and a cell miss keep
     // their own words. The cell code is kept so the audit trail is unchanged.
+    // A cell that carries its own specific reason (not-applicable "unincorporated
+    // parcel...", "no zoning layer yet for this city") keeps it exactly. Only a
+    // bare absent cell (blank or the generic no-basis words) or an unaccounted
+    // cell (a pipeline sentence, not a customer reason) reads Not checked.
+    const bareAbsent =
+      zoning?.state === "absent" &&
+      (!zoning.absence.reason?.trim() ||
+        zoning.absence.reason.includes("marked this cell absent with no basis recorded"));
     if (
       zoning &&
-      (zoning.state === "absent" ||
+      (bareAbsent ||
         (zoning.state === "refused" && zoning.code === "parcel-record-unaccounted"))
     ) {
       return { ...declined, ledgerReason: ZONING_DISTRICT_NOT_READ };

@@ -204,7 +204,7 @@ describe("a parcel with no zoning district reads Not checked (operator rule)", (
     loadZoningFactForServeMock.mockResolvedValue({
       state: "absent",
       entityId: "48021:34105",
-      absence: { kind: "absent-verified", reason: "swept, nothing found" },
+      absence: { kind: "absent-verified", reason: "parcel_record marked this cell absent with no basis recorded." },
     });
     loadSetbacksFactForServeMock.mockResolvedValue(null);
     const d = await decideEnvelopeFromLedger("48021:34105");
@@ -214,6 +214,24 @@ describe("a parcel with no zoning district reads Not checked (operator rule)", (
     expect(d.ledgerCode).toBe("absent-verified");
     expect(d.rail).toBe("zoningDistrict");
     expect(d.ledgerDistrict).toBeNull();
+  });
+
+  it("a cell with its own reason keeps it (not-applicable, no zoning layer yet)", async () => {
+    for (const [kind, reason] of [
+      ["not-applicable", "unincorporated parcel: the county does not zone land outside city limits"],
+      ["absent-verified", "no zoning layer yet for this city"],
+    ] as const) {
+      loadZoningFactForServeMock.mockResolvedValue({
+        state: "absent",
+        entityId: "48021:34105",
+        absence: { kind, reason },
+      });
+      loadSetbacksFactForServeMock.mockResolvedValue(null);
+      const d = await decideEnvelopeFromLedger("48021:34105");
+      if (d.state !== "declined") throw new Error("expected decline");
+      expect(d.ledgerReason).toBe(reason);
+      expect(d.ledgerCode).toBe(kind);
+    }
   });
 
   it("unaccounted district cell: the exact sentence", async () => {
