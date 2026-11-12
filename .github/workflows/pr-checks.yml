@@ -255,7 +255,24 @@ jobs:
         # service container, so the package has to land there too, not on the runner.
         run: |
           CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
-          docker exec -u root "$CONTAINER_ID" bash -c "apt-get update && apt-get install -y postgresql-14-postgis-3"
+          # 2026-11-12: PGDG rebuilt postgis-3 (3.7.0+dfsg-1.pgdg12+2) against PostgreSQL 14.25, and the
+          # pgvector/pgvector:pg14 image still runs 14.24, so CREATE EXTENSION postgis failed with
+          # 'undefined symbol: heap_datum_check' on every run. Pin the last build made for 14.24, the one
+          # every green run used (3.7.0+dfsg-1.pgdg12+1). It comes from the main repo while it is still listed
+          # there, and otherwise from the PGDG archive (same signing key, same components; the source line
+          # is derived from the image's own pgdg line). Upgrading the server instead was tried on #860's
+          # first head: it changes pg_dump output, which the schema fixture-drift check rejects. Lift this
+          # pin when the pgvector image moves to 14.25.
+          docker exec -u root -e PIN="3.7.0+dfsg-1.pgdg12+1" "$CONTAINER_ID" bash -ec '
+            apt-get update
+            if ! apt-get install -y "postgresql-14-postgis-3=$PIN" "postgresql-14-postgis-3-scripts=$PIN"; then
+              SRC=$(grep -l apt.postgresql.org /etc/apt/sources.list.d/*.list | head -n1)
+              sed -e "s#apt.postgresql.org/pub/repos/apt#apt-archive.postgresql.org/pub/repos/apt#" -e "s#bookworm-pgdg #bookworm-pgdg-archive #" "$SRC" > /etc/apt/sources.list.d/pgdg-archive.list
+              cat /etc/apt/sources.list.d/pgdg-archive.list
+              apt-get update
+              apt-get install -y "postgresql-14-postgis-3=$PIN" "postgresql-14-postgis-3-scripts=$PIN"
+            fi
+          '
       - name: Enable postgis extension
         env:
           PGPASSWORD: postgres
