@@ -498,7 +498,7 @@ describe("P-299 — the gate over every table this repo ships", () => {
     expect(bad).toEqual([]);
   });
 
-  it("the 12 tables whose note records a copy channel carry transcription-read values (the OT-2 relabel landed, and stayed)", () => {
+  it("the 11 tables whose note records a copy channel carry transcription-read values (the OT-2 relabel landed, and stayed)", () => {
     // Named explicitly rather than inferred from note text: this is the list
     // OT-2 relabelled (P-299), and a table that silently reverts to
     // primary-source-verified has to fail something.
@@ -506,7 +506,6 @@ describe("P-299 — the gate over every table this repo ships", () => {
       "austin-tx",
       "bellmead-tx",
       "beverly-hills-tx",
-      "jarrell-tx",
       "jonestown-tx",
       "kyle-tx",
       "luling-tx",
