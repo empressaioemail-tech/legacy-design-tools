@@ -208,3 +208,41 @@ describe("zoningFactFromParcelRecord reads the stamp's zoningConfidence", () => 
     expect("districtConfidence" in none).toBe(false);
   });
 });
+
+describe("zoningFactFromParcelRecord reads the confidence on the zoningDistrict cell itself (hauska-factory #377 shape)", () => {
+  const PARCEL = "48491:R609663";
+  const stamp = (confidence: string) => ({
+    kind: "value",
+    value: "SF-1",
+    source: "jarrell-zoning-map-trace",
+    vintage: "2024-03-05",
+    confidence,
+    fileSha256: "80c16809".padEnd(64, "0"),
+  });
+
+  it("medium on the cell is review and high is confirmed, with no zoningConfidence rail present", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("medium") }] }),
+    );
+    const medium = await zoningFactFromParcelRecord(PARCEL);
+    expect(medium.state === "present" && medium.districtConfidence).toEqual({ level: "review", label: "medium" });
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("high") }] }),
+    );
+    const high = await zoningFactFromParcelRecord(PARCEL);
+    expect(high.state === "present" && high.districtConfidence?.level).toBe("confirmed");
+  });
+
+  it("the cell's own field wins over a disagreeing rail", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("high") },
+          { placeKey: PARCEL, railKey: "zoningConfidence", cellState: { kind: "value", value: "medium" } },
+        ],
+      }),
+    );
+    const read = await zoningFactFromParcelRecord(PARCEL);
+    expect(read.state === "present" && read.districtConfidence?.level).toBe("confirmed");
+  });
+});

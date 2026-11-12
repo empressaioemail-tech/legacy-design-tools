@@ -192,12 +192,16 @@ export async function zoningFactFromParcelRecord(parcelNodeId: string): Promise<
       reason: `parcel_record_cell ${placeKey}/${ZONING_DISTRICT_RAIL_KEY} is kind=value but its value is not a readable district. Refusing rather than inventing one.`,
     };
   }
-  const [jurisdictionKey, provenance, confidenceLabel] = await Promise.all([
+  // hauska-factory #377 writes `confidence` on the zoningDistrict cell itself; read that first. The separate
+  // zoningConfidence rail is a fallback only (it is not in the closed rail set or the serve slate), so it is
+  // read only when the cell carries no confidence of its own.
+  const ownConfidence = districtConfidenceFromLabel(cell.raw?.confidence);
+  const [jurisdictionKey, provenance, railConfidenceLabel] = await Promise.all([
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_JURISDICTION_KEY_RAIL_KEY),
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_PROVENANCE_RAIL_KEY),
-    scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_CONFIDENCE_RAIL_KEY),
+    ownConfidence ? Promise.resolve(null) : scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_CONFIDENCE_RAIL_KEY),
   ]);
-  const districtConfidence = districtConfidenceFromLabel(confidenceLabel);
+  const districtConfidence = ownConfidence ?? districtConfidenceFromLabel(railConfidenceLabel);
   return {
     state: "present",
     source: ZONING_FACT_SOURCE,
