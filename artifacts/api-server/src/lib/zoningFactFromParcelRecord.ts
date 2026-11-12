@@ -38,7 +38,7 @@
 
 import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import { parseParcelNodeId } from "./parcelNodeId";
-import { districtConfidenceFromLabel, type DistrictConfidence } from "./districtConfidence";
+import { districtConfidenceFromLabel, districtConfidenceFromSource, type DistrictConfidence } from "./districtConfidence";
 
 export const ZONING_FACT_SOURCE = "zoning-fact-parcel-record" as const;
 export const ZONING_DISTRICT_RAIL_KEY = "zoningDistrict" as const;
@@ -201,7 +201,10 @@ export async function zoningFactFromParcelRecord(parcelNodeId: string): Promise<
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_PROVENANCE_RAIL_KEY),
     ownConfidence ? Promise.resolve(null) : scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_CONFIDENCE_RAIL_KEY),
   ]);
-  const districtConfidence = ownConfidence ?? districtConfidenceFromLabel(railConfidenceLabel);
+  // No confidence anywhere: the cell's SOURCE decides. An enumerated official layer is confirmed; anything else
+  // (traced-file:*, unknown, missing) is review, never confirmed.
+  const districtConfidence =
+    ownConfidence ?? districtConfidenceFromLabel(railConfidenceLabel) ?? districtConfidenceFromSource(cell.raw?.source);
   return {
     state: "present",
     source: ZONING_FACT_SOURCE,

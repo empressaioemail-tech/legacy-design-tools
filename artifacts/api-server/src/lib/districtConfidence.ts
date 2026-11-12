@@ -11,7 +11,8 @@
  *   - "high"           -> confirmed. Nothing changes in the copy.
  *   - "medium"         -> review, worded "for review at the edges".
  *   - any other value  -> review, worded "marked for review". No invented scale.
- *   - absent           -> confirmed (today's behavior; Bastrop and Travis are unchanged).
+ *   - absent, source is an enumerated OFFICIAL layer -> confirmed (today's behavior; Bastrop and Travis are unchanged).
+ *   - absent, any other source (traced-file:*, unknown, missing) -> review. Never confirmed.
  *
  * The disclosure is plain words and never says "guarantee" or "safe".
  */
@@ -23,6 +24,29 @@ export type DistrictConfidence = {
   /** The stamp's own label, as written ("high", "medium", ...). */
   label: string;
 };
+
+/**
+ * zoningDistrict sources that are an official zoning layer, so a cell with NO confidence of its own is
+ * still confirmed. An explicit list: a source not named here reads as review. If unsure, leave it OUT.
+ *
+ *   - tx_zoning_district_staging: the staged official city zoning layer the factory's parcel-r5-zoning
+ *     job writes (ZONING_SOURCE); Bastrop and Travis cells carry it.
+ *
+ * Deliberately NOT listed: legacy-design-tools:txgio_parcel.zoning_district and
+ * legacy-design-tools:zoning_stamp_run (the factory's own comments call these a different provenance from
+ * the staged layer), and traced-file:* (a district traced from a map file, e.g. traced-file:jarrell-tx).
+ */
+export const OFFICIAL_ZONING_DISTRICT_SOURCES: readonly string[] = ["tx_zoning_district_staging"];
+
+/** Label used when a district is under review only because its source is not an enumerated official layer. */
+export const UNVERIFIED_SOURCE_LABEL = "unverified-source";
+
+/** The confidence of a district cell that carries none of its own: decided by its source. */
+export function districtConfidenceFromSource(source: unknown): DistrictConfidence | null {
+  const s = typeof source === "string" ? source.trim() : "";
+  if (OFFICIAL_ZONING_DISTRICT_SOURCES.includes(s)) return null;
+  return { level: "review", label: UNVERIFIED_SOURCE_LABEL };
+}
 
 /**
  * Numeric stand-in for DistrictMappingResult.confidence when the district is

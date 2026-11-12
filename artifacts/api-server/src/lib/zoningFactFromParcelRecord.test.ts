@@ -186,7 +186,7 @@ describe("zoningFactFromParcelRecord reads the stamp's zoningConfidence", () => 
   function store(confidence: string | null) {
     return memoryParcelRecordStore({
       cells: [
-        { placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: { kind: "value", value: "SF-1", vintage: "2024-03-05" } },
+        { placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: { kind: "value", value: "SF-1", source: "tx_zoning_district_staging", vintage: "2024-03-05" } },
         { placeKey: PARCEL, railKey: ZONING_JURISDICTION_KEY_RAIL_KEY, cellState: { kind: "value", value: "jarrell-tx", vintage: "2024-03-05" } },
         ...(confidence
           ? [{ placeKey: PARCEL, railKey: "zoningConfidence", cellState: { kind: "value", value: confidence, vintage: "2024-03-05" } }]
@@ -244,5 +244,44 @@ describe("zoningFactFromParcelRecord reads the confidence on the zoningDistrict 
     );
     const read = await zoningFactFromParcelRecord(PARCEL);
     expect(read.state === "present" && read.districtConfidence?.level).toBe("confirmed");
+  });
+});
+
+describe("zoningFactFromParcelRecord: absent confidence is decided by the cell source", () => {
+  const PARCEL = "48491:R609663";
+  const withSource = (source?: string) =>
+    memoryParcelRecordStore({
+      cells: [
+        {
+          placeKey: PARCEL,
+          railKey: ZONING_DISTRICT_RAIL_KEY,
+          cellState: { kind: "value", value: "SF-1", vintage: "2024-03-05", ...(source ? { source } : {}) },
+        },
+      ],
+    });
+
+  it("a traced-file district with no confidence reads review (also for an unknown or missing source)", async () => {
+    for (const source of ["traced-file:jarrell-tx", "legacy-design-tools:zoning_stamp_run", undefined]) {
+      setParcelRecordQueryableForTests(withSource(source));
+      const read = await zoningFactFromParcelRecord(PARCEL);
+      expect(read.state === "present" && read.districtConfidence?.level, String(source)).toBe("review");
+    }
+  });
+
+  it("a staging district with no confidence is byte-identical to today: the full payload, no confidence field", async () => {
+    setParcelRecordQueryableForTests(withSource("tx_zoning_district_staging"));
+    const read = await zoningFactFromParcelRecord(PARCEL);
+    expect(read).toEqual({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: PARCEL,
+      district: "SF-1",
+      jurisdictionKey: null,
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2024-03-05",
+      evaluatedAt: "2024-03-05",
+    });
+    expect(Object.keys(read)).not.toContain("districtConfidence");
   });
 });
