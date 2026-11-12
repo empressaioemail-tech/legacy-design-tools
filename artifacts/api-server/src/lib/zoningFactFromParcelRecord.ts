@@ -192,19 +192,17 @@ export async function zoningFactFromParcelRecord(parcelNodeId: string): Promise<
       reason: `parcel_record_cell ${placeKey}/${ZONING_DISTRICT_RAIL_KEY} is kind=value but its value is not a readable district. Refusing rather than inventing one.`,
     };
   }
-  // hauska-factory #377 writes `confidence` on the zoningDistrict cell itself; read that first. The separate
-  // zoningConfidence rail is a fallback only (it is not in the closed rail set or the serve slate), so it is
-  // read only when the cell carries no confidence of its own.
+  // hauska-factory #377 writes `confidence` on the zoningDistrict cell itself, and that is the only place it is
+  // read. The separate zoningConfidence rail is NOT read here: it is outside the closed rail set and the serve
+  // slate, and Smart Site has one read path (operator guardrail, 2026-11-12). A read of it would be a back door.
   const ownConfidence = districtConfidenceFromLabel(cell.raw?.confidence);
-  const [jurisdictionKey, provenance, railConfidenceLabel] = await Promise.all([
+  const [jurisdictionKey, provenance] = await Promise.all([
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_JURISDICTION_KEY_RAIL_KEY),
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_PROVENANCE_RAIL_KEY),
-    ownConfidence ? Promise.resolve(null) : scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_CONFIDENCE_RAIL_KEY),
   ]);
-  // No confidence anywhere: the cell's SOURCE decides. An enumerated official layer is confirmed; anything else
-  // (traced-file:*, unknown, missing) is review, never confirmed.
-  const districtConfidence =
-    ownConfidence ?? districtConfidenceFromLabel(railConfidenceLabel) ?? districtConfidenceFromSource(cell.raw?.source);
+  // No confidence on the cell: the cell's SOURCE decides. An enumerated official layer is confirmed; anything
+  // else (traced-file:*, unknown, missing) is review, never confirmed.
+  const districtConfidence = ownConfidence ?? districtConfidenceFromSource(cell.raw?.source);
   return {
     state: "present",
     source: ZONING_FACT_SOURCE,
