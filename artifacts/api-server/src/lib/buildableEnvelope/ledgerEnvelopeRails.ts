@@ -28,6 +28,11 @@ import {
   type ZoningFactRead,
 } from "../zoningFactFromParcelRecord";
 import { NOT_SPECIFIED_MAX_HEIGHT_FT } from "./derive";
+import {
+  districtDisclosure,
+  mergeDistrictConfidence,
+  REVIEW_DISTRICT_CONFIDENCE,
+} from "../districtConfidence";
 
 export type LedgerEnvelopeValues = {
   state: "values";
@@ -199,15 +204,21 @@ export async function decideEnvelopeFromLedger(
     districts: [districtRow],
     note: "Setbacks read from parcel_record cells. Not a codified table lookup.",
   };
+  // The stamp's confidence rides on the zoning read and on the setback cell; the more cautious reading wins.
+  const districtConfidence = mergeDistrictConfidence(zoning.districtConfidence, setbacks.districtConfidence);
+  const disclosure = districtDisclosure(districtConfidence);
+  const review = disclosure !== null;
   const districtMapping: DistrictMappingResult = {
     district: districtRow,
     kind: "ledger",
-    confidence: 1,
+    // Confirmed (and unstamped) stays 1. A district the stamp marked for review is not certain.
+    confidence: review ? REVIEW_DISTRICT_CONFIDENCE : 1,
     note:
       `District ${zoning.district} and setbacks ` +
       `${setbacks.frontFt}/${setbacks.sideFt}/${setbacks.rearFt}` +
       (cornerSpecified ? `/${cornerFt}` : "") +
-      " ft read from parcel_record.",
+      " ft read from parcel_record." +
+      (disclosure ? ` ${disclosure}` : ""),
     zoningCode: zoning.district,
   };
   const vintage = setbacks.sourceVintage ?? zoning.sourceVintage ?? "unreadable";
@@ -229,6 +240,7 @@ export async function decideEnvelopeFromLedger(
     citationUrl: chart?.ordinanceUrl ?? zoning.provenance,
     table,
     district: districtMapping,
+    ...(review && districtConfidence ? { districtConfidence, districtDisclosure: disclosure! } : {}),
   };
   return {
     state: "values",

@@ -22,6 +22,7 @@
 
 import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import { parseParcelNodeId } from "./parcelNodeId";
+import { districtConfidenceFromRaw, type DistrictConfidence } from "./districtConfidence";
 
 export const SETBACKS_FACT_SOURCE = "setbacks-fact-parcel-record" as const;
 export const SETBACK_FRONT_FT_RAIL_KEY = "setbackFrontFt" as const;
@@ -54,6 +55,11 @@ export type SetbacksFactPresent = {
    * envelope says about its source. Absent for every other source.
    */
   chartSource?: { label: string; section: string | null; page: string | null; ordinanceUrl: string | null; abutsResidential: boolean | null; note: string | null };
+  /**
+   * The zoning stamp's confidence in the district, as the factory carried it onto this cell
+   * (`zoningConfidence` / `districtConfidence`). Omitted when the cell carries none.
+   */
+  districtConfidence?: DistrictConfidence;
   sourceAdapter: "parcel_record";
   sourceVintage: string | null;
   evaluatedAt: string | null;
@@ -212,11 +218,13 @@ export async function setbacksFactFromParcelRecord(parcelNodeId: string): Promis
   if (rear.refusal) refusals.rear = rear.refusal;
   if (corner.refusal) refusals.corner = corner.refusal;
   const chartSource = chartSourceOf(cell.raw);
+  const districtConfidence = districtConfidenceFromRaw(cell.raw);
   return {
     state: "present",
     source: SETBACKS_FACT_SOURCE,
     entityId: placeKey,
     ...(chartSource ? { chartSource } : {}),
+    ...(districtConfidence ? { districtConfidence } : {}),
     frontFt,
     sideFt: side.value,
     rearFt: rear.value,

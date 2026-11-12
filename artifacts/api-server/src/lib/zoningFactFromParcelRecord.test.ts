@@ -180,3 +180,108 @@ describe("zoningFactFromParcelRecord", () => {
     expect(result.code).toBe("parcel-record-cell-miss");
   });
 });
+
+describe("zoningFactFromParcelRecord reads the stamp's zoningConfidence", () => {
+  const PARCEL = "48491:R609663";
+  function store(confidence: string | null) {
+    return memoryParcelRecordStore({
+      cells: [
+        { placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: { kind: "value", value: "SF-1", source: "tx_zoning_district_staging", vintage: "2024-03-05" } },
+        { placeKey: PARCEL, railKey: ZONING_JURISDICTION_KEY_RAIL_KEY, cellState: { kind: "value", value: "jarrell-tx", vintage: "2024-03-05" } },
+        ...(confidence
+          ? [{ placeKey: PARCEL, railKey: "zoningConfidence", cellState: { kind: "value", value: confidence, vintage: "2024-03-05" } }]
+          : []),
+      ],
+    });
+  }
+
+  it("medium is carried as review, high as confirmed, none as no field", async () => {
+    setParcelRecordQueryableForTests(store("medium"));
+    const medium = await zoningFactFromParcelRecord(PARCEL);
+    expect(medium.state === "present" && medium.districtConfidence).toEqual({ level: "review", label: "medium" });
+    setParcelRecordQueryableForTests(store("high"));
+    const high = await zoningFactFromParcelRecord(PARCEL);
+    expect(high.state === "present" && high.districtConfidence?.level).toBe("confirmed");
+    setParcelRecordQueryableForTests(store(null));
+    const none = await zoningFactFromParcelRecord(PARCEL);
+    expect(none.state).toBe("present");
+    expect("districtConfidence" in none).toBe(false);
+  });
+});
+
+describe("zoningFactFromParcelRecord reads the confidence on the zoningDistrict cell itself (hauska-factory #377 shape)", () => {
+  const PARCEL = "48491:R609663";
+  const stamp = (confidence: string) => ({
+    kind: "value",
+    value: "SF-1",
+    source: "jarrell-zoning-map-trace",
+    vintage: "2024-03-05",
+    confidence,
+    fileSha256: "80c16809".padEnd(64, "0"),
+  });
+
+  it("medium on the cell is review and high is confirmed, with no zoningConfidence rail present", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("medium") }] }),
+    );
+    const medium = await zoningFactFromParcelRecord(PARCEL);
+    expect(medium.state === "present" && medium.districtConfidence).toEqual({ level: "review", label: "medium" });
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({ cells: [{ placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("high") }] }),
+    );
+    const high = await zoningFactFromParcelRecord(PARCEL);
+    expect(high.state === "present" && high.districtConfidence?.level).toBe("confirmed");
+  });
+
+  it("the cell's own field wins over a disagreeing rail", async () => {
+    setParcelRecordQueryableForTests(
+      memoryParcelRecordStore({
+        cells: [
+          { placeKey: PARCEL, railKey: ZONING_DISTRICT_RAIL_KEY, cellState: stamp("high") },
+          { placeKey: PARCEL, railKey: "zoningConfidence", cellState: { kind: "value", value: "medium" } },
+        ],
+      }),
+    );
+    const read = await zoningFactFromParcelRecord(PARCEL);
+    expect(read.state === "present" && read.districtConfidence?.level).toBe("confirmed");
+  });
+});
+
+describe("zoningFactFromParcelRecord: absent confidence is decided by the cell source", () => {
+  const PARCEL = "48491:R609663";
+  const withSource = (source?: string) =>
+    memoryParcelRecordStore({
+      cells: [
+        {
+          placeKey: PARCEL,
+          railKey: ZONING_DISTRICT_RAIL_KEY,
+          cellState: { kind: "value", value: "SF-1", vintage: "2024-03-05", ...(source ? { source } : {}) },
+        },
+      ],
+    });
+
+  it("a traced-file district with no confidence reads review (also for an unknown or missing source)", async () => {
+    for (const source of ["traced-file:jarrell-tx", "legacy-design-tools:zoning_stamp_run", undefined]) {
+      setParcelRecordQueryableForTests(withSource(source));
+      const read = await zoningFactFromParcelRecord(PARCEL);
+      expect(read.state === "present" && read.districtConfidence?.level, String(source)).toBe("review");
+    }
+  });
+
+  it("a staging district with no confidence is byte-identical to today: the full payload, no confidence field", async () => {
+    setParcelRecordQueryableForTests(withSource("tx_zoning_district_staging"));
+    const read = await zoningFactFromParcelRecord(PARCEL);
+    expect(read).toEqual({
+      state: "present",
+      source: "zoning-fact-parcel-record",
+      entityId: PARCEL,
+      district: "SF-1",
+      jurisdictionKey: null,
+      provenance: null,
+      sourceAdapter: "parcel_record",
+      sourceVintage: "2024-03-05",
+      evaluatedAt: "2024-03-05",
+    });
+    expect(Object.keys(read)).not.toContain("districtConfidence");
+  });
+});

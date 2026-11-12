@@ -38,11 +38,14 @@
 
 import { loadParcelRecordCell } from "./parcelRecordCellRead";
 import { parseParcelNodeId } from "./parcelNodeId";
+import { districtConfidenceFromLabel, districtConfidenceFromSource, type DistrictConfidence } from "./districtConfidence";
 
 export const ZONING_FACT_SOURCE = "zoning-fact-parcel-record" as const;
 export const ZONING_DISTRICT_RAIL_KEY = "zoningDistrict" as const;
 export const ZONING_JURISDICTION_KEY_RAIL_KEY = "zoningJurisdictionKey" as const;
 export const ZONING_PROVENANCE_RAIL_KEY = "zoningProvenance" as const;
+/** The zoning stamp's confidence in the district ("high" | "medium"). Read best-effort; not part of the gating group. */
+export const ZONING_CONFIDENCE_RAIL_KEY = "zoningConfidence" as const;
 export const ZONING_RAIL_KEYS = [
   ZONING_DISTRICT_RAIL_KEY,
   ZONING_JURISDICTION_KEY_RAIL_KEY,
@@ -59,6 +62,8 @@ export type ZoningFactPresent = {
   sourceAdapter: "parcel_record";
   sourceVintage: string | null;
   evaluatedAt: string | null;
+  /** The stamp's confidence in the district. Omitted when no zoningConfidence cell exists (treated as confirmed). */
+  districtConfidence?: DistrictConfidence;
 };
 
 export type ZoningFactAbsent = {
@@ -187,10 +192,19 @@ export async function zoningFactFromParcelRecord(parcelNodeId: string): Promise<
       reason: `parcel_record_cell ${placeKey}/${ZONING_DISTRICT_RAIL_KEY} is kind=value but its value is not a readable district. Refusing rather than inventing one.`,
     };
   }
-  const [jurisdictionKey, provenance] = await Promise.all([
+  // hauska-factory #377 writes `confidence` on the zoningDistrict cell itself; read that first. The separate
+  // zoningConfidence rail is a fallback only (it is not in the closed rail set or the serve slate), so it is
+  // read only when the cell carries no confidence of its own.
+  const ownConfidence = districtConfidenceFromLabel(cell.raw?.confidence);
+  const [jurisdictionKey, provenance, railConfidenceLabel] = await Promise.all([
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_JURISDICTION_KEY_RAIL_KEY),
     scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_PROVENANCE_RAIL_KEY),
+    ownConfidence ? Promise.resolve(null) : scalarStringOrNull(parsed.countyFips, parsed.propId, ZONING_CONFIDENCE_RAIL_KEY),
   ]);
+  // No confidence anywhere: the cell's SOURCE decides. An enumerated official layer is confirmed; anything else
+  // (traced-file:*, unknown, missing) is review, never confirmed.
+  const districtConfidence =
+    ownConfidence ?? districtConfidenceFromLabel(railConfidenceLabel) ?? districtConfidenceFromSource(cell.raw?.source);
   return {
     state: "present",
     source: ZONING_FACT_SOURCE,
@@ -201,5 +215,6 @@ export async function zoningFactFromParcelRecord(parcelNodeId: string): Promise<
     sourceAdapter: "parcel_record",
     sourceVintage: cell.vintage || null,
     evaluatedAt: cell.vintage || null,
+    ...(districtConfidence ? { districtConfidence } : {}),
   };
 }
