@@ -132,23 +132,6 @@ jobs:
         run: |
           cd artifacts/api-server
           node node_modules/puppeteer/install.mjs
-      - name: Install postgis into the postgres service container
-        # 2026-11-12: the PGDG postgis-3 package is built against the newest PostgreSQL 14 minor,
-        # and the pgvector:pg14 image's server is an older minor, so CREATE EXTENSION postgis failed with
-        # 'could not load library postgis-3.so: undefined symbol: heap_datum_check' on every run.
-        # The fix: install the matching postgresql-14 server package in the same apt transaction, and run
-        # this step BEFORE the lock-table step, whose docker restart then starts the upgraded server
-        # binaries. Same container, same data directory; only the minor version moves.
-        # TXGIO-GEOM-FIX: txgio_parcel.geom is a real PostGIS geometry(Geometry,4326)
-        # column in production (added by an uncodified manual process this card
-        # tracks properly for the first time), and upsertTxgioParcels now derives it
-        # on every write. pgvector/pgvector:pg14 has no postgis package baked in, but
-        # its PGDG apt repo is already configured, so it installs the same way it
-        # would on any Debian bookworm host. The server process runs INSIDE the
-        # service container, so the package has to land there too, not on the runner.
-        run: |
-          CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
-          docker exec -u root "$CONTAINER_ID" bash -c "apt-get update && apt-get install -y postgresql-14 postgresql-14-postgis-3"
       - name: Size the postgres lock table for the test suite
         # P-375 (2026-09-19). `Test` has failed intermittently on suites the PR
         # under review does not touch (#722, #727, and P-362's PR) with Postgres
@@ -262,6 +245,34 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d test_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Install postgis into the postgres service container
+        # TXGIO-GEOM-FIX: txgio_parcel.geom is a real PostGIS geometry(Geometry,4326)
+        # column in production (added by an uncodified manual process this card
+        # tracks properly for the first time), and upsertTxgioParcels now derives it
+        # on every write. pgvector/pgvector:pg14 has no postgis package baked in, but
+        # its PGDG apt repo is already configured, so it installs the same way it
+        # would on any Debian bookworm host. The server process runs INSIDE the
+        # service container, so the package has to land there too, not on the runner.
+        run: |
+          CONTAINER_ID=$(docker ps --filter "ancestor=pgvector/pgvector:pg14" --format "{{.ID}}")
+          # 2026-11-12: PGDG rebuilt postgis-3 (3.7.0+dfsg-1.pgdg12+2) against PostgreSQL 14.25, and the
+          # pgvector/pgvector:pg14 image still runs 14.24, so CREATE EXTENSION postgis failed with
+          # 'undefined symbol: heap_datum_check' on every run. Pin the last build made for 14.24, the one
+          # every green run used (3.7.0+dfsg-1.pgdg12+1). It comes from the main repo while it is still listed
+          # there, and otherwise from the PGDG archive (same signing key, same components; the source line
+          # is derived from the image's own pgdg line). Upgrading the server instead was tried on #860's
+          # first head: it changes pg_dump output, which the schema fixture-drift check rejects. Lift this
+          # pin when the pgvector image moves to 14.25.
+          docker exec -u root -e PIN="3.7.0+dfsg-1.pgdg12+1" "$CONTAINER_ID" bash -ec '
+            apt-get update
+            if ! apt-get install -y "postgresql-14-postgis-3=$PIN" "postgresql-14-postgis-3-scripts=$PIN"; then
+              SRC=$(grep -l apt.postgresql.org /etc/apt/sources.list.d/*.list | head -n1)
+              sed -e "s#apt.postgresql.org/pub/repos/apt#apt-archive.postgresql.org/pub/repos/apt#" -e "s#bookworm-pgdg #bookworm-pgdg-archive #" "$SRC" > /etc/apt/sources.list.d/pgdg-archive.list
+              cat /etc/apt/sources.list.d/pgdg-archive.list
+              apt-get update
+              apt-get install -y "postgresql-14-postgis-3=$PIN" "postgresql-14-postgis-3-scripts=$PIN"
+            fi
+          '
       - name: Enable postgis extension
         env:
           PGPASSWORD: postgres
