@@ -94,6 +94,13 @@ export type AuthoritativeSetbackResolution = {
   table: SetbackTable;
   district: DistrictMappingResult;
   /**
+   * Present ONLY when the zoning stamp marked the district for review. Additive: a confirmed or
+   * unstamped district carries neither field, so its payload is byte-identical to before.
+   */
+  districtConfidence?: { level: "confirmed" | "review"; label: string };
+  /** Plain-words sentence for a review district; shown beside the setbacks. */
+  districtDisclosure?: string;
+  /**
    * Present ONLY when `resolveMostCurrentSetback` returned `conflict` for
    * this district: candidates disagreed and at least one side's date was
    * unreadable (or two unattributed dates disagreed). `scalars` above is

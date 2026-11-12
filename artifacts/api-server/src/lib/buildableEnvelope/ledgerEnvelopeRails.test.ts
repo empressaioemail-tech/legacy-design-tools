@@ -127,3 +127,71 @@ describe("operator option A (2026-11-09): setbacks from the 2026 Development Cod
     expect(decision.resolved.citationUrl).toBe("zoning-cell");
   });
 });
+
+describe("district confidence: a review district is disclosed, never shown as certain", () => {
+  function jarrell(zoningExtra: Record<string, unknown>, setbackExtra: Record<string, unknown> = {}) {
+    loadZoningFactForServeMock.mockResolvedValue({
+      state: "present",
+      entityId: "48491:R609663",
+      district: "SF-1",
+      jurisdictionKey: "jarrell-tx",
+      provenance: "traced from the adopted 2024-03-05 zoning map",
+      sourceVintage: "2024-03-05",
+      ...zoningExtra,
+    });
+    loadSetbacksFactForServeMock.mockResolvedValue({
+      state: "present",
+      entityId: "48491:R609663",
+      frontFt: 20,
+      sideFt: 10,
+      rearFt: 20,
+      cornerFt: 15,
+      sourceVintage: "2026-11-12",
+      ...setbackExtra,
+    });
+  }
+
+  it("medium on the zoning read: confidence is no longer 1 and the disclosure says for review at the edges", async () => {
+    jarrell({ districtConfidence: { level: "review", label: "medium" } });
+    const decision = await decideEnvelopeFromLedger("48491:R609663");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.districtMapping.confidence).toBeLessThan(1);
+    expect(decision.resolved.districtConfidence).toEqual({ level: "review", label: "medium" });
+    expect(decision.resolved.districtDisclosure).toBe(
+      "The zoning district for this parcel was read from the city's zoning map and is for review at the edges; setbacks are shown for review, not confirmed.",
+    );
+    // The numbers themselves are untouched.
+    expect(decision.resolved.scalars).toEqual({ front_ft: 20, side_ft: 10, rear_ft: 20, side_corner_ft: 15 });
+  });
+
+  it("review carried only on the setback cell is disclosed too (marked for review wording for any other label)", async () => {
+    jarrell({}, { districtConfidence: { level: "review", label: "uncertain" } });
+    const decision = await decideEnvelopeFromLedger("48491:R609663");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.resolved.districtDisclosure).toMatch(/is marked for review; setbacks are shown for review, not confirmed\.$/);
+  });
+
+  it("high stays exactly as today: confidence 1 and no disclosure fields", async () => {
+    jarrell({ districtConfidence: { level: "confirmed", label: "high" } }, { districtConfidence: { level: "confirmed", label: "high" } });
+    const decision = await decideEnvelopeFromLedger("48491:R609663");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.districtMapping.confidence).toBe(1);
+    expect("districtConfidence" in decision.resolved).toBe(false);
+    expect("districtDisclosure" in decision.resolved).toBe(false);
+  });
+
+  it("no confidence stamped (Bastrop, Travis) is unchanged", async () => {
+    jarrell({});
+    const decision = await decideEnvelopeFromLedger("48491:R609663");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.districtMapping.confidence).toBe(1);
+    expect("districtDisclosure" in decision.resolved).toBe(false);
+  });
+
+  it("the disclosure never promises: no guarantee, no safe", async () => {
+    jarrell({ districtConfidence: { level: "review", label: "medium" } });
+    const decision = await decideEnvelopeFromLedger("48491:R609663");
+    if (decision.state !== "values") throw new Error("expected values");
+    expect(decision.resolved.districtDisclosure).not.toMatch(/guarantee|safe/i);
+  });
+});

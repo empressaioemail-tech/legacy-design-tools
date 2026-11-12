@@ -1409,6 +1409,16 @@ async function respondWithDrawnEnvelope(args: {
         ...(sourceConflictRow ? { setbackSourceConflict: sourceConflictRow } : {}),
         ...(provenanceRefs ? { provenanceRefs } : {}),
         ...(spineZoning ? { spineZoningSource: spineZoning.source } : {}),
+        /**
+         * Present only when the zoning stamp marked the district for review (additive). The
+         * setbacks are shown for review, not confirmed; the sentence is for the customer.
+         */
+        ...(resolved.districtDisclosure
+          ? {
+              districtConfidence: resolved.districtConfidence?.level ?? "review",
+              districtDisclosure: resolved.districtDisclosure,
+            }
+          : {}),
         setbacks: {
           front_ft: resolved.scalars.front_ft,
           side_ft: resolved.scalars.side_ft,
