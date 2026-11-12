@@ -181,7 +181,7 @@ describe("zoningFactFromParcelRecord", () => {
   });
 });
 
-describe("zoningFactFromParcelRecord reads the stamp's zoningConfidence", () => {
+describe("zoningFactFromParcelRecord does not read the separate zoningConfidence rail (one read path)", () => {
   const PARCEL = "48491:R609663";
   function store(confidence: string | null) {
     return memoryParcelRecordStore({
@@ -195,17 +195,16 @@ describe("zoningFactFromParcelRecord reads the stamp's zoningConfidence", () => 
     });
   }
 
-  it("medium is carried as review, high as confirmed, none as no field", async () => {
-    setParcelRecordQueryableForTests(store("medium"));
-    const medium = await zoningFactFromParcelRecord(PARCEL);
-    expect(medium.state === "present" && medium.districtConfidence).toEqual({ level: "review", label: "medium" });
-    setParcelRecordQueryableForTests(store("high"));
-    const high = await zoningFactFromParcelRecord(PARCEL);
-    expect(high.state === "present" && high.districtConfidence?.level).toBe("confirmed");
+  it("a rail value never changes the answer: the cell (here an official staging cell with no confidence) decides", async () => {
     setParcelRecordQueryableForTests(store(null));
     const none = await zoningFactFromParcelRecord(PARCEL);
     expect(none.state).toBe("present");
     expect("districtConfidence" in none).toBe(false);
+    for (const railValue of ["medium", "high", "review"]) {
+      setParcelRecordQueryableForTests(store(railValue));
+      const withRail = await zoningFactFromParcelRecord(PARCEL);
+      expect(withRail).toEqual(none);
+    }
   });
 });
 
