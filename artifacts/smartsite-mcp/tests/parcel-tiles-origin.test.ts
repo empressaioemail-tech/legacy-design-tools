@@ -157,9 +157,15 @@ describe("configured: the origin travels into both surfaces, and the dead bucket
     expect(probeCspDomains()).toContain("https://tiles.test.invalid");
   });
 
-  it("the served page carries the configured origin and no retired bucket host", () => {
-    const html = buildAppHtml();
-    expect(html).toContain("https://tiles.test.invalid");
-    expect(html).not.toContain("storage.googleapis.com");
+  it("the served page carries the configured origin (diagnostics on) and no retired bucket host", () => {
+    process.env.SMARTSITE_CARD_DIAGNOSTICS = "1";
+    try {
+      const html = buildAppHtml();
+      expect(html).toContain("https://tiles.test.invalid");
+      expect(html).not.toContain("storage.googleapis.com");
+    } finally {
+      delete process.env.SMARTSITE_CARD_DIAGNOSTICS;
+    }
+    expect(buildAppHtml()).not.toContain("storage.googleapis.com");
   });
 });

@@ -33,7 +33,96 @@ function sectionValue(section: BriefSection): string {
   }
 }
 
+/** A count that may arrive as a number, an array of rows, or an object with a count. */
+function countOf(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (Array.isArray(v)) return v.length;
+  const rec = asRecord(v);
+  if (rec && typeof rec.count === "number" && Number.isFinite(rec.count)) return rec.count;
+  if (rec && Array.isArray(rec.parcels)) return rec.parcels.length;
+  return null;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function railWords(rail: string): string {
+  const spaced = rail.replace(/([A-Z])/g, " $1").toLowerCase();
+  return spaced;
+}
+
+/**
+ * One plain sentence set for a search that returns many parcels. It never
+ * says "this parcel", and for the criteria search it always says all three
+ * sets (matched, excluded, not checked) because matched is never the whole
+ * answer. A count the result does not give is said as "not on record".
+ */
+export function listAnswerLine(data: Record<string, unknown>): string | null {
+  const matchedRaw = data.matched ?? data.constraintMatched;
+  const isCriteria = matchedRaw !== undefined && matchedRaw !== null;
+  const matchedRec = asRecord(matchedRaw);
+  if (isCriteria) {
+    const matched = countOf(matchedRaw);
+    const excluded = countOf(data.excluded ?? data.constraintExcluded);
+    const notChecked = countOf(data.notEvaluated ?? data.constraintNotEvaluated);
+    const parts: string[] = [];
+    parts.push(
+      matched === null
+        ? "The number of matching parcels is not on record."
+        : `${plural(matched, "parcel matches", "parcels match")} your criteria.`,
+    );
+    parts.push(
+      excluded === null
+        ? "The number excluded is not on record."
+        : `${plural(excluded, "parcel was", "parcels were")} excluded because ${excluded === 1 ? "it fails" : "they fail"} a filter.`,
+    );
+    parts.push(
+      notChecked === null
+        ? "The number not checked is not on record."
+        : `${plural(notChecked, "parcel was", "parcels were")} not checked because a value the filter needs is missing for ${notChecked === 1 ? "it" : "them"}.`,
+    );
+    const truncated = matchedRec?.truncated === true || data.truncated === true;
+    const received =
+      typeof matchedRec?.received === "number"
+        ? matchedRec.received
+        : Array.isArray(matchedRaw)
+          ? matchedRaw.length
+          : null;
+    if (truncated) {
+      parts.push(
+        received !== null && matched !== null
+          ? `Only the first ${received} of ${matched} matches are listed; the list is not complete, so narrow the search to see the rest.`
+          : "The list of matches is cut short and is not complete; narrow the search to see the rest.",
+      );
+    }
+    const pct = asRecord(data.unmeasuredPctByRail);
+    if (pct) {
+      const shown = Object.keys(pct)
+        .filter((k) => typeof pct[k] === "number")
+        .map((k) => `${railWords(k)} ${pct[k]}%`);
+      if (shown.length > 0) parts.push(`Share of the county not measured: ${shown.join(", ")}.`);
+    }
+    return parts.join(" ");
+  }
+  const nearest = Array.isArray(data.nearestNeighbors) ? data.nearestNeighbors : null;
+  const hits = Array.isArray(data.hits) ? data.hits : null;
+  const parcels = Array.isArray(data.parcels) ? data.parcels : null;
+  const rows = nearest && nearest.length > 1 ? nearest : hits && hits.length > 1 ? hits : parcels && parcels.length > 1 ? parcels : null;
+  if (!rows) return null;
+  const n = rows.length;
+  const base = nearest && rows === nearest ? `${n} nearby parcels.` : `${n} parcels found.`;
+  if (data.truncated === true) {
+    const cap = typeof data.cap === "number" ? data.cap : null;
+    const received = typeof data.received === "number" ? data.received : null;
+    return `${base} The list is cut short${cap !== null && received !== null ? ` (showing ${cap} of ${received})` : ""} and is not complete; narrow the search to see the rest.`;
+  }
+  return base;
+}
+
 function answerLine(data: Record<string, unknown>): string {
+  const list = listAnswerLine(data);
+  if (list) return list;
   const card = asRecord(data.inlineCard);
   if (typeof card?.answer === "string" && card.answer.trim()) return card.answer.trim();
   const draw = asRecord(data.draw);

@@ -44,6 +44,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { PLAN_REFUSAL_SENTENCE } from "../src/plan-refusal.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -171,6 +172,7 @@ describe("P-101 screens gate is inherited from the route, not re-implemented her
         message:
           "Studio or Team is required to build a screen. Solo answers one parcel; Studio works a list of them.",
         plansUrl: "https://smartsite.cloud/?plans=1",
+        reasonDisplayText: PLAN_REFUSAL_SENTENCE,
       });
       // The sentence survives the hop; the connector does not have to invent one.
       expect(parsed.message).toMatch(/screen/i);
