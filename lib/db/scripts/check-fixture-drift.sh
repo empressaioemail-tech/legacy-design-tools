@@ -33,6 +33,10 @@ fi
 LIVE="$(mktemp)"
 trap 'rm -f "$LIVE"' EXIT
 
+# 2026-11-13: the pgvector/pgvector:pg14 service image moved to PostgreSQL 14.25, whose pg_dump emits one
+# "ALTER TABLE ONLY t ALTER COLUMN c SET (pg_attver=<n>);" line per column, with a value that differs on
+# every fresh database. It is not part of the schema this fixture pins, so that exact shape is dropped
+# below; a column's real attribute options (e.g. n_distinct) still diff.
 pg_dump \
   "$DATABASE_URL" \
   --schema-only \
@@ -41,6 +45,7 @@ pg_dump \
   --no-comments \
   --schema=public \
   | grep -vE '^(SET |SELECT pg_catalog\.set_config|CREATE SCHEMA |\\restrict |\\unrestrict |--$|-- (PostgreSQL|Dumped))' \
+  | grep -vE '^ALTER TABLE ONLY [^ ]+ ALTER COLUMN [^ ]+ SET \(pg_attver=[0-9]+\);$' \
   | sed -E 's/\bpublic\./@@SCHEMA@@./g; s/@@SCHEMA@@\.vector\(/public.vector(/g; s/@@SCHEMA@@\.geometry\(/public.geometry(/g' \
   > "$LIVE"
 
