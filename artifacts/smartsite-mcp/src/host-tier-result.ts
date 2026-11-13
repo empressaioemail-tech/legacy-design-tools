@@ -136,3 +136,38 @@ export function applyHostTierToResult(
 
   return result;
 }
+
+/**
+ * Every tool result carries structuredContent: the tool's own JSON body as an
+ * object (MCP 2025-06-18: a tool that returns structuredContent should also
+ * return the same data serialised in a text block, which these results already
+ * do, so a client that reads only content keeps working). A result whose body is
+ * not a JSON object gets the first text as { text } and a bare JSON list gets
+ * { items }, so the field is always an object. No outputSchema is declared, so
+ * no client validation is added. `skipTexts` lists text parts that are not the
+ * tool body (the standing vocabulary block).
+ */
+export function ensureStructuredContent(
+  result: ToolResult,
+  skipTexts: readonly string[] = [],
+): ToolResult {
+  if (result.structuredContent && typeof result.structuredContent === "object") return result;
+  let firstText: string | null = null;
+  for (const part of result.content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+    if (skipTexts.includes(part.text)) continue;
+    if (firstText === null) firstText = part.text;
+    try {
+      const parsed = JSON.parse(part.text) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ...result, structuredContent: parsed as Record<string, unknown> };
+      }
+      if (Array.isArray(parsed)) {
+        return { ...result, structuredContent: { items: parsed } };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return { ...result, structuredContent: { text: firstText ?? "" } };
+}

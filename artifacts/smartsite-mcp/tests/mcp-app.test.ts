@@ -133,10 +133,10 @@ describe("mcp-app contracts", () => {
     expect(html).toContain("node unresolved");
     expect(html).not.toContain('data-act="listing" disabled');
     expect(html).not.toMatch(/#F3F5F1|#F5F5F0/);
-    expect(html).toContain("--ss-ink:#323234");
+    expect(html).toContain("--ss-ink:var(--color-background-primary)");
     expect(html).toContain("--ss-blue:#86ADDF");
     expect(html).toContain("--ss-atom:#6FC1B8");
-    expect(html).toContain("--bg:#1c1c1c");
+    expect(html).toContain("--bg:var(--color-background-primary)");
     expect(html).toContain("--ss-fs-meta:12.5px");
     expect(html).toContain("--ss-fs-body:14.5px");
     expect(html).toContain("--ss-r-tip:12px");

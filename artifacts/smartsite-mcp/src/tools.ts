@@ -73,7 +73,8 @@ import {
 } from "./map-tool-wire.js";
 import type { McpRenderHostKey } from "./mcp-host-key.js";
 import { hostKeyFromSession } from "./host-ui-capability.js";
-import { applyHostTierToResult } from "./host-tier-result.js";
+import { applyHostTierToResult, ensureStructuredContent } from "./host-tier-result.js";
+import { applyPlanRefusalWording } from "./plan-refusal.js";
 import {
   recordMapRenderNoMap,
   recordMapRenderSent,
@@ -839,7 +840,8 @@ function attachStandingVocabBlock(
   return async (args) => {
     const auth = requireAuthContext();
     const hostSession = hostSessionFromAuth(auth);
-    const { skipStandingVocab, ...result } = await handler(args);
+    const { skipStandingVocab, ...handled } = await handler(args);
+    const result = applyPlanRefusalWording(handled);
     let shaped = result;
     // The vocabulary block explains result tokens; an error result has none (fix register B4).
     if (!skipStandingVocab && !result.isError) {
@@ -854,7 +856,10 @@ function attachStandingVocabBlock(
         shaped = withVocab;
       }
     }
-    return applyHostTierToResult(toolName, shaped, hostSession, auth.userId);
+    return ensureStructuredContent(
+      applyHostTierToResult(toolName, shaped, hostSession, auth.userId),
+      [STANDING_VOCAB_CONTENT_PART.text],
+    );
   };
 }
 

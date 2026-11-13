@@ -9,6 +9,7 @@ export type CardView =
   | "parcel-set"
   | "screen-board"
   | "screen-list"
+  | "note"
   | "none";
 
 export const CARD_CONTRACT_TEXT_ONLY_NOTE =
@@ -18,9 +19,11 @@ const SENTENCES: Record<CardView, string> = {
   "single-parcel":
     "Card contract: the inline Smart Site panel shows one parcel (map and report rails). Do not describe a screening board.",
   "parcel-set":
-    "Card contract: the inline Smart Site panel shows a map selection with multiple parcels. Do not describe a single-parcel-only view or an empty board.",
+    "Card contract: the inline Smart Site panel shows the parcels you asked about side by side as a grid with a map. Do not describe a single-parcel-only view or an empty board.",
   "screen-board":
-    "Card contract: the inline Smart Site panel shows a screening board table. Do not describe a single-parcel map unless the user opens a row.",
+    "Card contract: the inline Smart Site panel shows a screening board table with one row per parcel (the parcels found by a search, the neighbours, or the rows of a screen). It is not a single-parcel map and not a saved screen unless the result says so; the user opens a row to see one parcel.",
+  note:
+    "Card contract: the inline Smart Site panel shows one short note (no parcel matched, or the request was refused). It shows no map, parcel or table. Do not describe one.",
   "screen-list":
     "Card contract: the inline Smart Site panel lists saved screens to reopen. It is not a parcel map or a screening table yet.",
   none: `Card contract: this tool result does not open the Smart Site MCP App card. ${CARD_CONTRACT_TEXT_ONLY_NOTE}`,
@@ -55,13 +58,37 @@ export function cardViewFromToolPayload(
     toolName === "find_parcels" ||
     toolName === "find_nearest_parcels"
   ) {
-    if (Array.isArray(data.parcels) && data.parcels.length >= 2) return "parcel-set";
+    if (
+      data.status === "refused" ||
+      data.status === "upgrade_required" ||
+      data.status === "degraded"
+    ) {
+      return "note";
+    }
+    const found = foundParcelCount(data);
+    if (found >= 2) return "screen-board";
+    if (found === 1) return "single-parcel";
     if (data.draw || data.parcelNodeId) return "single-parcel";
-    if (Array.isArray(data.parcels) && data.parcels.length === 1) return "single-parcel";
-    if (typeof data.mapPanelNote === "string") return "single-parcel";
-    return "single-parcel";
+    return "note";
   }
   return "none";
+}
+
+/** How many parcels a search result names, whichever field carries them. */
+export function foundParcelCount(data: Record<string, unknown>): number {
+  const lists: unknown[] = [data.parcels, data.hits, data.nearestNeighbors];
+  const matched = data.matched ?? data.constraintMatched;
+  if (Array.isArray(matched)) lists.push(matched);
+  else if (matched && typeof matched === "object") {
+    const rec = matched as Record<string, unknown>;
+    lists.push(rec.parcels);
+    if (typeof rec.count === "number" && Array.isArray(rec.parcels) === false) {
+      return rec.count;
+    }
+  }
+  let best = 0;
+  for (const l of lists) if (Array.isArray(l)) best = Math.max(best, l.length);
+  return best;
 }
 
 function asScreen(data: Record<string, unknown>): Record<string, unknown> | null {

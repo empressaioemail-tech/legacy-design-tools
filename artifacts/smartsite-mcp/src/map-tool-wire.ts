@@ -36,10 +36,17 @@ function parcelIdsFromHits(hits: unknown): string[] {
   return out;
 }
 
-function parcelIdsFromMatched(matched: unknown): string[] {
-  if (!Array.isArray(matched)) return [];
+/**
+ * find_parcels sends `matched` as either a bare array of parcel rows or, as the
+ * tool description says, an object { count, cap, received, truncated, parcels[] }.
+ * Both name the same parcels; reading only the array shape made a real match
+ * paint "No parcel matched".
+ */
+export function parcelIdsFromMatched(matched: unknown): string[] {
+  const rows = Array.isArray(matched) ? matched : asRecord(matched)?.parcels;
+  if (!Array.isArray(rows)) return [];
   const out: string[] = [];
-  for (const raw of matched) {
+  for (const raw of rows) {
     const row = asRecord(raw);
     const id = row && typeof row.parcelNodeId === "string" ? row.parcelNodeId : "";
     if (id.length > 0) out.push(id);

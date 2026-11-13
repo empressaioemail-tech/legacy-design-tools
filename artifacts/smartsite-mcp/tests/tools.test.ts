@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { PLAN_REFUSAL_SENTENCE } from "../src/plan-refusal.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -1381,7 +1382,9 @@ describe("get_smart_site non-OK wire contract (P-91 build plan 4.1)", () => {
     expect(JSON.parse(res.text)).toEqual({
       parcels: [],
       notFound: [],
-      refused: [{ parcelNodeId: ID, reason: "upgrade_required" }],
+      refused: [{ parcelNodeId: ID, reason: "upgrade_required", reasonDisplayText: PLAN_REFUSAL_SENTENCE, plansUrl: "https://smartsite.cloud/?plans=1" }],
+      reasonDisplayText: PLAN_REFUSAL_SENTENCE,
+      plansUrl: "https://smartsite.cloud/?plans=1",
     });
     expect(res.text).not.toContain("go Pro");
   });
@@ -1408,7 +1411,9 @@ describe("get_smart_site non-OK wire contract (P-91 build plan 4.1)", () => {
       expect(parsed).toEqual({
         parcels: [],
         notFound: [],
-        refused: ids.map((id) => ({ parcelNodeId: id, reason: "upgrade_required" })),
+        refused: ids.map((id) => ({ parcelNodeId: id, reason: "upgrade_required", reasonDisplayText: PLAN_REFUSAL_SENTENCE, plansUrl: "https://smartsite.cloud/?plans=1" })),
+        reasonDisplayText: PLAN_REFUSAL_SENTENCE,
+        plansUrl: "https://smartsite.cloud/?plans=1",
       });
     });
   });
@@ -1823,7 +1828,7 @@ describe("find_parcel near/street (P-91 v3 Q1)", () => {
     const parsed = JSON.parse(res.text) as Record<string, unknown>;
     expect(parsed.hits).toEqual(RADIUS_HITS_BODY.hits);
     expect(parsed.cap).toBe(RADIUS_HITS_BODY.cap);
-    expect(parsed.cardContract).toBe("single-parcel");
+    expect(parsed.cardContract).toBe("screen-board");
     expect(mockCortexFetch).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = mockCortexFetch.mock.calls as Array<
       [unknown, string, RequestInit & { userId?: string }]
@@ -2587,7 +2592,9 @@ describe("P-91 v3 V2: standing vocabulary block and resource", () => {
       expect(result.content!.length).toBeGreaterThanOrEqual(2);
       const first = JSON.parse((result.content?.[0] as { text: string }).text);
       expect(first.hits).toEqual([]);
-      expect(first.cardContract).toBe("single-parcel");
+      expect(first.cardContract).toBe("note");
+      // Finding 6: a lookup miss carries structuredContent too.
+      expect((result as { structuredContent?: Record<string, unknown> }).structuredContent).toMatchObject({ hits: [] });
       const second = JSON.parse((result.content?.[1] as { text: string }).text) as {
         smartSiteVocabulary: Array<{ token: string; displayText: string; meaning: string }>;
         resource: string;
