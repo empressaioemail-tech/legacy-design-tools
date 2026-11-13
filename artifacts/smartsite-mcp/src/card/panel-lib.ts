@@ -278,6 +278,8 @@ export type LookupCard = {
   state: string;
   headline: string;
   detail: string | null;
+  /** Upgrade link, https only. */
+  plansUrl?: string;
 };
 export type MissClass = "absent" | "unbaked" | "retired" | "unstated";
 export type MissRow = {
@@ -288,8 +290,31 @@ export type MissRow = {
   parcelExists: boolean | "unmeasured";
   /** P-206: the retirement's `asOf` vintage, on a `retired` row only. */
   retiredAsOf?: string;
+  /** The retirement's own details, on a `retired` row only. Shown, never dropped. */
+  retirement?: RetirementDetail;
 };
-export type RefusedRow = { parcelNodeId: string; reason: string };
+export type RetirementDetail = {
+  authority?: string;
+  scopeSearched?: string;
+  basis?: string;
+  lastSeenTaxYear?: number;
+};
+/** What a search result says about its own completeness. Every field is read off the wire, none composed. */
+export type SearchSummary = {
+  /** "constraint" = find_parcels, "nearest" = find_nearest_parcels, "search" = street or radius. */
+  kind: "constraint" | "nearest" | "search";
+  matchedCount?: number;
+  shownCount?: number;
+  cap?: number;
+  received?: number;
+  truncated?: boolean;
+  excludedCount?: number;
+  excludedByRail?: Record<string, number>;
+  notEvaluatedCount?: number;
+  notEvaluatedByRail?: Record<string, number>;
+  unmeasuredPctByRail?: Record<string, number>;
+};
+export type RefusedRow = { parcelNodeId: string; reason: string; plansUrl?: string };
 /** B2: a later query that resolved to a node an earlier query already held; declared, never written (peScreenSave ScreenDuplicate). */
 export type ScreenDuplicate = { query: string; parcelNodeId: string; keptQuery: string };
 export type ScreenDegraded = { timedOut?: string[]; duplicates?: ScreenDuplicate[] };
@@ -308,8 +333,14 @@ export type DeclaredBody = {
   tool?: string;
   upstreamStatus?: number | "unmeasured";
   tier?: string;
-  /** Only under upstream_non_json: the upstream text, shown verbatim and escaped. */
+  /** Only under upstream_non_json: the upstream text, shown verbatim and escaped. Never HTML (see looksLikeHtml). */
   brief?: string;
+  /** Where to change plan. Carried only when it is an https link. */
+  plansUrl?: string;
+  /** The server's plain sentence for a refusal. Shown instead of the raw reason token. */
+  reasonDisplayText?: string;
+  /** The server's own evidence for a refusal (for example the measured percentage). Primitive values only. */
+  detail?: Record<string, string | number | boolean>;
 };
 
 export type PanelModel = {
@@ -355,6 +386,8 @@ export type PanelModel = {
   nearestNeighbors?: NearestNeighborRow[];
   /** ICC preview (operator-only): the plan precheck view. */
   precheck?: PrecheckData;
+  /** Present on a search result (find_parcels, street, radius, nearest). Absent on a screen. */
+  search?: SearchSummary;
 };
 
 export type NearestNeighborRow = {
@@ -1380,7 +1413,7 @@ export function lookupCardHtml(lookup: LookupCard): string {
   return (
     `<div class="lookup-card" data-lookup-state="${escapeHtml(lookup.state)}">` +
     `<p class="lookup-head"><span class="ss-marker" data-marker="${escapeHtml(lookup.state === "out_of_coverage" ? "unknown" : lookup.state === "outage" ? "refused" : "unknown")}" aria-hidden="true"></span> ` +
-    `<b>${escapeHtml(lookup.headline)}</b></p>${detail}</div>`
+    `<b>${escapeHtml(lookup.headline)}</b></p>${detail}${lookup.plansUrl ? `<p class="lookup-detail">${plansLinkHtml(lookup.plansUrl)}</p>` : ""}</div>`
   );
 }
 
@@ -1425,24 +1458,32 @@ function lookupHeadlineFromMissClass(rec: Record<string, unknown>): LookupCard {
   };
 }
 
-function lookupOutageFromHtmlBody(rec: Record<string, unknown>): PanelModel | null {
-  const brief = typeof rec.brief === "string" ? rec.brief : null;
-  const reason = stringOrNull(rec.reason);
-  if (brief && /<html/i.test(brief) && (reason === "upstream_non_json" || reason === "upstream_html")) {
-    return {
-      kind: "lookup",
-      rows: [],
-      overlays: [],
-      ring: [],
-      edges: [],
-      lookup: {
-        state: "outage",
-        headline: "Smart Site could not reach the server",
-        detail: "Try again in a moment.",
-      },
-    };
+/** The one "could not reach the server" card. Reached by any result that carries an upstream HTML page. */
+export function outageModel(): PanelModel {
+  return {
+    kind: "lookup",
+    rows: [],
+    overlays: [],
+    ring: [],
+    edges: [],
+    lookup: {
+      state: "outage",
+      headline: "Smart Site could not reach the server",
+      detail: "Try again in a moment.",
+    },
+  };
+}
+
+/** An upstream error page rides in brief, message, body, detail or error. Any of them makes the whole result an outage. */
+export function recCarriesHtml(rec: Record<string, unknown>): boolean {
+  for (const key of ["brief", "message", "body", "detail", "error"]) {
+    if (looksLikeHtml(rec[key])) return true;
   }
-  return null;
+  return false;
+}
+
+function lookupOutageFromHtmlBody(rec: Record<string, unknown>): PanelModel | null {
+  return recCarriesHtml(rec) ? outageModel() : null;
 }
 
 export function lookupCardFrom(rec: Record<string, unknown>): PanelModel | null {
@@ -1452,17 +1493,8 @@ export function lookupCardFrom(rec: Record<string, unknown>): PanelModel | null 
     const lookup = lookupHeadlineFromMissClass(rec);
     return { kind: "lookup", rows: [], overlays: [], ring: [], edges: [], lookup };
   }
-  const declared = declaredFrom(rec);
-  if (declared) {
-    if (declared.reason === "upstream_non_json" && declared.brief && /<html/i.test(declared.brief)) {
-      const lookupShaped =
-        Array.isArray(rec.hits) ||
-        rec.missClass != null ||
-        (typeof rec.mapPanelNote === "string" && !asRecord(rec.draw) && !Array.isArray(rec.parcels));
-      if (lookupShaped) return lookupOutageFromHtmlBody({ ...rec, brief: declared.brief, reason: declared.reason });
-    }
-  }
-  return null;
+  /* Any other result that carries an upstream HTML page is an outage too: raw HTML never reaches a card. */
+  return lookupOutageFromHtmlBody(rec);
 }
 
 /*
@@ -2862,7 +2894,9 @@ export function boardQueryCellHtml(row: BoardRow): string {
   return `<div class="unres">${cap}</div><div class="pn">${escapeHtml(row.query)}</div>`;
 }
 
-export function boardCardTitle(screenName?: string | null): string {
+export function boardCardTitle(screenName?: string | null, search?: SearchSummary | null): string {
+  /* A search result is not a screen: no screen exists, so it is never titled as one. */
+  if (search) return search.kind === "nearest" ? NEAREST_RESULTS_TITLE : SEARCH_RESULTS_TITLE;
   const name = screenName?.trim();
   return name ? `Screening · ${name}` : "Screening board";
 }
@@ -2957,6 +2991,92 @@ export function screensListHtml(screens: ScreenSummary[]): string {
   return `<div class="screens" data-screens="list">${out}</div>`;
 }
 
+/** An https link and nothing else. Anything else (http, javascript:, data:, relative, spaces) is not a link. */
+export function httpsUrlOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (v.length > 2048 || !/^https:\/\/[^\s"'<>\\]+$/i.test(v)) return null;
+  return v;
+}
+
+export const PLANS_LINK_LABEL = "See plans";
+/** Used only where the wire names an upgrade but carries no link of its own (a refused row, the map-panel note). */
+export const DEFAULT_PLANS_URL = "https://smartsite.cloud/?plans=1";
+/** A real link on an upgrade card: plain words, new tab, https only. Empty when the url is not https. */
+export function plansLinkHtml(url: unknown): string {
+  const safe = httpsUrlOrNull(url);
+  if (!safe) return "";
+  const u = escapeHtml(safe);
+  return `<a class="plans-link" data-plans-link="1" data-url="${u}" href="${u}" target="_blank" rel="noopener noreferrer" onclick="return window.__ss?(window.__ss.cite(this),false):true">${PLANS_LINK_LABEL}</a>`;
+}
+
+/** True when the text is an HTML document or fragment (an upstream error page), not a sentence. */
+export function looksLikeHtml(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return /^\s*<(!doctype|html|head|body)\b/i.test(value) || /<\/?(html|head|body)[\s>]/i.test(value);
+}
+
+/** A machine token: lowercase words joined by underscores or dashes, no spaces. */
+function looksLikeToken(value: string): boolean {
+  return /^[a-z0-9]+([_-][a-z0-9]+)+$/.test(value.trim());
+}
+
+/** Plain sentences for the refusal tokens the card can meet. Keyed by token; the token itself is never shown. */
+const REFUSAL_PLAIN: Record<string, string> = {
+  radius_invalid: "That search distance could not be used.",
+  radius_exceeds_max: "That search distance is larger than Smart Site can search.",
+  radius_unbounded: "Smart Site needs a search distance to run this search.",
+  bare_street_unbounded: "That street name matches too much. Add a city, ZIP code or county.",
+  bare_street_not_a_street: "That looks like a street address, not a street name.",
+  constraint_bound_missing: "Smart Site needs a county to run this search.",
+  constraint_county_out_of_scope: "That county is not part of this search yet.",
+  constraint_single_address: "That reads as one address. Look it up as an address instead.",
+  constraint_filters_missing: "Smart Site needs at least one filter to run this search.",
+  constraint_rail_unknown: "One of those filters is not something Smart Site can search on.",
+  constraint_op_unsupported: "One of those filters cannot be used that way.",
+  constraint_cap_invalid: "That result limit could not be used.",
+  constraint_rail_unmeasured: "Too much of that county has not been measured to filter on it honestly.",
+  constraint_projection_missing: "The search index for that county is not ready yet.",
+  parcel_batch_cap: "Too many parcels in one request.",
+  nearest_invalid_node: "Smart Site needs a parcel or an address to find neighbours.",
+  nearest_subject_not_found: "Smart Site could not find that parcel to look for neighbours.",
+  nearest_subject_ambiguous: "That address matches more than one parcel.",
+};
+export const REFUSAL_GENERIC = "Smart Site could not run this request as asked.";
+
+/** The headline for a refusal: the server's sentence when it is a sentence, else a plain one keyed by the token. Never the token. */
+export function refusalHeadline(reason: string | null | undefined, displayText?: string | null): string {
+  const text = typeof displayText === "string" ? displayText.trim() : "";
+  if (text && !looksLikeToken(text) && !looksLikeHtml(text)) return text;
+  const key = typeof reason === "string" ? reason.trim() : "";
+  return REFUSAL_PLAIN[key] ?? REFUSAL_GENERIC;
+}
+
+function spacedWords(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").toLowerCase();
+}
+
+function numWord(n: unknown): string | null {
+  return typeof n === "number" && Number.isFinite(n) ? String(Math.round(n * 10) / 10) : null;
+}
+
+/** The refusal's own evidence in words. The unmeasured-rail refusal carries the number that makes it a determination. */
+export function refusalDetailHtml(detail: DeclaredBody["detail"] | undefined): string {
+  if (!detail) return "";
+  const rail = typeof detail.rail === "string" ? spacedWords(detail.rail) : null;
+  const pct = numWord(detail.unmeasuredPct);
+  const unmeasured = numWord(detail.unmeasuredParcels);
+  const total = numWord(detail.countyParcels);
+  const ceiling = numWord(detail.ceilingPct);
+  if (!rail || !pct) return "";
+  let sentence = `${rail.charAt(0).toUpperCase()}${rail.slice(1)} is not measured on ${pct}% of the parcels`;
+  if (unmeasured && total) sentence += ` (${unmeasured} of ${total})`;
+  if (typeof detail.countyFips === "string") sentence += ` in county ${detail.countyFips}`;
+  sentence += ".";
+  if (ceiling) sentence += ` A filter can be used only when it is unmeasured on no more than ${ceiling}%.`;
+  return `<p class="refusal-detail" data-refusal-detail="1">${escapeHtml(sentence)}</p>`;
+}
+
 /** H1: one sentence per declared body, in the five-state language; nothing painted that the body does not carry. */
 export function declaredLineHtml(d: DeclaredBody): string {
   const reason = d.reason ? d.reason : UNSTATED;
@@ -2978,6 +3098,7 @@ export function declaredLineHtml(d: DeclaredBody): string {
      * way, because it is neither a fault nor a bare refusal: it is a rung
      * the account does not hold. */
     head = UPGRADE_TO_SCREEN;
+    if (d.plansUrl) bits.push(plansLinkHtml(d.plansUrl));
     if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
     if (d.tier) bits.push(reasonLineHtml("tier", d.tier));
   } else if (d.status === "error" || d.status === "degraded") {
@@ -2985,10 +3106,12 @@ export function declaredLineHtml(d: DeclaredBody): string {
     if (typeof d.upstreamStatus === "number") bits.push(`<span class="mono" data-upstream-status="${d.upstreamStatus}">${UPSTREAM_KEY} ${d.upstreamStatus}</span>`);
     if (d.tool) bits.push(reasonLineHtml("tool", d.tool));
   } else if (d.status === "refused") {
-    head = `${REFUSED_PREFIX}: ${escapeHtml(reason)}`;
-    if (typeof d.cap === "number") bits.push(`<span class="mono" data-cap="${d.cap}">cap ${d.cap}</span>`);
+    head = `${REFUSED_PREFIX}: ${escapeHtml(refusalHeadline(d.reason, d.reasonDisplayText))}`;
+    if (typeof d.cap === "number") bits.push(`<span class="mono" data-cap="${d.cap}">limit ${d.cap}</span>`);
     if (typeof d.received === "number") bits.push(`<span class="mono" data-received="${d.received}">received ${d.received}</span>`);
     if (d.depth) bits.push(reasonLineHtml("depth", d.depth));
+    const evidence = refusalDetailHtml(d.detail);
+    if (evidence) bits.push(evidence);
   } else if (d.status === "not_implemented") {
     head = `${NOT_IMPLEMENTED_PREFIX}: ${escapeHtml(d.depth ? d.depth : reason)}`;
   } else if (d.status === "not_ready") {
@@ -2997,10 +3120,11 @@ export function declaredLineHtml(d: DeclaredBody): string {
     head = UPGRADE_TO_OPEN;
     bits.push(reasonLineHtml("reason", reason));
     if (d.tier) bits.push(reasonLineHtml("tier", d.tier));
+    if (d.plansUrl) bits.push(plansLinkHtml(d.plansUrl));
   }
-  if (d.message) bits.push(reasonLineHtml("message", d.message));
-  const brief = d.brief ? `<pre class="brief" data-brief="1">${escapeHtml(d.brief)}</pre>` : "";
-  return `<div class="miss" data-declared="${d.status}" data-reason="${escapeHtml(reason)}"><b>${head}</b>${bits.join("")}${brief}</div>`;
+  if (d.message && !looksLikeHtml(d.message)) bits.push(reasonLineHtml("message", d.message));
+  const brief = d.brief && !looksLikeHtml(d.brief) ? `<pre class="brief" data-brief="1">${escapeHtml(d.brief)}</pre>` : "";
+  return `<div class="miss" data-declared="${d.status}" data-reason="${escapeHtml(reason)}"><b>${head}</b>${bits.join(" ")}${brief}</div>`;
 }
 
 /** Sections in wire order. A section with no id names nothing and is skipped; every field is read or left null. */
@@ -3359,6 +3483,39 @@ export function batchRowsFrom(rec: Record<string, unknown>): BoardRow[] | null {
   return rows.length > 0 ? rows : null;
 }
 
+function plansFrom(value: unknown): { plansUrl?: string } {
+  const u = httpsUrlOrNull(value);
+  return u ? { plansUrl: u } : {};
+}
+
+/** The retirement's own details, each only when the wire carries it as the right type. */
+function retirementDetailFrom(value: unknown): RetirementDetail | null {
+  const r = asRecord(value);
+  if (!r) return null;
+  const out: RetirementDetail = {};
+  const authority = stringOrNull(r.authority);
+  if (authority) out.authority = authority;
+  const scope = stringOrNull(r.scopeSearched);
+  if (scope) out.scopeSearched = scope;
+  const basis = stringOrNull(r.basis);
+  if (basis) out.basis = basis;
+  const year = numberOrNull(r.lastSeenTaxYear);
+  if (year !== null) out.lastSeenTaxYear = year;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Retirement details in words, under the retired sentence. Empty when the wire carried none. */
+export function retirementDetailHtml(r: RetirementDetail | undefined): string {
+  if (!r) return "";
+  const bits: string[] = [];
+  if (r.authority) bits.push("Checked with " + r.authority + ".");
+  if (r.scopeSearched) bits.push("Searched: " + r.scopeSearched + ".");
+  if (r.basis) bits.push("Why: " + r.basis + ".");
+  if (r.lastSeenTaxYear != null) bits.push("Last seen on the " + r.lastSeenTaxYear + " tax roll.");
+  if (bits.length === 0) return "";
+  return '<span class="why retirement-detail" data-retirement-detail="1">' + escapeHtml(bits.join(" ")) + "</span>";
+}
+
 export function missRowsFrom(rec: Record<string, unknown>): MissRow[] | null {
   const reason = rec.reason;
   if (typeof reason !== "string" || reason.length === 0) return null;
@@ -3376,6 +3533,7 @@ export function missRowsFrom(rec: Record<string, unknown>): MissRow[] | null {
     typeof (retirement as Record<string, unknown>).asOf === "string"
       ? String((retirement as Record<string, unknown>).asOf)
       : undefined;
+  const retirementDetail = reason === "record_retired" ? retirementDetailFrom(retirement) : null;
   const missClass: MissClass =
     reason === "record_retired"
       ? "retired"
@@ -3393,6 +3551,7 @@ export function missRowsFrom(rec: Record<string, unknown>): MissRow[] | null {
       reason,
       parcelExists,
       ...(retiredAsOf ? { retiredAsOf } : {}),
+      ...(retirementDetail ? { retirement: retirementDetail } : {}),
     });
   }
   return out;
@@ -3406,7 +3565,11 @@ export function refusedRowsFrom(rec: Record<string, unknown>): RefusedRow[] | nu
     const r = asRecord(raw);
     if (!r || typeof r.parcelNodeId !== "string" || r.parcelNodeId.length === 0) continue;
     const reason = typeof r.reason === "string" && r.reason.length > 0 ? r.reason : "unstated";
-    out.push({ parcelNodeId: r.parcelNodeId, reason });
+    const plansUrl =
+      httpsUrlOrNull(r.plansUrl) ??
+      httpsUrlOrNull(rec.plansUrl) ??
+      (reason === "upgrade_required" ? DEFAULT_PLANS_URL : null);
+    out.push({ parcelNodeId: r.parcelNodeId, reason, ...(plansUrl ? { plansUrl } : {}) });
   }
   return out.length > 0 ? out : null;
 }
@@ -3480,6 +3643,23 @@ export function declaredFrom(rec: Record<string, unknown>): DeclaredBody | null 
     const brief = stringOrNull(rec.brief);
     if (brief) out.brief = brief;
   }
+  const plansUrl = httpsUrlOrNull(rec.plansUrl);
+  if (plansUrl) out.plansUrl = plansUrl;
+  const display = stringOrNull(rec.reasonDisplayText);
+  if (display) out.reasonDisplayText = display;
+  const detail = asRecord(rec.detail);
+  if (detail) {
+    const kept: Record<string, string | number | boolean> = {};
+    for (const key of Object.keys(detail)) {
+      const v = detail[key];
+      if (typeof v === "string") {
+        if (!looksLikeHtml(v)) kept[key] = v;
+      } else if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) {
+        kept[key] = v;
+      }
+    }
+    if (Object.keys(kept).length > 0) out.detail = kept;
+  }
   return out;
 }
 
@@ -3545,7 +3725,8 @@ function parseToolResultInner(text: string): PanelModel {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return emptyModel("unreadable");
+    /* A body that is an HTML page is the upstream's error page: the outage card, never the page itself. */
+    return looksLikeHtml(text) ? outageModel() : emptyModel("unreadable");
   }
   const rec = asRecord(parsed);
   if (!rec) return emptyModel("unreadable");
@@ -3567,7 +3748,12 @@ function parseToolResultInner(text: string): PanelModel {
       overlays: [],
       ring: [],
       edges: [],
-      lookup: { state: reason, headline: mapPanelNote, detail: null },
+      lookup: {
+        state: reason,
+        headline: mapPanelNote,
+        detail: null,
+        ...(/upgrade/i.test(reason) ? plansFrom(rec.plansUrl ?? DEFAULT_PLANS_URL) : {}),
+      },
     };
   }
 
@@ -3862,7 +4048,108 @@ export function parseToolResult(text: string): PanelModel {
   const rec = asRecord(parsed);
   const inline = rec ? inlineCardFrom(rec.inlineCard) : null;
   if (inline) model.inlineCard = inline;
+  if (rec) {
+    /* Neighbour distances travel with every shape the neighbours arrive in, not only the single-parcel card. */
+    if (!model.nearestNeighbors && model.kind !== "lookup" && model.kind !== "declared") attachNearestNeighbors(model, rec);
+    const search = searchSummaryFrom(rec);
+    if (search && model.kind !== "lookup" && model.kind !== "declared" && model.kind !== "unreadable") {
+      model.search = search;
+      /* A search that matched nothing still says what it ruled out; it is not the empty-screen copy. */
+      if (model.kind === "empty") model.kind = "board";
+    }
+  }
   return model;
+}
+
+function countRecord(value: unknown): Record<string, number> | undefined {
+  const r = asRecord(value);
+  if (!r) return undefined;
+  const out: Record<string, number> = {};
+  for (const k of Object.keys(r)) {
+    const n = numberOrNull(r[k]);
+    if (n !== null) out[k] = n;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** What a search result says about its own completeness: matched, excluded, not evaluated, capped. Null on a screen or a single read. */
+export function searchSummaryFrom(rec: Record<string, unknown>): SearchSummary | null {
+  const matchedObj = asRecord(rec.constraintMatched) ?? asRecord(rec.matched);
+  const excludedObj = asRecord(rec.constraintExcluded) ?? asRecord(rec.excluded);
+  const notEvalObj = asRecord(rec.constraintNotEvaluated) ?? asRecord(rec.notEvaluated);
+  const isConstraint = !!(matchedObj || excludedObj || notEvalObj || Array.isArray(rec.matched) || Array.isArray(rec.constraintMatched));
+  const isNearest = Array.isArray(rec.nearestNeighbors) || typeof rec.nearestSubjectParcelNodeId === "string";
+  const isStreetOrRadius = !isConstraint && !isNearest && typeof rec.truncated === "boolean" && (Array.isArray(rec.hits) || Array.isArray(rec.parcels));
+  if (!isConstraint && !isNearest && !isStreetOrRadius) return null;
+  if (rec.screen !== undefined || Array.isArray(rec.rows)) return null;
+  const out: SearchSummary = { kind: isConstraint ? "constraint" : isNearest ? "nearest" : "search" };
+  const src = matchedObj ?? rec;
+  const matchedCount = numberOrNull(matchedObj ? matchedObj.count : null);
+  if (matchedCount !== null) out.matchedCount = matchedCount;
+  const cap = numberOrNull(src.cap);
+  if (cap !== null) out.cap = cap;
+  const received = numberOrNull(src.received);
+  if (received !== null) out.received = received;
+  if (typeof src.truncated === "boolean") out.truncated = src.truncated;
+  const matchedList = Array.isArray(rec.constraintMatched) ? rec.constraintMatched : Array.isArray(rec.matched) ? rec.matched : null;
+  const shown = matchedList ? matchedList.length : Array.isArray(rec.parcels) ? rec.parcels.length : null;
+  if (shown !== null) out.shownCount = shown;
+  if (excludedObj) {
+    const n = numberOrNull(excludedObj.count);
+    if (n !== null) out.excludedCount = n;
+    const by = countRecord(excludedObj.byRail);
+    if (by) out.excludedByRail = by;
+  }
+  if (notEvalObj) {
+    const n = numberOrNull(notEvalObj.count);
+    if (n !== null) out.notEvaluatedCount = n;
+    const by = countRecord(notEvalObj.byRail);
+    if (by) out.notEvaluatedByRail = by;
+  }
+  const pct = countRecord(rec.unmeasuredPctByRail);
+  if (pct) out.unmeasuredPctByRail = pct;
+  return out;
+}
+
+function railCountWords(by: Record<string, number> | undefined): string {
+  if (!by) return "";
+  const parts = Object.keys(by).map((k) => `${spacedWords(k)} ${by[k]}`);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
+
+export const SEARCH_RESULTS_TITLE = "Search results";
+export const NEAREST_RESULTS_TITLE = "Nearest parcels";
+
+/** The words above a search result: how many matched, how many were ruled out, how many could not be checked, and whether the list is capped. */
+export function searchSummaryHtml(search: SearchSummary | null | undefined): string {
+  if (!search) return "";
+  const lines: string[] = [];
+  const line = (kind: string, text: string) =>
+    lines.push(`<p class="search-line" data-search="${kind}">${escapeHtml(text)}</p>`);
+  const noun = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (search.matchedCount !== undefined) {
+    const shown = search.shownCount !== undefined && search.shownCount < search.matchedCount ? ` Showing ${search.shownCount}.` : "";
+    line("matched", `${noun(search.matchedCount, "parcel matches", "parcels match")}.${shown}`);
+  }
+  if (search.truncated === true) {
+    const cap = search.cap !== undefined ? ` at ${search.cap}` : "";
+    const recd = search.received !== undefined ? ` ${search.received} came back.` : "";
+    line("truncated", `This list is cut off${cap}, so it is not the full set.${recd} Narrow the search or raise the limit.`);
+  }
+  if (search.excludedCount !== undefined) {
+    line("excluded", `${noun(search.excludedCount, "parcel was", "parcels were")} ruled out by the filters${railCountWords(search.excludedByRail)}.`);
+  }
+  if (search.notEvaluatedCount !== undefined) {
+    const them = search.notEvaluatedCount === 1 ? "it" : "them";
+    line("not-evaluated", `${noun(search.notEvaluatedCount, "parcel", "parcels")} could not be checked because a layer was not measured on ${them}${railCountWords(search.notEvaluatedByRail)}. These may or may not qualify.`);
+  }
+  const pcts = search.unmeasuredPctByRail;
+  if (pcts) {
+    const parts = Object.keys(pcts).map((k) => `${spacedWords(k)} ${Math.round(pcts[k] * 10) / 10}%`);
+    line("unmeasured", `Not measured across the county: ${parts.join(", ")}.`);
+  }
+  if (lines.length === 0) return "";
+  return `<div class="search-summary" data-search-summary="1">${lines.join("")}</div>`;
 }
 
 export function firstTextPart(content: unknown): string | null {
@@ -3874,6 +4161,22 @@ export function firstTextPart(content: unknown): string | null {
   return null;
 }
 
+/** The standing vocabulary block every tool result carries: an object whose only key is the vocabulary list. */
+function isStandingVocabularyRecord(obj: Record<string, unknown>): boolean {
+  const keys = Object.keys(obj);
+  return keys.length === 1 && keys[0] === "vocabulary" && Array.isArray(obj.vocabulary);
+}
+
+/** True when any text part of the content is an HTML page (an upstream error page). */
+function contentCarriesHtml(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  for (const part of content) {
+    const rec = asRecord(part);
+    if (rec && rec.type === "text" && looksLikeHtml(rec.text)) return true;
+  }
+  return false;
+}
+
 /** The first text part whose body parses as a JSON object (the wire record), never prose. */
 export function firstJsonObjectTextPart(content: unknown): string | null {
   if (!Array.isArray(content)) return null;
@@ -3882,7 +4185,9 @@ export function firstJsonObjectTextPart(content: unknown): string | null {
     if (!rec || rec.type !== "text" || typeof rec.text !== "string") continue;
     try {
       const parsed = JSON.parse(rec.text);
-      if (asRecord(parsed)) return rec.text;
+      const obj = asRecord(parsed);
+      /* The standing vocabulary part is valid JSON but is never the result. Reading it as one painted empty-board copy over a body that was not JSON. */
+      if (obj && !isStandingVocabularyRecord(obj)) return rec.text;
     } catch {
       /* prose or non-record text — keep scanning */
     }
@@ -3912,7 +4217,8 @@ export function parseToolContent(result: unknown): PanelModel {
     if (record) return parseToolResult(JSON.stringify(structured));
   }
   const text = firstJsonObjectTextPart(rec.content);
-  return text === null ? emptyModel("unreadable") : parseToolResult(text);
+  if (text === null) return contentCarriesHtml(rec.content) ? outageModel() : emptyModel("unreadable");
+  return parseToolResult(text);
 }
 
 
@@ -3943,6 +4249,9 @@ export const LOADING_SUBTITLE_BY_TOOL: Record<string, string> = {
   get_smart_site: "Loading this parcel…",
   create_screen: "Opening screening board…",
   list_screens: "Opening screening board…",
+  find_parcel: "Finding this parcel…",
+  find_parcels: "Searching parcels…",
+  find_nearest_parcels: "Finding nearby parcels…",
 };
 
 export function loadingPanelSubtitle(toolName: string | null | undefined): string {

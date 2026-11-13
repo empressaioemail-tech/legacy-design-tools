@@ -17,6 +17,9 @@ import {
   gwrapAspectAttr,
   mapboxAttributionHtml,
   nearestNeighborsListHtml,
+  loadingPanelSubtitle,
+  saveChooserHtml,
+  searchSummaryHtml,
   ringFit,
   ringSvg,
   LOADING_PANEL_TITLE,
@@ -118,21 +121,35 @@ function factsHtml(card: InlineCard): string {
   return `<div class="ss-tiles" data-tiles="${facts.length}">${tiles}</div><div class="ss-source" data-source-open="0" hidden></div>`;
 }
 
-function actionButtons(card: InlineCard, single: boolean): string {
+function actionButtons(card: InlineCard, single: boolean, model?: PanelModel): string {
   if (!single) return "";
   const expand = `<button type="button" class="btn primary" data-act="expand" onclick="window.__ss&&window.__ss.expand(this)">Expand map</button>`;
   const share = card.shareUrl
     ? `<button type="button" class="btn" data-act="share" data-url="${escapeHtml(card.shareUrl)}" onclick="window.__ss&&window.__ss.share(this)">Share</button>`
     : `<button type="button" class="btn" data-act="share" disabled data-state="absent">Share</button>`;
   const note = !card.shareUrl ? `<p class="af-note" data-state="absent">Card page link is not on this result.</p>` : "";
-  return `<div class="af-acts">${expand}${share}</div>${note}`;
+  /* Save and Find listing history: the old single-parcel panel is the only place these lived. Same markup, same handlers, same chat turn. */
+  const own = model && model.parcelNodeId && !model.nearestSubjectParcelNodeId ? parcelActionsHtml() : "";
+  return `<div class="af-acts">${expand}${share}</div>${note}${own}`;
+}
+
+/** The existing Save chooser and Find listing history button, unchanged markup (saveChooserHtml, data-act="listing"). */
+export function parcelActionsHtml(): string {
+  return `<div class="acts" data-parcel-actions="1">${saveChooserHtml()}<button type="button" class="btn primary" data-act="listing" onclick="window.__ss&&window.__ss.listing(this)">Find listing history</button></div>`;
 }
 
 export function answerFirstSingleHtml(model: PanelModel): string {
   const card = model.inlineCard;
   if (!card) return "";
   const aerial = aerialHtml(model.ring ?? [], model.anchor, model.anchorRead, model.overlays, false);
-  const address = card.title ? `<p class="ss-address">${escapeHtml(card.title)}</p>` : "";
+  /* When the one parcel drawn is a neighbour of a named subject, the subject stays the headline. */
+  const subject = model.nearestSubjectParcelNodeId;
+  const neighbourOnly = !!subject && !!model.parcelNodeId && subject !== model.parcelNodeId;
+  const address = neighbourOnly
+    ? `<p class="ss-address" data-subject="1">Parcels near ${escapeHtml(subject)}</p>`
+    : card.title
+      ? `<p class="ss-address">${escapeHtml(card.title)}</p>`
+      : "";
   const nearest =
     model.nearestNeighbors && model.nearestNeighbors.length > 0
       ? nearestNeighborsListHtml(model.nearestSubjectParcelNodeId ?? model.parcelNodeId ?? null, model.nearestNeighbors)
@@ -142,11 +159,12 @@ export function answerFirstSingleHtml(model: PanelModel): string {
     aerial.html +
     `<div class="ss-body">` +
     address +
+    searchSummaryHtml(model.search) +
     `<p class="af-answer" data-answer="1">${escapeHtml(card.answer)}</p>` +
     factsHtml(card) +
     nearest +
     `</div>` +
-    actionButtons(card, true) +
+    actionButtons(card, true, model) +
     `</div>`
   );
 }
@@ -192,10 +210,14 @@ export function answerFirstCarouselHtml(model: PanelModel): string {
     : "";
   return (
     `<div class="af" data-inline="1" data-layout="carousel" data-items="${card.items.length}">` +
+    searchSummaryHtml(model.search) +
     `<p class="af-answer" data-answer="1">${escapeHtml(card.answer)}</p>` +
     `<div class="af-carousel">${slides}</div>` +
     credit +
     more +
+    (model.nearestNeighbors && model.nearestNeighbors.length > 0
+      ? nearestNeighborsListHtml(model.nearestSubjectParcelNodeId ?? null, model.nearestNeighbors)
+      : "") +
     `</div>`
   );
 }
@@ -205,10 +227,11 @@ function parcelById(model: PanelModel, id: string): PanelParcel | null {
   return model.parcels.find((p) => p.parcelNodeId === id) ?? null;
 }
 
-export function loadingSkeletonHtml(): string {
+export function loadingSkeletonHtml(toolName?: string | null): string {
   return (
     `<div class="af-skel" data-loading="1" aria-busy="true">` +
     `<span class="ss-clip">${LOADING_PANEL_TITLE}</span>` +
+    `<p class="af-loading-sub" data-loading-sub="1">${escapeHtml(loadingPanelSubtitle(toolName))}</p>` +
     `<div class="ss-skel-map">${LOGO}</div>` +
     `<div class="ss-body">` +
     `<div class="sk sk-short"></div>` +
