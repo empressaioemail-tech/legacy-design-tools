@@ -93,9 +93,20 @@ describe("p559 probe in the served page", () => {
     expect(html).toContain(",netText,glText,bridgeText,toolsText].join");
   });
 
-  it("carries each probe URL verbatim", () => {
+  it("carries each probe URL verbatim only when diagnostics are switched on", () => {
     for (const t of probeNetTargets()) {
-      expect(html).toContain(t.url);
+      expect(html, "off by default: " + t.key).not.toContain(t.url);
+    }
+    const prior = process.env.SMARTSITE_CARD_DIAGNOSTICS;
+    process.env.SMARTSITE_CARD_DIAGNOSTICS = "1";
+    try {
+      const on = buildAppHtml();
+      for (const t of probeNetTargets()) {
+        expect(on).toContain(t.url);
+      }
+    } finally {
+      if (prior === undefined) delete process.env.SMARTSITE_CARD_DIAGNOSTICS;
+      else process.env.SMARTSITE_CARD_DIAGNOSTICS = prior;
     }
   });
 
