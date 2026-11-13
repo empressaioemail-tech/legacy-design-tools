@@ -126,6 +126,10 @@ import {
   boardRowPrimaryLabel,
   boardQueryCellHtml,
   boardCardTitle,
+  nearestNeighborsListHtml,
+  plansLinkHtml,
+  retirementDetailHtml,
+  searchSummaryHtml,
   parcelCardTitle,
   parcelFactSubheadHtml,
   reportHtmlPartialDefault,
@@ -234,6 +238,8 @@ declare const __SS_CARD_DATA__: {
     paintNet();
   }
   function startBridgeProbe(){
+    /* Diagnostics only: the server sends an empty probe list unless SMARTSITE_CARD_DIAGNOSTICS=1, and the resources/read probe follows the same switch. */
+    if(!PROBE_NET||PROBE_NET.length===0) return;
     if(bridgeText!=="bridge=unread") return;
     bridgeText="bridge=pending";
     var bid=rpcId++;
@@ -619,11 +625,11 @@ declare const __SS_CARD_DATA__: {
   function missLine(m){
     if(m.missClass==="absent") return '<p class="miss"><b>'+esc(notOnFileSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
     if(m.missClass==="unbaked") return '<p class="miss"><b>'+esc(noBakedSnapshotSentence(m.parcelNodeId))+"</b>"+idLine(m.parcelNodeId)+"</p>";
-    if(m.missClass==="retired") return '<p class="miss miss-retired"><b>'+esc(retiredRecordSentence(m.parcelNodeId,m.retiredAsOf))+"</b>"+idLine(m.parcelNodeId)+"</p>";
+    if(m.missClass==="retired") return '<p class="miss miss-retired"><b>'+esc(retiredRecordSentence(m.parcelNodeId,m.retiredAsOf))+"</b>"+idLine(m.parcelNodeId)+retirementDetailHtml(m.retirement)+"</p>";
     return '<p class="miss"><b>'+NOT_RETURNED+"</b>"+idLine(m.parcelNodeId)+reasonLine(m.reason)+"</p>";
   }
   function refusedLine(r){
-    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+UPGRADE_TO_OPEN+"</b>"+idLine(r.parcelNodeId)+"</p>";
+    if(r.reason==="upgrade_required") return '<p class="miss"><b>'+UPGRADE_TO_OPEN+"</b>"+idLine(r.parcelNodeId)+(r.plansUrl?" "+plansLinkHtml(r.plansUrl):"")+"</p>";
     return '<p class="miss"><b>'+OPEN_REFUSED+"</b>"+idLine(r.parcelNodeId)+reasonLine(r.reason)+"</p>";
   }
   function stateLines(){
@@ -677,9 +683,9 @@ declare const __SS_CARD_DATA__: {
       }).join("");
       var note=model.stubsDegraded===true?'<p class="note">'+RAILS_PARTLY_UNREAD+"</p>":"";
       var boardShare=model.inlineCard&&model.inlineCard.shareUrl?'<button type="button" class="btn" data-act="share" data-url="'+esc(model.inlineCard.shareUrl)+'" onclick="window.__ss&&window.__ss.share(this)">Share</button>':"";
-      root.innerHTML=card(esc(boardCardTitle(model.screenName)),stateLines()+'<div class="well"><div class="req">Rows <span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+note+
+      root.innerHTML=card(esc(boardCardTitle(model.screenName,model.search)),stateLines()+'<div class="well">'+searchSummaryHtml(model.search)+(model.rows.length===0?'<p class="empty"><b>No parcels matched.</b></p>':"")+'<div class="req">Rows<span class="sortc" data-k="completeness" data-sort-active="'+(sortKey==="completeness"?"1":"0")+'">'+SORT_COMPLETENESS_LABEL+'</span></div><table data-sort="'+esc(sortKey)+'" data-dir="'+sortDir+'"><thead>'+head+"</thead><tbody>"+body+"</tbody></table>"+degradedNotesHtml(model.degraded||null)+"</div>"+(model.nearestNeighbors&&model.nearestNeighbors.length?'<div class="well">'+nearestNeighborsListHtml(model.nearestSubjectParcelNodeId||null,model.nearestNeighbors)+"</div>":"")+note+
         '<div class="legend"><span>'+glyph("present")+" present</span><span>"+glyph("absent-verified")+' absent, verified</span><span>'+glyph("unknown")+" unknown</span><span>"+glyph("refused")+" refused</span><span>"+glyph("unread")+" unread</span></div>"+
-        '<div class="af-acts"><button type="button" class="btn primary" data-act="board" onclick="window.__ss&&window.__ss.expand(this)">Open board</button>'+boardShare+"</div>",false,"ss-board");
+        '<div class="af-acts"><button type="button" class="btn primary" data-act="board" onclick="window.__ss&&window.__ss.expand(this)">'+(model.search?"Expand results":"Open board")+'</button>'+boardShare+"</div>",false,"ss-board");
     } else if(model.kind==="parcel"){
       var ov=model.overlays.map(function(o,i){return overlayRowHtml(o,i)}).join("");
       var node=model.parcelNodeId?'<div class="pn atom">'+esc(model.parcelNodeId)+"</div>":"";
@@ -737,7 +743,7 @@ declare const __SS_CARD_DATA__: {
     } else if(model.kind==="unreadable"){
       root.innerHTML=card("result",'<p class="empty"><b>'+RESULT_NOT_READABLE+"</b>"+RESULT_NOT_READABLE_BODY+"</p>");
     } else if(!hasToolResult){
-      root.innerHTML=cardV2(stateLines()+loadingSkeletonHtml());
+      root.innerHTML=cardV2(stateLines()+loadingSkeletonHtml(pendingToolName));
     } else {
       root.innerHTML=card("screen board",stateLines()+'<p class="empty"><b>'+EMPTY_BOARD_TITLE+"</b>"+EMPTY_BOARD_BODY+"</p>");
     }

@@ -2242,9 +2242,9 @@ describe("P-91 v2 board (served)", () => {
     const cases: Array<[string, Record<string, unknown>, string[]]> = [
       ["errorJson", DECLARED_S8.errorJson, [`${COPY3.notReturned}: not_found`, "upstream 404"]],
       ["errorUnmeasured", DECLARED_S8.errorUnmeasured, [`${COPY3.notReturned}: export_failed`, "The export proxy did not answer."]],
-      ["nonJson", DECLARED_S8.nonJson, [`${COPY3.notReturned}: upstream_non_json`, "upstream 502", "<html>502 Bad Gateway</html>"]],
-      ["cap", DECLARED_S8.cap, [`${COPY3.refused}: parcel_batch_cap`, "cap 25", "received 30", "depth node"]],
-      ["screenId", DECLARED_S8.screenId, [`${COPY3.refused}: screen_id_not_accepted`]],
+      ["nonJson", DECLARED_S8.nonJson, ["Smart Site could not reach the server"]],
+      ["cap", DECLARED_S8.cap, [`${COPY3.refused}: Too many parcels in one request.`, "limit 25 received 30", "depth node"]],
+      ["screenId", DECLARED_S8.screenId, [`${COPY3.refused}: Smart Site could not run this request as asked.`]],
       ["hop1", DECLARED_S8.hop1, [`${COPY3.notImplemented}: hop1`]],
       ["cortex", DECLARED_S8.cortex, [`${COPY3.notReturned}: cortex_not_configured`, "Smart Site MCP cannot reach the workbench backend."]],
       ["exportDown", DECLARED_S8.exportDown, [`${COPY3.notReturned}: hauska_mcp_unavailable`, "tool export_instrument", "Export is temporarily unavailable because Hauska MCP is unreachable."]],
@@ -2258,15 +2258,16 @@ describe("P-91 v2 board (served)", () => {
       for (const s of sentences) expect(f.text(), `${name}: ${s}`).toContain(s);
       expect(f.text(), name).not.toContain(COPY.empty);
       expect(f.openButtons(), name).toBe(0);
-      expect(f.root.innerHTML, name).toContain(`data-declared="${String(body.status)}"`);
+      if (name !== "nonJson") expect(f.root.innerHTML, name).toContain(`data-declared="${String(body.status)}"`);
+      else expect(f.root.innerHTML, name).toContain("data-lookup-state=\"outage\"");
       const allowed = name === "upgrade" ? [COPY.refused] : [];
       for (const s of ALL_SENTENCES) if (!allowed.includes(s)) expect(f.text(), `${name}: ${s}`).not.toContain(s);
     }
     const nj = fresh();
     nj.init();
     nj.toolResult(DECLARED_S8.nonJson);
-    expect(nj.root.innerHTML).toContain('<pre class="brief" data-brief="1">&lt;html&gt;502 Bad Gateway&lt;/html&gt;</pre>');
-    expect(nj.root.innerHTML).not.toContain("<html>502");
+    expect(nj.root.innerHTML).not.toContain("data-brief");
+    expect(nj.root.innerHTML).not.toContain("502 Bad Gateway");
     const um = fresh();
     um.init();
     um.toolResult(DECLARED_S8.errorUnmeasured);
@@ -2280,7 +2281,7 @@ describe("P-91 v2 board (served)", () => {
     expect(f.armed(OPEN_DEAD_MS)).toBe(1);
     f.deliver({ jsonrpc: "2.0", id: msg?.id, result: { isError: true, content: [{ type: "text", text: JSON.stringify(DECLARED_S8.cap) }] } });
     expect(f.boot.textContent).toContain("reply=isError");
-    expect(f.text()).toContain(`${COPY3.refused}: parcel_batch_cap`);
+    expect(f.text()).toContain(`${COPY3.refused}: Too many parcels in one request.`);
     expect(f.armed(OPEN_DEAD_MS)).toBe(0);
     expect(f.fire(OPEN_DEAD_MS)).toBe(0);
     expect(f.text()).not.toContain(COPY.dead);
@@ -3299,5 +3300,263 @@ describe("P-428 served board reads tool results by shape", () => {
     expect(f.text()).not.toContain(COPY.empty);
     expect(f.text()).toContain("48021:35113");
     expect(f.root.innerHTML).toContain('data-act="report"');
+  });
+});
+
+/*
+ * Card-side findings from the Smart Site MCP UI library review (one test per finding,
+ * driven through the SERVED script so the painted card is what is asserted).
+ */
+import { attachInlineCard as attachInlineCardForFindings } from "../src/inline-card.js";
+
+const PLANS = "https://plans.example.test/choose-a-plan";
+const HTML_PAGE = "<html><head><title>502 Bad Gateway</title></head><body>nginx upstream error</body></html>";
+const VOCAB_PART = JSON.stringify({ vocabulary: [{ token: "present", displayText: "on record" }] });
+
+function findingsParcelRecord(): Record<string, unknown> {
+  return {
+    parcelNodeId: "48021:32342",
+    brief: {
+      sections: [
+        { id: "zoning", title: "Zoning", disposition: "present", data: { district: "SF-1" } },
+        { id: "flood", title: "Flood", disposition: "present", data: { floodZone: "A", method: "point-on-surface" } },
+      ],
+    },
+    draw: {
+      label: "1305 FAYETTE ST , BASTROP, TX 78602",
+      ring: [[0, 0], [10, 0], [10, 10], [0, 10]],
+      overlays: [],
+    },
+  };
+}
+
+function railRow(id: string, label: string) {
+  return { parcelNodeId: id, label, zoning: "present", landUse: "present", flood: "absent-verified", envelope: "unknown" };
+}
+
+describe("card-side findings (MCP UI library review)", () => {
+  /* 1 */
+  it("1 upgrade link: plansUrl travels through every upgrade_required card as a real https link in a new tab", () => {
+    const declared = fresh();
+    declared.init();
+    declared.toolResult({ status: "upgrade_required", reason: "studio_screens", tier: "free", message: "Studio is required.", plansUrl: PLANS });
+    const html = declared.root.innerHTML;
+    expect(html).toContain(`href="${PLANS}"`);
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(declared.text()).toContain("See plans");
+
+    const other = fresh();
+    other.init();
+    other.toolResult({ status: "upgrade_required", reason: "deep_report", tier: "free", plansUrl: PLANS });
+    expect(other.root.innerHTML).toContain(`href="${PLANS}"`);
+
+    /* the refused-row card and the map-panel note name an upgrade without carrying a link: they fall back to the plans page */
+    const rows = fresh();
+    rows.init();
+    rows.toolResult({ parcels: [], notFound: [], refused: [{ parcelNodeId: "48021:34137", reason: "upgrade_required" }] });
+    expect(rows.root.innerHTML).toContain('href="https://smartsite.cloud/?plans=1"');
+    const note = fresh();
+    note.init();
+    note.toolResult({ mapPanelNote: "The map panel is not included in this plan.", mapPanelReason: "map_upgrade_required", plansUrl: PLANS });
+    expect(note.root.innerHTML).toContain(`href="${PLANS}"`);
+  });
+
+  it("1 upgrade link: only https is a link; http, javascript and relative urls print no link", () => {
+    for (const bad of ["http://plans.example.test/x", "javascript:alert(1)", "/plans", "data:text/html,x", "https://x.test/a b"]) {
+      const f = fresh();
+      f.init();
+      f.toolResult({ status: "upgrade_required", reason: "studio_screens", tier: "free", plansUrl: bad });
+      expect(f.root.innerHTML, bad).not.toContain("<a ");
+      expect(f.root.innerHTML, bad).not.toContain("href=");
+    }
+  });
+
+  it("1 falsifier: declaredFrom must carry plansUrl (a copy that drops it loses the link)", () => {
+    const carried = app.declaredFrom({ status: "upgrade_required", reason: "studio_screens", plansUrl: PLANS });
+    expect(carried?.plansUrl).toBe(PLANS);
+    expect(app.declaredLineHtml(carried!)).toContain(`href="${PLANS}"`);
+    const dropped = { ...carried!, plansUrl: undefined };
+    expect(app.declaredLineHtml(dropped)).not.toContain("href=");
+  });
+
+  /* 2 */
+  it("2 refusal cards print the server's sentence and its evidence, never the raw token as the headline", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({
+      status: "refused",
+      reason: "radius_exceeds_max",
+      message: "radiusFt 90000 is over the ceiling",
+      reasonDisplayText: "That search area is too large to search honestly",
+    });
+    expect(f.text()).toContain("Refused: That search area is too large to search honestly");
+    expect(f.root.innerHTML).toContain("<b>Refused: That search area is too large to search honestly</b>");
+    expect(f.root.innerHTML).not.toMatch(/<b>[^<]*radius_exceeds_max/);
+
+    const rail = fresh();
+    rail.init();
+    rail.toolResult({
+      status: "refused",
+      reason: "constraint_rail_unmeasured",
+      message: "Rail flood is unmeasured on 76.3 percent.",
+      reasonDisplayText: "That filter cannot be used here",
+      detail: { rail: "flood", countyFips: "48021", countyParcels: 1704, unmeasuredParcels: 1300, unmeasuredPct: 76.3, ceilingPct: 50 },
+    });
+    expect(rail.text()).toContain("Flood is not measured on 76.3% of the parcels (1300 of 1704) in county 48021");
+    expect(rail.text()).toContain("50%");
+
+    /* no display text: a plain sentence keyed by the token, and a generic one for an unknown token */
+    const keyed = fresh();
+    keyed.init();
+    keyed.toolResult({ status: "refused", reason: "radius_exceeds_max" });
+    expect(keyed.root.innerHTML).toContain("<b>Refused: That search distance is larger than Smart Site can search.</b>");
+    const unknown = fresh();
+    unknown.init();
+    unknown.toolResult({ status: "refused", reason: "some_new_token", reasonDisplayText: "some_new_token" });
+    expect(unknown.root.innerHTML).toContain("<b>Refused: Smart Site could not run this request as asked.</b>");
+    expect(unknown.root.innerHTML).not.toMatch(/<b>[^<]*some_new_token/);
+  });
+
+  /* 3 */
+  it("3 find_parcels card shows excluded, not-evaluated and truncated, and is not titled a screening board", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({
+      countyFips: "48021",
+      parcels: [railRow("48021:1", "1 PINE ST"), railRow("48021:2", "2 PINE ST")],
+      constraintMatched: { count: 412, cap: 50, received: 50, truncated: true },
+      constraintExcluded: { count: 89, byRail: { flood: 89 } },
+      constraintNotEvaluated: { count: 1203, byRail: { flood: 1203 } },
+      unmeasuredPctByRail: { acreage: 0.6, flood: 76.3 },
+    });
+    const text = f.text();
+    expect(text).toContain("Search results");
+    expect(text).not.toContain("Screening board");
+    expect(text).toContain("412 parcels match");
+    expect(text).toContain("This list is cut off at 50");
+    expect(text).toContain("89 parcels were ruled out by the filters (flood 89)");
+    expect(text).toContain("1203 parcels could not be checked");
+    expect(text).toContain("flood 76.3%");
+    expect(text).not.toContain("Open board");
+    /* a search that matched nothing still says what it ruled out, never the empty-screen copy */
+    const none = fresh();
+    none.init();
+    none.toolResult({ matched: { count: 0, cap: 50, received: 0, truncated: false, parcels: [] }, excluded: { count: 12, byRail: { flood: 12 } }, notEvaluated: { count: 0, byRail: {} } });
+    expect(none.text()).toContain("12 parcels were ruled out");
+    expect(none.text()).toContain("No parcels matched");
+    expect(none.text()).not.toContain(COPY.empty);
+  });
+
+  /* 4 */
+  it("4 raw upstream HTML never reaches a card: it routes to the could-not-reach-the-server card", () => {
+    const bodies: Array<[string, unknown, unknown[] | undefined]> = [
+      ["html text part", HTML_PAGE, undefined],
+      ["html text part then vocabulary", HTML_PAGE, [{ type: "text", text: HTML_PAGE }, { type: "text", text: VOCAB_PART }]],
+      ["declared upstream_non_json", { status: "error", reason: "upstream_non_json", upstreamStatus: 502, brief: HTML_PAGE }, undefined],
+      ["html in a message", { status: "degraded", reason: "x", message: HTML_PAGE }, undefined],
+      ["html on a lookup miss", { hits: [], missClass: "no-hit", brief: HTML_PAGE, reason: "upstream_non_json" }, undefined],
+    ];
+    for (const [name, body, content] of bodies) {
+      const f = fresh();
+      f.init();
+      f.toolResult(body, content);
+      expect(f.text(), name).toContain("Smart Site could not reach the server");
+      expect(f.root.innerHTML, name).toContain('data-lookup-state="outage"');
+      expect(f.root.innerHTML, name).not.toMatch(/&lt;html|<html|nginx|502 Bad Gateway|data-brief/i);
+    }
+  });
+
+  /* 5 */
+  it("5 batch-cap chips are separated words, not run together", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({ status: "refused", reason: "parcel_batch_cap", cap: 25, received: 26, depth: "node" });
+    expect(f.text()).toContain("limit 25 received 26");
+    expect(f.text()).not.toContain("25received");
+  });
+
+  it("5 retirement details are shown with the retired sentence", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({
+      parcels: [],
+      notFound: ["48021:900099"],
+      reason: "record_retired",
+      parcelExists: "unmeasured",
+      retirement: { status: "retired", verdict: "absent-verified", authority: "Bastrop CAD", scopeSearched: "2025 certified roll", asOf: "2026-01-02", basis: "Parcel merged into a larger tract", lastSeenTaxYear: 2024 },
+    });
+    expect(f.text()).toContain("Checked with Bastrop CAD.");
+    expect(f.text()).toContain("Searched: 2025 certified roll.");
+    expect(f.text()).toContain("Why: Parcel merged into a larger tract.");
+    expect(f.text()).toContain("Last seen on the 2024 tax roll.");
+  });
+
+  it("5 a 200 body that is not JSON (only the vocabulary part is) reads as not readable, not as an empty board", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult("x", [{ type: "text", text: "Gateway says hello, not JSON" }, { type: "text", text: VOCAB_PART }]);
+    expect(f.text()).toContain("Result not readable");
+    expect(f.text()).not.toContain(COPY.empty);
+  });
+
+  it("5 the per-tool loading subtitle is painted while the result is awaited", () => {
+    const f = fresh();
+    f.init();
+    f.deliver({ jsonrpc: "2.0", method: "ui/notifications/tool-call", params: { toolName: "find_parcels" } });
+    expect(f.text()).toContain("Searching parcels");
+    const g = fresh();
+    g.init();
+    g.deliver({ jsonrpc: "2.0", method: "ui/notifications/tool-call", params: { toolName: "get_smart_site" } });
+    expect(g.text()).toContain("Loading this parcel");
+  });
+
+  /* 6 */
+  it("6 neighbour distances print on a board of two or more, and the subject stays the headline", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult({
+      nearestSubjectParcelNodeId: "48021:100",
+      nearestNeighbors: [
+        { parcelNodeId: "48021:1", label: "1 PINE ST", distanceFt: 120 },
+        { parcelNodeId: "48021:2", label: "2 PINE ST", distanceFt: 0 },
+      ],
+      parcels: [railRow("48021:1", "1 PINE ST"), railRow("48021:2", "2 PINE ST")],
+    });
+    expect(f.text()).toContain("Nearest parcels");
+    expect(f.text()).toContain("Subject parcel 48021:100");
+    expect(f.text()).toContain("120 ft");
+    expect(f.text()).toContain("Adjacent");
+    expect(f.text()).not.toContain("Screening board");
+  });
+
+  it("6 one neighbour: the subject is the headline, the neighbour is listed with its distance", () => {
+    const rec = {
+      ...findingsParcelRecord(),
+      nearestSubjectParcelNodeId: "48021:100",
+      nearestNeighbors: [{ parcelNodeId: "48021:32342", label: "1305 FAYETTE ST", distanceFt: 85 }],
+      parcels: [findingsParcelRecord()],
+    };
+    const f = fresh();
+    f.init();
+    f.toolResult(attachInlineCardForFindings(rec, "https://smartsite.cloud/card#abc"));
+    const html = f.root.innerHTML;
+    expect(html).toContain('data-subject="1">Parcels near 48021:100');
+    expect(html).not.toMatch(/ss-address">1305 FAYETTE/);
+    expect(f.text()).toContain("85 ft");
+  });
+
+  /* 7 */
+  it("7 the single-parcel answer card carries Save and Find listing history through the existing handlers", () => {
+    const f = fresh();
+    f.init();
+    f.toolResult(attachInlineCardForFindings(findingsParcelRecord(), "https://smartsite.cloud/card#abc"));
+    const html = f.root.innerHTML;
+    expect(html).toContain('data-save-chooser="1"');
+    expect(html).toContain('data-act="listing"');
+    f.ss().save(f.btn({ "data-status": "Watching" }));
+    expect(f.lastText()).toContain("save_property");
+    expect(f.lastText()).toContain("status Watching");
+    expect(f.lastText()).toContain("48021:32342");
   });
 });

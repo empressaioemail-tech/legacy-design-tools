@@ -101,6 +101,8 @@ import {
   candidateFor,
   countyFipsOf,
   declaredLineHtml,
+  declaredFrom,
+  REFUSAL_GENERIC,
   degradedNotesHtml,
   knownRank,
   lookupControlHtml,
@@ -716,7 +718,7 @@ describe("Wave J honesty", () => {
       JSON.stringify({ parcels: [], notFound: [], refused: [{ parcelNodeId: "48021:34137", reason: "upgrade_required" }] }),
     );
     expect(refused.kind).toBe("refused");
-    expect(refused.refused).toEqual([{ parcelNodeId: "48021:34137", reason: "upgrade_required" }]);
+    expect(refused.refused).toEqual([{ parcelNodeId: "48021:34137", reason: "upgrade_required", plansUrl: "https://smartsite.cloud/?plans=1" }]);
     expect(refused.rows).toEqual([]);
     expect(parseToolResult("not json").kind).toBe("unreadable");
     expect(parseToolResult("[1,2]").kind).toBe("unreadable");
@@ -1608,7 +1610,9 @@ describe("P-91 v2 board (exported twins)", () => {
     const parse = (b: unknown) => parseToolResult(JSON.stringify(b));
     expect(parse(S8_DECLARED.errorJson)).toEqual({ kind: "declared", rows: [], overlays: [], ring: [], edges: [], declared: { status: "error", reason: "not_found", upstreamStatus: 404 } });
     expect(parse(S8_DECLARED.errorUnmeasured).declared).toEqual({ status: "error", reason: "export_failed", upstreamStatus: "unmeasured", message: "The export proxy did not answer." });
-    expect(parse(S8_DECLARED.nonJson).declared).toEqual({ status: "error", reason: "upstream_non_json", upstreamStatus: 502, brief: "<html>502 Bad Gateway</html>" });
+    /* an upstream HTML page is the outage card, never a declared body that prints the page */
+    expect(parse(S8_DECLARED.nonJson).kind).toBe("lookup");
+    expect(parse(S8_DECLARED.nonJson).declared).toBeUndefined();
     expect(parse(S8_DECLARED.cap).declared).toEqual({ status: "refused", reason: "parcel_batch_cap", cap: 25, received: 30, depth: "node" });
     expect(parse(S8_DECLARED.screenId).declared).toEqual({ status: "refused", reason: "screen_id_not_accepted" });
     expect(parse(S8_DECLARED.hop1).declared).toEqual({ status: "not_implemented", reason: "depth_not_implemented", depth: "hop1" });
@@ -1628,17 +1632,18 @@ describe("P-91 v2 board (exported twins)", () => {
     expect(unmeasured).toContain(`<b>${NOT_RETURNED}: export_failed</b>`);
     expect(unmeasured).not.toContain("upstream");
     expect(unmeasured).toContain("The export proxy did not answer.");
-    const nonJson = line(S8_DECLARED.nonJson);
-    expect(nonJson).toContain(`<b>${NOT_RETURNED}: upstream_non_json</b>`);
-    expect(nonJson).toContain('data-upstream-status="502"');
-    expect(nonJson).toContain('<pre class="brief" data-brief="1">&lt;html&gt;502 Bad Gateway&lt;/html&gt;</pre>');
+    /* the same body painted straight through declaredLineHtml still never prints the page */
+    const nonJson = declaredLineHtml(declaredFrom(S8_DECLARED.nonJson)!);
+    expect(nonJson).not.toContain("&lt;html");
     expect(nonJson).not.toContain("<html>");
+    expect(nonJson).not.toContain("data-brief");
     const cap = line(S8_DECLARED.cap);
-    expect(cap).toContain(`<b>${REFUSED_PREFIX}: parcel_batch_cap</b>`);
-    expect(cap).toContain('data-cap="25">cap 25</span>');
+    expect(cap).toContain(`<b>${REFUSED_PREFIX}: Too many parcels in one request.</b>`);
+    expect(cap).not.toContain("parcel_batch_cap</b>");
+    expect(cap).toContain('data-cap="25">limit 25</span> <span class="mono" data-received="30">received 30</span>');
     expect(cap).toContain('data-received="30">received 30</span>');
     expect(cap).toContain('<span class="key">depth</span> <span class="reason">node</span>');
-    expect(line(S8_DECLARED.screenId)).toBe(`<div class="miss" data-declared="refused" data-reason="screen_id_not_accepted"><b>${REFUSED_PREFIX}: screen_id_not_accepted</b></div>`);
+    expect(line(S8_DECLARED.screenId)).toBe(`<div class="miss" data-declared="refused" data-reason="screen_id_not_accepted"><b>${REFUSED_PREFIX}: ${REFUSAL_GENERIC}</b></div>`);
     expect(line(S8_DECLARED.hop1)).toBe(`<div class="miss" data-declared="not_implemented" data-reason="depth_not_implemented"><b>${NOT_IMPLEMENTED_PREFIX}: hop1</b></div>`);
     expect(line({ status: "not_implemented", reason: "x" })).toContain(`<b>${NOT_IMPLEMENTED_PREFIX}: x</b>`);
     const cortex = line(S8_DECLARED.cortex);
@@ -1655,7 +1660,7 @@ describe("P-91 v2 board (exported twins)", () => {
     expect(up).toContain('<span class="key">tier</span> <span class="reason">free</span>');
     expect(up).toContain("Deep report needs Solo or above.");
     expect(line({ status: "error" })).toContain(`<b>${NOT_RETURNED}: unstated</b>`);
-    for (const b of Object.values(S8_DECLARED)) expect(line(b)).not.toContain(EMPTY_BOARD_TITLE);
+    for (const b of Object.values(S8_DECLARED)) expect(declaredLineHtml(declaredFrom(b)!)).not.toContain(EMPTY_BOARD_TITLE);
   });
 
   it("htmlContractViolations: the S8 checks fire on violated copies", () => {

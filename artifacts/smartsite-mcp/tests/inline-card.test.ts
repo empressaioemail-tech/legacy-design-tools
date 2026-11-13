@@ -169,7 +169,9 @@ describe("P-448 inline card", () => {
     expect(html).toContain('data-layout="single"');
     expect(html).toContain("Vacant lot or tract");
     expect(html).toContain('data-envelope="modelled"');
-    expect(html).not.toContain("Find listing history");
+    /* the existing Save chooser and Find listing history now live on this card (finding 7) */
+    expect(html).toContain("Find listing history");
+    expect(html).toContain('data-save-chooser="1"');
     expect(html).not.toContain("bastrop_city_tx");
     expect(html).not.toContain("Mapbox held");
     expect(html).not.toMatch(MACHINE);
